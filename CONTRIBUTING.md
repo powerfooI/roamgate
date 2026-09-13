@@ -2,13 +2,18 @@
 
 ## Development Setup
 
-Install Bun 1.4 or newer, start a local Herdr server, then install dependencies:
+Install Bun 1.4.1 or newer (CI uses 1.4.1), start a local Herdr server, then
+install all workspace dependencies from the repository root:
 
 ```bash
-bun install
-(cd web && bun install)
-(cd server && bun install)
+bun install --frozen-lockfile
 ```
+
+The root `bun.lock` is the only dependency lockfile. Shared development tools
+(TypeScript, Bun types, formatting, and linting) belong in the root manifest;
+browser dependencies and Vite belong in `web/package.json`. Keep server-only
+runtime dependencies in `server/package.json`. After changing dependencies,
+run `bun install` at the root and commit the updated manifest and lockfile.
 
 Run the bridge and frontend in separate terminals:
 
@@ -22,10 +27,13 @@ bun run dev:web
 Before submitting a change, run:
 
 ```bash
-bun run lint
-bun run typecheck
-bun run test
+bun run precommit
 ```
+
+Individual workspace checks remain available as
+`bun run --filter roamgate-web typecheck` and
+`bun run --filter roamgate-server typecheck`. The server check builds and embeds
+the frontend first, so it also works before any generated assets exist.
 
 Use `bun run build` for changes that affect production assets or server
 bundling. Release changes should also validate the relevant

@@ -13,6 +13,11 @@ are ignored and should not be committed.
 
 ## Build, Test, and Development Commands
 
+Install all Bun workspace dependencies from the repository root with
+`bun install --frozen-lockfile` (Bun 1.4.1 or newer). The root `bun.lock` is the
+only lockfile; shared TypeScript, Bun types, and lint/format tooling belong in
+the root manifest. Keep runtime dependencies in their owning workspace.
+
 - `bun run dev:web`: start the Vite frontend on port 5173.
 - `bun run dev:server`: start the Bun bridge with hot reload.
 - `bun run build`: build frontend assets and the default standalone server binary.

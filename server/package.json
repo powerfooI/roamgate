@@ -27,11 +27,7 @@
     "postcompile:all": "bun run clean:bun-build",
     "clean:bun-build": "find . -maxdepth 1 -name '*.bun-build' -exec rm -rf {} +",
     "clean": "rm -rf public src/public-files.gen.ts roamgate roamgate.exe roamgate-* herdr-gui herdr-gui-* && bun run clean:bun-build",
-    "pretypecheck": "cd ../web && bun run build && cd ../server && bun run embed:public",
+    "pretypecheck": "bun run --filter roamgate-web build && bun run embed:public",
     "typecheck": "tsc --noEmit"
-  },
-  "devDependencies": {
-    "bun-types": "latest",
-    "typescript": "^5.4.0"
   }
 }

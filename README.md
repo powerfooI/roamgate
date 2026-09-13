@@ -134,13 +134,11 @@ reachable; PWA mode does not provide offline access.
 
 ## Development
 
-Source builds require [Bun](https://bun.sh) 1.4 or newer. Start the bridge and
+Source builds require [Bun](https://bun.sh) 1.4.1 or newer. Start the bridge and
 frontend in separate terminals:
 
 ```bash
-bun install
-(cd web && bun install)
-(cd server && bun install)
+bun install --frozen-lockfile
 
 bun run dev:server
 bun run dev:web
