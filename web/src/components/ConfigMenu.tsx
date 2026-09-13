@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Download,
   ExternalLink,
+  Focus,
   GitBranch,
   Keyboard,
   LayoutDashboard,
@@ -34,6 +35,8 @@ import {
   UI_SCALE_STEP,
 } from "../appearance";
 import { connectionHttpPath } from "../connectionHttp";
+import { useLayoutPreferences } from "../layoutPreferences";
+import { shortcutLabel, useShortcutPreferences } from "../shortcutPreferences";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
 import {
@@ -89,6 +92,7 @@ type ConfigMenuProps = {
   theme: Theme;
   accentColor: AccentColor;
   uiScale: number;
+  zenMode: boolean;
   mobileTerminalShortcuts: MobileTerminalShortcutRows;
   mobileTerminalSideShortcuts: MobileTerminalSideShortcuts;
   terminalThemeSelection: TerminalThemeSelection;
@@ -96,6 +100,7 @@ type ConfigMenuProps = {
   onThemeChange: (theme: Theme) => void;
   onAccentColorChange: (accentColor: AccentColor) => void;
   onUiScaleChange: (scale: number) => void;
+  onZenModeChange: (zenMode: boolean) => void;
   onMobileTerminalShortcutsChange: (rows: MobileTerminalShortcutRows) => void;
   onMobileTerminalSideShortcutsChange: (
     shortcuts: MobileTerminalSideShortcuts,
@@ -108,6 +113,7 @@ export function ConfigMenu({
   theme,
   accentColor,
   uiScale,
+  zenMode,
   mobileTerminalShortcuts,
   mobileTerminalSideShortcuts,
   terminalThemeSelection,
@@ -115,6 +121,7 @@ export function ConfigMenu({
   onThemeChange,
   onAccentColorChange,
   onUiScaleChange,
+  onZenModeChange,
   onMobileTerminalShortcutsChange,
   onMobileTerminalSideShortcutsChange,
   onTerminalThemeSelectionChange,
@@ -134,6 +141,8 @@ export function ConfigMenu({
     shallowEqual,
   );
   const connectionClient = useConnectionClient();
+  const layout = useLayoutPreferences();
+  useShortcutPreferences();
   const updateAvailable = !!s.updateInfo?.update_available;
   const canInstallUpdate = updateAvailable && s.updateInfo?.can_auto_update;
   const updateVersion = s.updateInfo?.latest_version;
@@ -381,6 +390,33 @@ export function ConfigMenu({
                   setTerminalThemesOpen(true);
                 }}
               />
+              {layout.mobile ? null : (
+                <div className="config-preference-row">
+                  <span className="config-item-icon">
+                    <Focus size={15} />
+                  </span>
+                  <div className="config-item-copy">
+                    <strong>Zen mode</strong>
+                    <span>
+                      {zenMode ? "Enabled" : "Disabled"} ·{" "}
+                      {shortcutLabel("zen.toggle")}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-label="Zen mode"
+                    aria-checked={zenMode}
+                    className={"settings-switch" + (zenMode ? " is-on" : "")}
+                    onClick={() => {
+                      onZenModeChange(!zenMode);
+                      setOpen(false);
+                    }}
+                  >
+                    <span />
+                  </button>
+                </div>
+              )}
               <ConfigMenuItem
                 icon={<LayoutDashboard size={15} />}
                 label="Layout"

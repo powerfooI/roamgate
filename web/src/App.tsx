@@ -39,6 +39,8 @@ import {
   normalizeAccentColor,
   normalizeThemePreference,
   normalizeUiScale,
+  normalizeZenMode,
+  serializeZenMode,
   UI_SCALE_DEFAULT,
   type ResolvedTheme,
   resolveSystemTheme,
@@ -166,6 +168,7 @@ const DEFAULT_SIDEBAR = 284;
 const THEME_KEY = "theme";
 const ACCENT_COLOR_KEY = "accentColor";
 const UI_SCALE_KEY = "uiScale";
+const ZEN_MODE_KEY = "zenMode";
 const LazyTerminalView = lazyWithReload("terminal-view", () =>
   import("./components/TerminalView").then((module) => ({
     default: module.TerminalView,
@@ -277,6 +280,10 @@ function loadAccentColor(): AccentColor {
 
 function loadUiScale(): number {
   return normalizeUiScale(roamgateLocalStorage.getItem(UI_SCALE_KEY));
+}
+
+function loadZenMode(): boolean {
+  return normalizeZenMode(roamgateLocalStorage.getItem(ZEN_MODE_KEY));
 }
 
 function loadTerminalThemeSelection(): TerminalThemeSelection {
@@ -1113,7 +1120,10 @@ export default function App() {
       ),
     [resolvedTheme, terminalThemeSelection, customTerminalThemes],
   );
-  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [zenMode, setZenMode] = useState(loadZenMode);
+  const [sidebarHidden, setSidebarHidden] = useState(loadZenMode);
+  // What the sidebar was doing before Zen hid it, restored when Zen ends.
+  const sidebarBeforeZenRef = useRef(false);
   const [mobileControlsCollapsed, setMobileControlsCollapsed] = useState(false);
   const [mobileTabSheetOpen, setMobileTabSheetOpen] = useState(false);
   const terminalComposerScopeKey = JSON.stringify([
@@ -1292,10 +1302,25 @@ export default function App() {
       });
     }
   }, [mobile, updateInspectorState]);
-  const toggleSidebar = () => {
+  const toggleSidebar = useCallback(() => {
     setMobileView("session");
     setSidebarHidden((value) => !value);
-  };
+  }, []);
+  // Entering Zen hides the sidebar; leaving Zen puts it back as it was. In
+  // between, the sidebar toggles on its own without disturbing Zen.
+  const applyZenMode = useCallback(
+    (next: boolean) => {
+      if (next === zenMode) return;
+      if (next) sidebarBeforeZenRef.current = sidebarHidden;
+      setSidebarHidden(next ? true : sidebarBeforeZenRef.current);
+      setZenMode(next);
+    },
+    [sidebarHidden, zenMode],
+  );
+  const toggleZenMode = useCallback(
+    () => applyZenMode(!zenMode),
+    [applyZenMode, zenMode],
+  );
   const openWorkspaces = useCallback(() => {
     setSidebarHidden(false);
     if (mobile) {
@@ -2331,6 +2356,13 @@ export default function App() {
         toggleDiffViewer();
         return;
       }
+      if (shortcutMatches(e, "zen.toggle")) {
+        if (isEditableElement(e.target)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        toggleZenMode();
+        return;
+      }
       if (!shortcutMatches(e, "sidebar.toggle") || isEditableElement(e.target))
         return;
       e.preventDefault();
@@ -2366,7 +2398,9 @@ export default function App() {
     selectPaneJumpIndex,
     toggleDiffViewer,
     toggleFileExplorer,
+    toggleSidebar,
     toggleWorkspaceInspector,
+    toggleZenMode,
   ]);
   useEffect(() => {
     const media = window.matchMedia(SYSTEM_THEME_QUERY);
@@ -2417,6 +2451,9 @@ export default function App() {
     }
     roamgateLocalStorage.setItem(UI_SCALE_KEY, String(uiScale));
   }, [accentColor, resolvedTheme, theme, uiScale]);
+  useEffect(() => {
+    roamgateLocalStorage.setItem(ZEN_MODE_KEY, serializeZenMode(zenMode));
+  }, [zenMode]);
   useEffect(() => {
     roamgateLocalStorage.setItem(
       MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY,
@@ -2631,8 +2668,8 @@ export default function App() {
   return (
     <div
       className={`app ${sidebarHidden && !mobile ? "sidebar-hidden" : ""} ${
-        mobileControlsCollapsed ? "mobile-controls-collapsed" : ""
-      }`}
+        zenMode && !mobile ? "zen" : ""
+      } ${mobileControlsCollapsed ? "mobile-controls-collapsed" : ""}`}
     >
       <header className="topbar">
         <div className="topbar-start">
@@ -2670,6 +2707,8 @@ export default function App() {
               onAccentColorChange={setAccentColor}
               uiScale={uiScale}
               onUiScaleChange={setUiScale}
+              zenMode={zenMode}
+              onZenModeChange={applyZenMode}
               onMobileTerminalShortcutsChange={setMobileTerminalShortcuts}
               onMobileTerminalSideShortcutsChange={
                 setMobileTerminalSideShortcuts

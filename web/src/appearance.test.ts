@@ -4,7 +4,9 @@ import {
   normalizeAccentColor,
   normalizeThemePreference,
   normalizeUiScale,
+  normalizeZenMode,
   resolveSystemTheme,
+  serializeZenMode,
   UI_SCALE_DEFAULT,
   UI_SCALE_MAX,
   UI_SCALE_MIN,
@@ -78,5 +80,18 @@ describe("normalizeUiScale", () => {
   test("parses and clamps stored values", () => {
     expect(normalizeUiScale("110")).toBe(110);
     expect(normalizeUiScale("999")).toBe(UI_SCALE_MAX);
+  });
+});
+
+describe("zen mode", () => {
+  test("stays off until it is stored", () => {
+    expect(normalizeZenMode(null)).toBe(false);
+    expect(normalizeZenMode("")).toBe(false);
+    expect(normalizeZenMode("true")).toBe(false);
+  });
+
+  test("round-trips through storage", () => {
+    expect(normalizeZenMode(serializeZenMode(true))).toBe(true);
+    expect(normalizeZenMode(serializeZenMode(false))).toBe(false);
   });
 });

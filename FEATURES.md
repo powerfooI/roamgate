@@ -13,6 +13,12 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
 - Search workspace, worktree, file, tab, pane, and agent actions in the command
   menu (`Cmd+K` on macOS, `Ctrl+Alt+K` elsewhere). A workspace-relative or
   absolute path opens the file.
+- Toggle **Zen mode** (`Cmd+Shift+Z` on macOS, `Ctrl+Alt+Z` elsewhere) to hide
+  the topbar, tab strip, and sidebar and run the terminal flush to the window.
+  Hovering the top edge slides the topbar back, and it stays while one of its
+  menus is open. The sidebar still toggles inside Zen and returns to its prior
+  state on exit; split layouts keep pane borders. Desktop only, stored in this
+  browser; mobile keeps its floating control collapse.
 
 Herdr 0.9.0 uses **Local navigation** per browser/connection; legacy connections
 use **Shared navigation**. Reconnect preserves live selections; reload starts
@@ -336,6 +342,7 @@ Common defaults (Linux/Android overrides follow the table):
 | Command menu | `Cmd+K` | `Ctrl+Alt+K` |
 | Sidebar | `Cmd+B` | `Ctrl+Alt+B` |
 | Workspace Inspector | `Cmd+Shift+B` | `Ctrl+Alt+Shift+B` |
+| Zen mode (desktop) | `Cmd+Shift+Z` | `Ctrl+Alt+Z` |
 | Recent pane switcher | `Ctrl+Tab` | `Ctrl+Alt+J` |
 | Create / close tab or pane | `Cmd+T` / `Cmd+W` | `Ctrl+Alt+T` / `Ctrl+Alt+W` |
 | Previous / next tab | `Cmd+Option+Left/Right` | `Alt+Shift+Left/Right` |

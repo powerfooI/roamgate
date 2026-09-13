@@ -64,3 +64,13 @@ export function terminalFontOptions(compact: boolean, uiScale: number) {
     lineHeight: compact ? 1.12 : 1.18,
   };
 }
+
+// Zen mode hides the topbar, tab strip, and sidebar on desktop so only the
+// terminal remains. Mobile keeps its own floating control collapse instead.
+export function normalizeZenMode(value: string | null): boolean {
+  return value === "1";
+}
+
+export function serializeZenMode(value: boolean): string {
+  return value ? "1" : "0";
+}

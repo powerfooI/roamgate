@@ -2450,6 +2450,47 @@ textarea:focus {
 .sidebar-hidden .main {
   padding-left: 0;
 }
+/* Zen mode leaves only the terminal on screen. The topbar keeps a thin edge
+   so the connection switcher, command menu, and settings stay reachable with
+   the pointer without leaving Zen; the shortcut and the Appearance switch
+   remain the keyboard and menu paths back. */
+.app.zen {
+  position: relative;
+}
+.app.zen .topbar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  transform: translateY(calc(-100% + 6px));
+  transition: transform 0.15s ease;
+}
+.app.zen .topbar:hover,
+.app.zen .topbar:focus-within {
+  transform: none;
+}
+/* A popover opened from the keyboard must not measure a sliding anchor, and
+   its trigger must stay visible while the pointer moves to the portal. */
+.app.zen .topbar:has([data-state="open"]) {
+  transform: none;
+  transition: none;
+}
+.app.zen .tabbar {
+  display: none;
+}
+/* Only the topbar's reveal edge is reserved; the terminal runs flush to every
+   other side, without its own border or corner radius. Split layouts keep
+   their pane borders so the focused pane stays identifiable. */
+.app.zen .body {
+  padding: 6px 0 0;
+}
+.app.zen .workspace-terminal-surface > .terminal-shell .terminal-view {
+  border-width: 0;
+  border-radius: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app.zen .topbar {
+    transition: none;
+  }
+}
 .panel {
   background: var(--shell-panel);
   border: 1px solid var(--shell-border);

@@ -31,6 +31,8 @@ const defaults: ShortcutPreferences = {
   active: "auto",
   presets: [],
 };
+/** Actions added after presets could be saved, in the order they shipped. */
+const LATE_SHORTCUT_IDS: ShortcutId[] = ["terminal.copy", "zen.toggle"];
 export function validateShortcutPreset(value: unknown): ShortcutPreset {
   if (!value || typeof value !== "object")
     throw new Error("Invalid shortcut preset.");
@@ -64,11 +66,13 @@ export function validateShortcutPreset(value: unknown): ShortcutPreset {
     if (Object.prototype.hasOwnProperty.call(input.bindings, id))
       bindings[id] = validateShortcutKeys(id, input.bindings[id]);
   }
-  // Older presets predate the copy action. Keep their explicit assignments
-  // and only add new default copy keys that do not conflict with them.
-  if (!Object.prototype.hasOwnProperty.call(input.bindings, "terminal.copy")) {
-    bindings["terminal.copy"] = bindings["terminal.copy"].filter(
-      (key) => shortcutConflicts("terminal.copy", [key], bindings).length === 0,
+  // Presets saved before an action existed keep their explicit assignments.
+  // Only add default keys for the newer action that do not conflict with them,
+  // so a stored preset stays loadable instead of being discarded.
+  for (const id of LATE_SHORTCUT_IDS) {
+    if (Object.prototype.hasOwnProperty.call(input.bindings, id)) continue;
+    bindings[id] = bindings[id].filter(
+      (key) => shortcutConflicts(id, [key], bindings).length === 0,
     );
   }
   for (const id of SHORTCUT_IDS) {
