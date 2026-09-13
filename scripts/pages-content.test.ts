@@ -97,6 +97,40 @@ describe("tutorial Markdown", () => {
 });
 
 describe("Pages references", () => {
+  test("social previews and canonical URLs use the production domain", async () => {
+    for (const page of ["index.html", "tutorial/index.html"]) {
+      const html = await Bun.file(
+        new URL(`../site/${page}`, import.meta.url),
+      ).text();
+      expect(html).not.toContain("github.io/");
+      expect(html).toMatch(
+        /property="og:image"\s+content="https:\/\/roamgate\.dev\/roamgate-og\.png"/,
+      );
+      expect(html).toMatch(
+        /name="twitter:image"\s+content="https:\/\/roamgate\.dev\/roamgate-og\.png"/,
+      );
+      expect(html).toContain(
+        'name="twitter:card" content="summary_large_image"',
+      );
+      const url = `https://roamgate.dev/${page.replace("index.html", "")}`;
+      expect(html.replace(/\s+/g, " ")).toContain(
+        `rel="canonical" href="${url}"`,
+      );
+    }
+    expect(
+      await Bun.file(
+        new URL("../site/roamgate-og.png", import.meta.url),
+      ).exists(),
+    ).toBe(true);
+    for (const file of ["robots.txt", "sitemap.xml"]) {
+      const content = await Bun.file(
+        new URL(`../site/${file}`, import.meta.url),
+      ).text();
+      expect(content).toContain("https://roamgate.dev/");
+      expect(content).not.toContain("github.io/");
+    }
+  });
+
   test("website and tutorial reuse the current README screenshots", async () => {
     const [readme, site, tutorial, build] = await Promise.all(
       [

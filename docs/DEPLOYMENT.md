@@ -154,9 +154,10 @@ original download addresses. Existing tags and release assets are not replaced;
 new builds use the current repository address. Do not reuse the old repository
 name, because doing so removes GitHub's redirects.
 
-The website and tutorial are at <https://powerfooI.github.io/roamgate/>.
-GitHub Pages does not redirect the old `/herdr-studio/` project-site path;
-update bookmarks and external website links to `/roamgate/`.
+The website is at <https://roamgate.dev/> and the tutorial at
+<https://roamgate.dev/tutorial/>. The `/roamgate/` GitHub Pages address redirects
+to this custom domain. Update bookmarks and external website links to
+`roamgate.dev`; do not rely on the old `/herdr-studio/` project-site path.
 
 ### Install historical Herdr Studio
 

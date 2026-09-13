@@ -28,8 +28,12 @@ afterEach(() => {
   }
 });
 
-test("Pages is manual-only and installer availability gates artifact upload and deployment", async () => {
-  expect(Object.keys(workflow.on)).toEqual(["workflow_dispatch"]);
+test("Pages deploys on main pushes or manual dispatch and checks installer availability", async () => {
+  expect(Object.keys(workflow.on).sort()).toEqual([
+    "push",
+    "workflow_dispatch",
+  ]);
+  expect(workflow.on.push).toEqual({ branches: ["main"] });
   expect(gateIndex).toBeGreaterThan(-1);
   expect(gateIndex).toBeLessThan(
     steps.findIndex((step) =>

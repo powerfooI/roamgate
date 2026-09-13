@@ -7,7 +7,7 @@
   </picture>
 </p>
 
-An independent, community-built **Web and PWA client** for
+A **browser client** for
 [Herdr](https://herdr.dev). Access terminals, inspect agent sessions, and review
 files and diffs from desktop or mobile. A running Herdr server is required.
 
@@ -20,8 +20,8 @@ files and diffs from desktop or mobile. A running Herdr server is required.
 
 ## Documentation
 
-- [Project website](https://powerfooI.github.io/roamgate/)
-- [Hands-on tutorial](https://powerfooI.github.io/roamgate/tutorial/)
+- [Project website](https://roamgate.dev/)
+- [Hands-on tutorial](https://roamgate.dev/tutorial/)
   ([Markdown](./docs/TUTORIAL.md)): first steps, review workflows, mobile, and
   private remote access with Tailscale, SSH, or Tailcat.
 - [Feature tour and keyboard shortcuts](./FEATURES.md)
@@ -122,8 +122,9 @@ user-service setup.
 
 ## Install as a PWA
 
-For day-to-day use, install Roamgate as a standalone web app after starting
-and authenticating with `roamgate`:
+**Installing Roamgate as a PWA is recommended for everyday use on desktop or
+mobile.** It opens in its own app window without browser tabs or the address bar.
+After starting and connecting to `roamgate`, install it from your browser:
 
 - **iPhone or iPad (Safari):** **Share** -> **Add to Home Screen**.
 - **macOS (Safari 17+):** **File** -> **Add to Dock**.

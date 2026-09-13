@@ -53,17 +53,18 @@ bun run build:site
 ```
 
 Serve `.pages-dist/` with a local static HTTP server and open `/tutorial/`.
-Also check deployment beneath the `/roamgate/` Pages subpath, narrow-screen
-layouts, keyboard navigation, and reading with JavaScript disabled. Generated
-`.pages-dist/` files must not be committed.
+Check narrow-screen layouts, keyboard navigation, and reading with JavaScript
+disabled. The production website uses <https://roamgate.dev/>; canonical URLs,
+social images, and the sitemap must use that domain. Generated `.pages-dist/`
+files must not be committed.
 
-Pages deployment is manual so a website update cannot advertise an unpublished
-installer. Publish a Roamgate release as GitHub Latest first, then dispatch
-**Deploy Pages** on `main` from GitHub Actions. The workflow checks the live
-`install-roamgate.sh` URL before uploading the site; missing assets, HTTP errors,
-and network failures block deployment. A source build alone does not satisfy
-this gate. After a repository rename, align the site's installer URL and the
-workflow check before dispatching.
+**Deploy Pages** runs automatically on every push to `main`, including merged
+pull requests. Manual `workflow_dispatch` remains available in GitHub Actions
+for retries. Both triggers check the live `install-roamgate.sh` URL before
+uploading the site; missing assets, HTTP errors, and network failures block
+deployment. A published Roamgate release must be available as GitHub Latest;
+a source build alone does not satisfy this gate. After a repository rename,
+align the site's installer URL and the workflow check before deploying.
 
 ## Pull Requests
 

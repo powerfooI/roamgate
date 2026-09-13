@@ -1,6 +1,8 @@
 name: Deploy Pages
 
 on:
+    push:
+        branches: [main]
     workflow_dispatch:
 
 permissions:
@@ -33,7 +35,7 @@ jobs:
                     --write-out '%{http_code}' \
                     https://github.com/powerfooI/roamgate/releases/latest/download/install-roamgate.sh) \
                     && [ "$status" = 200 ] \
-                    || { echo 'Publish a Roamgate release as Latest before dispatching Pages.' >&2; exit 1; }
+                    || { echo 'Publish a Roamgate release as Latest before deploying Pages.' >&2; exit 1; }
             - name: Configure Pages
               uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
               with:

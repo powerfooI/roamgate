@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://powerfooI.github.io/roamgate/sitemap.xml
+Sitemap: https://roamgate.dev/sitemap.xml
