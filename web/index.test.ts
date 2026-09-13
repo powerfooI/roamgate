@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 
@@ -13,11 +13,18 @@ function firstPaint(values: Record<string, string>, systemLight = false) {
     dataset: { theme: "" },
     style: { colorScheme: "", zoom: "" },
   };
+  const writeStorage = mock(() => undefined);
   runInNewContext(bootstrap as string, {
     document: { documentElement: element },
     window: { matchMedia: () => ({ matches: systemLight }) },
-    localStorage: { getItem: (key: string) => values[key] ?? null },
+    localStorage: {
+      getItem: (key: string) => values[key] ?? null,
+      setItem: writeStorage,
+      removeItem: writeStorage,
+      clear: writeStorage,
+    },
   });
+  expect(writeStorage).not.toHaveBeenCalled();
   return element;
 }
 
@@ -34,7 +41,6 @@ test("index first paint reads legacy appearance preferences without changing the
     dataset: { theme: "light" },
     style: { colorScheme: "light", zoom: "1.25" },
   });
-  expect(values).toEqual({ theme: "light", uiScale: "125" });
 });
 
 test("index first paint uses Roamgate appearance preferences on fresh installs", () => {

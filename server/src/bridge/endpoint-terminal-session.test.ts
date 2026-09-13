@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test";
+import { once } from "node:events";
 import * as net from "node:net";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
@@ -513,20 +514,23 @@ describe("EndpointTerminalSession", () => {
       );
       const frames: Array<{ width: number; height: number }> = [];
       session.on("terminal", (frame) => frames.push(frame));
+      jest.useFakeTimers();
       try {
         await session.connect(cols, 69);
         const settle = await requested.promise;
-        await Bun.sleep(60);
+        jest.advanceTimersByTime(60);
         expect(frames).toEqual([]);
+        const rendered = once(session, "terminal");
         settle();
-        await Bun.sleep(60);
+        await rendered;
         expect(frames).toEqual([
           expect.objectContaining({ width: cols, height: 69 }),
         ]);
-        await Bun.sleep(550);
+        jest.advanceTimersByTime(550);
         expect(frames).toHaveLength(1); // no stale timer repaint
       } finally {
         session.close();
+        jest.useRealTimers();
       }
     },
   );
@@ -554,23 +558,29 @@ describe("EndpointTerminalSession", () => {
     );
     const frames: Array<{ width: number; mouseReporting: boolean }> = [];
     session.on("terminal", (frame) => frames.push(frame));
+    jest.useFakeTimers();
     try {
       await session.connect(134, 69);
       const send = await requested.promise;
       expect(frames).toEqual([]);
       for (let i = 0; i < 7; i++) {
         send(true);
-        await Bun.sleep(100);
+        // The reply shares the socket with surfaces: drain the sent frame
+        // before advancing its deadline, without a wall-clock sleep.
+        await session.focus(() => true);
+        jest.advanceTimersByTime(100);
+        if (i < 4) expect(frames).toEqual([]);
       }
       expect(frames.length).toBeGreaterThan(0);
       expect(frames.at(-1)).toEqual(
         expect.objectContaining({ width: 64, mouseReporting: true }),
       );
       send(false);
-      await Bun.sleep(40);
+      await session.focus(() => true);
       expect(frames.at(-1)?.mouseReporting).toBe(false);
     } finally {
       session.close();
+      jest.useRealTimers();
     }
   });
 
@@ -594,17 +604,21 @@ describe("EndpointTerminalSession", () => {
       );
       const frames: unknown[] = [];
       session.on("terminal", (frame) => frames.push(frame));
+      jest.useFakeTimers();
       try {
         await session.connect(134, 69);
         await requested.promise;
         expect(frames).toEqual([]);
+        const closed = once(session, "close");
         if (side === "local") session.close();
         else disconnect();
-        await Bun.sleep(600);
+        await closed;
+        jest.advanceTimersByTime(600);
         expect(session.isClosed).toBe(true);
         expect(frames).toEqual([]);
       } finally {
         session.close();
+        jest.useRealTimers();
       }
     },
   );

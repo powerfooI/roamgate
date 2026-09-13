@@ -3,25 +3,18 @@
 
 # From your first terminal to a workspace that travels
 
-**Start Roamgate on the computer running Herdr, then open its browser URL.**
-Follow the standalone or plugin startup steps in [chapter 1](#start).
-Not installed yet? Choose an option in the
-[installation guide](./DEPLOYMENT.md#install-a-release), then return here.
+**Start Roamgate on the Herdr host and open its URL:** follow [chapter 1](#start).
+Not installed? Use the [installation guide](./DEPLOYMENT.md#install-a-release).
 
-This hands-on tutorial follows one small task all the way through:
-**ask an agent to improve a project README, review its changes, and check its
-progress from your phone.** You do not need to learn Git, SSH, and networking
-before starting, or finish every chapter in one sitting.
+Practice one task: **ask an agent to improve a README, review the changes, then
+check from your phone.** No Git, SSH, or networking knowledge is needed to start.
 
-> **Finish one small section first.** With Herdr and Roamgate already installed,
-> chapter 1 takes about 5 minutes; the first three chapters take about 25 minutes.
-> Allow another 15-25 minutes for remote access, excluding account approvals,
-> installation, and network troubleshooting. Each exercise has an observable
-> completion check.
+> With both tools installed: chapter 1 takes about 5 minutes; chapters 1-3 about
+> 25 minutes. Allow 15-25 more for remote access, excluding installation,
+> approvals, and troubleshooting. Stop at any completion check.
 >
-> This page is a static tutorial, not your workspace. GitHub Pages hosts the
-> text and screenshots. **It does not run Herdr, keep your terminals alive, or
-> replace the `roamgate` service.**
+> **This static Pages tutorial does not run Herdr or keep terminals alive.**
+> You still need the Roamgate process.
 
 ## 1. Start here: see your own work locally
 
@@ -29,7 +22,7 @@ before starting, or finish every chapter in one sitting.
 
 ### Three names, three jobs
 
-Follow a request from your browser to the process doing the work:
+The browser reaches your agent through two services:
 
 ```text
 Your browser / installed PWA
@@ -43,65 +36,48 @@ Roamgate (command: roamgate)
 Herdr server -> workspace -> tab -> pane -> shell / agent
 ```
 
-**Herdr owns the terminal sessions. Roamgate provides the browser interface.
-Your agent is still a CLI running in a terminal.** Roamgate is not a model
-provider, and does not install or sign in to Codex, Claude, Pi, or other tools
-for you.
+**Herdr owns terminals; Roamgate supplies the browser UI; agents remain CLIs.**
+Roamgate neither provides models nor installs/signs in to Codex, Claude, Pi, or
+other tools. Closing the browser leaves terminals running, but host sleep,
+shutdown, or process exit can stop work.
 
-Closing the browser does not close Herdr's terminals. Work can continue while
-the host, Herdr, and task processes remain running. That does not protect a
-task from host sleep, shutdown, or a process exiting.
-
-The plugin/service names below describe the current source build. Published
-0.7.0 still uses legacy identities; follow the
-[migration guide](./DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui)
-before changing an existing service or plugin registration.
+The commands below use source-build identities. Published 0.7.0 still uses legacy
+service/plugin names; read the [migration guide](./DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui)
+before changing an existing installation.
 
 ### Open your first workspace: about 5 minutes
 
-1. Confirm that Herdr is installed and running on the host, with a project you
-   trust open. For Herdr's own installation and introduction, visit
-   [herdr.dev](https://herdr.dev). Roamgate does not start Herdr for you.
-2. Install Roamgate using the
-   [installation guide](./DEPLOYMENT.md#install-a-release). Standalone binaries
-   do not require Bun. On Windows, download the matching x64 or ARM64 archive
-   and use `roamgate.exe`. Prefer the Herdr plugin? See the
-   [plugin instructions](./DEPLOYMENT.md#herdr-plugin).
-3. Start Roamgate using the path for your installation:
+1. Start Herdr with a trusted project open. See [herdr.dev](https://herdr.dev)
+   for setup; Roamgate does not start it.
+2. [Install Roamgate](./DEPLOYMENT.md#install-a-release). Standalone needs no Bun;
+   Windows uses the matching x64/ARM64 archive and `roamgate.exe`. Alternatively,
+   follow the [plugin setup](./DEPLOYMENT.md#herdr-plugin).
+3. Start it on that computer:
 
-   **Standalone installation:** run this command in a terminal on that
-   computer. Leave the process running.
+   **Standalone:** leave this process running:
 
    ```bash
    roamgate
    ```
 
-   **Plugin installation:** follow the
-   [plugin startup instructions](./DEPLOYMENT.md#herdr-plugin) to start Roamgate
-   and obtain its login URL from the plugin panel or command log. The plugin
-   does not add `roamgate` to `PATH`; skip the standalone command above.
+   **Plugin:** use its [startup action](./DEPLOYMENT.md#herdr-plugin) and obtain
+   the login URL from the panel/command log. The plugin does not add `roamgate`
+   to `PATH`; skip the standalone command.
 
-4. In a browser on **the same computer**, open the URL from the standalone
-   process or plugin, including any login token. A default standalone launch
-   uses `http://127.0.0.1:8787`. Select your workspace, click an idle shell pane,
-   and run `pwd`. In Windows PowerShell, use `Get-Location` instead.
+4. Open the printed URL (including any token) on **the same computer**. Standalone
+   defaults to `http://127.0.0.1:8787`. Select a workspace and idle shell pane;
+   run `pwd` (`Get-Location` in PowerShell).
 
-**You are done when:** the browser shows your project directory and terminal
-input produces output. Leave ports, domains, and VPNs alone for now. Get local
-access working before adding another network connection.
+**You are done when:** terminal input shows your project directory. Get this
+working before configuring remote access.
 
-> **The two startup defaults differ.** Running `roamgate` directly defaults
-> to a local-only listener. The current implementation skips built-in login
-> for that listener, even if a password is configured. A new
-> `roamgate service install` service instead listens on `0.0.0.0:8787` with a
-> login token. The plugin also uses the user service. Check the actual listener
-> address before following the private-access examples later in this tutorial.
+> **Check the listener:** standalone defaults to loopback and bypasses login
+> even with a password configured. A new `roamgate service install` uses
+> `0.0.0.0:8787` with a token; the plugin uses this service too.
 
 ![Desktop workspace with project navigation on the left, live terminals in the center, and changed files on the right](./images/roamgate-desktop-changes.png)
 
-*Find your project and active pane first. You do not need to identify every
-button yet. Screenshots show an existing version; menu positions may change
-between releases.*
+*Find the project and active pane. Screenshot menu positions can differ by release.*
 
 ### Learn this one hierarchy
 
@@ -112,9 +88,8 @@ between releases.*
 | Pane | One terminal region within a tab | An agent on the left, tests on the right |
 | Worktree | Another real checkout directory of the same Git repository | An isolated documentation branch |
 
-**A pane is not a worktree.** Splitting a pane gives you another terminal. If
-both terminals use the same directory, they still modify the same files. Use
-chapter 3 when you need to isolate parallel changes.
+**Splitting panes does not isolate files.** Terminals in the same directory
+modify the same checkout; use chapter 3 for parallel changes.
 
 ## 2. Everyday work: verify what the agent changed
 
@@ -122,32 +97,25 @@ chapter 3 when you need to isolate parallel changes.
 
 ### 2.1 Find the terminal you want to control
 
-Try `Cmd/Ctrl+K`. The command menu searches workspaces, files, tabs, panes,
-and agents. Entering a project-relative path such as `README.md` also opens
-that file directly.
+Open the command menu to search workspaces, files, tabs, panes, and agents;
+enter `README.md` to open a project-relative path. Defaults differ by platform:
+use [Keyboard Shortcuts](../FEATURES.md#keyboard-shortcuts) or interface menus.
 
-1. Select your practice project and create a tab using the interface menu.
-2. Split the active pane to the right using its actions menu. On macOS, you
-   can also try `Cmd+D`.
-3. Run an agent CLI you have already installed and signed in to in the left
-   pane. Leave the right pane as an ordinary shell.
-4. Press `Ctrl+Tab` to see recent panes. Release `Ctrl` to switch, or press
-   `Esc` to cancel.
+1. Select your practice project and create a tab from its menu.
+2. Split right from the pane actions menu (`Cmd+D` on macOS).
+3. Start an installed, signed-in agent CLI on the left; keep a shell on the right.
+4. Open the recent pane switcher (`Ctrl+Tab` on macOS). Release its opening
+   modifier to switch or press `Esc` to cancel.
 
-**You are done when:** you can switch between the agent and shell, and know
-which pane will receive your next keystroke.
+**You are done when:** you can switch panes and know where typing will go.
 
-> Browsers may reserve `Cmd+T`, `Cmd+W`, or `Cmd+D`. Use the interface menus
-> when there is a conflict; these shortcuts are usually more reliable in an
-> installed PWA. Do not automatically replace every `Cmd` with `Ctrl` on other
-> platforms. Check the
-> [complete shortcut reference](../FEATURES.md#keyboard-shortcut-reference).
+> Browsers may reserve `Cmd+T`, `Cmd+W`, or `Cmd+D`; use menus or the shortcut
+> editor. PWAs are often more reliable. Do not substitute Ctrl for every Cmd.
 
 ### 2.2 Give the agent a small, reviewable task
 
-Paste this practice prompt into your agent's input, review it, and submit it
-yourself. Use a repository you are allowed to modify. Model usage may incur
-charges.
+Use a repository you may modify. Paste, review, and manually submit this prompt;
+model usage may incur charges.
 
 ```text
 Read this project's README and add a short first-run example.
@@ -156,95 +124,72 @@ Modify only the README. Do not install dependencies, commit, or push.
 When finished, explain what changed and what you have not actually verified.
 ```
 
-While the agent works, watch the sidebar or Agent panel. A `working` state
-suggests work is in progress; `blocked` usually means something needs your
-attention. `done` and `idle` help you decide when to return.
+Watch Herdr's recognized status: `working` suggests activity, `blocked` needs
+attention, and `done`/`idle` suggest when to return. **Status is not verification:**
+`done` does not mean tests passed. Available states depend on agent integration.
 
-**Status helps you navigate; it does not certify quality.** `done` does not
-mean tests passed. Available states depend on Herdr's recognition and
-integration with that agent.
+Open Agent History to find the explanation. Session Inspector offers Timeline,
+ATIF (a normalized trajectory), and raw transcript; original export preserves
+the source record. Use the [shortcut reference](../FEATURES.md#keyboard-shortcuts)
+for History, Files, and Changes on your platform.
 
-Open message history with `Cmd/Ctrl+Shift+H` to revisit the conversation.
-For more detail, use **Session Inspector** to view the Timeline, ATIF, or raw
-transcript. ATIF is a normalized trajectory representation for use by other
-tools; the original export preserves the source record.
+**You are done when:** you found the explanation, not just the last terminal line.
 
-**You are done when:** you have found the agent's explanation of this change,
-not just the last line in the terminal.
-
-> Session inspection currently supports Codex, Claude, Kimi, Grok Build, and
-> Pi, provided a session record is readable. Follow the interface's integration
-> hints when metadata is missing. In remote mode, session paths reported by
-> Herdr are read remotely, and Pi session IDs support remote lookup. Other
-> fallback searches that depend on local IDs or directories may not find a
-> remote transcript.
+> Inspection supports Codex, Claude, Kimi, Grok Build, and Pi with readable records.
+> Follow missing-metadata integration hints. SSH reads Herdr-reported paths and
+> Pi ID lookups remotely; other local ID/directory fallbacks may miss remote
+> transcripts. See [session inspection](../FEATURES.md#agent-awareness-and-session-inspection).
 
 ### 2.3 Read the file, then the diff
 
-1. Open **File Explorer** with `Cmd/Ctrl+Shift+E` and find `README.md`.
+1. Open **File Explorer** from the interface menu and find `README.md`.
 2. Switch between **Raw / Rendered** to check both the source and formatting.
    Previews also support images, Mermaid diagrams in Markdown, and standalone
    Mermaid files.
-3. Open **Diff Viewer** with `Ctrl+Shift+G`. Select the working-tree scope and
+3. Open **Diff Viewer** from the interface menu. Select the working-tree scope and
    inspect the README's added and removed lines.
 4. Use `Cmd/Ctrl+F` in the diff to find the command the agent added. Confirm
    that it actually exists in the project's configuration.
 
-**You are done when:** you can identify the new lines and explain whether the
-run command is correct, rather than repeating the agent's summary.
+**You are done when:** you can identify the new lines and verify the run command.
 
 ![File Explorer previewing a README with raw and rendered views](./images/roamgate-desktop-files.png)
 
-*File Explorer explains a file; Diff Viewer explains a change. File-tree search
-covers files already loaded into the tree, not a repository-wide full-text
-search.*
+*File-tree search covers loaded files, not repository-wide full-text search.*
 
-You can also manage files here. Right-click on desktop or long-press on mobile
-to open actions. Drag files in to upload them, download individual files, or
-download a directory as a `.tar.gz` archive. Use `Cmd/Ctrl+Click` on a file path
-in terminal output to preview it. **Uploads, deletions, and SSH-backed file
-operations affect real files on the target host, not browser-only copies.**
+Right-click/long-press for file actions, drag to upload, or download a file or
+`.tar.gz` directory. `Cmd/Ctrl+Click` on terminal paths opens previews.
+**Uploads, deletions, and SSH file operations affect real target-host files.**
 
 ### 2.4 Send precise feedback back to the agent
 
-Instead of typing "this part is wrong," select the exact place to change:
+1. Click/drag diff line numbers and comment, for example: "Use the dev command
+   in package.json." Source annotation gutters and rendered Markdown selections
+   also accept comments.
+2. Check files, ranges, and quotes in the review panel; reorder as needed.
+3. Choose the agent pane and pre-fill its input with compiled feedback.
+4. Review the full message in that pane and press Enter yourself.
 
-1. Click or drag across diff line numbers and add a specific comment, such as
-   "Use the dev command that actually exists in package.json here." Source-file
-   annotation gutters and text selections in rendered Markdown also support
-   comments.
-2. Organize the comments in the review panel. Check their files, line ranges,
-   and quoted content.
-3. Choose the target agent pane and pre-fill its terminal input with the
-   compiled feedback.
-4. Return to that pane, review the full message, and press Enter yourself.
+**You are done when:** the agent receives located, contextual feedback.
+**Pre-filling does not submit.**
 
-**You are done when:** the agent receives feedback with a file location and
-context. **Pre-filling does not submit the message**, so you retain a final
-review opportunity.
-
-Annotation drafts stay in the current browser, scoped to the checkout. They
-are not GitHub PR comments and do not automatically sync to another device.
-When a changed file prevents re-anchoring, the comment is marked stale and its
-original quote remains available for inspection.
+Drafts stay in this browser/checkout, not GitHub PRs or other devices. Failed
+re-anchoring marks a comment stale but retains its original quote.
 
 ![Diff Viewer with a comment on selected changed lines](./images/roamgate-desktop-annotations.png)
 
 ### 2.5 Do not rush into bulk actions
 
-Diff Viewer distinguishes staged, unstaged, untracked, and conflicted files.
-File actions can stage or unstage matching changes, while **More Git actions**
-contains operations that affect multiple files.
+Diff Viewer separates staged, unstaged, untracked, and conflicted files.
+Context actions stage/unstage matching changes; **More Git actions** affects
+multiple files.
 
-**For this exercise, stop when the review is satisfactory; a commit is not
-required.** If you do want to commit, run `git status` in the ordinary shell
-first, then follow the project's testing and commit process. Staging is not
-committing, and committing is not pushing.
+**This exercise needs no commit.** To commit, first run `git status` in the
+shell and follow the project's checks/commit process. Staging is not committing;
+committing is not pushing.
 
-> **Discarding and deleting do not just tidy the interface.** Discard Unstaged
-> removes changes that have not been staged; Delete Untracked deletes
-> untracked files. A confirmation dialog is not a backup. When uncertain,
-> cancel and preserve the files first.
+> **Discard Unstaged loses unstaged changes; Delete Untracked deletes files.**
+> Confirmation is not a backup. When uncertain, cancel and preserve files.
 
 ## 3. Parallel work and mobile access
 
@@ -252,10 +197,8 @@ committing, and committing is not pushing.
 
 ### 3.1 When do you need a worktree?
 
-Suppose the documentation task and a bug fix need to run at the same time,
-and both will edit files. Give them separate worktrees. Each has its own
-directory and checked-out branch, making review easier than having two agents
-write into the same directory.
+For simultaneous tasks that edit files, use separate worktrees: each has its
+own checkout directory and branch.
 
 1. Confirm that the repository has a fetchable `origin/main`, and inspect
    `paseo.json` if it exists. If you do not trust its commands, disable hooks
@@ -268,30 +211,23 @@ write into the same directory.
 4. In the new worktree's terminal, run `pwd` and `git status`. Confirm the
    directory and branch before starting the agent.
 
-**You are done when:** the tasks live in different checkouts, with changes you
-can review independently. The sidebar can group, collapse, and pin worktrees
-from the same repository; these display preferences stay in the current
-browser.
+**You are done when:** tasks have separate checkouts and independently reviewable
+changes. Group/collapse/pin preferences stay in this browser.
 
-> The setup, opened, teardown, and removed hooks in `paseo.json` execute
-> repository commands. They are enabled by default and run remotely in SSH
-> mode. Before removing a worktree, save or commit the results you want to
-> retain, confirm its tasks have ended, and read the removal confirmation.
-> A hook failure can also block removal. See
-> [hook timing and boundaries](../FEATURES.md#paseo-worktree-hooks).
+> `paseo.json` setup/opened/teardown/removed hooks are enabled by default and run
+> repository code, remotely in SSH mode. Before removal, save/commit wanted
+> results, end tasks, and read the confirmation. Hook failure can block removal;
+> see [hook boundaries](../FEATURES.md#paseo-worktree-hooks).
 
-**Automatic branch updates** are optional. By default, they fetch `origin/main`
-every 10 minutes and try to merge it into the current branch of an enabled
-checkout. This is not automatic pushing. Dirty workspaces and detached HEADs
-are skipped, and conflicting merges are aborted. Updates run only while that
-workspace is open in the current Roamgate connection. Leave this off for your
-first exercise; enable it once you are comfortable managing changes manually.
+Leave **Automatic branch updates** off for this exercise. When enabled, they
+fetch/merge `origin/main` every 10 minutes by default, never push, skip dirty or
+detached checkouts, and abort conflicts. They run only while the workspace is open
+in this connection. See [update controls](../FEATURES.md#automatic-branch-updates).
 
 ### 3.2 Continue from your phone
 
-Complete chapter 4's **Tailscale + Serve** setup and access-policy checks
-first, then open its HTTPS address on your phone. On a phone, `127.0.0.1`
-means the phone itself, not your work computer.
+First complete chapter 4's [Tailscale + Serve](#tailscale) setup and access checks.
+Use its HTTPS URL: `127.0.0.1` on a phone means the phone, not the work computer.
 
 1. Open Roamgate in the mobile browser and select your practice project and
    agent pane. Authenticate first if your deployment requires login.
@@ -309,44 +245,32 @@ means the phone itself, not your work computer.
 | macOS Safari 17+ | File > Add to Dock |
 | Chrome / Edge | Browser menu > Install app |
 
-**You are done when:** a Roamgate icon on your home screen opens the same
-project. Confirm that the service address is stable before installing. Install
-your Roamgate URL, not this tutorial's Pages URL.
+**You are done when:** the home-screen icon opens your project. Install the stable
+Roamgate service URL, not this tutorial's Pages URL.
 
 ![Mobile terminal with touch shortcut controls](./images/roamgate-mobile-terminal.png)
 
-*On a small screen, start with one action: check an agent waiting for your
-input, inspect a diff, or add feedback. You do not need to reproduce an entire
-desktop workflow on your phone.*
-
-A PWA is a standalone window, **not an offline terminal or a background
-keep-alive mechanism**. Host sleep, a stopped Roamgate process, or a disconnected
-VPN can interrupt access. Browser task-completion notifications can take you
-back to a pane, but delivery depends on browser permissions and operating
-system background restrictions. Do not treat them as a reliable alerting
-service.
+**PWA is not offline access or background keep-alive.** Host sleep, stopped
+Roamgate, or a disconnected VPN interrupts access. Completion notifications can
+return to a pane, but browser permissions and OS restrictions make them unsuitable
+as reliable alerts.
 
 ### 3.3 Multiple browsers are not separate permission roles
 
-Your computer and phone can connect to the same bridge and receive Herdr
-events. Connection controls can pause the current browser or other clients.
-That does not synchronize every browser's font settings, annotation drafts,
-pinned items, or shortcut preferences.
+Browsers share Herdr events, not all fonts, drafts, pins, or shortcuts.
+Connection controls can pause your browser or others.
 
-**Server profiles in the connection selector are shared; each browser chooses
-which connection to display independently.** Adding or editing a profile
-changes the connection list available to other authenticated users. Roamgate
-does not provide a per-person read-only reviewer role. Do not share a workspace
-URL as if it were an ordinary document link.
+**Profiles are shared; each browser selects its displayed connection.** Editing
+a profile affects others' connection lists. There is no per-person read-only
+role: do not share a workspace URL like a document link.
 
 ## 4. Remote access: choose the right connection
 
 <a id="networking"></a>
 
-**For regular access from your own phone or computer, start with Tailscale +
-Serve.** If you can already SSH to the work machine and only need access from
-another computer, SSH is another option. Keep Tailcat for temporary experiments
-between two computers you control.
+**Choose Tailscale + Serve for everyday phone/computer access.** Use SSH if you
+already have SSH access and only need another computer. Reserve Tailcat for
+temporary experiments between computers you control.
 
 | Your goal | Recommended route | What you need |
 | --- | --- | --- |
@@ -355,11 +279,9 @@ between two computers you control.
 | Manage remote Herdr through local Roamgate | SSH profile / `--ssh-host` | Local Linux/macOS, Herdr already running remotely |
 | Connect two computers temporarily without a tailnet | Tailcat port forwarding | Tailcat on both ends and a securely exchanged address |
 
-**These are combinations with external tools, not built-in Tailscale or Tailcat
-integrations.** You do not need router port forwarding, an exit node, or subnet
-routing for this tutorial. The examples were checked against source code and
-official documentation, not tested on your devices or network. Complete the
-checks for your chosen route before relying on it regularly.
+These external tools are **not built-in integrations**. No router forwarding,
+exit node, or subnet routing is needed. Verify the chosen route on your own
+network before relying on it.
 
 ### 4.1 Separate the two network hops
 
@@ -371,40 +293,32 @@ Hop B: Roamgate -> Herdr
        Local sockets / a Roamgate SSH profile
 ```
 
-The Tailscale and Tailcat examples solve **hop A**, bringing your browser to
-Roamgate. `--ssh-host` solves **hop B**, bringing Roamgate to remote Herdr. You can
-combine them, but start with the hop you actually need.
+Tailscale/Tailcat solve **hop A** (browser to Roamgate); `--ssh-host` solves
+**hop B** (Roamgate to Herdr). Start with the hop you need.
 
 #### Safety checks before connecting
 
-1. Allow only your devices or people you fully trust. Access to the Roamgate UI
-   is effectively terminal and file access as the user running Roamgate.
-2. **The current implementation skips built-in authentication for listeners
-   configured as `127.0.0.1`, `localhost`, or `::1`, even with
-   `ROAMGATE_PASSWORD` set.** Forwarding one of these listeners makes the
-   outer tunnel or proxy the access boundary. There is no extra Roamgate
-   password gate.
-3. Prefer HTTPS or a trusted encrypted tunnel, and restrict listener addresses
-   and access policies. A password is not TLS, rate limiting, multi-user
-   authorization, or a sandbox.
-4. Keep passwords, token login URLs, and Tailcat addresses out of screenshots,
-   public issues, group chats, and example configurations.
+1. Admit only fully trusted devices/people: UI access is terminal/file authority
+   as the Roamgate user.
+2. **Loopback (`127.0.0.1`, `localhost`, `::1`) bypasses login even with
+   `ROAMGATE_PASSWORD`.** A forwarding tunnel/proxy becomes the entire remote
+   access boundary, with no extra Roamgate password gate.
+3. Use HTTPS or a trusted encrypted tunnel; restrict listeners and access policy.
+   Passwords provide no TLS, rate limiting, multi-user authorization, or sandbox.
+4. Never publish passwords, token URLs, or Tailcat addresses in screenshots,
+   issues, chats, or configs.
 
-See [SECURITY.md](../SECURITY.md) for the full trust model. The examples below
-configure private access, not public publishing. If you require an additional
-application login for remote access, stop here and use an independently
-authenticated proxy design: these loopback examples do not meet that
-requirement. Do not switch to `0.0.0.0` just to force password authentication;
-that also expands the exposed network surface.
+Read [SECURITY.md](../SECURITY.md). These are private-access examples. If you need
+an additional application login, use an independently authenticated proxy instead.
+Do not bind `0.0.0.0` just to force login: that expands network exposure.
 
 <a id="tailscale"></a>
 
 ### 4.2 Tailscale + Serve: the recommended everyday option
 
-**Tailscale** connects authorized devices in a private network called a
-**tailnet**. Traffic uses WireGuard encryption, with direct connections where
-possible and relays when needed. **Serve** exposes a local HTTP service through
-an HTTPS address reachable within that tailnet.
+**Tailscale** links authorized devices in a private **tailnet**, using WireGuard
+with direct connections or relays. **Serve** gives local HTTP a tailnet-only HTTPS
+address.
 
 ```text
 Phone browser (connected to Tailscale)
@@ -420,47 +334,36 @@ Tailscale Serve on the work computer
 
 #### Prepare both devices: about 5-10 minutes
 
-1. Install [Tailscale](https://tailscale.com/download) on the work computer and
-   visiting device. Sign in to the same tailnet and confirm that both appear
-   online in the admin console.
-2. Run `tailscale status` on the work computer. If the CLI is missing on macOS,
-   follow the [official macOS instructions](https://tailscale.com/docs/install/mac)
-   to configure its command entry. Do not install multiple client variants
-   just to fix a PATH problem.
-3. Follow the [access-control documentation](https://tailscale.com/docs/features/access-control)
-   to allow only the intended users or devices to reach HTTPS port 443 on the
-   Roamgate node. Check whether existing broad rules still allow other access.
-   Membership in the same tailnet does not automatically imply least
-   privilege. These rules determine who gets full Roamgate access; do not
-   enable Serve before confirming their scope.
+1. Install [Tailscale](https://tailscale.com/download) on the host and visiting
+   device. Sign into the same tailnet; confirm both are online in its admin console.
+2. Run `tailscale status` on the host. For a missing macOS CLI, follow the
+   [macOS instructions](https://tailscale.com/docs/install/mac), not a second
+   client installation to fix PATH.
+3. [Restrict access](https://tailscale.com/docs/features/access-control) to intended
+   users/devices on the Roamgate node's HTTPS port 443. Check broad existing rules.
+   Tailnet membership is not least privilege: **verify scope before enabling Serve**.
 
 #### Start Roamgate with a local-only listener
 
-Run this on **the work computer running Herdr**. Port 8787 must be free. If
-Roamgate already runs through the plugin or a user service, do not start a second
-instance; use the existing-service instructions below instead.
+On **the Herdr host**, ensure port 8787 is free. If a plugin/user service already
+runs Roamgate, follow the existing-service instructions below; do not duplicate it.
 
 ```bash
 roamgate --host 127.0.0.1 --port 8787
 ```
 
-On Windows, use `roamgate.exe`, usually `./roamgate.exe` when launching from
-the current PowerShell directory. Leave this terminal running Roamgate.
+On Windows, use `roamgate.exe` (`./roamgate.exe` from its PowerShell directory).
+Leave the process running.
 
-> **This setup has no Roamgate login page under the current implementation.**
-> HTTPS protects transport; Tailscale device identity and access rules control
-> remote admission. Devices allowed to reach this HTTPS endpoint enter the
-> workspace directly. Other local processes can also access loopback. Continue
-> only if you understand and accept this boundary.
+> **No Roamgate login page:** Tailscale identity/access rules admit remote devices
+> directly. HTTPS protects transport. Local processes can also access loopback.
+> Continue only if you accept this boundary.
 
-**Already using a user service?** Edit
-`~/.config/roamgate/roamgate.env` on Unix or
-`%APPDATA%\roamgate\roamgate.env` on Windows. Preserve other necessary
-settings, set `HOST` to `127.0.0.1`, and set `PORT` to `8787`. Changing from a
-non-loopback listener to loopback removes the existing token or password login
-gate; the Tailscale policy above must take over remote admission. The config
-may contain secrets. Restrict file access and do not commit it to Git. Then
-restart the service using the command for your installation:
+**Existing service:** edit `~/.config/roamgate/roamgate.env` (Unix) or
+`%APPDATA%\roamgate\roamgate.env` (Windows). Preserve other settings; set
+`HOST=127.0.0.1` and `PORT=8787`. **This removes the token/password gate:** Tailscale
+policy must replace it. Protect this potentially secret file; never commit it.
+Restart for your installation:
 
 **Standalone installation:**
 
@@ -474,11 +377,8 @@ roamgate service restart
 herdr plugin action invoke roamgate.restart
 ```
 
-Plugin actions run asynchronously. Confirm the restart in the plugin panel
-or command log before continuing.
-
-The [deployment guide](./DEPLOYMENT.md#run-as-a-user-service) is the canonical
-reference for service installation, configuration, and logs.
+Plugin actions are asynchronous: confirm restart in its panel/log.
+See [service configuration and logs](./DEPLOYMENT.md#run-as-a-user-service).
 
 #### Connect from another terminal on the same work computer
 
@@ -488,19 +388,15 @@ reference for service installation, configuration, and logs.
    tailscale serve status
    ```
 
-2. Once you have confirmed that HTTPS port 443 at the root path is available
-   on this node, create the proxy. If another service already uses that
-   endpoint, stop and plan a separate port or node using the official
-   documentation. Do not overwrite it.
+2. Confirm HTTPS port 443 at `/` is free. If occupied, use official documentation
+   to plan another port/node; do not overwrite another service.
 
    ```bash
    tailscale serve --bg --https=443 http://127.0.0.1:8787
    ```
 
-   The first run may provide a consent link for enabling tailnet HTTPS
-   certificates. Have an authorized administrator approve it. Certificate
-   hostnames appear in public certificate transparency logs, so do not put
-   sensitive information in machine names.
+   Approve the first-run HTTPS certificate consent link as an authorized admin.
+   Hostnames appear in public certificate transparency logs: avoid sensitive names.
 
 3. On your Tailscale-connected phone, open the printed address, shaped like
    `https://machine-name.tailnet-name.ts.net`. **Use the printed HTTPS hostname,
@@ -511,32 +407,26 @@ reference for service installation, configuration, and logs.
    With Tailscale disconnected and no other access path, the HTTPS endpoint
    should also be unreachable.
 
-**You are done when:** the phone can control the terminal over cellular data
-with Tailscale connected, while devices outside the access policy cannot open
-the service. An incognito window is not an admission test: it does not change
-the device's Tailscale identity.
+**You are done when:** cellular access works with Tailscale, and excluded devices
+cannot connect. Incognito is not an admission test; device identity stays the same.
 
-> **Serve is not Funnel.** Serve is for your tailnet; Funnel is public. Do not
-> replace `serve` with `funnel` because the names look similar. Serve's identity
-> headers do not automatically give Roamgate per-person authorization or
-> read-only roles. Mount the proxy at the domain root `/`; do not assume Roamgate
-> supports an arbitrary `/studio/` subpath.
+> **Serve is private; Funnel is public. Do not substitute `funnel`.** Serve identity
+> headers add no Roamgate per-person/read-only roles. Use domain root `/`; arbitrary
+> subpaths such as `/studio/` are not assured.
 
 #### Stop sharing, or make it a regular setup
 
-To close the endpoint created above, first confirm that doing so will not
-affect other mounts, then use its matching off command:
+Before closing this endpoint, check that other mounts will not be affected:
 
 ```bash
 tailscale serve --bg --https=443 off
 tailscale serve status
 ```
 
-Do not casually run `tailscale serve reset`: it clears that device's Serve
-configuration and may affect other services. `--bg` keeps Serve configured
-persistently; **it does not start Roamgate or prevent host sleep**. Once the
-setup is verified, use the deployment guide to configure a Roamgate user service
-if needed, retaining loopback binding and strict Tailscale access rules.
+`tailscale serve reset` clears the device's entire Serve configuration, including
+other services. **`--bg` persists Serve, not Roamgate, and does not prevent sleep.**
+After verification, configure a [Roamgate user service](./DEPLOYMENT.md#run-as-a-user-service)
+if needed, keeping loopback and strict Tailscale policy.
 
 <a id="ssh"></a>
 
@@ -544,10 +434,8 @@ if needed, retaining loopback binding and strict Tailscale access rules.
 
 #### Option A: local Roamgate, remote Herdr
 
-Use this when code and agents run on a Linux work machine while your browser
-runs on a Mac, for example. Roamgate SSH profiles and `--ssh-host` currently
-require **Roamgate itself to run on Linux or macOS**. Windows Roamgate supports
-native local profiles, but not this Unix socket forwarding transport.
+Use local Roamgate with remote code/agents. **Roamgate must run on Linux/macOS**
+for SSH socket forwarding; Windows supports native local profiles only.
 
 1. Verify connectivity with system SSH, confirm the host fingerprint, and check
    authentication and the already-running remote Herdr server. Put custom
@@ -559,78 +447,60 @@ native local profiles, but not this Unix socket forwarding transport.
 3. Test and connect using the selector. Open the remote project and run `pwd`
    in its terminal to confirm the directory.
 
-Alternatively, start a local bridge with the command below. Its port must not
-conflict with an existing Roamgate instance.
+Or start a local bridge on a free port:
 
 ```bash
 roamgate --ssh-host workbox --host 127.0.0.1
 ```
 
-**You are done when:** your local browser controls the remote terminal and
-shows remote project files. Image uploads, Git operations, file operations,
-and worktree hooks execute on that same remote host, not on copies pulled to
-your local computer.
+**You are done when:** the local browser controls the remote terminal/files.
+Image uploads, Git, file operations, and hooks run on that remote host.
 
-Explicit `--socket-path` / `--client-socket-path` settings, or their environment
-variables, override automatically forwarded paths. Old settings can point you
-at the wrong target. SSH profiles do not store passwords or private keys;
-OpenSSH still controls host-key verification and authentication. See
-[multiple and remote connections](./DEPLOYMENT.md#multiple-and-remote-herdr-connections).
+Explicit `--socket-path` / `--client-socket-path` or environment equivalents
+override tunnel paths; stale settings can select the wrong target. Profiles
+store no passwords/keys; OpenSSH owns host verification/authentication. See
+[connections](./DEPLOYMENT.md#multiple-and-remote-herdr-connections).
 
 #### Option B: Roamgate already runs remotely; forward its web port
 
-This differs from `--ssh-host`: both services stay remote, while system SSH
-forwards one TCP port. Remote Roamgate should listen on loopback. This skips
-Roamgate login, so remote admission relies on SSH authentication. Local processes
-on the visiting computer can also use its forwarded port. The visiting
-computer needs OpenSSH; Windows OpenSSH works for this option too.
+Both services stay remote; system SSH forwards the web port (not `--ssh-host`).
+Remote Roamgate must use loopback: login is bypassed, so SSH authentication controls
+remote admission. Visiting-computer processes can also use the forwarded port.
+This option works with Windows OpenSSH too.
 
-Run this on the visiting computer, replacing `workbox` with your SSH alias:
+On the visiting computer, replace `workbox` with your SSH alias:
 
 ```bash
 ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:18787:127.0.0.1:8787 workbox
 ```
 
-Open `http://127.0.0.1:18787` on that computer. HTTP travels only across
-loopback at each end; SSH encrypts the link between them. This tunnel runs on
-the visiting computer and is not directly a phone-access URL.
-
-**Press Ctrl+C in the SSH forwarding terminal when finished.** `-N` means no
-remote command is executed, `18787` is the local port, and the final `8787` is
-the remote Roamgate port.
+Open `http://127.0.0.1:18787` there, not on your phone. HTTP stays on loopback at
+each end; SSH encrypts the link. `-N` runs no remote command; `18787` is local,
+`8787` remote. **Press Ctrl+C in this terminal when finished.**
 
 <a id="tailcat"></a>
 
 ### 4.4 Tailcat: a temporary link between trusted computers
 
-**Tailcat is a separate open-source tool from the Tailscale team, not another
-spelling of Tailscale.** It reuses WireGuard, NAT traversal, and DERP relays,
-but does not require a Tailscale account or tailnet control plane. It does not
-provide a long-term device directory and access-policy management for you.
+**Tailcat is a separate Tailscale-team tool**, not Tailscale. It uses WireGuard,
+NAT traversal, and DERP without a tailnet/account, but offers no long-term device
+directory or access-policy management. Its client maps remote ports to localhost;
+privately exchange the server's address.
 
-Think of it as a temporary connection to selected ports. Privately send the
-server's printed Tailcat address to your other computer, where the client maps
-a remote port to localhost. Your browser does not need to understand Tailcat.
-
-> **Experimental boundaries.** Upstream makes no CLI, API, or wire-format
-> stability promises, and its public relays have no availability or throughput
-> SLA. The threat model primarily targets connecting your own devices. The
-> example below was checked against the referenced upstream README, but has
-> not had a two-machine end-to-end test in this project. Check both versions
-> and `tailcat --help`, `tailcat serve --help`, and `tailcat forward --help`.
-> Continue only after confirming support for `serve`, `forward`, and
-> `--key=new`. Update older versions using official instructions rather than
-> guessing flags.
+> **Experimental:** no upstream CLI/API/wire stability promises or relay
+> availability/throughput SLA. Its threat model primarily covers your own devices.
+> This project has not verified this example end-to-end on two machines. Check
+> both versions and `tailcat --help`, `tailcat serve --help`, and
+> `tailcat forward --help` for `serve`, `forward`, and `--key=new` support.
+> Update through official instructions; do not guess flags.
 
 #### Prepare both ends
 
-Install a supported version on both computers using the
-[official Tailcat repository](https://github.com/tailscale/tailcat#install).
-Upstream's macOS options include `brew install tailcat`; on other systems,
-choose the appropriate architecture from official releases. **This example
-does not treat the experimental Tailcat web demo as a general-purpose Roamgate
-proxy or assume that phones can run these CLIs.** Prefer Tailscale for regular
-mobile access.
+Install supported versions on both computers from the
+[official repository](https://github.com/tailscale/tailcat#install): macOS supports
+`brew install tailcat`; other systems need the matching release architecture.
+The experimental web demo is not a general Roamgate proxy, and phones are not
+assumed to support these CLIs. Use Tailscale for regular mobile access.
 
 #### Connect only the Roamgate port
 
@@ -675,16 +545,13 @@ Visiting browser -> 127.0.0.1:18787 -> tailcat forward
 Work host: Herdr <- Roamgate :8787 <- tailcat serve
 ```
 
-**You are done when:** the other trusted computer can use Roamgate without a
-public listener, and the old entry point stops working after both forwarding
-processes exit.
+**You are done when:** the trusted computer has access without a public listener,
+and access stops when both forwarding processes exit.
 
-Treat a Tailcat address as a sensitive connection credential. Current upstream
-default addresses include a pre-shared key, not just a public hostname. Keep
-the default protections and avoid compatibility options that weaken them.
-**Do not switch to `serve all`, exit-node mode, authentication-free SSH, or
-writable-directory sharing for convenience.** Each expands this experiment's
-permission scope.
+**Protect the Tailcat address as a credential:** default addresses include a
+pre-shared key, not just a hostname. Keep default protections; avoid weakening
+compatibility options. Do not expand to `serve all`, exit-node mode,
+authentication-free SSH, or writable-directory sharing.
 
 #### Which one should you choose?
 
@@ -727,9 +594,8 @@ does not mean encryption is disabled, but performance may differ from your LAN.
    supports WebSocket upgrades and long-lived connections. Retry locally to
    distinguish proxy trouble from Herdr rendering trouble.
 
-**You are done when:** you can identify whether the failure is in the Roamgate
-service, the Herdr connection, or the external access path, and change only
-that part of the configuration.
+**You are done when:** you identified the failing service, Herdr connection, or
+access path and changed only that part.
 
 ### Five common symptoms
 
@@ -741,14 +607,13 @@ that part of the configuration.
 | SSH connects, but session history is empty | Check remote transcript readability and the metadata/fallback limitations in chapter 2. |
 | Image paste, clipboard access, or PWA installation is restricted | Check the HTTPS secure context, browser permissions, and platform support. Prefer the Serve HTTPS address. |
 
-For token recovery, service restarts, and debug logs, use the
-[deployment guide](./DEPLOYMENT.md). Do not "fix" connectivity by permanently
-disabling authentication or opening the entire firewall. When asking for help,
-share only redacted logs, OS and Roamgate versions, and the failing step.
+See [deployment](./DEPLOYMENT.md) for token recovery, restarts, and debug logs.
+Do not disable authentication permanently or open the entire firewall. For help,
+share redacted logs, OS/Roamgate versions, and the failing step.
 
 ### Your first round is complete
 
-Check these four things. You do not need to learn every remaining feature yet.
+Check before finishing:
 
 - [ ] I know which workspace, tab, and pane will receive my input.
 - [ ] I reviewed the actual diff and know that an agent's "done" is not verification.
@@ -760,10 +625,8 @@ you and inspect one part of its diff.**
 
 ### References and maintenance
 
-Product descriptions follow this repository's implementation and feature
-documentation. Third-party commands follow official sources. Tailcat is
-changing quickly; check the installed version's help rather than assuming
-future releases remain compatible.
+Third-party commands follow official sources. For fast-changing Tailcat, check
+your installed version's help.
 
 #### Product references
 
@@ -789,7 +652,6 @@ future releases remain compatible.
 - [Tailcat security model](https://github.com/tailscale/tailcat/blob/main/SECURITY.md):
   read the current limitations before experimenting.
 
-The source is `docs/TUTORIAL.md`. The Pages build generates the reading page
-from this file; do not maintain a second copy of the body in HTML. When changing
-installation flags, feature limitations, or upstream networking commands,
-review the corresponding chapter too.
+The Pages build renders this canonical Markdown; do not duplicate its body in HTML.
+Review affected chapters when installation flags, feature limits, or upstream
+networking commands change.

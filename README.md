@@ -7,28 +7,9 @@
   </picture>
 </p>
 
-A **browser client** for
-[Herdr](https://herdr.dev). Access terminals, inspect agent sessions, and review
-files and diffs from desktop or mobile. A running Herdr server is required.
-
-> **Breaking change from Herdr Studio / herdr-gui:** install Roamgate manually.
-> Old clients cannot upgrade to Roamgate through their default update channel.
-> Existing processes and historical releases are left intact. Read the
-> [transition guide](./docs/DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui)
-> before switching an existing service. Source builds migrate data and use new
-> service/plugin identities; published 0.7.0 still uses the legacy identities.
-
-## Documentation
-
-- [Project website](https://roamgate.dev/)
-- [Hands-on tutorial](https://roamgate.dev/tutorial/)
-  ([Markdown](./docs/TUTORIAL.md)): first steps, review workflows, mobile, and
-  private remote access with Tailscale, SSH, or Tailcat.
-- [Feature tour and keyboard shortcuts](./FEATURES.md)
-- [Installation, configuration, services, and builds](./docs/DEPLOYMENT.md)
-- [Architecture and implementation](./docs/ARCHITECTURE.md)
-- [Security guidance](./SECURITY.md)
-- [Contributing](./CONTRIBUTING.md)
+A **browser client** for [Herdr](https://herdr.dev). Control terminals, inspect
+agent sessions, and review files and diffs on desktop or mobile.
+**Requires a running Herdr server.**
 
 ## Screenshots
 
@@ -90,72 +71,72 @@ Click any screenshot to open the full-resolution image.
 
 [desktop-changes]: ./docs/images/roamgate-desktop-changes.png
 
+> **Moving from Herdr Studio / herdr-gui?** Automatic upgrades are not supported.
+> Follow the [migration guide](./docs/DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui)
+> to install Roamgate manually.
+
 ## Quick start
 
-Need the existing Herdr Studio release? The legacy installer remains available;
-follow [historical installation](./docs/DEPLOYMENT.md#install-historical-herdr-studio)
-to install `herdr-gui` 0.6.2 instead of Roamgate.
+1. Install and start [Herdr](https://herdr.dev).
+2. On Linux or macOS, install Roamgate:
 
-Herdr must already be installed and running. Install the latest Roamgate
-standalone binary with:
+   ```bash
+   # Empty selects latest; use X.Y.Z (no v prefix) to pin a Roamgate version.
+   curl -fsSL \
+     https://github.com/powerfooI/roamgate/releases/latest/download/install-roamgate.sh \
+     | ROAMGATE_VERSION= sh
+   ```
 
-```bash
-# Leave empty for latest; set ROAMGATE_VERSION=X.Y.Z for a Roamgate version (no v prefix).
-curl -fsSL \
-  https://github.com/powerfooI/roamgate/releases/latest/download/install-roamgate.sh \
-  | ROAMGATE_VERSION= sh
-```
+   On Windows, download the matching x64 or ARM64 archive from the
+   [latest release](https://github.com/powerfooI/roamgate/releases/latest).
+3. On Linux/macOS, add `~/.local/bin` to `PATH` and run `roamgate`.
+   On Windows, extract the archive and run `roamgate.exe`. Open the printed URL.
 
-Make sure `~/.local/bin` is in `PATH`, then start the application:
-
-```bash
-roamgate
-```
-
-Open the URL printed by the process. On Windows, download the matching x64 or
-ARM64 archive from the
-[latest release](https://github.com/powerfooI/roamgate/releases/latest)
-instead of running the script. See the
-[deployment guide](./docs/DEPLOYMENT.md) for checksum verification,
-fixed-version installation, authentication, remote connections, updates, and
-user-service setup.
+See [deployment](./docs/DEPLOYMENT.md) for checksums, configuration, updates,
+and services, or [historical installation](./docs/DEPLOYMENT.md#install-historical-herdr-studio)
+for `herdr-gui` 0.6.2.
 
 ## Install as a PWA
 
-**Installing Roamgate as a PWA is recommended for everyday use on desktop or
-mobile.** It opens in its own app window without browser tabs or the address bar.
-After starting and connecting to `roamgate`, install it from your browser:
+**PWA installation is recommended for daily use:** a separate app window without
+browser tabs or the address bar. Open and authenticate with Roamgate, then install:
 
-- **iPhone or iPad (Safari):** **Share** -> **Add to Home Screen**.
-- **macOS (Safari 17+):** **File** -> **Add to Dock**.
-- **Chrome or Edge:** choose **Install app** from the browser menu.
+- **iPhone/iPad Safari:** Share -> Add to Home Screen.
+- **macOS Safari 17+:** File -> Add to Dock.
+- **Chrome/Edge:** browser menu -> Install app.
 
-The installed app still requires the `roamgate` process to be running and
-reachable; PWA mode does not provide offline access.
+The process must stay running and reachable. **PWA mode is not offline access.**
+
+## Documentation
+
+- [Website](https://roamgate.dev/) and
+  [hands-on tutorial](https://roamgate.dev/tutorial/)
+  ([Markdown](./docs/TUTORIAL.md)): local work, mobile, and private remote access.
+- [Features and shortcuts](./FEATURES.md)
+- [Deployment](./docs/DEPLOYMENT.md): installation, configuration, services, builds.
+- [Architecture](./docs/ARCHITECTURE.md): system contracts.
+- [Security](./SECURITY.md) and [contributing](./CONTRIBUTING.md).
 
 ## Development
 
-Source builds require [Bun](https://bun.sh) 1.4.1 or newer. Start the bridge and
-frontend in separate terminals:
+Use Bun 1.4.1 or newer and a running Herdr server:
 
 ```bash
 bun install --frozen-lockfile
-
+# Run in separate terminals:
 bun run dev:server
 bun run dev:web
 ```
 
-Open <http://localhost:5173>. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the
-validation commands and pull request guidelines.
+Open <http://localhost:5173>. See [CONTRIBUTING.md](./CONTRIBUTING.md) for checks
+and pull requests.
 
 ## Security
 
-Roamgate can control terminal sessions and modify workspace files. Keep the
-default loopback binding unless you understand the trust boundary. Read
-[SECURITY.md](./SECURITY.md) before exposing the service to another device.
+Roamgate controls terminals and modifies real files. Keep the default loopback
+binding; read [SECURITY.md](./SECURITY.md) before allowing another device access.
 
 ## License
 
-The project code is available under the [MIT License](./LICENSE). Bundled fonts
-and brand assets retain their original terms; see
-[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
+Code: [MIT](./LICENSE). Bundled fonts and brand assets retain their original
+terms; see [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).

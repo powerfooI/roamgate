@@ -1,9 +1,8 @@
 # Installation and Deployment
 
-This guide covers installation, runtime configuration, remote connections,
-user services, and standalone builds. For a guided private-access walkthrough
-with Tailscale Serve, SSH forwarding, or experimental Tailcat port forwarding,
-see the [hands-on tutorial](./TUTORIAL.md#networking).
+Install, configure, connect, and run Roamgate below. For step-by-step private
+access with Tailscale Serve, SSH, or experimental Tailcat, use the
+[tutorial](./TUTORIAL.md#networking).
 
 ## Requirements
 
@@ -11,7 +10,7 @@ see the [hands-on tutorial](./TUTORIAL.md#networking).
 - The default Herdr sockets at `~/.config/herdr/herdr.sock` and
   `~/.config/herdr/herdr-client.sock` on Unix, or the corresponding
   `%APPDATA%\herdr\` named pipes on Windows.
-- [Bun](https://bun.sh) 1.4 or newer for source builds. Standalone binaries do
+- [Bun](https://bun.sh) 1.4.1 or newer for source builds. Standalone binaries do
   not require Bun on the target machine.
 
 ### Herdr compatibility
@@ -71,16 +70,16 @@ For endpoint negotiation, input, and reconnect contracts, see
 
 ## Transition from Herdr Studio / herdr-gui
 
-**Roamgate is a breaking distribution change, not an in-place update offered to
-Herdr Studio clients (0.6.2 and earlier).** Its releases publish only `roamgate-*`
-archives, checksums, and
-update manifests, plus `install-roamgate.sh`. Starting with Roamgate 0.7.0,
-the old default update and latest-installer URLs no longer work.
-Old clients may report an update-check error: removing a manifest alone would
-not stop their archive-based fallback, so neither legacy resource is published.
-Existing processes keep running. Historical tagged releases are not modified.
-Users remaining on old clients do not receive new fixes through that channel.
-Custom mirrors and manually pinned historical downloads are outside this cutoff.
+**Moving from Herdr Studio / herdr-gui 0.6.2 or earlier requires a manual
+Roamgate installation, not an in-place update.**
+Roamgate 0.7.0+ publishes only `roamgate-*` archives, checksums, update manifests,
+and `install-roamgate.sh`. Old default Latest/update URLs no longer work; clients
+may report update-check errors. Neither legacy manifests nor archives are
+published, because old clients can fall back to archive discovery.
+
+Existing processes and historical tagged assets remain intact, but old clients
+receive no new fixes through the retired channel. Custom mirrors and pinned
+historical downloads are outside this cutoff.
 
 **Identity migration is implemented in source builds; published 0.7.0 still
 uses the old service names, `herdr.studio` plugin ID, and data paths.** Running
@@ -148,26 +147,19 @@ Historical binaries, manifests and release assets retain their original contract
 ### Repository and website addresses
 
 The repository is [powerfooI/roamgate](https://github.com/powerfooI/roamgate).
-GitHub redirects the former `powerfooI/herdr-studio` repository's Git and
-release URLs, allowing already-published binaries and installers to keep their
-original download addresses. Existing tags and release assets are not replaced;
-new builds use the current repository address. Do not reuse the old repository
-name, because doing so removes GitHub's redirects.
+GitHub redirects former `powerfooI/herdr-studio` Git/release URLs, preserving old
+binaries' download addresses. Tags/assets stay intact; new builds use the new
+address. **Do not reuse the old repository name:** that removes the redirects.
 
-The website is at <https://roamgate.dev/> and the tutorial at
+The website is <https://roamgate.dev/>; the tutorial is
 <https://roamgate.dev/tutorial/>. The `/roamgate/` GitHub Pages address redirects
-to this custom domain. Update bookmarks and external website links to
-`roamgate.dev`; do not rely on the old `/herdr-studio/` project-site path.
+there. Update bookmarks and links; do not rely on the old `/herdr-studio/` path.
 
 ### Install historical Herdr Studio
 
-The original [install-herdr-gui.sh](../scripts/install-herdr-gui.sh) remains
-in the repository and installs only `herdr-gui`, never Roamgate. Its default
-Latest download no longer works: select a historical version explicitly. The
-retained source script is not included in Roamgate releases and does not restore
-the old update channel.
-
-For example, install the historical 0.6.2 release with its pinned installer:
+The retained [install-herdr-gui.sh](../scripts/install-herdr-gui.sh) installs only
+`herdr-gui`, not Roamgate. It is not included in new releases and does not restore
+the old channel. Its default Latest URL is retired; pin a historical version:
 
 ```bash
 curl -fsSL \
@@ -175,19 +167,16 @@ curl -fsSL \
   | HERDR_GUI_VERSION=0.6.2 sh
 ```
 
-This installs the old `herdr-gui` command, not `roamgate`. Historical versions
-do not receive future fixes through the retired update channel.
+This installs `herdr-gui` 0.6.2, with no future fixes through the old channel.
 
 ## Install a release
 
-Roamgate releases are available starting with 0.7.0. Historical 0.6.2 releases
-do not contain Roamgate assets. To run an unreleased checkout, use the
-[source build instructions](#build-a-standalone-executable) or the
-[source plugin path](#herdr-plugin) instead.
+Roamgate 0.7.0+ releases support Linux, macOS, and Windows on x86-64/arm64;
+historical 0.6.2 has no Roamgate assets. For unreleased checkouts, use
+[source builds](#build-a-standalone-executable) or the [source plugin](#herdr-plugin).
 
-Roamgate releases target Linux, macOS, and Windows on x86-64 and arm64.
-On Linux and macOS, the installer verifies the release checksum and installs
-the standalone binary to `~/.local/bin/roamgate`:
+On Linux/macOS, the installer verifies checksums and installs to
+`~/.local/bin/roamgate`:
 
 ```bash
 curl -fsSL \
@@ -235,8 +224,7 @@ preserve a replaced executable as `roamgate.previous` for manual recovery.
 
 ## Herdr plugin
 
-Herdr 0.7.2 or newer can install Roamgate as a plugin. The shim requires
-[Bun](https://bun.sh). Choose the installation path for your checkout:
+Requires Herdr 0.7.2+ and [Bun](https://bun.sh) for the shim.
 
 **Migrating an existing `herdr.studio` registration:** first stop/uninstall its
 service with its previous binary as described in the transition section. Close
@@ -271,11 +259,10 @@ bun scripts/studio-plugin.ts build-source
 herdr plugin link .
 ```
 
-`build-source` installs the root, web, and server dependencies and runs
-`bun run build`. Only link after it succeeds. Linking does not run the manifest's
-release download step; actions use the resulting `server/roamgate` executable
-(`roamgate.exe` on Windows). Keep the checkout in place and rerun `build-source`
-after updating it. Building and linking do not start the Roamgate service.
+`build-source` installs all workspace dependencies and runs `bun run build`.
+Link only after success: linking skips release download and uses `server/roamgate`
+(`roamgate.exe` on Windows). Keep the checkout and rebuild after updates.
+Building/linking does not start the service.
 
 **Published Roamgate release:** replace `X.Y.Z` with a published Roamgate tag:
 
@@ -283,11 +270,10 @@ after updating it. Building and linking do not start the Roamgate service.
 herdr plugin install powerfooI/roamgate --ref vX.Y.Z
 ```
 
-Remote installation runs the manifest's `build` command, which downloads and
-checksum-verifies only the Roamgate binary matching that checkout's version.
-It does not compile on download failure or fall back to legacy assets.
-Historical 0.6.2 assets cannot satisfy a Roamgate checkout; an unpublished
-version cannot be installed through this release-only path.
+Remote installation runs the manifest's `build`: download and checksum-verify
+the checkout version's Roamgate binary. It never compiles on failure or falls
+back to legacy assets. Neither historical 0.6.2 nor unpublished versions can
+satisfy this release-only path.
 
 Plugin actions manage the same user service described in
 [Run as a user service](#run-as-a-user-service):
@@ -300,18 +286,16 @@ herdr plugin action invoke roamgate.restart
 herdr plugin action invoke roamgate.uninstall  # remove the service
 ```
 
-Plugin actions run asynchronously; their output is recorded in the plugin
-command log (`herdr plugin log list --plugin roamgate`). For an
-interactive view, open the plugin's popup pane in the Herdr TUI:
+Actions are asynchronous; inspect output with
+`herdr plugin log list --plugin roamgate` or open the TUI panel:
 
 ```bash
 herdr plugin pane open --plugin roamgate --entrypoint panel
 ```
 
-The panel shows service status, the login URL, and the version, with
-single-key start, restart, and uninstall controls. It opens as a
-session-modal popup by default; pass `--placement split` (or `tab`, `zoomed`,
-`overlay`) to open it as a regular pane that other Herdr clients can see.
+The panel shows status, login URL, version, and single-key start/restart/uninstall
+controls. It defaults to a session-modal popup; `--placement split` (or `tab`,
+`zoomed`, `overlay`) creates a regular pane visible to other Herdr clients.
 
 ## Basic runtime configuration
 
@@ -374,12 +358,10 @@ Read [SECURITY.md](../SECURITY.md) before using a non-loopback bind.
 
 ## Logging
 
-Runtime logs use one line per event with an ISO timestamp, severity, scope, and
-bounded key/value context. The default `info` level records startup, connection
-readiness and recovery, degraded states, and fatal failures without routine RPC,
-Herdr event, terminal frame, or successful auto-sync traffic.
-
-Use `debug` temporarily when diagnosing request or lifecycle behavior:
+Logs contain one event per line: ISO timestamp, severity, scope, and bounded
+key/value context. Default `info` covers startup, readiness/recovery, degraded
+states, and fatal errors, excluding routine RPC, Herdr events, frames, and
+successful auto-sync. Temporarily use `debug` for request/lifecycle diagnosis:
 
 ```bash
 roamgate --log-level debug
@@ -387,26 +369,21 @@ roamgate --log-level debug
 ROAMGATE_LOG_LEVEL=debug
 ```
 
-For a managed service, restart after changing `roamgate.env`. Debug context can
-include workspace paths and connection or terminal identifiers, so return to
-`info` after collecting the required diagnostics. Runtime logs print browser
-and LAN URLs without authentication tokens; generated tokens remain in the
-protected token file described below.
+Restart services after editing `roamgate.env`. Debug may expose paths and
+connection/terminal IDs; return to `info` after diagnosis. Logs omit auth tokens
+from browser/LAN URLs; generated tokens stay in the protected file below.
 
 ## Multiple and remote Herdr connections
 
-Use the connection selector beside the application title to add, test, connect,
-disconnect, edit, and remove Herdr servers. Profiles are shared by authenticated
-browsers, while each browser independently selects the connection it displays.
-Local profiles attach to existing sockets and never start Herdr. When the first
-profile is created, the default local server remains available as a writable
-`Local` profile.
+Use the title's connection selector to add/test/connect/disconnect/edit/remove
+servers. Authenticated browsers share profiles but select independently. Local
+profiles attach to existing sockets, never start Herdr. Creating the first profile
+retains the default server as a writable `Local` profile.
 
 ![Connection selector showing local and SSH profiles](./screenshots/multi-connection-selector.png)
 
-The selector is keyboard accessible. Focus its trigger and open it with Enter,
-Space, Arrow Up, or Arrow Down; navigate with the arrow, Home, and End keys.
-There is currently no global next/previous-connection shortcut.
+Open the selector with Enter, Space, Up, or Down; navigate with arrows/Home/End.
+There is no global next/previous-connection shortcut.
 
 SSH profiles require an already-running remote Herdr server and accept only an
 OpenSSH alias or `user@host`. Leave the remote control and render socket paths
@@ -531,21 +508,18 @@ unit when it still invokes the same Roamgate binary.
 
 ## Build a standalone executable
 
-The build embeds the frontend and Bun runtime in a self-contained executable.
-From a local checkout, install dependencies and compile with the shared source
-build command:
+From a checkout, install dependencies and embed the frontend/Bun runtime into
+one executable:
 
 ```bash
 bun scripts/studio-plugin.ts build-source
 # server/roamgate (server/roamgate.exe on Windows)
 ```
 
-With dependencies already installed, `bun run build` rebuilds directly.
+With dependencies installed, rebuild with `bun run build`. The executable serves
+the frontend, bridge, and HTTP APIs and connects to Herdr; the target needs no Bun.
 
-The executable serves the frontend, WebSocket bridge, and HTTP APIs and connects
-to the configured Herdr sockets. The target machine does not need Bun.
-
-Cross-compile or package supported targets with:
+Cross-compile or package:
 
 ```bash
 bun run build:linux-x64

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, test } from "bun:test";
+import { once } from "node:events";
 import * as net from "node:net";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
@@ -400,15 +401,23 @@ describe("EndpointClient (endpoint generation 1)", () => {
   test("times out if welcome is not followed by a snapshot", async () => {
     const socketPath = await startEndpointServer(() => {}, undefined, false);
     const client = new EndpointClient(socketPath);
+    jest.useFakeTimers();
     try {
-      await expect(client.connect(80, 24)).rejects.toThrow(
-        "welcome and snapshot",
-      );
+      const welcomed = once(client, "welcome");
+      const result = client.connect(80, 24).catch((error: unknown) => error);
+      await welcomed;
+      jest.advanceTimersByTime(7_999);
+      expect(client.isClosed).toBe(false);
+      jest.advanceTimersByTime(1);
+      expect(await result).toMatchObject({
+        message: expect.stringContaining("welcome and snapshot"),
+      });
       expect(client.isClosed).toBe(true);
     } finally {
       client.close();
+      jest.useRealTimers();
     }
-  }, 12_000);
+  });
 
   test.each(["peer", "client"])(
     "rejects pending and new requests when the %s closes",
@@ -550,14 +559,14 @@ describe("EndpointClient (endpoint generation 1)", () => {
       await client.connect(10, 5);
       await Bun.sleep(50);
       expect(surfaces).toHaveLength(cursors.length);
-      for (let i = 0; i < cursors.length; i++) {
-        expect(surfaces[i].frame.cursor).toEqual(cursors[i]);
-        expect(surfaces[i].panes).toEqual(surfaces[0].panes);
-        expect(surfaces[i].panes.map((pane) => pane.paneId)).toEqual([
-          "w1:p1",
-          "w1:p2",
-        ]);
-        expect(surfaces[i].frame.cells).toEqual(surfaces[0].frame.cells);
+      expect(surfaces.map((surface) => surface.frame.cursor)).toEqual(cursors);
+      expect(surfaces[0].panes.map((pane) => pane.paneId)).toEqual([
+        "w1:p1",
+        "w1:p2",
+      ]);
+      for (const surface of surfaces.slice(1)) {
+        expect(surface.panes).toEqual(surfaces[0].panes);
+        expect(surface.frame.cells).toEqual(surfaces[0].frame.cells);
       }
     } finally {
       client.close();

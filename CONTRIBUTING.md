@@ -2,83 +2,70 @@
 
 ## Development Setup
 
-Install Bun 1.4.1 or newer (CI uses 1.4.1), start a local Herdr server, then
-install all workspace dependencies from the repository root:
+1. Install Bun 1.4.1 or newer (CI uses 1.4.1) and start a local Herdr server.
+2. From the repository root, run `bun install --frozen-lockfile`.
+3. Run these in separate terminals, then open <http://localhost:5173>:
 
-```bash
-bun install --frozen-lockfile
-```
+   ```bash
+   bun run dev:server
+   bun run dev:web
+   ```
 
-The root `bun.lock` is the only dependency lockfile. Shared development tools
-(TypeScript, Bun types, formatting, and linting) belong in the root manifest;
-browser dependencies and Vite belong in `web/package.json`. Keep server-only
-runtime dependencies in `server/package.json`. After changing dependencies,
-run `bun install` at the root and commit the updated manifest and lockfile.
-
-Run the bridge and frontend in separate terminals:
-
-```bash
-bun run dev:server
-bun run dev:web
-```
+Keep `bun.lock` (the only lockfile) and shared tools (TypeScript, Bun types,
+formatting/linting) at root; browser/Vite dependencies in `web/package.json`;
+server runtime dependencies in `server/package.json`. After dependency changes,
+run root `bun install` and commit manifests/lockfile.
 
 ## Validation
 
-Before submitting a change, run:
+**Fresh checkout:** install dependencies, then `bun run typecheck` to build/embed
+assets required by server typechecks and process tests.
 
-```bash
-bun run precommit
-```
+| During iteration | Command / limits |
+| --- | --- |
+| Types | `bun run typecheck:quick` checks root scripts, web, and server without rebuilding assets or validating production bundles. |
+| Lint | `bun run lint` caches unchanged content in `node_modules/.cache/eslint/`. Use `bun run lint --no-cache` for fresh checks after tooling/dependency updates. |
+| Related tests | `bun test <path>` or `bun run test:quick` (includes integration tests, excludes three Chrome-based files). |
+| Browser regressions | `bun run test:browser`; requires Chrome/Chromium or `CHROME_BIN`, otherwise tests skip. |
+| Submission | `bun run precommit` runs formatting, lint, full typechecks, and the full test suite. Quick checks do not replace it. |
 
-Individual workspace checks remain available as
-`bun run --filter roamgate-web typecheck` and
-`bun run --filter roamgate-server typecheck`. The server check builds and embeds
-the frontend first, so it also works before any generated assets exist.
+Workspace checks: `bun run --filter roamgate-web typecheck` and
+`bun run --filter roamgate-server typecheck` (builds/embeds web assets first).
 
-Use `bun run build` for changes that affect production assets or server
-bundling. Release changes should also validate the relevant
-`package:<platform>` command.
+Frontend changes: `bun run build:web`. Production assets/bundling: `bun run build`.
+Releases: package and inspect every supported archive/checksum; see
+[build commands](docs/DEPLOYMENT.md#build-a-standalone-executable) and
+[release policy](AGENTS.md#release--changelog-notes).
 
 ## Pages Website and Tutorial
 
-The landing page lives in `site/`. The tutorial has one canonical
-source, `docs/TUTORIAL.md`; `scripts/build-pages.ts` renders it into the
-`site/tutorial/index.html` template, rewrites shared screenshots and reference
-links, and validates local links and fragments throughout the built site.
-Do not duplicate the tutorial body in the HTML template.
+Edit `site/` for the landing page; **only `docs/TUTORIAL.md`** for tutorial text.
+`scripts/build-pages.ts` renders into `site/tutorial/index.html`, rewrites
+screenshots/references, and checks built-site links/fragments.
 
 ```bash
-bun test scripts/pages-content.test.ts
+bun test scripts/pages-content.test.ts scripts/pages-workflow.test.ts
 bun run build:site
 ```
 
-Serve `.pages-dist/` with a local static HTTP server and open `/tutorial/`.
-Check narrow-screen layouts, keyboard navigation, and reading with JavaScript
-disabled. The production website uses <https://roamgate.dev/>; canonical URLs,
-social images, and the sitemap must use that domain. Generated `.pages-dist/`
-files must not be committed.
+Serve `.pages-dist/` locally and check `/tutorial/`, narrow screens, keyboard
+navigation, and JavaScript-disabled reading. Production canonical URLs, social
+images, and the sitemap use <https://roamgate.dev/>. Do not commit `.pages-dist/`.
 
-**Deploy Pages** runs automatically on every push to `main`, including merged
-pull requests. Manual `workflow_dispatch` remains available in GitHub Actions
-for retries. Both triggers check the live `install-roamgate.sh` URL before
-uploading the site; missing assets, HTTP errors, and network failures block
-deployment. A published Roamgate release must be available as GitHub Latest;
-a source build alone does not satisfy this gate. After a repository rename,
-align the site's installer URL and the workflow check before deploying.
+**Deploy Pages** runs on pushes to `main` (including merged PRs); manual dispatch
+remains available for retries. Both require a published Roamgate release as GitHub
+Latest: the live installer probe blocks upload on missing assets, HTTP errors,
+or network failures. Source builds do not qualify. After repository renames,
+align the site's installer URL and workflow probe.
 
 ## Pull Requests
 
-Keep commits focused and use short imperative commit messages. Describe the
-user-visible behavior, verification performed, and compatibility impact.
-Include screenshots for interface changes. Avoid committing generated
-artifacts from `dist/`, `server/public/`, or compiled binaries.
+Use focused commits and short imperative messages. PRs describe behavior,
+verification, compatibility impact, and UI screenshots. Do not commit generated
+assets (`dist/`, `server/public/`) or binaries.
 
-Pull requests without a release-note category label are labeled automatically:
-documentation-only changes become `documentation`, dependency updates become
-`dependencies`, fix-oriented titles become `bug`, and other code changes become
-`enhancement`. Release preparation PRs receive `skip-changelog`. Add one of the
-categories from `.github/release.yml` before merging to override the automatic
-choice.
+Unlabeled PRs get `documentation` (docs-only), `dependencies` (dependency updates),
+`bug` (fix titles), or `enhancement` (other code). Release preparation gets
+`skip-changelog`. Override with a `.github/release.yml` category before merging.
 
-By contributing, you agree that your contribution is licensed under the MIT
-License.
+Contributions are licensed under MIT.

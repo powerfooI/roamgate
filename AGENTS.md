@@ -30,9 +30,14 @@ the root manifest. Keep runtime dependencies in their owning workspace.
   `package:windows-arm64`: package the other supported release targets.
 - `bun run format`: format supported files with the pinned root Biome config.
 - `bun run format:check`: verify that all supported files are formatted.
-- `bun run lint`: lint all TypeScript and React code.
-- `bun run test`: run the Bun unit test suite.
-- `bun run typecheck`: run frontend and server TypeScript checks.
+- `bun run lint`: lint all TypeScript and React code with a local content cache.
+- `bun run test`: run the full Bun suite, including integration and browser tests.
+- `bun run test:quick`: run the suite without the three Chrome-based browser test
+  files for local feedback; this still includes server integration tests.
+- `bun run test:browser`: run the Chrome-based browser regressions separately.
+- `bun run typecheck`: build/embed web assets and run all TypeScript checks.
+- `bun run typecheck:quick`: check types without rebuilding existing web assets.
+  See [local validation](CONTRIBUTING.md#validation) for prerequisites and caching.
 - `bun run precommit`: run formatting, lint, type checks, and unit tests.
 
 ## Coding Style & Naming Conventions
@@ -59,10 +64,16 @@ work, consolidate or delete stale status documents and repair their links.
 
 ## Testing Guidelines
 
-Unit tests live beside their modules as `*.test.ts` and use `bun:test`. Run
-`bun run precommit` before committing. For frontend-facing work, also run
-`bun run build:web`. Release work must package and inspect every supported
-platform archive and checksum.
+Tests live beside their modules as `*.test.ts` and use `bun:test`. During local
+iteration, run a related file with `bun test <path>` or use `bun run test:quick`.
+Process-level tests need generated web assets; on a fresh checkout, run
+`bun run typecheck` once after installing dependencies to generate them. Browser
+tests require Chrome/Chromium (or `CHROME_BIN`) and skip when it is unavailable.
+Use Bun's fake timers for timer deadlines and events for socket readiness rather
+than waiting out production timeouts; restore real timers in `finally`.
+Run `bun run precommit` before committing; the quick suite does not replace it.
+For frontend-facing work, also run `bun run build:web`. Release work must package
+and inspect every supported platform archive and checksum.
 
 ## Commit & Pull Request Guidelines
 
