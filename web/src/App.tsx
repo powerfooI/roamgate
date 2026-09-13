@@ -2286,7 +2286,7 @@ export default function App() {
         ) {
           return;
         }
-        if (e.repeat && paneAction.type === "split") return;
+        if (e.repeat && paneAction.type !== "focus") return;
 
         const current = store.get();
         const focusedWorkspace = current.workspaces.find((w) => w.focused);
@@ -2306,6 +2306,8 @@ export default function App() {
         if (!activePane) return;
         if (paneAction.type === "split") {
           void store.splitPane(activePane.pane_id, paneAction.direction);
+        } else if (paneAction.type === "zoom") {
+          void store.zoomPane(activePane.pane_id);
         } else {
           void store.focusPaneDirection(
             activePane.pane_id,

@@ -348,6 +348,7 @@ Common defaults (Linux/Android overrides follow the table):
 | Previous / next tab | `Cmd+Option+Left/Right` | `Alt+Shift+Left/Right` |
 | Focus neighboring pane | `Cmd+Ctrl+Arrow` | `Ctrl+Shift+Arrow` |
 | Split right / down | `Cmd+D` / `Cmd+Shift+D` | `Ctrl+Alt+D` / `Ctrl+Alt+Shift+D` |
+| Zoom / restore pane | `Cmd+Shift+Enter` | `Ctrl+Alt+Enter` |
 | Numbered tab | `Ctrl+1…9` | `Ctrl+Alt+1…9` |
 | Numbered command menu action | `Option+1…9` | `Alt+1…9` |
 | Workspaces | `Ctrl+Shift+W` | `Ctrl+Alt+O` |

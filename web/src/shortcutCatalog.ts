@@ -23,6 +23,7 @@ const descriptions: [ShortcutId, string, string][] = [
   ["pane.down", "Focus the pane below", "Tabs & panes"],
   ["pane.splitRight", "Split the active pane right", "Tabs & panes"],
   ["pane.splitDown", "Split the active pane down", "Tabs & panes"],
+  ["pane.zoom", "Zoom or restore the active pane", "Tabs & panes"],
   ...SHORTCUT_NUMBERS.map((n): [ShortcutId, string, string] => [
     `tab.${n}`,
     `Switch to tab ${n}`,

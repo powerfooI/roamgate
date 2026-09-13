@@ -4,7 +4,8 @@ export type PaneShortcutDirection = "left" | "right" | "up" | "down";
 
 export type PaneShortcutAction =
   | { type: "focus"; direction: PaneShortcutDirection }
-  | { type: "split"; direction: "right" | "down" };
+  | { type: "split"; direction: "right" | "down" }
+  | { type: "zoom" };
 
 type PaneShortcutEvent = Pick<
   KeyboardEvent,
@@ -25,5 +26,6 @@ export function paneShortcutAction(
     return { type: "split", direction: "right" };
   if (matchesShortcut(event, "pane.splitDown", bindings))
     return { type: "split", direction: "down" };
+  if (matchesShortcut(event, "pane.zoom", bindings)) return { type: "zoom" };
   return null;
 }

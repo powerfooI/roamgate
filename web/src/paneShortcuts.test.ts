@@ -52,6 +52,19 @@ describe("pane shortcuts", () => {
     ).toEqual({ type: "split", direction: "down" });
   });
 
+  test("maps Cmd+Shift+Enter to pane zoom", () => {
+    expect(
+      paneShortcutAction(
+        keyEvent({ key: "Enter", metaKey: true, shiftKey: true }),
+      ),
+    ).toEqual({ type: "zoom" });
+    // Cmd+Enter sends the composer draft; plain Enter stays terminal input.
+    expect(
+      paneShortcutAction(keyEvent({ key: "Enter", metaKey: true })),
+    ).toBeNull();
+    expect(paneShortcutAction(keyEvent({ key: "Enter" }))).toBeNull();
+  });
+
   test("rejects extra or missing modifiers", () => {
     // Cmd+Option+Arrows belong to tab switching.
     expect(

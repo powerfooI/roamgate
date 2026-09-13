@@ -395,6 +395,36 @@ describe("terminal copy shortcuts", () => {
     expect(taken.presets[0].bindings["zen.toggle"]).toEqual([]);
   });
 
+  test("presets saved before pane zoom keep their keys and load intact", () => {
+    const previous = preset();
+    const bindings: Partial<typeof previous.bindings> = {
+      ...previous.bindings,
+    };
+    delete bindings["pane.zoom"];
+    const loaded = parseShortcutPreferences(
+      JSON.stringify({
+        version: 1,
+        active: previous.id,
+        presets: [{ ...previous, bindings }],
+      }),
+    );
+    expect(loaded.presets[0].bindings["pane.zoom"]).toEqual(["Ctrl+Alt+Enter"]);
+
+    // A preset that already spent the default key keeps it, and pane zoom
+    // arrives unassigned rather than dropping the whole preset.
+    bindings["tab.close"] = ["Ctrl+Alt+Enter"];
+    const taken = parseShortcutPreferences(
+      JSON.stringify({
+        version: 1,
+        active: previous.id,
+        presets: [{ ...previous, bindings }],
+      }),
+    );
+    expect(taken.presets).toHaveLength(1);
+    expect(taken.presets[0].bindings["tab.close"]).toEqual(["Ctrl+Alt+Enter"]);
+    expect(taken.presets[0].bindings["pane.zoom"]).toEqual([]);
+  });
+
   test("explicitly unassigned and customized copy keys survive preset round trips", () => {
     for (const keys of [[], ["Ctrl+Alt+C"]]) {
       const saved = preset();

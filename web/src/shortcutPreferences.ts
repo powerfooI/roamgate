@@ -32,7 +32,11 @@ const defaults: ShortcutPreferences = {
   presets: [],
 };
 /** Actions added after presets could be saved, in the order they shipped. */
-const LATE_SHORTCUT_IDS: ShortcutId[] = ["terminal.copy", "zen.toggle"];
+const LATE_SHORTCUT_IDS: ShortcutId[] = [
+  "terminal.copy",
+  "zen.toggle",
+  "pane.zoom",
+];
 export function validateShortcutPreset(value: unknown): ShortcutPreset {
   if (!value || typeof value !== "object")
     throw new Error("Invalid shortcut preset.");
