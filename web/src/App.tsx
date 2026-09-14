@@ -186,11 +186,15 @@ type TerminalViewProps = {
   onOpenWorkspaceFile?: (request: TerminalWorkspaceFileRequest) => void;
 };
 
-function TerminalLoadingFallback() {
+function TerminalLoadingFallback({
+  label = "Loading terminal",
+}: {
+  label?: string;
+}) {
   return (
-    <div className="terminal-loading">
+    <div className="terminal-loading" role="status">
       <span className="terminal-loading-dot" />
-      Loading terminal
+      {label}
     </div>
   );
 }
@@ -3034,7 +3038,9 @@ export default function App() {
                 }
               >
                 <Suspense
-                  fallback={<div role="status">Loading Inspector...</div>}
+                  fallback={
+                    <TerminalLoadingFallback label="Loading Inspector" />
+                  }
                 >
                   <WorkspaceInspectorHost
                     key={`${resourceUiKey}:${resourceOwnerKey(inspectorState.scope)}`}
