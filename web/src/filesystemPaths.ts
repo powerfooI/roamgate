@@ -21,9 +21,7 @@ export function directoryPreviewPath(
   if (!preview || preview.type !== "directory") return null;
   const path = normalizeFilesystemPath(preview.path);
   if (/^(?:\/|[a-z]:\/)/i.test(path)) return path;
-  return normalizeFilesystemPath(
-    `${preview.root.replace(/\/+$/, "")}/${path}`,
-  );
+  return normalizeFilesystemPath(`${preview.root.replace(/\/+$/, "")}/${path}`);
 }
 
 /** Display name for a directory preview: its last path component. */
