@@ -7,6 +7,7 @@ import {
 } from "../shortcutPreferences";
 import { SHORTCUT_NUMBERS, type ShortcutNumber } from "../shortcutBindings";
 import { endpointCreationReason } from "../store";
+import { normalizeSearchText } from "../searchText";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
@@ -103,13 +104,7 @@ function agentName(pane: Pane) {
     .join(" · ");
 }
 
-export function normalizeSearchText(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[-_:/]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+export { normalizeSearchText };
 
 export function commandFilter(
   value: string,

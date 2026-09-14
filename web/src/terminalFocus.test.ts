@@ -36,7 +36,7 @@ describe("terminalFocusBlockedByOverlay", () => {
     expect(
       terminalFocusBlockedByOverlay(
         elementMatching([
-          '[data-radix-popper-content-wrapper], .modal-backdrop, .workspace-tree-panel, .workspace-inspector, .annotation-panel, .tabbar-utilities, .mobile-nav, [role="dialog"], [role="menu"]',
+          '[data-radix-popper-content-wrapper], .modal-backdrop, .workspace-tree-panel, .workspace-inspector, .annotation-panel, .tabbar-utilities, .mobile-nav, .pane-jump-backdrop, [role="dialog"], [role="menu"]',
         ]),
         doc,
       ),

@@ -207,6 +207,25 @@
   white-space: nowrap;
 }
 
+.pane-jump-search {
+  width: 100%;
+  height: 40px;
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+  background: var(--input-bg);
+  color: var(--text);
+  padding: 0 14px;
+  font-size: 14px;
+  outline: none;
+}
+.pane-jump-empty {
+  margin: 0;
+  padding: 22px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
 .pane-jump-list {
   display: flex;
   flex-direction: column;

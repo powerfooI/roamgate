@@ -12,6 +12,7 @@ const descriptions: [ShortcutId, string, string][] = [
   ["annotations.toggle", "Toggle Annotations", "Global"],
   ["zen.toggle", "Toggle Zen mode on desktop", "Global"],
   ["panes.recent", "Open the recent pane switcher", "Global"],
+  ["panes.search", "Search panes in the pane switcher", "Global"],
   ["workspaces.open", "Open Workspaces", "Global"],
   ["files.toggle", "Toggle File Explorer", "Global"],
   ["diff.toggle", "Toggle Diff Viewer", "Global"],

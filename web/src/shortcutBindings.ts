@@ -26,6 +26,7 @@ const base = {
   "annotations.toggle": ["Ctrl+Alt+A"],
   "zen.toggle": ["Ctrl+Alt+Z"],
   "panes.recent": ["Ctrl+Alt+J"],
+  "panes.search": ["Alt+K"],
   "tab.create": ["Ctrl+Alt+T"],
   "tab.close": ["Ctrl+Alt+W"],
   "tab.previous": ["Alt+Shift+ArrowLeft"],
