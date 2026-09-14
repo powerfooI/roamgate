@@ -3,6 +3,13 @@ name: Deploy Pages
 on:
     push:
         branches: [main]
+        paths:
+            - site/**
+            - docs/TUTORIAL.md
+            - docs/images/**
+            - scripts/build-pages.ts
+            - scripts/pages-*.test.ts
+            - .github/workflows/pages.yml
     workflow_dispatch:
 
 permissions:

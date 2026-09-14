@@ -33,7 +33,17 @@ test("Pages deploys on main pushes or manual dispatch and checks installer avail
     "push",
     "workflow_dispatch",
   ]);
-  expect(workflow.on.push).toEqual({ branches: ["main"] });
+  expect(workflow.on.push).toEqual({
+    branches: ["main"],
+    paths: [
+      "site/**",
+      "docs/TUTORIAL.md",
+      "docs/images/**",
+      "scripts/build-pages.ts",
+      "scripts/pages-*.test.ts",
+      ".github/workflows/pages.yml",
+    ],
+  });
   expect(gateIndex).toBeGreaterThan(-1);
   expect(gateIndex).toBeLessThan(
     steps.findIndex((step) =>
