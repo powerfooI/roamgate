@@ -11,7 +11,7 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { HerdrClient } from "../bridge/herdr-client";
-import { shQuote } from "../utils/process-utils";
+import { runProcessWithCode, shQuote } from "../utils/process-utils";
 import { createFileHandlers } from "./files";
 import { sanitizeFilesystemPath } from "./file-paths";
 import { listRemoteFiles } from "./remote-files";
@@ -158,9 +158,12 @@ test("external references preview and download without widening upload or delete
   });
 });
 
-test("SSH directory listings support filesystem root and quoted external directories", async () => {
-  await fixture(async (_root, _workspace, refs) => {
-    for (const path of [refs, "/"]) {
+// Keep the two shell integrations on independent test deadlines.
+test.each(["quoted external directories", "filesystem root"])(
+  "SSH directory listings support %s",
+  async (target) => {
+    await fixture(async (_root, _workspace, refs) => {
+      const path = target === "filesystem root" ? "/" : refs;
       const list = await listRemoteFiles({
         host: "fixture",
         rootPath: path,
@@ -168,21 +171,12 @@ test("SSH directory listings support filesystem root and quoted external directo
         showHidden: false,
         shQuote,
         // Execute only the generated command locally, as an SSH host fixture.
-        runProcessWithCodeTimeout: async (argv) => {
-          const child = Bun.spawn(["bash", "-c", argv.at(-1)!], {
-            stdout: "pipe",
-            stderr: "pipe",
-          });
-          return {
-            code: await child.exited,
-            stdout: await new Response(child.stdout).text(),
-            stderr: await new Response(child.stderr).text(),
-          };
-        },
+        runProcessWithCodeTimeout: (argv) =>
+          runProcessWithCode(["bash", "-c", argv.at(-1)!]),
       });
       expect(list.root).toBe(path);
       if (path === refs)
         expect(list.entries.map((e) => e.name)).toEqual(["readme.md"]);
-    }
-  });
-});
+    });
+  },
+);

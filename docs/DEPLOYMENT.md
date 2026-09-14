@@ -81,11 +81,11 @@ Existing processes and historical tagged assets remain intact, but old clients
 receive no new fixes through the retired channel. Custom mirrors and pinned
 historical downloads are outside this cutoff.
 
-**Identity migration is implemented in source builds; published 0.7.0 still
-uses the old service names, `herdr.studio` plugin ID, and data paths.** Running
-today's Latest installer does not add this migration. Build this source checkout
-explicitly until a release containing these changes is published; do not reuse
-a previously downloaded `server/roamgate` binary.
+**Identity migration shipped in Roamgate 0.7.1.** Roamgate 0.7.0 uses the old
+service names, `herdr.studio` plugin ID, and data paths. Use a published release
+of 0.7.1 or newer, or build from source, for the migration described below.
+Updating the binary does not automatically replace legacy services or plugin
+registrations.
 
 Roamgate 0.7.0 already uses the new release assets and can receive later in-app
 updates. Updating its binary does not rename its service. If only an unmodified
@@ -114,8 +114,10 @@ To switch an existing installation deliberately:
    disable, and archive the old definition using its native manager instead;
    review custom arguments and environment before recreating it. Stop unmanaged
    processes too. Do not keep old and new auto-start entries enabled together.
-3. Build the new executable using [source build instructions](#build-a-standalone-executable).
-   Run `./server/roamgate service install` explicitly. Install refuses an
+3. [Install a release](#install-a-release) of Roamgate 0.7.1 or newer, or
+   [build from source](#build-a-standalone-executable). Run
+   `roamgate service install` explicitly with the installed binary (or
+   `./server/roamgate service install` for a source build). Install refuses an
    installed/loaded legacy service, even with `--force`, before changing
    configuration or definitions. A detection error also blocks install.
 4. Check service status, login and saved connections. For rollback, uninstall the
@@ -241,13 +243,12 @@ uninstalls another plugin. Build and link the new checkout only after unlinking
 the old ID to avoid duplicate entries. Keep the previous checkout for rollback;
 do not run its start action alongside the new service.
 
-The new manifest uses ID `roamgate` (plain ASCII IDs are supported by
-[Herdr's manifest contract](https://herdr.dev/docs/plugins/)). Published 0.7.0
-uses `herdr.studio`; the commands below apply to the new source-built plugin.
-This shim refuses prebuilt downloads through 0.7.0 and directs you to build from
-source. It does not validate an already-present binary: always rebuild before
-linking this checkout. Release installation of the new identity requires a
-published release containing these changes, not the existing 0.7.0 tag.
+Roamgate 0.7.1 and newer use plugin ID `roamgate` (plain ASCII IDs are supported
+by [Herdr's manifest contract](https://herdr.dev/docs/plugins/)). Roamgate 0.7.0
+uses `herdr.studio`. The commands below support both published releases from
+0.7.1 onward and source builds. This shim refuses prebuilt downloads through
+0.7.0 and directs you to build from source. It does not validate an
+already-present binary: always rebuild before linking a source checkout.
 
 **Unreleased checkout:** clone the repository to a directory you will keep,
 compile explicitly, then link that local directory:
@@ -264,7 +265,8 @@ Link only after success: linking skips release download and uses `server/roamgat
 (`roamgate.exe` on Windows). Keep the checkout and rebuild after updates.
 Building/linking does not start the service.
 
-**Published Roamgate release:** replace `X.Y.Z` with a published Roamgate tag:
+**Published Roamgate release:** replace `X.Y.Z` with a published version of
+0.7.1 or newer:
 
 ```bash
 herdr plugin install powerfooI/roamgate --ref vX.Y.Z
