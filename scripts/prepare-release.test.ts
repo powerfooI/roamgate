@@ -5,7 +5,6 @@ import {
   replaceManifestVersion,
   replacePackageVersion,
   resolveNextVersion,
-  rotateChangelog,
 } from "./prepare-release";
 
 const PACKAGE_JSON = `{
@@ -22,29 +21,6 @@ const PLUGIN_MANIFEST = `id = "herdr.studio"
 name = "Herdr Studio"
 version = "0.4.1"
 min_herdr_version = "0.7.2"
-`;
-
-const CHANGELOG = `# Changelog
-
-## Unreleased
-
-### Added
-
-- Shiny new feature.
-
-### Fixed
-
-- Important fix.
-
-## 0.4.1 - 2026-08-20
-
-### Changed
-
-- Previous release entry.
-
-## 0.4.0 - 2026-08-20
-
-- Older entry.
 `;
 
 describe("parsePackageVersion", () => {
@@ -133,48 +109,5 @@ describe("resolveNextVersion", () => {
     expect(() => resolveNextVersion("0.4.1", "next")).toThrow("X.Y.Z");
     expect(() => resolveNextVersion("0.4.1", "")).toThrow("X.Y.Z");
     expect(() => resolveNextVersion("0.4", "patch")).toThrow("X.Y.Z");
-  });
-});
-
-describe("rotateChangelog", () => {
-  test("moves the Unreleased entries under a dated version heading", () => {
-    const next = rotateChangelog(CHANGELOG, "0.4.2", "2026-08-21");
-    expect(next).toContain("## Unreleased\n\n## 0.4.2 - 2026-08-21\n");
-    expect(next).toContain(
-      "## 0.4.2 - 2026-08-21\n\n### Added\n\n- Shiny new feature.\n\n### Fixed\n\n- Important fix.\n\n## 0.4.1 - 2026-08-20",
-    );
-    expect(next).toContain("## 0.4.0 - 2026-08-20");
-  });
-
-  test("handles Unreleased as the last section", () => {
-    const text = "# Changelog\n\n## Unreleased\n\n- Only entry.\n";
-    const next = rotateChangelog(text, "1.0.0", "2026-08-21");
-    expect(next).toBe(
-      "# Changelog\n\n## Unreleased\n\n## 1.0.0 - 2026-08-21\n\n- Only entry.\n\n",
-    );
-  });
-
-  test("rejects an empty Unreleased section", () => {
-    const text =
-      "# Changelog\n\n## Unreleased\n\n## 0.4.1 - 2026-08-20\n\n- Old.\n";
-    expect(() => rotateChangelog(text, "0.4.2", "2026-08-21")).toThrow(
-      "no entries",
-    );
-  });
-
-  test("rejects a duplicate version section", () => {
-    expect(() => rotateChangelog(CHANGELOG, "0.4.1", "2026-08-21")).toThrow(
-      "already has a section",
-    );
-  });
-
-  test("rejects a changelog without an Unreleased section", () => {
-    expect(() =>
-      rotateChangelog(
-        "# Changelog\n\n## 0.4.1\n\n- Old.\n",
-        "0.4.2",
-        "2026-08-21",
-      ),
-    ).toThrow("Unreleased");
   });
 });

@@ -3409,9 +3409,6 @@ textarea:focus {
   font-size: 11px;
   line-height: 1.45;
 }
-.changelog-modal {
-  width: min(760px, 100%);
-}
 .shortcut-modal {
   width: min(860px, 100%);
   display: flex;
@@ -4448,23 +4445,6 @@ textarea:focus {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
-}
-.changelog-content {
-  max-height: min(620px, calc(100vh - 140px));
-  margin: 0;
-  overflow: auto;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--input-bg);
-  color: var(--text-code);
-  font:
-    12px / 1.5 ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Consolas,
-    monospace;
-  white-space: pre-wrap;
 }
 .modal-head {
   min-height: 32px;

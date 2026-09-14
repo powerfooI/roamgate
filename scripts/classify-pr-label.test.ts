@@ -17,7 +17,7 @@ describe("pull request release-note labels", () => {
       classify({
         title: "Release 0.5.0",
         author: "github-actions[bot]",
-        files: ["CHANGELOG.md", "package.json"],
+        files: ["package.json", "herdr-plugin.toml"],
       }),
     ).toBe("skip-changelog");
     expect(

@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  ExternalLink,
   GitBranch,
   Keyboard,
   Minus,
@@ -14,7 +15,6 @@ import {
   Palette,
   Plus,
   RefreshCw,
-  ScrollText,
   Server,
   SquareTerminal,
   Smartphone,
@@ -47,7 +47,6 @@ import {
   type TerminalThemeSelection,
 } from "../terminalThemes";
 import { AutoSyncRepositoriesDialog } from "./AutoSyncRepositoriesDialog";
-import { ChangelogDialog } from "./ChangelogDialog";
 import { MobileTerminalShortcutsDialog } from "./MobileTerminalShortcutsDialog";
 
 const ShortcutLookupDialog = lazyWithReload("keyboard-shortcuts", () =>
@@ -68,6 +67,7 @@ const MobileLayoutDialog = lazyWithReload("mobile-layout", () =>
 );
 
 const APP_VERSION = packageJson.version;
+const RELEASES_URL = "https://github.com/powerfooI/roamgate/releases";
 export const CONFIG_MENU_ID = "roamgate-config-menu";
 
 export function reloadApplicationPage(
@@ -146,7 +146,6 @@ export function ConfigMenu({
     s.taskNotificationPermission,
   );
   const [open, setOpen] = useState(false);
-  const [changelogOpen, setChangelogOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [mobileShortcutsOpen, setMobileShortcutsOpen] = useState(false);
   const [terminalThemesOpen, setTerminalThemesOpen] = useState(false);
@@ -529,12 +528,12 @@ export function ConfigMenu({
             <div className="config-section config-section-tiles-3">
               <div className="config-title">Help & updates</div>
               <ConfigMenuItem
-                icon={<ScrollText size={15} />}
+                icon={<ExternalLink size={15} />}
                 label="Changelog"
-                description="Recent changes"
+                description="Recent changes on GitHub"
                 onClick={() => {
                   setOpen(false);
-                  setChangelogOpen(true);
+                  window.open(RELEASES_URL, "_blank", "noopener,noreferrer");
                 }}
               />
 
@@ -620,10 +619,6 @@ export function ConfigMenu({
           </div>
         ) : null}
       </div>
-      <ChangelogDialog
-        open={changelogOpen}
-        onClose={() => setChangelogOpen(false)}
-      />
       {shortcutsOpen ? (
         <Suspense fallback={null}>
           <ShortcutLookupDialog open onClose={() => setShortcutsOpen(false)} />

@@ -22,7 +22,7 @@ Herdr 0.7.2 or newer. Protocol 21 and unknown versions are rejected at the contr
 probe and binary handshake. Use a Roamgate build explicitly supporting your
 server, or a separate compatible server; do not downgrade a live server.
 Published binaries retain the behavior documented for their release in the
-[Changelog](../CHANGELOG.md).
+[release notes](https://github.com/powerfooI/roamgate/releases).
 
 Herdr 0.9.0 terminals use **stable endpoint generation 1** (distinct from
 terminal protocol 22). Set `ROAMGATE_DISABLE_ENDPOINT=1` to use the legacy

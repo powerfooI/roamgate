@@ -77,9 +77,6 @@ jobs:
           test "$(read_version package.json)" = "$VERSION"
           test "$(read_version web/package.json)" = "$VERSION"
           test "$(read_version server/package.json)" = "$VERSION"
-          escaped_version="${VERSION//./\\.}"
-          git show "$release_sha:CHANGELOG.md" \
-            | grep -Eq "^## ${escaped_version} - [0-9]{4}-[0-9]{2}-[0-9]{2}$"
 
           tag="v$VERSION"
           if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then

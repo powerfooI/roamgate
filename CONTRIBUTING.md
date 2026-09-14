@@ -35,7 +35,7 @@ Workspace checks: `bun run --filter roamgate-web typecheck` and
 Frontend changes: `bun run build:web`. Production assets/bundling: `bun run build`.
 Releases: package and inspect every supported archive/checksum; see
 [build commands](docs/DEPLOYMENT.md#build-a-standalone-executable) and
-[release policy](AGENTS.md#release--changelog-notes).
+[release policy](AGENTS.md#release-notes).
 
 ## Pages Website and Tutorial
 
