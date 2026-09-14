@@ -235,6 +235,44 @@ describe("endpoint initial viewport", () => {
     ).toEqual({ cols: 280, rows: 108 });
   });
 
+  test("a pane already fitting the layout keeps the settled area verbatim", () => {
+    // xterm fit floors fractional pixels, so a settled pane can measure one
+    // cell under the layout-implied content size; that must not re-base the
+    // shared geometry on every focus switch.
+    for (const paneId of ["left", "right"]) {
+      for (const size of [
+        { cols: 64, rows: 67 },
+        { cols: 63, rows: 66 },
+        { cols: 65, rows: 68 },
+      ]) {
+        expect(terminalEndpointViewportSize(size, layout, paneId)).toEqual({
+          cols: 134,
+          rows: 69,
+        });
+      }
+    }
+  });
+
+  test("both settled panes project the identical relay viewport", () => {
+    // Regression: per-pane fit rounding must not alternate the shared relay
+    // viewport (and with it the pane widths) when focus switches.
+    for (const [paneId, size] of [
+      ["left", { cols: 64, rows: 67 }],
+      ["right", { cols: 63, rows: 66 }],
+    ] as const) {
+      expect(terminalRelayViewportSize(size, layout, paneId)).toEqual({
+        cols: 160,
+        rows: 70,
+      });
+    }
+  });
+
+  test("a real resize still projects a corrected viewport", () => {
+    expect(
+      terminalEndpointViewportSize({ cols: 70, rows: 67 }, layout, "left"),
+    ).toEqual({ cols: 146, rows: 69 });
+  });
+
   test("missing or unusable layout leaves sizing to endpoint feedback", () => {
     expect(
       terminalEndpointViewportSize({ cols: 134, rows: 69 }, null, "left"),

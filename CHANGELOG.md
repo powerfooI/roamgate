@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep split pane widths stable when switching focus between panes, stopping
+  terminal content from reflowing on every focus change.
 - Open complete terminal file paths across wrapped rows, including indented
   continuations in agent output, from either part of the link.
 - Fix copying preview content and file paths when Roamgate is opened over HTTP.
