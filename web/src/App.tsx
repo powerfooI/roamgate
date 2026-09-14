@@ -15,7 +15,7 @@ import {
   type ReviewAnnotation,
 } from "./annotations";
 import { roamgateLocalStorage } from "./browserStorage";
-import { useLayoutPreferences } from "./layoutPreferences";
+import { LAYOUT_CHANGE_EVENT, useLayoutPreferences } from "./layoutPreferences";
 import {
   shortcutMatches,
   shortcutTitle,
@@ -3171,6 +3171,18 @@ export default function App() {
     }, dismissDelay);
     return () => window.clearTimeout(timer);
   }, [notice]);
+  useEffect(() => {
+    // Hiding/showing the sidebar snaps `.body`'s grid columns instantly (no
+    // CSS transition), which grows or shrinks every terminal in the tab by
+    // exactly the sidebar's width in one frame. The ResizeObserver that
+    // normally drives this still fires, but its resize RPC is debounced for
+    // window-drag bursts, so the newly revealed columns sit blank (the
+    // terminal's own background) until that debounce elapses and the server
+    // streams a redrawn frame — a black bar the width of the sidebar. Route
+    // this discrete toggle through the same immediate-resize signal used for
+    // mobile/desktop layout switches instead.
+    window.dispatchEvent(new Event(LAYOUT_CHANGE_EVENT));
+  }, [sidebarHidden]);
   useEffect(() => {
     const normalizedWidth = normalizeSidebarWidth(sidebarWidth);
     if (normalizedWidth !== sidebarWidth) {
