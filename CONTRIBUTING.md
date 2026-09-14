@@ -29,6 +29,9 @@ assets required by server typechecks and process tests.
 | Browser regressions | `bun run test:browser`; requires Chrome/Chromium or `CHROME_BIN`, otherwise tests skip. |
 | Submission | `bun run precommit` runs formatting, lint, full typechecks, and the full test suite. Quick checks do not replace it. |
 
+Run `bun run install-hooks` once per clone to point Git at the tracked
+`.githooks/` directory; its `pre-commit` hook runs `bun run precommit`.
+
 Workspace checks: `bun run --filter roamgate-web typecheck` and
 `bun run --filter roamgate-server typecheck` (builds/embeds web assets first).
 
