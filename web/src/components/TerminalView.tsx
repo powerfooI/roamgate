@@ -209,6 +209,26 @@ const CLIPBOARD_READ_TIMEOUT_MS = 2000;
 const TERMINAL_EVICTION_WINDOW_MS = 60_000;
 const TERMINAL_EVICTION_MAX_RETRIES = 3;
 const TERMINAL_TOUCH_TAP_SLOP_PX = 8;
+// A switch that resolves within this window shows no spinner at all, which
+// reads as an instant switch instead of a flash of loading chrome. Set well
+// above the round trip a local attach actually takes: a spinner that appears
+// and leaves again is more distracting than a terminal that stays briefly
+// blank, and a switch is still perceived as immediate far past this point.
+const TERMINAL_LOADING_SPINNER_DELAY_MS = 500;
+
+/** True only once `pending` has held continuously for `delayMs`. */
+function useDelayedFlag(pending: boolean, delayMs: number): boolean {
+  const [elapsed, setElapsed] = useState(false);
+  useEffect(() => {
+    if (!pending) {
+      setElapsed(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setElapsed(true), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [delayMs, pending]);
+  return pending && elapsed;
+}
 
 function terminalDensity(uiScale: number) {
   const compact = typeof window !== "undefined" && isMobileLayout();
@@ -410,6 +430,14 @@ export function TerminalView({
   );
   const [terminalAttachError, setTerminalAttachError] = useState("");
   const [pasteLoading, setPasteLoading] = useState(false);
+  const terminalLoadingSpinner = useDelayedFlag(
+    terminalLoading,
+    TERMINAL_LOADING_SPINNER_DELAY_MS,
+  );
+  const navigationLoadingSpinner = useDelayedFlag(
+    s.navigationLoading,
+    TERMINAL_LOADING_SPINNER_DELAY_MS,
+  );
   const [attachRetry, setAttachRetry] = useState(0);
   const [inputActive, setInputActive] = useState(false);
   const inputActiveRef = useRef(false);
@@ -2945,14 +2973,18 @@ export function TerminalView({
                 </button>
               </div>
             ) : s.navigationLoading ? (
-              <div
-                className="terminal-loading"
-                role="status"
-                aria-live="polite"
-              >
-                <span className="terminal-loading-dot" />
-                <span>Loading terminal</span>
-              </div>
+              // Stay blank for the grace window rather than falling through to
+              // the prompt below, which would read as "nothing is happening".
+              navigationLoadingSpinner ? (
+                <div
+                  className="terminal-loading"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span className="terminal-loading-dot" />
+                  <span>Loading terminal</span>
+                </div>
+              ) : null
             ) : (
               <span className="muted">
                 Select a workspace or agent to open its terminal.
@@ -3477,7 +3509,7 @@ export function TerminalView({
           >
             <span>{terminalAttachError}</span>
           </div>
-        ) : terminalLoading || pasteLoading ? (
+        ) : terminalLoadingSpinner || pasteLoading ? (
           <div className="terminal-loading" role="status" aria-live="polite">
             <span className="terminal-loading-dot" />
             <span>{pasteLoading ? "Pasting..." : "Loading terminal"}</span>

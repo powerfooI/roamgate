@@ -177,6 +177,7 @@ import {
   store,
   type State,
 } from "./store";
+import { clearTabLayouts } from "./tabLayout";
 
 function browserState(): State {
   const topology = navigationTopology();
@@ -243,6 +244,7 @@ async function withBrowserStore(
   const previous = store.get();
   const original = bridge.connection;
   const topology = navigationTopology();
+  clearTabLayouts();
   const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   const control: {
     mode: string;
@@ -350,7 +352,7 @@ function renderTerminalSnapshot() {
 
 describe("store browser-local navigation", () => {
   test.each(["workspace", "tab", "agent"])(
-    "%s selection shows loading while its layout is deferred",
+    "%s selection renders the target pane while its layout is deferred",
     async (route) => {
       await withBrowserStore(async (_calls, _topology, control) => {
         let release!: () => void;
@@ -365,13 +367,16 @@ describe("store browser-local navigation", () => {
               : store.focusPane("b1p");
         try {
           expect(store.get().selectedPaneId).toBe("b1p");
-          expect(store.get().layout).toBeNull();
-          expect(terminalNavigationLoading(store.get())).toBe(true);
+          // A provisional layout keeps the terminal on screen while the real
+          // one is still in flight, so no navigation spinner is reached.
+          expect(store.get().layout?.tab_id).toBe("b1");
+          expect(terminalNavigationLoading(store.get())).toBe(false);
           const waiting = renderTerminalSnapshot();
-          expect(waiting).toContain("Loading terminal");
-          expect(waiting).toContain('role="status"');
+          expect(waiting).toContain('class="terminal-view"');
           expect(waiting).not.toContain("Select a workspace");
-          expect(waiting).not.toContain('class="terminal-view"');
+          // The attach spinner only appears once its delay elapses, which a
+          // static render never reaches.
+          expect(waiting).not.toContain("Loading terminal");
         } finally {
           release();
           await pending;
@@ -380,11 +385,69 @@ describe("store browser-local navigation", () => {
         expect(terminalNavigationLoading(store.get())).toBe(false);
         const attaching = renderTerminalSnapshot();
         expect(attaching).toContain('class="terminal-view"');
-        expect(attaching).toContain("Loading terminal");
         expect(attaching).not.toContain("Select a workspace");
       });
     },
   );
+
+  test("a revisited split reappears with the geometry it was left in", async () => {
+    await withBrowserStore(async (_calls, _topology, control) => {
+      // Observe the split once so its geometry is known, then leave it.
+      await store.refresh();
+      expect(store.get().layout?.panes).toHaveLength(2);
+      await store.focusTab("b1");
+      expect(store.get().layout?.tab_id).toBe("b1");
+
+      let release!: () => void;
+      control.layoutWait = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const pending = store.focusTab("a1");
+      try {
+        const restored = store.get().layout;
+        expect(restored?.tab_id).toBe("a1");
+        expect(restored?.panes.map((pane) => pane.pane_id)).toEqual([
+          "a1p",
+          "a1q",
+        ]);
+        expect(terminalNavigationLoading(store.get())).toBe(false);
+      } finally {
+        release();
+        await pending;
+      }
+      expect(store.get().layout?.panes).toHaveLength(2);
+    });
+  });
+
+  test("a split that changed while it was away waits for real geometry", async () => {
+    await withBrowserStore(async (_calls, topology, control) => {
+      await store.refresh();
+      await store.focusTab("b1");
+      // A third pane appears in the tab while it is not being shown, so the
+      // remembered rects no longer describe it.
+      topology.panes.push({
+        ...topology.panes[0],
+        pane_id: "a1r",
+        terminal_id: "a1r-terminal",
+        focused: false,
+      });
+      await store.refresh();
+
+      let release!: () => void;
+      control.layoutWait = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const pending = store.focusTab("a1");
+      try {
+        expect(store.get().layout).toBeNull();
+        expect(terminalNavigationLoading(store.get())).toBe(true);
+      } finally {
+        release();
+        await pending;
+      }
+      expect(store.get().layout?.panes).toHaveLength(3);
+    });
+  });
 
   test("failed layout requests stop loading and a successful retry restores the terminal", async () => {
     await withBrowserStore(async (_calls, _topology, control) => {
@@ -512,8 +575,8 @@ describe("store browser-local navigation", () => {
       const refresh = store.refresh();
       await Bun.sleep(1);
       await store.focusTab("b1");
-      expect(store.get().layout).toBeNull();
-      expect(terminalNavigationLoading(store.get())).toBe(true);
+      expect(store.get().layout?.tab_id).toBe("b1");
+      expect(terminalNavigationLoading(store.get())).toBe(false);
       resolve();
       await refresh;
       await Bun.sleep(5);

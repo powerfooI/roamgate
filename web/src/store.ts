@@ -48,6 +48,13 @@ import {
   forgetTerminalRelayViewportsExcept,
   terminalRelayViewportForTab,
 } from "./terminalResize";
+import {
+  clearTabLayouts,
+  forgetTabLayoutsExcept,
+  provisionalTabLayout,
+  rememberTabLayout,
+  tabLayoutFor,
+} from "./tabLayout";
 import type { GitDiffEntry, Pane, PaneLayout, Tab, Workspace } from "./types";
 import {
   gitFileActionLabel,
@@ -1153,11 +1160,13 @@ async function refreshNow(lease = captureConnectionLease()) {
     const workspaces: Workspace[] = wsRes?.workspaces ?? [];
     const tabs: Tab[] = tabRes?.tabs ?? [];
     const panes = withAgentActivity(paneRes?.panes ?? [], agentRes);
+    const liveTabIds = new Set(tabs.map((tab) => tab.tab_id));
     forgetTerminalRelayViewportsExcept(
       lease.connectionId,
       lease.generation,
-      new Set(tabs.map((tab) => tab.tab_id)),
+      liveTabIds,
     );
+    forgetTabLayoutsExcept(lease.connectionId, lease.generation, liveTabIds);
     const completedPanes = trackTaskCompletions(lease.connectionId, panes);
 
     const navigationMode =
@@ -1246,6 +1255,7 @@ async function refreshNow(lease = captureConnectionLease()) {
               )));
         const layout = staleLayout ? null : observedLayout;
         if (staleLayout) queuedConnectionKeys.add(refreshKey);
+        rememberTabLayout(lease.connectionId, lease.generation, layout);
         next.layout =
           navigationMode === "browser-local"
             ? projectBrowserLayout(layout, next.selectedPaneId ?? null)
@@ -1485,6 +1495,7 @@ function selectConnectionNow(connectionId: string, refresh = true): boolean {
     true,
   );
   clearTerminalRelayViewports();
+  clearTabLayouts();
   focusActionChain = Promise.resolve();
   const generation = bridge.setActiveConnection(connectionId);
   state = activateConnectionState(state, connectionId, generation);
@@ -1515,6 +1526,7 @@ function resetActiveConnectionLease(
     false,
   );
   clearTerminalRelayViewports();
+  clearTabLayouts();
   focusActionChain = Promise.resolve();
   taskCompletionTracker.reset(state.activeConnectionId);
   const generation = bridge.advanceActiveConnectionGeneration();
@@ -1996,12 +2008,23 @@ function navigateBrowser(workspaceId: string, tabId?: string, paneId?: string) {
     state.panes,
   );
   const activeTabId = projected.browserNavigation.tabIds[workspaceId];
+  // Render the target tab from its last known geometry instead of blanking the
+  // terminal area until pane.layout answers. The refresh below corrects it.
+  const nextLayout =
+    state.layout?.tab_id === activeTabId
+      ? state.layout
+      : provisionalTabLayout(
+          tabLayoutFor(
+            state.activeConnectionId,
+            state.connectionGeneration,
+            activeTabId,
+          ),
+          state.panes,
+          activeTabId,
+        );
   set({
     ...projected,
-    layout:
-      state.layout?.tab_id === activeTabId
-        ? projectBrowserLayout(state.layout, projected.selectedPaneId)
-        : null,
+    layout: projectBrowserLayout(nextLayout, projected.selectedPaneId),
     pendingFocusWorkspaceId: null,
     pendingFocusWorkspaceSettledAt: null,
     error: null,
@@ -2107,6 +2130,7 @@ export const store = {
         terminalReattachPending = true;
         bridge.setConnectionRuntimeGenerations([]);
         clearTerminalRelayViewports();
+        clearTabLayouts();
         focusActionChain = Promise.resolve();
         queuedConnectionKeys.clear();
       }
@@ -3404,6 +3428,7 @@ export const store = {
         amount,
       });
       const layout = result?.resize?.layout;
+      rememberTabLayout(lease.connectionId, lease.generation, layout ?? null);
       if (layout && state.layout?.tab_id === layout.tab_id)
         setForConnection(lease, {
           layout:
