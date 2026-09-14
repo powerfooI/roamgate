@@ -264,6 +264,16 @@ export interface TerminalClosedPush {
   reason?: string;
 }
 
+/**
+ * One interface preference, pushed when any browser changes it. Carries no
+ * connection envelope: preferences belong to the Roamgate server, not to a
+ * Herdr connection. A null value means the preference was cleared.
+ */
+export interface UiSettingPush {
+  key: string;
+  value: unknown;
+}
+
 export interface BridgeControlMsg {
   type: "pause_connection";
   reason?: string;
@@ -316,6 +326,14 @@ export async function logoutBrowserSession(): Promise<void> {
 function wsUrl(): string {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   return `${proto}://${location.host}/ws`;
+}
+
+function parseUiSettingPush(value: unknown): UiSettingPush | null {
+  if (!value || typeof value !== "object") return null;
+  const push = value as Record<string, unknown>;
+  return typeof push.key === "string" && push.key.length > 0
+    ? { key: push.key, value: push.value ?? null }
+    : null;
 }
 
 function scopedPayload<T extends object>(
@@ -407,6 +425,7 @@ export class Bridge {
     (closed: TerminalClosedPush) => void
   >();
   private popupHandlers = new Set<(popup: PopupStatePush) => void>();
+  private uiSettingsHandlers = new Set<(push: UiSettingPush) => void>();
   private statusHandlers = new Set<(s: ConnectionStatus) => void>();
   private controlHandlers = new Set<(c: BridgeControlMsg) => void>();
   private helloHandlers = new Set<(hello: BridgeHello) => void>();
@@ -755,6 +774,7 @@ export class Bridge {
     const hasClipboard = owns("terminal_clipboard");
     const hasTerminalClosed = owns("terminal_closed");
     const hasPopup = owns("popup");
+    const hasUiSettings = owns("ui_settings");
     const hasControl = owns("control");
     const hasAssistant = owns("assistant");
     const hasAssistantNotification = owns("assistant_notification");
@@ -766,6 +786,7 @@ export class Bridge {
       hasClipboard,
       hasTerminalClosed,
       hasPopup,
+      hasUiSettings,
       hasControl,
       hasAssistant,
       hasAssistantNotification,
@@ -998,6 +1019,14 @@ export class Bridge {
       return;
     }
 
+    if (hasUiSettings) {
+      // Accepted regardless of the active Herdr connection: the preference
+      // belongs to the Roamgate server that served this page.
+      const push = parseUiSettingPush(msg.ui_settings);
+      if (push) this.uiSettingsHandlers.forEach((handler) => handler(push));
+      return;
+    }
+
     if (
       msg.control &&
       typeof msg.control === "object" &&
@@ -1173,6 +1202,11 @@ export class Bridge {
   onPopup(cb: (popup: PopupStatePush) => void): () => void {
     this.popupHandlers.add(cb);
     return () => this.popupHandlers.delete(cb);
+  }
+
+  onUiSetting(cb: (push: UiSettingPush) => void): () => void {
+    this.uiSettingsHandlers.add(cb);
+    return () => this.uiSettingsHandlers.delete(cb);
   }
 
   onTerminalClosed(cb: (closed: TerminalClosedPush) => void): () => void {

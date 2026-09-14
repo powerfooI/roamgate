@@ -122,6 +122,12 @@ export function createLegacyConnectionRuntime(args: {
   taskNotificationSource?: TaskNotificationSource;
   onError?: (error: unknown, identity: ConnectionIdentity) => void;
   onTransportExit?: (error: SshTunnelError) => void;
+  /**
+   * An interface preference changed. Unlike everything else here this is not
+   * scoped to the connection: it belongs to the Roamgate server, so the host
+   * pushes it to every browser rather than to this connection's viewers.
+   */
+  onUiSettingChanged?: (key: string, value: unknown) => void;
   /** Test seam for deterministic shutdown coverage. */
   lastStepBaselines?: LastStepBaselineStore;
   resolveLastStepWorkspaceGitRoot?: (workspaceId: string) => Promise<string>;
@@ -250,6 +256,7 @@ export function createLegacyConnectionRuntime(args: {
         identity,
       );
     },
+    onUiSettingChanged: args.onUiSettingChanged,
     safeSend: args.safeSend,
     markRpcError: args.markRpcError,
   });

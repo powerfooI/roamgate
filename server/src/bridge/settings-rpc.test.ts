@@ -19,6 +19,7 @@ test("terminal transport settings validate input, persist by connection, and rec
     repositories: {},
     workspace_auto_sync: {},
     custom: { keep: true },
+    ui: {},
     terminal_transport: { beta: { surface_codecs: false } },
   };
   const changed: boolean[] = [];
@@ -161,6 +162,7 @@ test("settings RPC lists and mutates only its connection namespace", async () =>
       },
     },
     custom: {},
+    ui: {},
   };
   const messages: any[] = [];
   const handler = createSettingsRpcHandler({
@@ -277,6 +279,7 @@ test("settings RPC cancels a queued mutation after replacement", async () => {
       },
     },
     custom: {},
+    ui: {},
   };
   const messages: string[] = [];
   const handler = createSettingsRpcHandler({
@@ -382,4 +385,60 @@ test("hook settings expose selected config and errors without mislabeling native
       else expect(result.error).toBeUndefined();
     }
   }
+});
+
+test("interface preferences are stored, cleared, and announced to every browser", async () => {
+  let settings: GuiSettings = {
+    version: 1 as const,
+    repositories: {},
+    workspace_auto_sync: {},
+    custom: {},
+    ui: {},
+  };
+  const messages: any[] = [];
+  const announced: Array<{ key: string; value: unknown }> = [];
+  const handler = createSettingsRpcHandler({
+    connectionId: "alpha",
+    herdr: {} as HerdrClient,
+    sshHost: () => undefined,
+    readWorktreeHooks: async () => null,
+    resolveWorkspaceGitRoot: async () => ({ workspace: {}, root: "/tmp" }),
+    workspaceAutoSyncIsRunning: () => false,
+    onWorkspaceAutoSyncSettingsChanged: () => undefined,
+    onUiSettingChanged: (key, value) => announced.push({ key, value }),
+    readSettings: async () => settings,
+    updateSettings: async (update) => {
+      settings = await update(settings);
+      return settings;
+    },
+    safeSend: (_ws, payload) => {
+      messages.push(JSON.parse(payload));
+      return true;
+    },
+    markRpcError: () => undefined,
+  });
+  const ws = {} as ServerWebSocket<unknown>;
+  const preferences = { version: 1, active: "mine", presets: [] };
+
+  await handler(ws, "1", "settings.ui.update", {
+    key: "keyboardShortcuts",
+    value: preferences,
+  });
+  expect(settings.ui.keyboardShortcuts).toEqual(preferences);
+  expect(announced).toEqual([{ key: "keyboardShortcuts", value: preferences }]);
+
+  // Omitting `value` clears it: JSON has no undefined, and null is a value.
+  await handler(ws, "2", "settings.ui.update", { key: "keyboardShortcuts" });
+  expect("keyboardShortcuts" in settings.ui).toBe(false);
+  expect(announced[1]).toEqual({ key: "keyboardShortcuts", value: undefined });
+
+  await handler(ws, "3", "settings.ui.update", { key: "../escape", value: 1 });
+  expect(messages[2].error.message).toContain(
+    "settings.ui.update requires key",
+  );
+  expect(announced).toHaveLength(2);
+
+  // Other connections share one settings file: a preference is not namespaced
+  // by connection the way repository settings are.
+  expect(settings.repositories).toEqual({});
 });
