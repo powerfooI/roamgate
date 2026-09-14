@@ -19,6 +19,11 @@ import {
   findGrokSessionForCwd,
 } from "./grok-session";
 import {
+  describeAntigravitySessionPath,
+  findAntigravitySessionById,
+  findAntigravitySessionForCwd,
+} from "./antigravity-session";
+import {
   integrationInstallCommand,
   isRecord,
   normalizeAgentName,
@@ -175,6 +180,13 @@ async function sessionFileFor(
         : await findGrokSessionById(session.value, cwd);
     return descriptor?.file ?? null;
   }
+  if (agent === "agy") {
+    const descriptor =
+      session.kind === "path"
+        ? await describeAntigravitySessionPath(resolve(session.value))
+        : await findAntigravitySessionById(session.value, cwd);
+    return descriptor?.file ?? null;
+  }
   if (session.kind === "path") {
     const path = resolve(session.value);
     return files.statFile(path);
@@ -246,10 +258,11 @@ export async function resolveAgentSessionInfo(
     agent !== "claude" &&
     agent !== "kimi" &&
     agent !== "grok" &&
-    agent !== "pi"
+    agent !== "pi" &&
+    agent !== "agy"
   ) {
     throw new Error(
-      `agent session only supports codex, claude, kimi, grok, and pi`,
+      `agent session only supports codex, claude, kimi, grok, pi, and agy`,
     );
   }
   // Native session files follow the agent process, which may have been
@@ -278,6 +291,18 @@ export async function resolveAgentSessionInfo(
       };
     }
   }
+  if (agent === "agy" && !resolvedSession) {
+    const descriptor = await findAntigravitySessionForCwd(cwd);
+    if (descriptor) {
+      file = descriptor.file;
+      resolvedSession = {
+        source: "agy-local",
+        agent: "agy",
+        kind: "id",
+        value: descriptor.session.sessionId,
+      };
+    }
+  }
   if (!resolvedSession) {
     return {
       ...base,
@@ -287,7 +312,11 @@ export async function resolveAgentSessionInfo(
           ? cwd
             ? `No local Grok Build session was found for ${cwd}. Start Grok Build in this directory, then refresh Session Inspect.`
             : "Herdr did not report a working directory for this Grok Build pane."
-          : "Herdr has not received an agent session id for this pane. Install the Herdr integration for this agent and start a new agent session.",
+          : agent === "agy"
+            ? cwd
+              ? `No local Antigravity session was found for ${cwd}. Start Antigravity in this directory, then refresh Session Inspect.`
+              : "Herdr did not report a working directory for this Antigravity pane."
+            : "Herdr has not received an agent session id for this pane. Install the Herdr integration for this agent and start a new agent session.",
       command: agent === "grok" ? undefined : integrationInstallCommand(agent),
       updated_at: new Date(0).toISOString(),
       path: "",

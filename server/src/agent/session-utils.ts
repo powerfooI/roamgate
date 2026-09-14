@@ -17,10 +17,18 @@ export function normalizeAgentName(value: string) {
   if (normalized === "claude-code") return "claude";
   if (normalized === "kimi-code" || normalized === "kimi code") return "kimi";
   if (normalized === "grok-build" || normalized === "grok build") return "grok";
+  if (
+    normalized === "antigravity" ||
+    normalized === "antigravity-cli" ||
+    normalized === "antigravity cli"
+  ) {
+    return "agy";
+  }
   return normalized;
 }
 
 export function integrationInstallCommand(agent: string) {
+  if (agent === "agy") return "herdr integration install antigravity-cli";
   return `herdr integration install ${agent}`;
 }
 

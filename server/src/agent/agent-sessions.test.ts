@@ -311,4 +311,115 @@ describe("Pi agent sessions", () => {
       session_id: "remote-pi-session",
     });
   });
+
+  test("reads and exports an Antigravity sqlite session", async () => {
+    const { Database } = await import("bun:sqlite");
+    const directory = await mkdtemp(join(tmpdir(), "herdr-gui-agy-session-"));
+    tempDirectories.push(directory);
+    const sessionId = "test-agy-uuid";
+    const path = join(directory, `${sessionId}.db`);
+    const db = new Database(path);
+    db.run(
+      "CREATE TABLE trajectory_meta (trajectory_id text, cascade_id text, trajectory_type integer, source integer, PRIMARY KEY (trajectory_id))",
+    );
+    db.run(
+      "CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, status integer NOT NULL DEFAULT 0, has_subtrajectory numeric NOT NULL DEFAULT false, metadata blob, error_details blob, permissions blob, task_details blob, render_info blob, step_payload blob, step_format integer NOT NULL DEFAULT 0, PRIMARY KEY (idx))",
+    );
+    db.run(
+      "CREATE TABLE gen_metadata (idx integer, data blob, size integer NOT NULL DEFAULT 0, PRIMARY KEY (idx))",
+    );
+    db.run(
+      'CREATE TABLE trajectory_metadata_blob (id text DEFAULT "main", data blob, PRIMARY KEY (id))',
+    );
+    db.run("INSERT INTO trajectory_meta VALUES (?, ?, ?, ?)", [
+      "traj-1",
+      sessionId,
+      4,
+      17,
+    ]);
+
+    // User message (step_type 14)
+    const userTextBuf = Buffer.from("\x12\x0ehello from agy");
+    const userMsg = Buffer.concat([
+      Buffer.from([0x9a, 0x01, userTextBuf.length]),
+      userTextBuf,
+    ]);
+    db.run(
+      "INSERT INTO steps (idx, step_type, metadata, step_payload) VALUES (?, ?, ?, ?)",
+      [0, 14, Buffer.from("\x0a\x06\x08\x80\xa4\xeb\xb5\x06"), userMsg],
+    );
+
+    // Assistant response (step_type 15)
+    const respText = Buffer.from("\x0a\x0fagy response ok");
+    const plannerMsg = Buffer.concat([
+      Buffer.from([0xa2, 0x01, respText.length]),
+      respText,
+    ]);
+    db.run(
+      "INSERT INTO steps (idx, step_type, metadata, step_payload) VALUES (?, ?, ?, ?)",
+      [1, 15, Buffer.from("\x0a\x06\x08\x85\xa4\xeb\xb5\x06"), plannerMsg],
+    );
+    db.close();
+
+    const call: HerdrCall = async () => ({
+      agent: {
+        agent: "agy",
+        workspace_id: "w1",
+        tab_id: "t1",
+        cwd: "/tmp/project",
+        agent_session: {
+          source: "herdr:antigravity_cli",
+          agent: "agy",
+          kind: "path",
+          value: path,
+        },
+      },
+    });
+
+    const history = await readAgentMessageHistory(
+      { pane_id: "p1", agent: "agy" },
+      call,
+    );
+    expect(history.status).toBe("ok");
+    expect(history.messages.map((m) => m.text)).toEqual([
+      "hello from agy",
+      "agy response ok",
+    ]);
+
+    const summary = await readAgentSessionSummary(
+      {
+        pane_id: "p1",
+        agent: "agy",
+        include_text: true,
+        include_trajectory: true,
+      },
+      call,
+    );
+    expect(summary.status).toBe("ok");
+    expect(summary.stats.turns).toBe(1);
+    expect(summary.text).toContain("hello from agy");
+
+    const raw = await downloadAgentSessionFile(
+      { pane_id: "p1", agent: "agy" },
+      call,
+    );
+    expect(raw.status).toBe(200);
+    expect(raw.headers.get("content-type")).toBe("application/vnd.sqlite3");
+
+    const atif = await downloadAgentSessionAtif(
+      { pane_id: "p1", agent: "agy" },
+      call,
+    );
+    expect(atif.status).toBe(200);
+    const atifJson = (await atif.json()) as {
+      schema_version: string;
+      session_id: string;
+      agent: { name: string };
+    };
+    expect(atifJson).toMatchObject({
+      schema_version: "ATIF-v1.7",
+      session_id: sessionId,
+      agent: { name: "antigravity-cli" },
+    });
+  });
 });

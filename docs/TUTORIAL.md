@@ -135,7 +135,7 @@ for History, Files, and Changes on your platform.
 
 **You are done when:** you found the explanation, not just the last terminal line.
 
-> Inspection supports Codex, Claude, Kimi, Grok Build, and Pi with readable records.
+> Inspection supports Codex, Claude, Kimi, Grok Build, Pi, and Antigravity CLI with readable records.
 > Follow missing-metadata integration hints. SSH reads Herdr-reported paths and
 > Pi ID lookups remotely; other local ID/directory fallbacks may miss remote
 > transcripts. See [session inspection](../FEATURES.md#agent-awareness-and-session-inspection).

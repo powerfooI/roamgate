@@ -43,7 +43,9 @@ function agentVersionFromRecords(
         : "");
     if (version) return version;
   }
-  return agent === "kimi" ? "kimi-code" : "unknown";
+  if (agent === "kimi") return "kimi-code";
+  if (agent === "agy") return "antigravity-cli";
+  return "unknown";
 }
 
 function sessionIdFromRecords(
@@ -110,7 +112,9 @@ function createTrajectory(
             ? "claude-code"
             : agent === "grok"
               ? "grok-build"
-              : agent,
+              : agent === "agy"
+                ? "antigravity-cli"
+                : agent,
       version: file.agentVersion || agentVersionFromRecords(agent, records),
       model_name: file.modelName || undefined,
     },
@@ -812,6 +816,116 @@ function projectGrokTrajectory(
   return createTrajectory("grok", file, records, steps);
 }
 
+function projectAntigravityTrajectory(
+  file: SessionFile,
+  records: Record<string, unknown>[],
+) {
+  const steps: Omit<AtifStep, "step_id">[] = [];
+  const createdAt = file.createdAtMs ?? file.mtimeMs;
+  records.forEach((record, index) => {
+    const timestamp = messageTime(record, createdAt, index);
+    const type = stringValue(record.type);
+    if (type === "user") {
+      const text = cleanMessageText(textFromContent(record.content));
+      if (text) {
+        steps.push({
+          timestamp,
+          source: "user",
+          message: text,
+          extra: { record_type: type },
+        });
+      }
+      return;
+    }
+    if (type === "system") {
+      const text = cleanMessageText(textFromContent(record.content));
+      if (text) {
+        steps.push({
+          timestamp,
+          source: "system",
+          message: text,
+          extra: { record_type: type },
+        });
+      }
+      return;
+    }
+    if (type === "reasoning") {
+      const reasoning = cleanMessageText(
+        textFromContent(record.summary ?? record.content),
+      );
+      if (!reasoning) return;
+      steps.push({
+        timestamp,
+        source: "agent",
+        message: "Reasoning",
+        reasoning_content: reasoning,
+        metrics: tokenUsageToMetrics(tokenUsageForRecord(record).usage),
+        extra: {
+          record_type: type,
+          model: file.modelName,
+        },
+      });
+      return;
+    }
+    if (type === "assistant") {
+      const text = cleanMessageText(textFromContent(record.content));
+      const toolCalls = Array.isArray(record.tool_calls)
+        ? record.tool_calls.filter(isRecord).map((call, callIndex) => ({
+            tool_call_id: stringValue(call.id) || `${index}:${callIndex}`,
+            function_name: stringValue(call.name) || "tool",
+            arguments: toolArguments(call.arguments),
+          }))
+        : [];
+      const reasoning = cleanMessageText(textFromContent(record.reasoning));
+      const errorMessage = stringValue(record.error_message);
+      if (!text && toolCalls.length === 0 && !reasoning && !errorMessage)
+        return;
+      steps.push({
+        timestamp,
+        source: "agent",
+        message:
+          text ||
+          (toolCalls.length > 0
+            ? `Tool call${toolCalls.length === 1 ? "" : "s"}: ${toolCalls
+                .map((call) => call.function_name)
+                .join(", ")}`
+            : errorMessage || "Assistant message"),
+        reasoning_content: reasoning || undefined,
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+        metrics: tokenUsageToMetrics(tokenUsageForRecord(record).usage),
+        extra: {
+          record_type: type,
+          model: file.modelName,
+          error_message: errorMessage || undefined,
+        },
+      });
+      return;
+    }
+    if (type === "tool_result") {
+      const content = toolOutputText(record.content);
+      steps.push({
+        timestamp,
+        source: "system",
+        message: content || "Tool result",
+        observation: {
+          results: [
+            {
+              source_call_id: stringValue(record.tool_call_id),
+              content: content || "Tool result",
+              extra: {
+                tool_name: stringValue(record.tool_name) || undefined,
+                is_error: record.is_error === true,
+              },
+            },
+          ],
+        },
+        extra: { record_type: type },
+      });
+    }
+  });
+  return createTrajectory("agy", file, records, steps);
+}
+
 export function projectAgentTrajectory(
   agent: string,
   file: SessionFile,
@@ -822,5 +936,6 @@ export function projectAgentTrajectory(
   if (agent === "kimi") return projectKimiTrajectory(file, records);
   if (agent === "grok") return projectGrokTrajectory(file, records);
   if (agent === "pi") return projectPiTrajectory(file, records);
+  if (agent === "agy") return projectAntigravityTrajectory(file, records);
   return createTrajectory(agent, file, records, []);
 }

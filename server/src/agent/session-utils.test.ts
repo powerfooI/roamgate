@@ -12,8 +12,13 @@ describe("agent session utility helpers", () => {
     expect(normalizeAgentName("Claude-Code")).toBe("claude");
     expect(normalizeAgentName("Kimi Code")).toBe("kimi");
     expect(normalizeAgentName("Grok Build")).toBe("grok");
+    expect(normalizeAgentName("Antigravity")).toBe("agy");
+    expect(normalizeAgentName("antigravity-cli")).toBe("agy");
     expect(integrationInstallCommand("codex")).toBe(
       "herdr integration install codex",
+    );
+    expect(integrationInstallCommand("agy")).toBe(
+      "herdr integration install antigravity-cli",
     );
   });
 

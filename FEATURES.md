@@ -121,10 +121,10 @@ See [resource ownership](docs/ARCHITECTURE.md#workspace-resource-ownership).
   Inspector offers Timeline, searchable ATIF/raw transcripts, and original-file
   or normalized ATIF export.
 
-Supported providers: **Codex, Claude, Kimi, Grok Build, Pi**, with a readable
+Supported providers: **Codex, Claude, Kimi, Grok Build, Pi, Antigravity CLI**, with a readable
 session record. Missing Herdr integration metadata shows the integration command.
 With `--ssh-host`, Herdr-reported paths and Pi ID lookup read remotely. Other
-ID/directory fallbacks (including Grok Build discovery) remain local and need
+ID/directory fallbacks (including Grok Build and Antigravity CLI discovery) remain local and need
 locally accessible transcripts.
 
 ## Git Worktree Lifecycle

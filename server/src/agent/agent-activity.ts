@@ -32,7 +32,9 @@ export async function enrichAgentActivity(
         // this host's sessions as activity evidence for a remote connection.
         if (
           files.remote &&
-          (name === "grok" || (session.kind !== "path" && name !== "pi"))
+          (name === "grok" ||
+            name === "agy" ||
+            (session.kind !== "path" && name !== "pi"))
         )
           continue;
         try {

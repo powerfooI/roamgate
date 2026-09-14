@@ -445,4 +445,94 @@ describe("agent session trajectory projection", () => {
       content: "# Project",
     });
   });
+
+  test("projects Antigravity sessions into normalized ATIF trajectory", () => {
+    const trajectory = projectAgentTrajectory(
+      "agy",
+      {
+        path: "/tmp/conversations/test-uuid.db",
+        mtimeMs: Date.parse("2026-07-07T00:00:00.000Z"),
+        sessionId: "test-uuid",
+        modelName: "gemini-3.8-flash",
+      },
+      [
+        {
+          type: "user",
+          timestamp: "2026-07-07T00:00:00.000Z",
+          content: "Hello Antigravity",
+        },
+        {
+          type: "reasoning",
+          timestamp: "2026-07-07T00:00:01.000Z",
+          summary: "Thinking about the prompt",
+        },
+        {
+          type: "assistant",
+          timestamp: "2026-07-07T00:00:02.000Z",
+          content: "I will check the file",
+          reasoning: "Checking workspace",
+          tool_calls: [
+            {
+              id: "call_1",
+              name: "view_file",
+              arguments: { AbsolutePath: "/dev/pult/README.md" },
+            },
+          ],
+          usage: {
+            input_tokens: 120,
+            output_tokens: 45,
+            cached_input_tokens: 30,
+          },
+        },
+        {
+          type: "tool_result",
+          timestamp: "2026-07-07T00:00:03.000Z",
+          tool_call_id: "call_1",
+          tool_name: "view_file",
+          content: "# Pult",
+        },
+        {
+          type: "assistant",
+          timestamp: "2026-07-07T00:00:04.000Z",
+          content: "Done checking!",
+          usage: {
+            input_tokens: 150,
+            output_tokens: 25,
+          },
+        },
+      ],
+    );
+
+    expect(trajectory.session_id).toBe("test-uuid");
+    expect(trajectory.agent).toMatchObject({
+      name: "antigravity-cli",
+      version: "antigravity-cli",
+      model_name: "gemini-3.8-flash",
+    });
+    expect(trajectory.steps.map((step) => step.message)).toEqual([
+      "Hello Antigravity",
+      "Reasoning",
+      "I will check the file",
+      "# Pult",
+      "Done checking!",
+    ]);
+    expect(trajectory.steps[1]?.reasoning_content).toBe(
+      "Thinking about the prompt",
+    );
+    expect(trajectory.steps[2]?.tool_calls?.[0]).toMatchObject({
+      tool_call_id: "call_1",
+      function_name: "view_file",
+      arguments: { AbsolutePath: "/dev/pult/README.md" },
+    });
+    expect(trajectory.steps[3]?.observation?.results[0]).toMatchObject({
+      source_call_id: "call_1",
+      content: "# Pult",
+    });
+    expect(trajectory.final_metrics).toMatchObject({
+      total_prompt_tokens: 270,
+      total_completion_tokens: 70,
+      total_cached_tokens: 30,
+      total_steps: 5,
+    });
+  });
 });

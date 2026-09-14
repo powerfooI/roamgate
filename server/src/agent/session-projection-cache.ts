@@ -10,6 +10,7 @@ import {
 } from "./session-history";
 import { isRecord } from "./session-utils";
 import { summarizeTokenUsage } from "./token-usage";
+import { readAntigravitySessionRecords } from "./antigravity-session";
 
 function parseJsonl(text: string) {
   const records: Record<string, unknown>[] = [];
@@ -31,7 +32,10 @@ export async function readSessionProjection(
   files: AgentSessionFileAccess,
   fallbackTime = file.createdAtMs ?? file.mtimeMs,
 ) {
-  const records = parseJsonl(await files.readText(file.path));
+  const records =
+    agent === "agy"
+      ? await readAntigravitySessionRecords(file.path)
+      : parseJsonl(await files.readText(file.path));
   const projectionFile = { ...file, mtimeMs: fallbackTime };
   const trajectory = projectAgentTrajectory(agent, projectionFile, records);
   const messages = conversationMessagesFromTrajectory(
