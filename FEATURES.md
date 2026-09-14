@@ -260,13 +260,13 @@ newer work.
 ## Mobile and PWA
 
 - Responsive terminals, Inspector, and viewport/keyboard handling. **Menu →
-  Appearance → Mobile Layout → Display mode** offers Automatic/Mobile/Desktop.
+  Appearance → Layout → Display mode** offers Automatic/Mobile/Desktop.
   Automatic uses **Mobile up to (px)**: 768 by default, adjustable 320–2560 CSS
   pixels. Mobile stays mobile at any width, including after reload.
 - URL overrides `?layout=mobile`, `?layout=desktop`, or `?layout=auto` beat saved
   mode. Choosing a menu mode clears that override, preserving other parameters.
 - Choose **Agents on top** or **Workspaces on top** independently for each layout
-  under Mobile Layout. This affects the separate Agents panel; mobile defaults
+  under Layout Preferences. This affects the separate Agents panel; mobile defaults
   to agents first, desktop to workspaces first.
 - Configure the floating terminal panel's `2×8` shortcut grid and up to four
   side buttons. Empty editor slots keep their positions but compact at runtime.

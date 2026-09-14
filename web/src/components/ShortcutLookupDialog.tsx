@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CloseButton } from "./CloseButton";
+import { ThemedSelect } from "./ThemedSelect";
 import { focusDialogElement } from "./dialogFocus";
 import { SHORTCUT_CATALOG } from "../shortcutCatalog";
 import {
@@ -96,6 +97,8 @@ export function ShortcutLookupDialog({
         setError("");
         saveRef.current?.focus();
       } else if (event.key === "Escape") {
+        // An open popover (themed select) consumes Escape to close itself.
+        if (document.querySelector(".popover-content")) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         if (editing) setEditing(null);
@@ -126,7 +129,13 @@ export function ShortcutLookupDialog({
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        // Clicks inside portaled popovers bubble here through the React tree.
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <div
         ref={dialogRef}
         className="modal shortcut-modal"
@@ -167,29 +176,30 @@ export function ShortcutLookupDialog({
         <div className="keybinding-settings">
           <label className="keybinding-preset">
             <span>Active preset</span>
-            <select
+            <ThemedSelect
+              aria-label="Active preset"
               value={preferences.active}
-              onChange={(event) =>
+              options={[
+                {
+                  value: "auto",
+                  label: `Automatic (${SHORTCUT_PLATFORMS[platform]})`,
+                },
+                ...Object.entries(SHORTCUT_PLATFORMS).map(([id, label]) => ({
+                  value: id,
+                  label,
+                })),
+                ...preferences.presets.map((item) => ({
+                  value: item.id,
+                  label: item.name,
+                })),
+              ]}
+              onChange={(preset) =>
                 attempt(() => {
-                  selectShortcutPreset(event.target.value);
+                  selectShortcutPreset(preset);
                   clearEditor();
                 })
               }
-            >
-              <option value="auto">
-                Automatic ({SHORTCUT_PLATFORMS[platform]})
-              </option>
-              {Object.entries(SHORTCUT_PLATFORMS).map(([id, label]) => (
-                <option value={id} key={id}>
-                  {label}
-                </option>
-              ))}
-              {preferences.presets.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+            />
           </label>
           <div className="keybinding-preset-actions">
             <input

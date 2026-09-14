@@ -10,6 +10,7 @@ import {
   ExternalLink,
   GitBranch,
   Keyboard,
+  LayoutDashboard,
   Minus,
   Moon,
   Palette,
@@ -17,7 +18,6 @@ import {
   RefreshCw,
   Server,
   SquareTerminal,
-  Smartphone,
   Sun,
   SunMoon,
   Wifi,
@@ -382,10 +382,10 @@ export function ConfigMenu({
                 }}
               />
               <ConfigMenuItem
-                icon={<Smartphone size={15} />}
-                label="Mobile Layout"
+                icon={<LayoutDashboard size={15} />}
+                label="Layout"
                 className="config-menu-item-row"
-                description="Display mode, breakpoint, and sidebar order"
+                description="Display mode, mobile breakpoint, and sidebar order"
                 onClick={() => {
                   setOpen(false);
                   setMobileLayoutOpen(true);

@@ -9,6 +9,7 @@ import {
 } from "../terminalComposer";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ContextMenu, type ContextMenuState } from "./ContextMenu";
+import { ThemedSelect } from "./ThemedSelect";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
 import { buildWorkspaceHierarchy, worktreeCreationSource } from "../worktree";
 import {
@@ -645,47 +646,47 @@ export function WorkspaceTree({
         <div className="panel-head">
           <h2>Agents</h2>
           <div className="panel-actions agent-list-controls">
-            <label className="agent-list-control">
-              <ArrowDownWideNarrow size={15} aria-hidden="true" />
-              <select
-                aria-label="Agent sort order"
-                title={`Sort agents: ${{ attention: "Attention first", workspace: "Workspace order", manual: "Manual order" }[agentListPreferences.sort]}`}
-                value={agentListPreferences.sort}
-                onChange={(event) => {
-                  clearAgentDrag();
-                  setAgentListPreferences((current) => ({
-                    ...current,
-                    sort: event.target.value as AgentSort,
-                  }));
-                }}
-              >
-                <option value="attention">Attention first</option>
-                <option value="workspace">Workspace order</option>
-                <option value="manual">Manual order</option>
-              </select>
-            </label>
-            <label
+            <ThemedSelect
+              className="agent-list-control"
+              icon={<ArrowDownWideNarrow size={15} aria-hidden="true" />}
+              align="end"
+              aria-label="Agent sort order"
+              title={`Sort agents: ${{ attention: "Attention first", workspace: "Workspace order", manual: "Manual order" }[agentListPreferences.sort]}`}
+              value={agentListPreferences.sort}
+              options={[
+                { value: "attention", label: "Attention first" },
+                { value: "workspace", label: "Workspace order" },
+                { value: "manual", label: "Manual order" },
+              ]}
+              onChange={(sort) => {
+                clearAgentDrag();
+                setAgentListPreferences((current) => ({
+                  ...current,
+                  sort: sort as AgentSort,
+                }));
+              }}
+            />
+            <ThemedSelect
               className={`agent-list-control ${agentListPreferences.grouping !== "none" ? "is-active" : ""}`}
-            >
-              <Layers size={15} aria-hidden="true" />
-              <select
-                aria-label="Agent grouping"
-                title={`Group agents: ${{ none: "No grouping", status: "Status", workspace: "Workspace", agent: "Agent type" }[agentListPreferences.grouping]}`}
-                value={agentListPreferences.grouping}
-                onChange={(event) => {
-                  clearAgentDrag();
-                  setAgentListPreferences((current) => ({
-                    ...current,
-                    grouping: event.target.value as AgentGrouping,
-                  }));
-                }}
-              >
-                <option value="none">No grouping</option>
-                <option value="status">Status</option>
-                <option value="workspace">Workspace</option>
-                <option value="agent">Agent type</option>
-              </select>
-            </label>
+              icon={<Layers size={15} aria-hidden="true" />}
+              align="end"
+              aria-label="Agent grouping"
+              title={`Group agents: ${{ none: "No grouping", status: "Status", workspace: "Workspace", agent: "Agent type" }[agentListPreferences.grouping]}`}
+              value={agentListPreferences.grouping}
+              options={[
+                { value: "none", label: "No grouping" },
+                { value: "status", label: "Status" },
+                { value: "workspace", label: "Workspace" },
+                { value: "agent", label: "Agent type" },
+              ]}
+              onChange={(grouping) => {
+                clearAgentDrag();
+                setAgentListPreferences((current) => ({
+                  ...current,
+                  grouping: grouping as AgentGrouping,
+                }));
+              }}
+            />
           </div>
         </div>
         <div className="agents-list">

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { CloseButton } from "./CloseButton";
+import { ThemedSelect } from "./ThemedSelect";
 import { focusDialogElement } from "./dialogFocus";
 import {
   type LayoutMode,
@@ -25,6 +26,8 @@ export function MobileLayoutDialog({
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      // An open popover (themed select) consumes Escape to close itself.
+      if (document.querySelector(".popover-content")) return;
       event.preventDefault();
       event.stopPropagation();
       onClose();
@@ -36,13 +39,19 @@ export function MobileLayoutDialog({
   const { preferences, mobile, urlOverride } = useLayoutPreferences();
   if (!open) return null;
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        // Clicks inside portaled popovers bubble here through the React tree.
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <div
         ref={dialogRef}
         className="modal mobile-layout-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Mobile Layout"
+        aria-label="Layout Preferences"
         tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
         onKeyDown={(event) => {
@@ -69,26 +78,26 @@ export function MobileLayoutDialog({
       >
         <div className="modal-head">
           <div>
-            <h2>Mobile Layout</h2>
-            <p>Choose display mode, breakpoint, and sidebar order.</p>
+            <h2>Layout Preferences</h2>
+            <p>Choose display mode, mobile breakpoint, and sidebar order.</p>
           </div>
-          <CloseButton label="Close Mobile Layout" onClick={onClose} />
+          <CloseButton label="Close Layout Preferences" onClick={onClose} />
         </div>
         <div className="layout-preferences">
           <label>
             <span>Display mode</span>
-            <select
+            <ThemedSelect
+              aria-label="Display mode"
               value={urlOverride ?? preferences.mode}
-              onChange={(event) =>
-                updateLayoutPreferences({
-                  mode: event.target.value as LayoutMode,
-                })
+              options={[
+                { value: "auto", label: "Automatic" },
+                { value: "mobile", label: "Mobile" },
+                { value: "desktop", label: "Desktop" },
+              ]}
+              onChange={(mode) =>
+                updateLayoutPreferences({ mode: mode as LayoutMode })
               }
-            >
-              <option value="auto">Automatic</option>
-              <option value="mobile">Mobile</option>
-              <option value="desktop">Desktop</option>
-            </select>
+            />
           </label>
           <p className="muted">
             Using {mobile ? "mobile" : "desktop"} layout
@@ -126,17 +135,19 @@ export function MobileLayoutDialog({
           {(["mobile", "desktop"] as const).map((view) => (
             <label key={view}>
               <span>{view === "mobile" ? "Mobile" : "Desktop"} sidebar</span>
-              <select
+              <ThemedSelect
+                aria-label={`${view === "mobile" ? "Mobile" : "Desktop"} sidebar`}
                 value={preferences[`${view}SidebarOrder`]}
-                onChange={(event) =>
+                options={[
+                  { value: "agents-first", label: "Agents on top" },
+                  { value: "workspaces-first", label: "Workspaces on top" },
+                ]}
+                onChange={(order) =>
                   updateLayoutPreferences({
-                    [`${view}SidebarOrder`]: event.target.value as SidebarOrder,
+                    [`${view}SidebarOrder`]: order as SidebarOrder,
                   })
                 }
-              >
-                <option value="agents-first">Agents on top</option>
-                <option value="workspaces-first">Workspaces on top</option>
-              </select>
+              />
             </label>
           ))}
           <p className="muted">

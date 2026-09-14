@@ -15,6 +15,7 @@ import {
 } from "../annotations";
 import type { Pane } from "../types";
 import { ConfirmDialog } from "./ModalDialogs";
+import { ThemedSelect } from "./ThemedSelect";
 
 function annotationLocation(annotation: ReviewAnnotation) {
   if (annotation.source === "diff") {
@@ -185,16 +186,15 @@ export function AnnotationPanel({
         {agentPanes.length > 1 ? (
           <label className="annotation-target-picker">
             <span>Agent pane</span>
-            <select
+            <ThemedSelect
+              aria-label="Agent pane"
               value={targetPaneId}
-              onChange={(event) => setTargetPaneId(event.currentTarget.value)}
-            >
-              {agentPanes.map((pane) => (
-                <option key={pane.pane_id} value={pane.pane_id}>
-                  {paneLabel(pane)}
-                </option>
-              ))}
-            </select>
+              options={agentPanes.map((pane) => ({
+                value: pane.pane_id,
+                label: paneLabel(pane),
+              }))}
+              onChange={setTargetPaneId}
+            />
           </label>
         ) : agentPanes.length === 1 ? (
           <div className="annotation-target-summary">

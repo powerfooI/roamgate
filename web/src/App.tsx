@@ -2392,6 +2392,29 @@ export default function App() {
         String(uiScale / 100),
       );
     }
+    // Radix positions popovers using getBoundingClientRect. Some engines
+    // return pre-zoom layout px instead of visual viewport px under CSS
+    // zoom, which breaks the static 1/zoom portal compensation. Measure the
+    // actual ratio and compensate with it so anchoring works either way.
+    const zoomProbe = document.createElement("div");
+    zoomProbe.style.cssText =
+      "position:fixed;top:100px;left:0;width:1px;height:1px;pointer-events:none;visibility:hidden";
+    document.body.append(zoomProbe);
+    const zoomRectRatio = zoomProbe.getBoundingClientRect().top / 100;
+    zoomProbe.remove();
+    if (zoomRectRatio > 0) {
+      document.documentElement.style.setProperty(
+        "--popover-portal-zoom",
+        String(1 / zoomRectRatio),
+      );
+      document.documentElement.style.setProperty(
+        "--popover-content-zoom",
+        String(zoomRectRatio),
+      );
+    } else {
+      document.documentElement.style.removeProperty("--popover-portal-zoom");
+      document.documentElement.style.removeProperty("--popover-content-zoom");
+    }
     roamgateLocalStorage.setItem(UI_SCALE_KEY, String(uiScale));
   }, [accentColor, resolvedTheme, theme, uiScale]);
   useEffect(() => {

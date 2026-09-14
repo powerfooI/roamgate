@@ -8,7 +8,7 @@ const maxFileCount = 160;
 const maxTotalBytes = 12 * 1024 * 1024;
 const maxInitialJsBytes = 660 * 1024;
 const maxInitialJsGzipBytes = 200 * 1024;
-const maxInitialCssBytes = 192 * 1024;
+const maxInitialCssBytes = 196 * 1024;
 
 /** Follow eager imports only; dynamic imports belong to feature budgets. */
 export function initialAssetFiles(manifest) {
