@@ -6,8 +6,8 @@ import {
   type TerminalReviewAnnotation,
 } from "../annotations";
 import {
-  WORKSPACE_INSPECTOR_REQUEST_EVENT,
-  type WorkspaceInspectorRequest,
+  WORKSPACE_ANNOTATION_REQUEST_EVENT,
+  type WorkspaceAnnotationRequest,
 } from "../workspaceResource";
 import {
   AnnotationComposerPopover,
@@ -2528,14 +2528,13 @@ export function TerminalView({
             comment,
           }) as TerminalReviewAnnotation;
           window.dispatchEvent(
-            new CustomEvent<WorkspaceInspectorRequest>(
-              WORKSPACE_INSPECTOR_REQUEST_EVENT,
+            new CustomEvent<WorkspaceAnnotationRequest>(
+              WORKSPACE_ANNOTATION_REQUEST_EVENT,
               {
                 detail: {
                   connectionId: connectionClient.connectionId,
                   generation: connectionClient.generation,
                   workspaceId: source.workspace_id,
-                  view: "files",
                   annotation,
                 },
               },

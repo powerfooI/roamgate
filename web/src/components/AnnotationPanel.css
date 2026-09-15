@@ -1,10 +1,6 @@
 .annotation-panel {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  bottom: 8px;
-  z-index: 20;
-  width: min(380px, calc(100% - 16px));
+  flex: 0 0 clamp(300px, 30%, 380px);
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -236,18 +232,20 @@
   color: var(--danger-text);
 }
 
-.workspace-inspector.is-compact .annotation-panel {
-  inset: 0;
-  width: 100%;
-  border: 0;
-  border-radius: 0;
-}
+:where(html[data-layout="mobile"]) {
+  .annotation-panel {
+    box-shadow: none;
+  }
 
-.workspace-inspector.is-compact .annotation-icon-button {
-  width: 36px;
-  height: 36px;
-}
+  .annotation-panel button {
+    min-height: 44px;
+  }
 
-.workspace-inspector.is-compact .annotation-delivery-actions button {
-  min-height: 42px;
+  .annotation-icon-button {
+    min-width: 44px;
+  }
+
+  .annotation-panel-footer {
+    padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+  }
 }

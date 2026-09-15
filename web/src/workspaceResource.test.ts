@@ -100,6 +100,12 @@ describe("workspace inspector shortcuts", () => {
 });
 
 describe("workspace inspector geometry", () => {
+  test("caps peer-layout resizing while preserving a compact terminal", () => {
+    expect(inspectorMaximumSize("right", 800, 700, true)).toBeCloseTo(440);
+    expect(inspectorMaximumSize("right", 500, 700, true)).toBe(253);
+    expect(inspectorMaximumSize("bottom", 800, 700, true)).toBe(350);
+    expect(inspectorMaximumSize("bottom", 800, 200, true)).toBe(73);
+  });
   test("preserves terminal minimums at the dock boundary", () => {
     const inspector = inspectorMaximumSize("right", 1000, 800);
     expect(inspector).toBe(513);
@@ -498,6 +504,16 @@ describe("workspace resource scope", () => {
       filesNavigationRatio: 0.4,
       changesNavigationRatio: 0.4,
     });
+
+    writeInspectorPreferences(storage, { ...state, size: 150 });
+    writeInspectorPreferences(storage, { ...state, dock: "right", size: 400 });
+    expect(readInspectorPreferences(storage, scope).bottomSize).toBe(150);
+    writeInspectorPreferences(storage, { ...state, size: 73 });
+    expect(readInspectorPreferences(storage, scope).bottomSize).toBe(73);
+    expect(
+      readInspectorPreferences(memoryStorage(), scope, { bottomSize: 0 })
+        .bottomSize,
+    ).toBe(360);
 
     writeInspectorNavigationRatio(storage, scope, "files", 0.56);
     expect(readInspectorPreferences(storage, scope).filesNavigationRatio).toBe(

@@ -2,6 +2,7 @@ import "../styles/tokens.css";
 import "../styles/base.css";
 import "../styles/layout/app.css";
 import "./WorktreeLifecycleDialog.css";
+import "./AnnotationPanel.css";
 
 // Deliberately exclude lazy inspector/terminal styles: App's shell must lay
 // out correctly even while those chunks are still downloading.
@@ -102,6 +103,67 @@ async function run() {
               }
             }
           }
+        }
+      }
+    }
+    document.documentElement.dataset.layout = "desktop";
+    const peers = document.createElement("div");
+    peers.className = "workspace-surfaces has-annotations";
+    peers.style.height = "700px";
+    fixture.append(peers);
+    peers.append(stage);
+    const annotations = document.createElement("aside");
+    annotations.className = "annotation-panel";
+    peers.append(annotations);
+    stage.style.cssText = "";
+    const disjoint = (a: DOMRect, b: DOMRect) =>
+      a.right <= b.left + 1 ||
+      b.right <= a.left + 1 ||
+      a.bottom <= b.top + 1 ||
+      b.bottom <= a.top + 1;
+    for (const theme of ["light", "dark"]) {
+      document.documentElement.dataset.theme = theme;
+      for (const width of [1100, 850]) {
+        peers.style.width = `${width}px`;
+        for (const dock of ["right", "bottom"]) {
+          stage.className = `workspace-stage has-inspector inspector-dock-${dock}`;
+          slot.style.cssText =
+            dock === "right" ? "width:400px" : "height:300px";
+          await settle();
+          const terminalRect = surface.getBoundingClientRect();
+          const inspectorRect = slot.getBoundingClientRect();
+          const annotationRect = annotations.getBoundingClientRect();
+          const context = `${theme} ${dock} peers at ${width}px`;
+          check(
+            getComputedStyle(resizer).display !== "none",
+            `${context}: docked Inspector resize control is hidden`,
+          );
+          check(
+            disjoint(terminalRect, annotationRect) &&
+              disjoint(inspectorRect, annotationRect) &&
+              disjoint(terminalRect, inspectorRect),
+            `${context}: docked peers overlap`,
+          );
+          check(
+            terminalRect.width >= 240 &&
+              terminalRect.height >= 180 &&
+              annotationRect.width >= 300,
+            `${context}: peer docking makes terminal or draft unusable`,
+          );
+          if (width === 1100 && dock === "right") {
+            slot.style.width = "360px";
+            await settle();
+            check(
+              slot.getBoundingClientRect().width === 360,
+              `${context}: peer docking ignored Inspector resize`,
+            );
+          }
+          check(
+            width > 900
+              ? annotationRect.left >= stage.getBoundingClientRect().right
+              : annotationRect.top >= stage.getBoundingClientRect().bottom,
+            `${context}: draft did not adapt to available width`,
+          );
         }
       }
     }

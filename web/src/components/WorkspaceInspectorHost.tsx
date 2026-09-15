@@ -1,4 +1,3 @@
-import { roamgateLocalStorage } from "../browserStorage";
 import {
   ChevronLeft,
   FileDiff,
@@ -6,7 +5,6 @@ import {
   GitFork,
   History,
   Maximize2,
-  MessageSquareText,
   Minimize2,
   PanelBottom,
   PanelRight,
@@ -18,7 +16,6 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -26,24 +23,12 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { ConnectionClient } from "../api";
+import { roamgateLocalStorage } from "../browserStorage";
 import {
-  annotationDraftStorageKey,
-  compileReviewFeedback,
-  createReviewAnnotation,
-  moveReviewAnnotation,
-  readReviewAnnotations,
-  reanchorDiffReviewAnnotations,
-  reanchorFileReviewAnnotations,
-  reviewAgentPanes,
-  removeDeliveredReviewAnnotations,
-  writeReviewAnnotations,
   type NewReviewAnnotation,
   type ReviewAnnotation,
 } from "../annotations";
 import { lazyWithReload } from "../lazyWithReload";
-import { store, useStoreSelector } from "../store";
-import { copyTextFromUserGesture } from "../terminalClipboard";
-import { terminalPasteRequest } from "../terminalPaste";
 import type { GitDiffEntry, Pane, Workspace } from "../types";
 import {
   DEFAULT_INSPECTOR_NAVIGATION_RATIO,
@@ -58,7 +43,6 @@ import {
   type WorkspaceInspectorState,
 } from "../workspaceResource";
 import { AgentHistoryDrawer } from "./AgentHistoryDrawer";
-import { AnnotationPanel } from "./AnnotationPanel";
 import { paneHasAgentHistory } from "./agentSession";
 import {
   type ActiveDiffSelection,
@@ -209,8 +193,6 @@ function InspectorSplitResizer({
 export function WorkspaceInspectorHost({
   state,
   onReady,
-  onAnnotationsReceived,
-  onGoToAgent,
   visible,
   workspace,
   historyPane,
@@ -221,6 +203,11 @@ export function WorkspaceInspectorHost({
   onFileSelectionChange,
   onDiffSelectionChange,
   onOpenDiffFile,
+  annotations,
+  onCreateAnnotation,
+  onReanchorFileAnnotations,
+  onReanchorDiffAnnotations,
+  onEditAnnotation,
   onOpenDocument,
   onRefreshFile,
   onViewChange,
@@ -231,8 +218,6 @@ export function WorkspaceInspectorHost({
 }: {
   state: WorkspaceInspectorState;
   onReady?: () => void;
-  onAnnotationsReceived: (ids: string[]) => void;
-  onGoToAgent: (paneId: string) => void;
   visible: boolean;
   workspace?: Workspace;
   historyPane?: Pane;
@@ -247,6 +232,15 @@ export function WorkspaceInspectorHost({
   onOpenDocument: (path: string, fragment?: string) => void;
   onRefreshFile: () => void;
   onOpenDiffFile: (entry: ActiveDiffSelection["entry"]) => void;
+  annotations: readonly ReviewAnnotation[];
+  onCreateAnnotation: (input: NewReviewAnnotation) => void;
+  onReanchorFileAnnotations: (path: string, text: string) => void;
+  onReanchorDiffAnnotations: (
+    path: string,
+    kind: GitDiffEntry["kind"],
+    patch: string,
+  ) => void;
+  onEditAnnotation: (id: string) => void;
   onViewChange: (view: InspectorView) => void;
   onDockChange: (dock: InspectorDock) => void;
   onExpandedChange: (expanded: boolean) => void;
@@ -261,26 +255,7 @@ export function WorkspaceInspectorHost({
   const changesTabRef = useRef<HTMLButtonElement | null>(null);
   const historyTabRef = useRef<HTMLButtonElement | null>(null);
   const diffViewerRef = useRef<DiffViewerPanelHandle | null>(null);
-  const annotationStorageFailureRef = useRef(false);
   const splitId = useId();
-  const allPanes = useStoreSelector((snapshot) => snapshot.panes);
-  const annotationStorageKey = annotationDraftStorageKey(state.scope);
-  const activeDraftKeyRef = useRef<string | null>(annotationStorageKey);
-  useLayoutEffect(() => {
-    activeDraftKeyRef.current = annotationStorageKey;
-    return () => {
-      activeDraftKeyRef.current = null;
-    };
-  }, [annotationStorageKey]);
-  const [annotations, setAnnotations] = useState<ReviewAnnotation[]>(() =>
-    readReviewAnnotations(roamgateLocalStorage, annotationStorageKey),
-  );
-  const [annotationsOpen, setAnnotationsOpen] = useState(false);
-  const [focusedAnnotationId, setFocusedAnnotationId] = useState<string | null>(
-    null,
-  );
-  const [deliveredPaneId, setDeliveredPaneId] = useState<string | null>(null);
-  const [annotationDeliveryBusy, setAnnotationDeliveryBusy] = useState(false);
   const [hostWidth, setHostWidth] = useState(0);
   const [fileDiffState, setFileDiffState] = useState<{
     resourceKey: string;
@@ -295,170 +270,6 @@ export function WorkspaceInspectorHost({
   }));
   const resourceKey = resourceOwnerKey(state.scope);
   const contentResourceKey = resourceStateKey(state.scope);
-  const agentPanes = useMemo(
-    () =>
-      reviewAgentPanes(
-        allPanes,
-        workspace?.workspace_id ?? "",
-        state.originPaneId,
-      ),
-    [allPanes, state.originPaneId, workspace?.workspace_id],
-  );
-  const commitAnnotations = useCallback(
-    (
-      update:
-        | ReviewAnnotation[]
-        | ((current: ReviewAnnotation[]) => ReviewAnnotation[]),
-    ) => {
-      setAnnotations((current) => {
-        const next = typeof update === "function" ? update(current) : update;
-        if (
-          next.length === current.length &&
-          next.every((annotation, index) => annotation === current[index])
-        ) {
-          return current;
-        }
-        const persisted = writeReviewAnnotations(
-          roamgateLocalStorage,
-          annotationStorageKey,
-          next,
-        );
-        if (!persisted && !annotationStorageFailureRef.current) {
-          annotationStorageFailureRef.current = true;
-          queueMicrotask(() =>
-            store.notify({
-              kind: "error",
-              message: "Review draft could not be saved",
-              detail:
-                "Browser storage is unavailable. Keep this page open or copy the feedback now.",
-            }),
-          );
-        } else if (persisted) {
-          annotationStorageFailureRef.current = false;
-        }
-        return next;
-      });
-    },
-    [annotationStorageKey],
-  );
-  const addAnnotation = useCallback(
-    (input: NewReviewAnnotation) => {
-      const annotation = createReviewAnnotation(input);
-      commitAnnotations((current) => [...current, annotation]);
-      setFocusedAnnotationId(annotation.id);
-      setAnnotationsOpen(true);
-    },
-    [commitAnnotations],
-  );
-  const reanchorFileAnnotations = useCallback(
-    (path: string, text: string) => {
-      commitAnnotations((current) =>
-        reanchorFileReviewAnnotations(current, path, text),
-      );
-    },
-    [commitAnnotations],
-  );
-  const reanchorDiffAnnotations = useCallback(
-    (path: string, kind: GitDiffEntry["kind"], patch: string) => {
-      commitAnnotations((current) =>
-        reanchorDiffReviewAnnotations(current, path, kind, patch),
-      );
-    },
-    [commitAnnotations],
-  );
-  const clearAnnotations = useCallback(() => {
-    commitAnnotations([]);
-    setFocusedAnnotationId(null);
-    setAnnotationsOpen(false);
-  }, [commitAnnotations]);
-  const copyFeedback = useCallback(
-    async (fallback = false) => {
-      const message = compileReviewFeedback(annotations);
-      if (!message) {
-        store.notify({
-          kind: "error",
-          message: "Add text to a review comment before delivery",
-        });
-        return;
-      }
-      setAnnotationDeliveryBusy(true);
-      try {
-        await copyTextFromUserGesture(message);
-        store.notify({
-          kind: "success",
-          message: fallback
-            ? "No agent pane found; feedback copied"
-            : "Review feedback copied",
-          detail: `${annotations.length} comment${annotations.length === 1 ? "" : "s"}`,
-          autoDismissMs: 5000,
-        });
-      } catch (error) {
-        store.notify({
-          kind: "error",
-          message: "Failed to copy review feedback",
-          detail: error instanceof Error ? error.message : String(error),
-        });
-      } finally {
-        setAnnotationDeliveryBusy(false);
-      }
-    },
-    [annotations],
-  );
-  const sendFeedback = useCallback(
-    async (paneId: string | null) => {
-      const target = agentPanes.find((pane) => pane.pane_id === paneId);
-      if (!target) {
-        await copyFeedback(true);
-        return;
-      }
-      const message = compileReviewFeedback(annotations);
-      if (!message) {
-        store.notify({
-          kind: "error",
-          message: "Add text to a review comment before delivery",
-        });
-        return;
-      }
-      setAnnotationDeliveryBusy(true);
-      try {
-        const request = terminalPasteRequest(target.pane_id, message);
-        await connectionClient.call(request.method, request.params);
-        if (!connectionClient.isCurrent()) return;
-        const draftActive = activeDraftKeyRef.current === annotationStorageKey;
-        if (draftActive) {
-          setDeliveredPaneId(target.pane_id);
-          commitAnnotations((current) =>
-            removeDeliveredReviewAnnotations(current, annotations),
-          );
-        }
-        store.notify({
-          kind: "success",
-          message: "Feedback pre-filled in the agent pane",
-          detail: draftActive
-            ? "Review the message there, then press Enter to submit it."
-            : "Original draft retained because its Inspector was unloaded. Review the message in the agent pane, then press Enter.",
-          autoDismissMs: 6000,
-        });
-      } catch (error) {
-        if (!connectionClient.isCurrent()) return;
-        store.notify({
-          kind: "error",
-          message: "Failed to pre-fill review feedback",
-          detail: error instanceof Error ? error.message : String(error),
-        });
-      } finally {
-        setAnnotationDeliveryBusy(false);
-      }
-    },
-    [
-      agentPanes,
-      annotations,
-      annotationStorageKey,
-      commitAnnotations,
-      connectionClient,
-      copyFeedback,
-    ],
-  );
   const fileDiffEntries =
     fileDiffState.resourceKey === contentResourceKey
       ? fileDiffState.entries
@@ -555,44 +366,6 @@ export function WorkspaceInspectorHost({
   const fileChangesKey = fileChangesEntries
     .map((entry) => `${entry.kind}:${entry.status}:${entry.path}`)
     .join("|");
-
-  useEffect(() => {
-    setAnnotations(
-      readReviewAnnotations(roamgateLocalStorage, annotationStorageKey),
-    );
-    setAnnotationsOpen(false);
-    setFocusedAnnotationId(null);
-  }, [annotationStorageKey]);
-
-  useEffect(() => {
-    const pending = state.pendingAnnotations;
-    if (!pending?.length) return;
-    commitAnnotations((current) => [
-      ...current,
-      ...pending.filter(
-        (annotation) => !current.some((item) => item.id === annotation.id),
-      ),
-    ]);
-    setFocusedAnnotationId(pending[pending.length - 1].id);
-    setAnnotationsOpen(true);
-    onAnnotationsReceived(pending.map((annotation) => annotation.id));
-  }, [state.pendingAnnotations, commitAnnotations, onAnnotationsReceived]);
-
-  useEffect(() => {
-    commitAnnotations((current) =>
-      current.map((annotation) => {
-        if (annotation.source !== "terminal") return annotation;
-        const stale = !allPanes.some(
-          (pane) =>
-            pane.pane_id === annotation.paneId &&
-            pane.workspace_id === workspace?.workspace_id,
-        );
-        return stale === !!annotation.stale
-          ? annotation
-          : { ...annotation, stale };
-      }),
-    );
-  }, [allPanes, workspace?.workspace_id, commitAnnotations]);
 
   useEffect(() => {
     if (state.view !== "files" || !fileSelection.entry) return;
@@ -737,21 +510,6 @@ export function WorkspaceInspectorHost({
         <div className="workspace-inspector-actions">
           <button
             type="button"
-            className={`workspace-inspector-annotation-action ${annotationsOpen ? "is-active" : ""}`}
-            title="Review feedback"
-            aria-label={`Review feedback, ${annotations.length} comment${annotations.length === 1 ? "" : "s"}`}
-            aria-pressed={annotationsOpen}
-            onClick={() => setAnnotationsOpen((open) => !open)}
-          >
-            <MessageSquareText size={15} />
-            {annotations.length ? (
-              <span className="workspace-inspector-annotation-count">
-                {annotations.length}
-              </span>
-            ) : null}
-          </button>
-          <button
-            type="button"
             className="workspace-inspector-dock-action"
             title={state.dock === "right" ? "Dock at bottom" : "Dock at right"}
             aria-label={
@@ -887,8 +645,8 @@ export function WorkspaceInspectorHost({
                     : undefined
                 }
                 annotations={annotations}
-                onCreateAnnotation={addAnnotation}
-                onReanchorAnnotations={reanchorFileAnnotations}
+                onCreateAnnotation={onCreateAnnotation}
+                onReanchorAnnotations={onReanchorFileAnnotations}
                 onOpenChanges={
                   primaryFileChangesEntry
                     ? () =>
@@ -936,12 +694,9 @@ export function WorkspaceInspectorHost({
                         resourceKey={`${contentResourceKey}:file:${fileChangesKey}`}
                         connectionClient={connectionClient}
                         annotations={annotations}
-                        onCreateAnnotation={addAnnotation}
-                        onReanchorAnnotations={reanchorDiffAnnotations}
-                        onEditAnnotation={(id) => {
-                          setFocusedAnnotationId(id);
-                          setAnnotationsOpen(true);
-                        }}
+                        onCreateAnnotation={onCreateAnnotation}
+                        onReanchorAnnotations={onReanchorDiffAnnotations}
+                        onEditAnnotation={onEditAnnotation}
                         onSelectFile={(entry) =>
                           diffViewerRef.current?.selectWorkingEntry(entry)
                         }
@@ -1015,12 +770,9 @@ export function WorkspaceInspectorHost({
                     resourceKey={contentResourceKey}
                     connectionClient={connectionClient}
                     annotations={annotations}
-                    onCreateAnnotation={addAnnotation}
-                    onReanchorAnnotations={reanchorDiffAnnotations}
-                    onEditAnnotation={(id) => {
-                      setFocusedAnnotationId(id);
-                      setAnnotationsOpen(true);
-                    }}
+                    onCreateAnnotation={onCreateAnnotation}
+                    onReanchorAnnotations={onReanchorDiffAnnotations}
+                    onEditAnnotation={onEditAnnotation}
                     onSelectFile={(target) =>
                       diffViewerRef.current?.selectEntry(target)
                     }
@@ -1052,44 +804,6 @@ export function WorkspaceInspectorHost({
               </div>
             )}
           </div>
-          <AnnotationPanel
-            open={annotationsOpen}
-            annotations={annotations}
-            agentPanes={agentPanes}
-            preferredPaneId={state.originPaneId}
-            busy={annotationDeliveryBusy}
-            focusedAnnotationId={focusedAnnotationId}
-            onClose={() => setAnnotationsOpen(false)}
-            onUpdateComment={(id, comment) =>
-              commitAnnotations((current) =>
-                current.map((annotation) =>
-                  annotation.id === id
-                    ? { ...annotation, comment }
-                    : annotation,
-                ),
-              )
-            }
-            onDelete={(id) => {
-              commitAnnotations((current) =>
-                current.filter((annotation) => annotation.id !== id),
-              );
-              if (focusedAnnotationId === id) setFocusedAnnotationId(null);
-            }}
-            onMove={(id, delta) =>
-              commitAnnotations((current) =>
-                moveReviewAnnotation(current, id, delta),
-              )
-            }
-            onGoToAgent={
-              deliveredPaneId &&
-              agentPanes.some((pane) => pane.pane_id === deliveredPaneId)
-                ? () => onGoToAgent(deliveredPaneId)
-                : undefined
-            }
-            onClear={clearAnnotations}
-            onCopy={() => void copyFeedback()}
-            onSend={(paneId) => void sendFeedback(paneId)}
-          />
         </div>
       )}
     </aside>

@@ -7,7 +7,7 @@ import {
 } from "../store";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { PanelRight } from "lucide-react";
+import { MessageSquareText, PanelRight } from "lucide-react";
 import type { Tab } from "../types";
 import { AgentStatusIcon } from "./AgentStatusIcon";
 import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
@@ -62,11 +62,15 @@ export function requestClosePane(paneId: string) {
 export function TabBar({
   mobile = false,
   inspectorOpen = false,
+  annotationsOpen = false,
   onToggleInspector,
+  onToggleAnnotations,
 }: {
   mobile?: boolean;
   inspectorOpen?: boolean;
+  annotationsOpen?: boolean;
   onToggleInspector?: () => void;
+  onToggleAnnotations?: () => void;
 }) {
   useShortcutPreferences();
   const s = useStoreSelector(
@@ -312,6 +316,16 @@ export function TabBar({
               {changedCount > 0 ? (
                 <span className="tabbar-change-count">{changedCount}</span>
               ) : null}
+            </button>
+            <button
+              type="button"
+              className={annotationsOpen ? "is-active" : ""}
+              aria-expanded={annotationsOpen}
+              title={annotationsOpen ? "Close Annotations" : "Open Annotations"}
+              onClick={onToggleAnnotations}
+            >
+              <MessageSquareText size={14} />
+              <span>Annotations</span>
             </button>
           </div>
         </div>

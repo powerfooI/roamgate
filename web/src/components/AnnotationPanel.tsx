@@ -90,14 +90,17 @@ export function AnnotationPanel({
 
   useEffect(() => {
     if (!open || !focusedAnnotationId) return;
-    const frame = requestAnimationFrame(() => {
-      const card = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-review-annotation-id]"),
-      ).find(
-        (element) => element.dataset.reviewAnnotationId === focusedAnnotationId,
-      );
-      card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      card?.querySelector("textarea")?.focus({ preventScroll: true });
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        const card = Array.from(
+          document.querySelectorAll<HTMLElement>("[data-review-annotation-id]"),
+        ).find(
+          (element) =>
+            element.dataset.reviewAnnotationId === focusedAnnotationId,
+        );
+        card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        card?.querySelector("textarea")?.focus({ preventScroll: true });
+      });
     });
     return () => cancelAnimationFrame(frame);
   }, [focusedAnnotationId, open]);
