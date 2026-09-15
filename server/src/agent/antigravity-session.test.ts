@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,6 +10,7 @@ import {
   readAntigravitySessionRecords,
 } from "./antigravity-session";
 import { resolveAgentSession } from "./session-resolver";
+import { projectAgentTrajectory } from "./session-trajectory";
 
 const tempRoots: string[] = [];
 const originalHome = process.env.ANTIGRAVITY_HOME;
@@ -430,5 +431,86 @@ describe("Antigravity sessions", () => {
     // Strictly assert no control characters (U+0000 - U+001F except \t, \n, \r) and no U+FFFD
     const junkRegex = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffd]/;
     expect(junkRegex.test(content || "")).toBe(false);
+  });
+
+  test("fails soft with empty history on unknown tables or future schema bump", async () => {
+    const root = await mkdtemp(join(tmpdir(), "roamgate-agy-test-"));
+    tempRoots.push(root);
+    const dbPath = join(root, "unknown-schema-session.db");
+    const db = new Database(dbPath);
+    db.run("CREATE TABLE schema_v99_future (id text, unknown_payload blob)");
+    db.run("INSERT INTO schema_v99_future VALUES (?, ?)", [
+      "fut-1",
+      Buffer.from([0x01, 0x02, 0x03]),
+    ]);
+    db.close();
+
+    const desc = await describeAntigravitySessionPath(dbPath);
+    expect(desc).not.toBeNull();
+    expect(desc?.session.sessionId).toBe("unknown-schema-session");
+
+    const records = await readAntigravitySessionRecords(dbPath);
+    expect(records).toEqual([]);
+
+    if (desc) {
+      const trajectory = projectAgentTrajectory("agy", desc.file, records);
+      expect(trajectory.schema_version).toBe("ATIF-v1.7");
+      expect(trajectory.agent.name).toBe("antigravity-cli");
+      expect(trajectory.steps).toEqual([]);
+    }
+  });
+
+  test("fails soft with empty records when steps table schema is altered", async () => {
+    const root = await mkdtemp(join(tmpdir(), "roamgate-agy-test-"));
+    tempRoots.push(root);
+    const dbPath = join(root, "altered-steps-session.db");
+    const db = new Database(dbPath);
+    db.run("CREATE TABLE steps (step_id text, different_structure text)");
+    db.run("INSERT INTO steps VALUES (?, ?)", ["1", "not-expected-columns"]);
+    db.close();
+
+    const records = await readAntigravitySessionRecords(dbPath);
+    expect(records).toEqual([]);
+  });
+
+  test("fails soft on individual malformed step rows while recovering valid ones", async () => {
+    const root = await mkdtemp(join(tmpdir(), "roamgate-agy-test-"));
+    tempRoots.push(root);
+    const dbPath = join(root, "partial-malformed.db");
+    const db = new Database(dbPath);
+
+    db.run(
+      "CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, status integer NOT NULL DEFAULT 0, has_subtrajectory numeric NOT NULL DEFAULT false, metadata blob, error_details blob, permissions blob, task_details blob, render_info blob, step_payload blob, step_format integer NOT NULL DEFAULT 0, PRIMARY KEY (idx))",
+    );
+
+    // Row 0: valid user input (step_type 14)
+    const userPrompt = "Hello from valid step";
+    const userMsg = encodeField(19, 2, encodeField(2, 2, userPrompt));
+    db.run(
+      "INSERT INTO steps (idx, step_type, metadata, step_payload) VALUES (?, ?, ?, ?)",
+      [0, 14, makeStepMeta(1726272000), userMsg],
+    );
+
+    // Row 1: malformed row with corrupt metadata and payload that could trigger type errors
+    db.run(
+      "INSERT INTO steps (idx, step_type, metadata, step_payload) VALUES (?, ?, ?, ?)",
+      [1, 15, Buffer.from([0xff, 0xff, 0xff]), Buffer.from([0xff, 0xff, 0xff])],
+    );
+    db.close();
+
+    const records = await readAntigravitySessionRecords(dbPath);
+    expect(records.length).toBe(1);
+    expect(records[0].type).toBe("user");
+    expect((records[0] as { content?: string }).content).toBe(userPrompt);
+  });
+
+  test("fails soft with empty records when file is corrupt or not an sqlite database", async () => {
+    const root = await mkdtemp(join(tmpdir(), "roamgate-agy-test-"));
+    tempRoots.push(root);
+    const corruptPath = join(root, "not-a-db.db");
+    await writeFile(corruptPath, "this is not an sqlite database at all");
+
+    const records = await readAntigravitySessionRecords(corruptPath);
+    expect(records).toEqual([]);
   });
 });

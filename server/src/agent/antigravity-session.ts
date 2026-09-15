@@ -95,6 +95,14 @@ export function decodeProto(buf: Uint8Array | null | undefined): ProtoField[] {
   return fields;
 }
 
+export function toUtf8String(val: unknown): string {
+  if (val instanceof Uint8Array || Buffer.isBuffer(val)) {
+    return Buffer.from(val).toString("utf8");
+  }
+  if (typeof val === "string") return val;
+  return "";
+}
+
 const CONTROL_CHARS_REGEX = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffd]/;
 
 export function extractToolOutputText(
@@ -106,11 +114,11 @@ export function extractToolOutputText(
     const subFields = decodeProto(val);
     const sf1 = subFields.find((f) => f.fieldNum === 1);
     if (sf1 && sf1.val) {
-      text = Buffer.from(sf1.val).toString("utf8");
+      text = toUtf8String(sf1.val);
     } else {
       for (const f of subFields) {
         if (f.wireType === 2 && f.val) {
-          const candidate = Buffer.from(f.val).toString("utf8");
+          const candidate = toUtf8String(f.val);
           if (!CONTROL_CHARS_REGEX.test(candidate)) {
             text = candidate;
             break;
@@ -122,7 +130,7 @@ export function extractToolOutputText(
     // fallback if not a valid protobuf message
   }
   if (!text) {
-    text = Buffer.from(val).toString("utf8");
+    text = toUtf8String(val);
   }
   return text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffd]/g, "");
 }
@@ -210,11 +218,7 @@ function inspectAntigravityDb(
       const fields = decodeProto(blobRow.data);
       const f7 = fields.find((f) => f.fieldNum === 7);
       const f1 = fields.find((f) => f.fieldNum === 1);
-      const rawUri = f7
-        ? Buffer.from(f7.val).toString("utf8")
-        : f1
-          ? Buffer.from(f1.val).toString("utf8")
-          : "";
+      const rawUri = f7 ? toUtf8String(f7.val) : f1 ? toUtf8String(f1.val) : "";
       if (rawUri.startsWith("file://")) {
         cwd = rawUri.replace(/^file:\/\//, "");
       } else if (rawUri) {
@@ -234,7 +238,7 @@ function inspectAntigravityDb(
       if (f1) {
         const f1sub = decodeProto(f1.val);
         const f19 = f1sub.find((f) => f.fieldNum === 19);
-        if (f19) modelName = Buffer.from(f19.val).toString("utf8");
+        if (f19) modelName = toUtf8String(f19.val);
       }
     }
   } catch {}
@@ -410,224 +414,244 @@ export async function findAntigravitySessionForCwd(
 export async function readAntigravitySessionRecords(
   dbPath: string,
 ): Promise<Record<string, unknown>[]> {
-  return withTempDb(dbPath, (db) => {
-    let globalModelName: string | undefined;
-    const tokenUsageByStepIndex = new Map<number, TokenUsage>();
+  try {
+    return withTempDb(dbPath, (db) => {
+      let globalModelName: string | undefined;
+      const tokenUsageByStepIndex = new Map<number, TokenUsage>();
 
-    try {
-      const genRows = db
-        .query("SELECT * FROM gen_metadata ORDER BY idx ASC")
-        .all() as {
-        idx: number;
-        data: Uint8Array;
-      }[];
-      for (const r of genRows) {
-        const fields = decodeProto(r.data);
-        const f1 = fields.find((f) => f.fieldNum === 1);
-        if (!f1) continue;
-        const f1sub = decodeProto(f1.val);
-        const f19 = f1sub.find((f) => f.fieldNum === 19);
-        if (f19) globalModelName = Buffer.from(f19.val).toString("utf8");
+      try {
+        const genRows = db
+          .query("SELECT * FROM gen_metadata ORDER BY idx ASC")
+          .all() as {
+          idx: number;
+          data: Uint8Array;
+        }[];
+        for (const r of genRows) {
+          try {
+            const fields = decodeProto(r.data);
+            const f1 = fields.find((f) => f.fieldNum === 1);
+            if (!f1) continue;
+            const f1sub = decodeProto(f1.val);
+            const f19 = f1sub.find((f) => f.fieldNum === 19);
+            if (f19) globalModelName = toUtf8String(f19.val);
 
-        const f4 = f1sub.find((f) => f.fieldNum === 4);
-        let usage: TokenUsage | undefined;
-        if (f4) {
-          const f4sub = decodeProto(f4.val);
-          const inTok = Number(f4sub.find((f) => f.fieldNum === 2)?.val);
-          const outTok = Number(f4sub.find((f) => f.fieldNum === 3)?.val);
-          const cachedTok = Number(f4sub.find((f) => f.fieldNum === 9)?.val);
-          usage = {
-            input_tokens: Number.isFinite(inTok) ? inTok : undefined,
-            output_tokens: Number.isFinite(outTok) ? outTok : undefined,
-            cached_input_tokens: Number.isFinite(cachedTok)
-              ? cachedTok
-              : undefined,
-            total_tokens:
-              (Number.isFinite(inTok) ? inTok : 0) +
-                (Number.isFinite(outTok) ? outTok : 0) || undefined,
-          };
-        }
-
-        if (usage) {
-          let lastStepIndex: number | undefined;
-          for (const f20 of f1sub.filter((f) => f.fieldNum === 20)) {
-            const kv = decodeProto(f20.val);
-            const k = kv.find((x) => x.fieldNum === 1);
-            const v = kv.find((x) => x.fieldNum === 2);
-            if (
-              k &&
-              v &&
-              Buffer.from(k.val).toString("utf8") === "last_step_index"
-            ) {
-              lastStepIndex = parseInt(Buffer.from(v.val).toString("utf8"), 10);
+            const f4 = f1sub.find((f) => f.fieldNum === 4);
+            let usage: TokenUsage | undefined;
+            if (f4) {
+              const f4sub = decodeProto(f4.val);
+              const inTok = Number(f4sub.find((f) => f.fieldNum === 2)?.val);
+              const outTok = Number(f4sub.find((f) => f.fieldNum === 3)?.val);
+              const cachedTok = Number(
+                f4sub.find((f) => f.fieldNum === 9)?.val,
+              );
+              usage = {
+                input_tokens: Number.isFinite(inTok) ? inTok : undefined,
+                output_tokens: Number.isFinite(outTok) ? outTok : undefined,
+                cached_input_tokens: Number.isFinite(cachedTok)
+                  ? cachedTok
+                  : undefined,
+                total_tokens:
+                  (Number.isFinite(inTok) ? inTok : 0) +
+                    (Number.isFinite(outTok) ? outTok : 0) || undefined,
+              };
             }
-          }
-          if (lastStepIndex !== undefined) {
-            tokenUsageByStepIndex.set(lastStepIndex, usage);
+
+            if (usage) {
+              let lastStepIndex: number | undefined;
+              for (const f20 of f1sub.filter((f) => f.fieldNum === 20)) {
+                const kv = decodeProto(f20.val);
+                const k = kv.find((x) => x.fieldNum === 1);
+                const v = kv.find((x) => x.fieldNum === 2);
+                if (k && v && toUtf8String(k.val) === "last_step_index") {
+                  lastStepIndex = parseInt(toUtf8String(v.val), 10);
+                }
+              }
+              if (lastStepIndex !== undefined) {
+                tokenUsageByStepIndex.set(lastStepIndex, usage);
+              }
+            }
+          } catch {
+            // Ignore malformed row in gen_metadata
           }
         }
+      } catch {
+        // Table gen_metadata missing or schema changed
       }
-    } catch {}
 
-    const steps = db.query("SELECT * FROM steps ORDER BY idx ASC").all() as {
-      idx: number;
-      step_type: number;
-      metadata: Uint8Array | null;
-      step_payload: Uint8Array | null;
-      error_details: Uint8Array | null;
-    }[];
-
-    const records: Record<string, unknown>[] = [];
-
-    for (const s of steps) {
-      const meta = decodeProto(s.metadata);
-      const payload = decodeProto(s.step_payload);
-
-      let date = new Date(0);
-      const tsField = meta.find((f) => f.fieldNum === 1);
-      if (tsField && tsField.val) {
-        const sub = decodeProto(tsField.val);
-        const sec = sub.find((f) => f.fieldNum === 1);
-        if (sec) date = new Date(Number(sec.val) * 1000);
+      type StepRow = {
+        idx: number;
+        step_type: number;
+        metadata: Uint8Array | null;
+        step_payload: Uint8Array | null;
+        error_details: Uint8Array | null;
+      };
+      let steps: StepRow[];
+      try {
+        steps = db
+          .query("SELECT * FROM steps ORDER BY idx ASC")
+          .all() as StepRow[];
+      } catch {
+        // Table steps missing or schema bumped — fail soft with empty records
+        return [];
       }
-      const timestamp = date.toISOString();
 
-      // Tool call? (metadata field 4)
-      const f4 = meta.find((f) => f.fieldNum === 4);
-      if (f4 && f4.val) {
-        const sub = decodeProto(f4.val);
-        const sf1 = sub.find((f) => f.fieldNum === 1);
-        const sf2 = sub.find((f) => f.fieldNum === 2);
-        const sf3 = sub.find((f) => f.fieldNum === 3);
+      const records: Record<string, unknown>[] = [];
 
-        const toolCallId = sf1
-          ? Buffer.from(sf1.val).toString("utf8")
-          : `call_${s.idx}`;
-        const toolName = sf2 ? Buffer.from(sf2.val).toString("utf8") : "tool";
-        const argsRaw = sf3 ? Buffer.from(sf3.val).toString("utf8") : "{}";
-        let parsedArgs: Record<string, unknown>;
+      for (const s of steps) {
         try {
-          const parsed = JSON.parse(argsRaw);
-          parsedArgs = isRecord(parsed) ? parsed : { value: parsed };
-        } catch {
-          parsedArgs = { value: argsRaw };
-        }
+          const meta = decodeProto(s.metadata);
+          const payload = decodeProto(s.step_payload);
 
-        records.push({
-          type: "assistant",
-          timestamp,
-          tool_calls: [
-            {
-              id: toolCallId,
-              name: toolName,
-              arguments: parsedArgs,
-            },
-          ],
-          model: globalModelName,
-        });
-
-        // Tool result (payload field 140)
-        const f140 = payload.find((f) => f.fieldNum === 140);
-        if (f140 && f140.val) {
-          const resSub = decodeProto(f140.val);
-          const sfOut = resSub.find((f) => f.fieldNum === 2);
-          const outText = sfOut ? extractToolOutputText(sfOut.val) : "";
-          records.push({
-            type: "tool_result",
-            timestamp,
-            tool_call_id: toolCallId,
-            tool_name: toolName,
-            content: outText,
-          });
-        }
-        continue;
-      }
-
-      // User input (step_type 14)
-      if (s.step_type === 14) {
-        const f19 = payload.find((f) => f.fieldNum === 19);
-        if (f19 && f19.val) {
-          const sub = decodeProto(f19.val);
-          const sf2 = sub.find((f) => f.fieldNum === 2);
-          if (sf2 && sf2.val) {
-            records.push({
-              type: "user",
-              timestamp,
-              content: Buffer.from(sf2.val).toString("utf8").trim(),
-            });
+          let date = new Date(0);
+          const tsField = meta.find((f) => f.fieldNum === 1);
+          if (tsField && tsField.val) {
+            const sub = decodeProto(tsField.val);
+            const sec = sub.find((f) => f.fieldNum === 1);
+            if (sec) date = new Date(Number(sec.val) * 1000);
           }
-        }
-        continue;
-      }
+          const timestamp = date.toISOString();
 
-      // Planner response (step_type 15)
-      if (s.step_type === 15) {
-        const f20 = payload.find((f) => f.fieldNum === 20);
-        if (f20 && f20.val) {
-          const sub = decodeProto(f20.val);
-          const sf1 =
-            sub.find((f) => f.fieldNum === 1) ||
-            sub.find((f) => f.fieldNum === 8);
-          const sf3 = sub.find((f) => f.fieldNum === 3);
-          const text =
-            sf1 && sf1.val ? Buffer.from(sf1.val).toString("utf8").trim() : "";
-          const thought =
-            sf3 && sf3.val ? Buffer.from(sf3.val).toString("utf8").trim() : "";
+          // Tool call? (metadata field 4)
+          const f4 = meta.find((f) => f.fieldNum === 4);
+          if (f4 && f4.val) {
+            const sub = decodeProto(f4.val);
+            const sf1 = sub.find((f) => f.fieldNum === 1);
+            const sf2 = sub.find((f) => f.fieldNum === 2);
+            const sf3 = sub.find((f) => f.fieldNum === 3);
 
-          const usage = tokenUsageByStepIndex.get(s.idx);
+            const toolCallId = sf1 ? toUtf8String(sf1.val) : `call_${s.idx}`;
+            const toolName = sf2 ? toUtf8String(sf2.val) : "tool";
+            const argsRaw = sf3 ? toUtf8String(sf3.val) : "{}";
+            let parsedArgs: Record<string, unknown>;
+            try {
+              const parsed = JSON.parse(argsRaw);
+              parsedArgs = isRecord(parsed) ? parsed : { value: parsed };
+            } catch {
+              parsedArgs = { value: argsRaw };
+            }
 
-          if (text) {
             records.push({
               type: "assistant",
               timestamp,
-              content: text,
-              reasoning: thought || undefined,
-              usage,
+              tool_calls: [
+                {
+                  id: toolCallId,
+                  name: toolName,
+                  arguments: parsedArgs,
+                },
+              ],
               model: globalModelName,
             });
-          } else if (thought) {
-            records.push({
-              type: "reasoning",
-              timestamp,
-              summary: thought,
-              usage,
-              model: globalModelName,
-            });
+
+            // Tool result (payload field 140)
+            const f140 = payload.find((f) => f.fieldNum === 140);
+            if (f140 && f140.val) {
+              const resSub = decodeProto(f140.val);
+              const sfOut = resSub.find((f) => f.fieldNum === 2);
+              const outText = sfOut ? extractToolOutputText(sfOut.val) : "";
+              records.push({
+                type: "tool_result",
+                timestamp,
+                tool_call_id: toolCallId,
+                tool_name: toolName,
+                content: outText,
+              });
+            }
+            continue;
           }
+
+          // User input (step_type 14)
+          if (s.step_type === 14) {
+            const f19 = payload.find((f) => f.fieldNum === 19);
+            if (f19 && f19.val) {
+              const sub = decodeProto(f19.val);
+              const sf2 = sub.find((f) => f.fieldNum === 2);
+              if (sf2 && sf2.val) {
+                records.push({
+                  type: "user",
+                  timestamp,
+                  content: toUtf8String(sf2.val).trim(),
+                });
+              }
+            }
+            continue;
+          }
+
+          // Planner response (step_type 15)
+          if (s.step_type === 15) {
+            const f20 = payload.find((f) => f.fieldNum === 20);
+            if (f20 && f20.val) {
+              const sub = decodeProto(f20.val);
+              const sf1 =
+                sub.find((f) => f.fieldNum === 1) ||
+                sub.find((f) => f.fieldNum === 8);
+              const sf3 = sub.find((f) => f.fieldNum === 3);
+              const text = sf1 && sf1.val ? toUtf8String(sf1.val).trim() : "";
+              const thought =
+                sf3 && sf3.val ? toUtf8String(sf3.val).trim() : "";
+
+              const usage = tokenUsageByStepIndex.get(s.idx);
+
+              if (text) {
+                records.push({
+                  type: "assistant",
+                  timestamp,
+                  content: text,
+                  reasoning: thought || undefined,
+                  usage,
+                  model: globalModelName,
+                });
+              } else if (thought) {
+                records.push({
+                  type: "reasoning",
+                  timestamp,
+                  summary: thought,
+                  usage,
+                  model: globalModelName,
+                });
+              }
+            }
+            continue;
+          }
+
+          // System message (step_type 101)
+          if (s.step_type === 101) {
+            const f114 = payload.find((f) => f.fieldNum === 114);
+            if (f114 && f114.val) {
+              records.push({
+                type: "system",
+                timestamp,
+                content: toUtf8String(f114.val).trim(),
+              });
+            }
+            continue;
+          }
+
+          // Error message (step_type 17)
+          if (s.step_type === 17) {
+            const f24 = payload.find((f) => f.fieldNum === 24);
+            if (f24 && f24.val) {
+              const err = toUtf8String(f24.val).trim();
+              records.push({
+                type: "assistant",
+                timestamp,
+                content: `Error: ${err}`,
+                error_message: err,
+                is_error: true,
+              });
+            }
+            continue;
+          }
+        } catch {
+          // Fail soft on malformed individual step record
+          continue;
         }
-        continue;
       }
 
-      // System message (step_type 101)
-      if (s.step_type === 101) {
-        const f114 = payload.find((f) => f.fieldNum === 114);
-        if (f114 && f114.val) {
-          records.push({
-            type: "system",
-            timestamp,
-            content: Buffer.from(f114.val).toString("utf8").trim(),
-          });
-        }
-        continue;
-      }
-
-      // Error message (step_type 17)
-      if (s.step_type === 17) {
-        const f24 = payload.find((f) => f.fieldNum === 24);
-        if (f24 && f24.val) {
-          const err = Buffer.from(f24.val).toString("utf8").trim();
-          records.push({
-            type: "assistant",
-            timestamp,
-            content: `Error: ${err}`,
-            error_message: err,
-            is_error: true,
-          });
-        }
-        continue;
-      }
-    }
-
-    return records;
-  });
+      return records;
+    });
+  } catch {
+    // Fail soft when opening or reading the database fails
+    return [];
+  }
 }

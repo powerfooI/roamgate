@@ -823,104 +823,108 @@ function projectAntigravityTrajectory(
   const steps: Omit<AtifStep, "step_id">[] = [];
   const createdAt = file.createdAtMs ?? file.mtimeMs;
   records.forEach((record, index) => {
-    const timestamp = messageTime(record, createdAt, index);
-    const type = stringValue(record.type);
-    if (type === "user") {
-      const text = cleanMessageText(textFromContent(record.content));
-      if (text) {
+    try {
+      const timestamp = messageTime(record, createdAt, index);
+      const type = stringValue(record.type);
+      if (type === "user") {
+        const text = cleanMessageText(textFromContent(record.content));
+        if (text) {
+          steps.push({
+            timestamp,
+            source: "user",
+            message: text,
+            extra: { record_type: type },
+          });
+        }
+        return;
+      }
+      if (type === "system") {
+        const text = cleanMessageText(textFromContent(record.content));
+        if (text) {
+          steps.push({
+            timestamp,
+            source: "system",
+            message: text,
+            extra: { record_type: type },
+          });
+        }
+        return;
+      }
+      if (type === "reasoning") {
+        const reasoning = cleanMessageText(
+          textFromContent(record.summary ?? record.content),
+        );
+        if (!reasoning) return;
         steps.push({
           timestamp,
-          source: "user",
-          message: text,
-          extra: { record_type: type },
+          source: "agent",
+          message: "Reasoning",
+          reasoning_content: reasoning,
+          metrics: tokenUsageToMetrics(tokenUsageForRecord(record).usage),
+          extra: {
+            record_type: type,
+            model: file.modelName,
+          },
         });
+        return;
       }
-      return;
-    }
-    if (type === "system") {
-      const text = cleanMessageText(textFromContent(record.content));
-      if (text) {
+      if (type === "assistant") {
+        const text = cleanMessageText(textFromContent(record.content));
+        const toolCalls = Array.isArray(record.tool_calls)
+          ? record.tool_calls.filter(isRecord).map((call, callIndex) => ({
+              tool_call_id: stringValue(call.id) || `${index}:${callIndex}`,
+              function_name: stringValue(call.name) || "tool",
+              arguments: toolArguments(call.arguments),
+            }))
+          : [];
+        const reasoning = cleanMessageText(textFromContent(record.reasoning));
+        const errorMessage = stringValue(record.error_message);
+        if (!text && toolCalls.length === 0 && !reasoning && !errorMessage)
+          return;
+        steps.push({
+          timestamp,
+          source: "agent",
+          message:
+            text ||
+            (toolCalls.length > 0
+              ? `Tool call${toolCalls.length === 1 ? "" : "s"}: ${toolCalls
+                  .map((call) => call.function_name)
+                  .join(", ")}`
+              : errorMessage || "Assistant message"),
+          reasoning_content: reasoning || undefined,
+          tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+          metrics: tokenUsageToMetrics(tokenUsageForRecord(record).usage),
+          extra: {
+            record_type: type,
+            model: file.modelName,
+            error_message: errorMessage || undefined,
+          },
+        });
+        return;
+      }
+      if (type === "tool_result") {
+        const content = toolOutputText(record.content);
         steps.push({
           timestamp,
           source: "system",
-          message: text,
+          message: content || "Tool result",
+          observation: {
+            results: [
+              {
+                source_call_id: stringValue(record.tool_call_id),
+                content: content || "Tool result",
+                extra: {
+                  tool_name: stringValue(record.tool_name) || undefined,
+                  is_error: record.is_error === true,
+                },
+              },
+            ],
+          },
           extra: { record_type: type },
         });
       }
-      return;
-    }
-    if (type === "reasoning") {
-      const reasoning = cleanMessageText(
-        textFromContent(record.summary ?? record.content),
-      );
-      if (!reasoning) return;
-      steps.push({
-        timestamp,
-        source: "agent",
-        message: "Reasoning",
-        reasoning_content: reasoning,
-        metrics: tokenUsageToMetrics(tokenUsageForRecord(record).usage),
-        extra: {
-          record_type: type,
-          model: file.modelName,
-        },
-      });
-      return;
-    }
-    if (type === "assistant") {
-      const text = cleanMessageText(textFromContent(record.content));
-      const toolCalls = Array.isArray(record.tool_calls)
-        ? record.tool_calls.filter(isRecord).map((call, callIndex) => ({
-            tool_call_id: stringValue(call.id) || `${index}:${callIndex}`,
-            function_name: stringValue(call.name) || "tool",
-            arguments: toolArguments(call.arguments),
-          }))
-        : [];
-      const reasoning = cleanMessageText(textFromContent(record.reasoning));
-      const errorMessage = stringValue(record.error_message);
-      if (!text && toolCalls.length === 0 && !reasoning && !errorMessage)
-        return;
-      steps.push({
-        timestamp,
-        source: "agent",
-        message:
-          text ||
-          (toolCalls.length > 0
-            ? `Tool call${toolCalls.length === 1 ? "" : "s"}: ${toolCalls
-                .map((call) => call.function_name)
-                .join(", ")}`
-            : errorMessage || "Assistant message"),
-        reasoning_content: reasoning || undefined,
-        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-        metrics: tokenUsageToMetrics(tokenUsageForRecord(record).usage),
-        extra: {
-          record_type: type,
-          model: file.modelName,
-          error_message: errorMessage || undefined,
-        },
-      });
-      return;
-    }
-    if (type === "tool_result") {
-      const content = toolOutputText(record.content);
-      steps.push({
-        timestamp,
-        source: "system",
-        message: content || "Tool result",
-        observation: {
-          results: [
-            {
-              source_call_id: stringValue(record.tool_call_id),
-              content: content || "Tool result",
-              extra: {
-                tool_name: stringValue(record.tool_name) || undefined,
-                is_error: record.is_error === true,
-              },
-            },
-          ],
-        },
-        extra: { record_type: type },
-      });
+    } catch {
+      // Fail soft on malformed record
     }
   });
   return createTrajectory("agy", file, records, steps);
