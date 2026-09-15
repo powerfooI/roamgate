@@ -203,3 +203,37 @@
     }
   }
 }
+
+:where(html[data-layout="mobile"]) {
+  .mobile-nav[aria-label="Workspace view switcher"] {
+    padding: 2px;
+  }
+
+  .mobile-nav[aria-label="Workspace view switcher"] button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+}
+
+/* Draft editing has no terminal controls. Dock its surface switcher outside
+   the draft instead of floating over comments and delivery actions. */
+:where(html[data-layout="mobile"]) {
+  .app:has(.body.mobile-view-annotations) {
+    .mobile-terminal-controls,
+    .mobile-workspace-shortcut {
+      display: none;
+    }
+
+    .mobile-nav[aria-label="Workspace view switcher"] {
+      position: static;
+      order: 1;
+      flex: 0 0 auto;
+      align-self: center;
+      margin: 4px 6px max(4px, env(safe-area-inset-bottom, 0px));
+      transform: none;
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+}

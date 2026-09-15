@@ -6,7 +6,6 @@ export type ReviewAnnotationSide = "old" | "new";
 
 type ReviewAnnotationBase = {
   id: string;
-  path: string;
   quote: string;
   comment: string;
   createdAt: number;
@@ -15,6 +14,7 @@ type ReviewAnnotationBase = {
 
 export type DiffReviewAnnotation = ReviewAnnotationBase & {
   source: "diff";
+  path: string;
   kind: GitDiffKind;
   side: ReviewAnnotationSide;
   line: number;
@@ -25,6 +25,7 @@ export type DiffReviewAnnotation = ReviewAnnotationBase & {
 
 export type FileLineReviewAnnotation = ReviewAnnotationBase & {
   source: "file";
+  path: string;
   anchor: "line";
   line: number;
   endLine?: number;
@@ -32,16 +33,26 @@ export type FileLineReviewAnnotation = ReviewAnnotationBase & {
 
 export type MarkdownReviewAnnotation = ReviewAnnotationBase & {
   source: "file";
+  path: string;
   anchor: "quote";
   section: string[];
 };
 
+export type TerminalReviewAnnotation = ReviewAnnotationBase & {
+  source: "terminal";
+  anchor: "quote";
+  paneId: string;
+  title: string;
+};
+
 export type ReviewAnnotation =
+  | TerminalReviewAnnotation
   | DiffReviewAnnotation
   | FileLineReviewAnnotation
   | MarkdownReviewAnnotation;
 
 export type NewReviewAnnotation =
+  | Omit<TerminalReviewAnnotation, "id" | "createdAt" | "stale">
   | Omit<DiffReviewAnnotation, "id" | "createdAt" | "stale">
   | Omit<FileLineReviewAnnotation, "id" | "createdAt" | "stale">
   | Omit<MarkdownReviewAnnotation, "id" | "createdAt" | "stale">;
@@ -115,23 +126,30 @@ export function parseReviewAnnotation(value: unknown): ReviewAnnotation | null {
     candidate.createdAt >= 0
       ? candidate.createdAt
       : null;
-  if (
-    !id ||
-    !path ||
-    quote === null ||
-    comment === null ||
-    createdAt === null
-  ) {
+  if (!id || quote === null || comment === null || createdAt === null) {
     return null;
   }
   const base = {
     id,
-    path,
     quote,
     comment,
     createdAt,
     ...(candidate.stale === true ? { stale: true } : {}),
   };
+
+  if (candidate.source === "terminal") {
+    const paneId = boundedString(candidate.paneId, 200);
+    const title = boundedString(candidate.title, 500);
+    if (
+      !paneId?.trim() ||
+      !title?.trim() ||
+      !quote.trim() ||
+      candidate.anchor !== "quote"
+    )
+      return null;
+    return { ...base, source: "terminal", anchor: "quote", paneId, title };
+  }
+  if (!path) return null;
 
   if (candidate.source === "diff") {
     const line = finitePositiveLine(candidate.line);
@@ -163,6 +181,7 @@ export function parseReviewAnnotation(value: unknown): ReviewAnnotation | null {
     }
     return {
       ...base,
+      path,
       source: "diff",
       kind: candidate.kind as GitDiffKind,
       side: candidate.side,
@@ -189,6 +208,7 @@ export function parseReviewAnnotation(value: unknown): ReviewAnnotation | null {
     }
     return {
       ...base,
+      path,
       source: "file",
       anchor: "line",
       line,
@@ -202,7 +222,7 @@ export function parseReviewAnnotation(value: unknown): ReviewAnnotation | null {
     .slice(0, MAX_SECTION_DEPTH)
     .map((part) => boundedString(part, 500))
     .filter((part): part is string => part !== null && part.length > 0);
-  return { ...base, source: "file", anchor: "quote", section };
+  return { ...base, path, source: "file", anchor: "quote", section };
 }
 
 export function readReviewAnnotations(
@@ -729,13 +749,15 @@ export function compileReviewFeedback(
     .map((annotation, index) => {
       const stale = annotation.stale ? "; anchor may be stale" : "";
       const location =
-        annotation.source === "diff"
-          ? `${quotedPath(annotation.path)} (${diffReviewLineLabel(annotation)}${stale})`
-          : annotation.anchor === "line"
-            ? `${quotedPath(annotation.path)} (${fileReviewLineLabel(annotation)}${stale})`
-            : annotation.section.length
-              ? `${quotedPath(annotation.path)} § "${annotation.section.join(" › ")}"${annotation.stale ? " (anchor may be stale)" : ""}`
-              : `${quotedPath(annotation.path)} (selected passage${stale})`;
+        annotation.source === "terminal"
+          ? `terminal pane ${quotedPath(annotation.title)} (selected passage${stale})`
+          : annotation.source === "diff"
+            ? `${quotedPath(annotation.path)} (${diffReviewLineLabel(annotation)}${stale})`
+            : annotation.anchor === "line"
+              ? `${quotedPath(annotation.path)} (${fileReviewLineLabel(annotation)}${stale})`
+              : annotation.section.length
+                ? `${quotedPath(annotation.path)} § "${annotation.section.join(" › ")}"${annotation.stale ? " (anchor may be stale)" : ""}`
+                : `${quotedPath(annotation.path)} (selected passage${stale})`;
       return `${index + 1}. ${location}:\n${quoteBlock(annotation.quote)}\n\n${annotation.comment.trim()}`;
     });
   return items.length ? `Review feedback:\n\n${items.join("\n\n")}` : "";
@@ -760,4 +782,23 @@ export function reviewAgentPanes(
         right.pane_id === preferredPaneId ? 0 : right.focused ? 1 : 2;
       return leftRank - rightRank || left.pane_id.localeCompare(right.pane_id);
     });
+}
+
+// Only remove unchanged, nonblank comments included in the successful pre-fill.
+export function removeDeliveredReviewAnnotations(
+  current: readonly ReviewAnnotation[],
+  delivered: readonly ReviewAnnotation[],
+): ReviewAnnotation[] {
+  const snapshots = new Map(
+    delivered
+      .filter((item) => item.comment.trim())
+      .map((item) => [item.id, JSON.stringify(item)]),
+  );
+  return current.filter(
+    (item) => snapshots.get(item.id) !== JSON.stringify(item),
+  );
+}
+
+export function terminalAnnotationTitle(pane: Pane): string {
+  return `${pane.agent?.trim() || "Terminal"} · ${pane.pane_id.slice(0, 8)}`;
 }

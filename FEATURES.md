@@ -237,14 +237,27 @@ File operations and previews work locally and over SSH.
 
 ## Review Annotations
 
+- Open **Annotations** independently next to **Inspector** in the workspace bar (or
+  the narrow-screen view switcher). The panel stays available when Inspector is
+  closed and opening it does not change Inspector's view. Desktop drafts dock
+  beside or below the workspace; mobile uses an explicit Annotations surface.
 - Click/drag diff line numbers or source annotation gutters to comment on lines;
   release opens the editor with file, range, and content snapshot.
 - Select rendered Markdown passages to capture their text and nearest heading.
-- Edit, delete, or reorder checkout-scoped comments. Copy compiled feedback or
+- Select terminal text with the mouse, then choose **Add comment** to capture
+  the passage and pane label, even with the Inspector closed. Terminal quotes
+  have no buffer coordinates and are not re-anchored; missing panes are marked
+  unavailable.
+- Edit, delete, or reorder mixed checkout-scoped comments. Copy compiled feedback or
   pre-fill a selected Agent pane; **delivery never submits**. Review and press
-  Enter manually.
-- Browser-local drafts persist until delivered/cleared. Refresh re-anchors matching
-  content and marks unresolved anchors stale without losing captured quotes.
+  Enter manually. After pre-fill, **Go to agent** opens the destination pane/tab.
+- Copy retains the browser-local draft. Successful pre-fill removes only unchanged,
+  delivered comments; edits made during delivery and failed deliveries retain work.
+  Leaving the draft's workspace or connection during pre-fill retains the original draft,
+  even after returning. Closing Inspector or Annotations does not discard drafts.
+  Blank comments cannot be delivered.
+- Refresh re-anchors matching file/diff content and marks unresolved anchors stale
+  without losing captured quotes.
 
 ## Diff Viewer
 

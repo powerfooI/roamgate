@@ -774,7 +774,7 @@
     display: none;
   }
 
-  .workspace-inspector-slot {
+  .workspace-inspector-slot:where(:not(.has-annotations *)) {
     position: absolute;
     z-index: 10;
     max-width: none;
@@ -782,7 +782,8 @@
     box-shadow: -12px 0 36px color-mix(in srgb, var(--bg) 42%, transparent);
   }
 
-  .inspector-dock-right .workspace-inspector-slot {
+  .inspector-dock-right
+    .workspace-inspector-slot:where(:not(.has-annotations *)) {
     top: 0;
     right: 0;
     bottom: 0;
@@ -791,7 +792,8 @@
     min-width: min(360px, 100%);
   }
 
-  .inspector-dock-bottom .workspace-inspector-slot {
+  .inspector-dock-bottom
+    .workspace-inspector-slot:where(:not(.has-annotations *)) {
     right: 0;
     bottom: 0;
     left: 0;
@@ -806,8 +808,10 @@
     display: none;
   }
 
-  .inspector-dock-right .workspace-inspector-slot,
-  .inspector-dock-bottom .workspace-inspector-slot {
+  .inspector-dock-right
+    .workspace-inspector-slot:where(:not(.has-annotations *)),
+  .inspector-dock-bottom
+    .workspace-inspector-slot:where(:not(.has-annotations *)) {
     position: absolute;
     inset: 0;
     z-index: 10;
@@ -821,12 +825,118 @@
 }
 
 @container workspace-stage (max-width: 699px) {
-  .inspector-dock-right .workspace-inspector-slot,
-  .inspector-dock-bottom .workspace-inspector-slot {
+  .inspector-dock-right
+    .workspace-inspector-slot:where(:not(.has-annotations *)),
+  .inspector-dock-bottom
+    .workspace-inspector-slot:where(:not(.has-annotations *)) {
     inset: 0;
     width: 100% !important;
     height: 100% !important;
     min-width: 0;
     border-radius: 0;
+  }
+}
+
+/* Annotations are a peer of the terminal/Inspector stage, never its overlay. */
+.workspace-surfaces {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  gap: 8px;
+  overflow: hidden;
+  container: workspace-surfaces / size;
+}
+
+/* With a peer draft open, keep the Inspector docked even when its stage is
+   smaller than the usual overlay breakpoint. Explicit expansion still wins. */
+.has-annotations .workspace-stage:not(.is-inspector-expanded) {
+  .workspace-inspector-slot:not(.is-closed) {
+    position: relative;
+    inset: auto;
+    min-width: 0;
+    min-height: 0;
+    box-shadow: none;
+  }
+
+  &.inspector-dock-right .workspace-inspector-slot {
+    max-width: 55%;
+    height: 100%;
+  }
+
+  &.inspector-dock-bottom .workspace-inspector-slot {
+    width: 100%;
+    max-height: 50%;
+  }
+}
+
+html:not([data-layout="mobile"])
+  .has-annotations
+  .workspace-stage:not(.is-inspector-expanded)
+  .workspace-inspector-resizer {
+  display: block;
+}
+
+/* Container queries cannot change the container itself. Wrap below the same
+   available-width threshold without measuring the viewport in JavaScript. */
+.workspace-surfaces.has-annotations {
+  flex-wrap: wrap;
+}
+
+.workspace-surfaces.has-annotations > .workspace-stage {
+  flex-basis: 560px;
+}
+
+@container workspace-surfaces (max-width: 900px) {
+  .workspace-surfaces.has-annotations > .workspace-stage {
+    flex-basis: 100%;
+    height: calc(55% - 4px);
+  }
+
+  .workspace-surfaces.has-annotations > .annotation-panel {
+    flex-basis: 100%;
+    height: calc(45% - 4px);
+  }
+}
+
+:where(html[data-layout="mobile"]) {
+  .workspace-surfaces {
+    gap: 0;
+  }
+
+  .workspace-surfaces > .workspace-stage,
+  .workspace-surfaces.has-annotations > .workspace-stage,
+  .workspace-surfaces.has-annotations > .annotation-panel {
+    flex: 1 1 100%;
+    height: 100%;
+    border-radius: 0;
+  }
+
+  .body.mobile-view-annotations .workspace-stage,
+  .body:not(.mobile-view-annotations) .workspace-surfaces > .annotation-panel {
+    display: none;
+  }
+
+  .body.mobile-view-session .workspace-inspector-slot,
+  .body .workspace-inspector-resizer {
+    display: none;
+  }
+
+  .body:is(.mobile-view-files, .mobile-view-changes, .mobile-view-history) {
+    .workspace-terminal-surface {
+      display: none;
+    }
+
+    .workspace-stage .workspace-inspector-slot:not(.is-closed) {
+      position: relative;
+      inset: auto;
+      width: 100% !important;
+      height: 100% !important;
+      min-width: 0;
+      min-height: 0;
+      max-width: none;
+      max-height: none;
+      flex: 1;
+    }
   }
 }

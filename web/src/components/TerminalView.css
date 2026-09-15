@@ -378,3 +378,10 @@
     border-radius: 0;
   }
 }
+
+.terminal-annotation-action {
+  position: fixed;
+  z-index: 1190;
+  min-height: 36px;
+  box-shadow: var(--shadow-lg);
+}

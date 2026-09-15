@@ -1,3 +1,18 @@
+import { createPortal } from "react-dom";
+import {
+  createReviewAnnotation,
+  MAX_QUOTE_LENGTH,
+  terminalAnnotationTitle,
+  type TerminalReviewAnnotation,
+} from "../annotations";
+import {
+  WORKSPACE_ANNOTATION_REQUEST_EVENT,
+  type WorkspaceAnnotationRequest,
+} from "../workspaceResource";
+import {
+  AnnotationComposerPopover,
+  type AnnotationComposerDraft,
+} from "./AnnotationComposerPopover";
 import { isMobileLayout, LAYOUT_CHANGE_EVENT } from "../layoutPreferences";
 import { terminalFontOptions } from "../appearance";
 import { detectShortcutPlatform } from "../shortcutBindings";
@@ -388,6 +403,16 @@ export function TerminalView({
     [connectionClient],
   );
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
+  const [reviewSelection, setReviewSelection] = useState<
+    | (AnnotationComposerDraft & {
+        paneId: string;
+        workspaceId: string;
+        tabId: string;
+        terminalId: string;
+        composing: boolean;
+      })
+    | null
+  >(null);
   const [uploadError, setUploadError] = useState("");
   const [terminalLoading, setTerminalLoading] = useState(
     s.status === "connected" && !s.connectionPaused,
@@ -443,6 +468,16 @@ export function TerminalView({
     : (s.panes.find((p) => p.pane_id === selectedPaneInLayout) ??
       s.panes.find((p) => p.pane_id === s.layout?.focused_pane_id) ??
       null);
+  useEffect(() => {
+    setReviewSelection(null);
+  }, [
+    connectionClient,
+    pane?.pane_id,
+    pane?.terminal_id,
+    pane?.workspace_id,
+    pane?.tab_id,
+    s.layout?.tab_id,
+  ]);
   const activePaneId =
     selectedPaneInLayout ?? s.layout?.focused_pane_id ?? null;
   const isActivePane = !!pane && (!paneId || pane.pane_id === activePaneId);
@@ -1601,6 +1636,7 @@ export function TerminalView({
         }),
       );
     };
+    let reviewSelectionDrag = false;
     const onTerminalMouseDown = (e: MouseEvent) => {
       if (replayingSelection) return;
       if (
@@ -1625,6 +1661,8 @@ export function TerminalView({
         return;
       selectionDragGuard.mouseDown(e.button);
       if (e.button !== 0) return;
+      reviewSelectionDrag = true;
+      setReviewSelection(null);
       historySelection.reset();
       if (
         endpointPresentation.mouseReporting === undefined &&
@@ -1695,9 +1733,34 @@ export function TerminalView({
         e.stopImmediatePropagation();
         return;
       }
+      const offerReview = reviewSelectionDrag && e.button === 0;
+      reviewSelectionDrag = false;
       selectionDragGuard.mouseUp();
       endpointPresentation.selectionDrag = false;
       queueMicrotask(() => {
+        if (
+          offerReview &&
+          !terminalEffectDisposed &&
+          connectionClient.isCurrent()
+        ) {
+          const quote = historySelection.text ?? term.getSelection();
+          const source = store
+            .get()
+            .panes.find((candidate) => candidate.pane_id === paneIdRef.current);
+          if (source && quote.trim() && quote.length <= MAX_QUOTE_LENGTH) {
+            setReviewSelection({
+              x: Math.max(8, Math.min(e.clientX, window.innerWidth - 140)),
+              y: Math.max(8, Math.min(e.clientY + 8, window.innerHeight - 48)),
+              quote,
+              title: terminalAnnotationTitle(source),
+              paneId: source.pane_id,
+              workspaceId: source.workspace_id,
+              tabId: source.tab_id,
+              terminalId: source.terminal_id,
+              composing: false,
+            });
+          }
+        }
         if (!terminalEffectDisposed) endpointPresentation.flush();
       });
     };
@@ -1706,6 +1769,13 @@ export function TerminalView({
       // this deferred replay before a sibling terminal can start an app drag.
       // Synthetic selection replay must not cancel another pane's intent.
       if (!e.isTrusted) return;
+      const target = e.target instanceof Element ? e.target : null;
+      if (
+        !target?.closest(
+          ".terminal-annotation-action, .annotation-composer-popover",
+        )
+      )
+        setReviewSelection(null);
       if (historySelection.active) {
         historySelection.finish();
         selectionDragGuard.reset();
@@ -2406,6 +2476,73 @@ export function TerminalView({
 
   return (
     <>
+      {reviewSelection && !reviewSelection.composing
+        ? createPortal(
+            <button
+              type="button"
+              className="terminal-annotation-action"
+              style={{ left: reviewSelection.x, top: reviewSelection.y }}
+              onMouseDown={(event) => event.preventDefault()}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setReviewSelection(null);
+                  termRef.current?.focus();
+                }
+              }}
+              onClick={() =>
+                setReviewSelection((current) =>
+                  current ? { ...current, composing: true } : null,
+                )
+              }
+            >
+              Add comment
+            </button>,
+            document.body,
+          )
+        : null}
+      <AnnotationComposerPopover
+        draft={reviewSelection?.composing ? reviewSelection : null}
+        onClose={() => setReviewSelection(null)}
+        onSave={(comment) => {
+          if (!reviewSelection || !connectionClient.isCurrent()) return;
+          const source = store
+            .get()
+            .panes.find(
+              (candidate) =>
+                candidate.pane_id === reviewSelection.paneId &&
+                candidate.workspace_id === reviewSelection.workspaceId &&
+                candidate.tab_id === reviewSelection.tabId &&
+                candidate.terminal_id === reviewSelection.terminalId,
+            );
+          if (!source) {
+            setReviewSelection(null);
+            return;
+          }
+          const annotation = createReviewAnnotation({
+            source: "terminal",
+            anchor: "quote",
+            paneId: source.pane_id,
+            title: reviewSelection.title,
+            quote: reviewSelection.quote,
+            comment,
+          }) as TerminalReviewAnnotation;
+          window.dispatchEvent(
+            new CustomEvent<WorkspaceAnnotationRequest>(
+              WORKSPACE_ANNOTATION_REQUEST_EVENT,
+              {
+                detail: {
+                  connectionId: connectionClient.connectionId,
+                  generation: connectionClient.generation,
+                  workspaceId: source.workspace_id,
+                  annotation,
+                },
+              },
+            ),
+          );
+          setReviewSelection(null);
+        }}
+      />
       <div className="terminal-shell">
         <div className="terminal-main">
           <div ref={containerRef} className="terminal-view" />

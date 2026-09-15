@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import {
   diffReviewLineLabel,
   fileReviewLineLabel,
+  terminalAnnotationTitle,
   type ReviewAnnotation,
 } from "../annotations";
 import type { Pane } from "../types";
@@ -19,20 +20,21 @@ import { ThemedSelect } from "./ThemedSelect";
 import "./AnnotationPanel.css";
 
 function annotationLocation(annotation: ReviewAnnotation) {
+  if (annotation.source === "terminal")
+    return `Terminal · ${annotation.title} · selected passage`;
   if (annotation.source === "diff") {
-    return `${annotation.path} · ${diffReviewLineLabel(annotation)}`;
+    return `Diff · ${annotation.path} · ${diffReviewLineLabel(annotation)}`;
   }
   if (annotation.anchor === "line") {
-    return `${annotation.path} · ${fileReviewLineLabel(annotation)}`;
+    return `File · ${annotation.path} · ${fileReviewLineLabel(annotation)}`;
   }
   return annotation.section.length
-    ? `${annotation.path} · ${annotation.section.join(" › ")}`
-    : `${annotation.path} · selected passage`;
+    ? `Markdown · ${annotation.path} · ${annotation.section.join(" › ")}`
+    : `Markdown · ${annotation.path} · selected passage`;
 }
 
 function paneLabel(pane: Pane) {
-  const id = pane.pane_id.length > 8 ? pane.pane_id.slice(0, 8) : pane.pane_id;
-  return `${pane.agent ?? "Agent"} · ${id}`;
+  return terminalAnnotationTitle(pane);
 }
 
 export function AnnotationPanel({
@@ -49,6 +51,7 @@ export function AnnotationPanel({
   onClear,
   onCopy,
   onSend,
+  onGoToAgent,
 }: {
   open: boolean;
   annotations: readonly ReviewAnnotation[];
@@ -63,9 +66,17 @@ export function AnnotationPanel({
   onClear: () => void;
   onCopy: () => void;
   onSend: (paneId: string | null) => void;
+  onGoToAgent?: () => void;
 }) {
+  const hasFeedback = annotations.some((annotation) =>
+    annotation.comment.trim(),
+  );
   const [targetPaneId, setTargetPaneId] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
+
+  useEffect(() => {
+    if (preferredPaneId) setTargetPaneId(preferredPaneId);
+  }, [preferredPaneId]);
 
   useEffect(() => {
     const preferred = agentPanes.find(
@@ -79,15 +90,19 @@ export function AnnotationPanel({
 
   useEffect(() => {
     if (!open || !focusedAnnotationId) return;
-    requestAnimationFrame(() => {
-      const card = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-review-annotation-id]"),
-      ).find(
-        (element) => element.dataset.reviewAnnotationId === focusedAnnotationId,
-      );
-      card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      card?.querySelector("textarea")?.focus({ preventScroll: true });
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        const card = Array.from(
+          document.querySelectorAll<HTMLElement>("[data-review-annotation-id]"),
+        ).find(
+          (element) =>
+            element.dataset.reviewAnnotationId === focusedAnnotationId,
+        );
+        card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        card?.querySelector("textarea")?.focus({ preventScroll: true });
+      });
     });
+    return () => cancelAnimationFrame(frame);
   }, [focusedAnnotationId, open]);
 
   if (!open) return null;
@@ -119,7 +134,7 @@ export function AnnotationPanel({
             <strong>No review comments yet</strong>
             <span>
               Click or drag across diff line numbers or a source gutter, or
-              select rendered Markdown text.
+              select rendered Markdown or terminal text.
             </span>
           </div>
         ) : (
@@ -135,9 +150,20 @@ export function AnnotationPanel({
                 <strong title={annotationLocation(annotation)}>
                   {index + 1}. {annotationLocation(annotation)}
                 </strong>
-                {annotation.stale ? <span>Stale anchor</span> : null}
+                {annotation.stale ? (
+                  <span>
+                    {annotation.source === "terminal"
+                      ? "Pane unavailable"
+                      : "Stale anchor"}
+                  </span>
+                ) : null}
               </div>
-              <blockquote>{annotation.quote || "Blank line"}</blockquote>
+              <blockquote
+                tabIndex={0}
+                aria-label={`Selected text for comment ${index + 1}`}
+              >
+                {annotation.quote || "Blank line"}
+              </blockquote>
               <textarea
                 value={annotation.comment}
                 rows={3}
@@ -210,20 +236,25 @@ export function AnnotationPanel({
           <button
             type="button"
             className="ghost"
-            disabled={busy || annotations.length === 0}
+            disabled={busy || !hasFeedback}
             onClick={onCopy}
           >
             <Clipboard size={14} /> Copy
           </button>
           <button
             type="button"
-            disabled={busy || annotations.length === 0}
+            disabled={busy || !hasFeedback}
             onClick={() => onSend(targetPaneId || null)}
           >
             {agentPanes.length ? <Send size={14} /> : <Clipboard size={14} />}
             {agentPanes.length ? "Pre-fill agent" : "Copy feedback"}
           </button>
         </div>
+        {onGoToAgent ? (
+          <button type="button" className="ghost" onClick={onGoToAgent}>
+            Go to agent
+          </button>
+        ) : null}
         <button
           type="button"
           className="annotation-clear-button"

@@ -1,3 +1,17 @@
+import { useReviewAnnotationDraft } from "./useReviewAnnotationDraft";
+import {
+  annotationDraftStorageKey,
+  compileReviewFeedback,
+  createReviewAnnotation,
+  moveReviewAnnotation,
+  parseReviewAnnotation,
+  removeDeliveredReviewAnnotations,
+  reanchorDiffReviewAnnotations,
+  reanchorFileReviewAnnotations,
+  reviewAgentPanes,
+  type NewReviewAnnotation,
+  type ReviewAnnotation,
+} from "./annotations";
 import { roamgateLocalStorage } from "./browserStorage";
 import { useLayoutPreferences } from "./layoutPreferences";
 import {
@@ -16,6 +30,7 @@ import {
   History,
   Info,
   LoaderCircle,
+  MessageSquareText,
   MoreHorizontal,
   PanelTop,
   SquarePen,
@@ -66,6 +81,7 @@ import {
   requestFilePreview,
 } from "./components/fileExplorerResources";
 import { type ActiveFilePreviewSelection } from "./components/FilePreviewContent";
+import { AnnotationPanel } from "./components/AnnotationPanel";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import { MobileTabSheet } from "./components/MobileTabSheet";
 import { requestClosePane, requestCloseTab, TabBar } from "./components/TabBar";
@@ -121,6 +137,7 @@ import {
   tabShortcutAction,
 } from "./tabShortcuts";
 import { copyTextFromUserGesture } from "./terminalClipboard";
+import { terminalPasteRequest } from "./terminalPaste";
 import {
   activateTerminalComposerDraftScope,
   readTerminalComposerDraft,
@@ -128,7 +145,7 @@ import {
   terminalComposerDraftKey,
 } from "./terminalComposer";
 import { terminalMountKey } from "./terminalConnection";
-import type { FileExplorerEntry, Pane } from "./types";
+import type { FileExplorerEntry, GitDiffEntry, Pane } from "./types";
 import {
   connectionClientScopeKey,
   useConnectionClient,
@@ -150,6 +167,9 @@ import {
   resourceStateKey,
   sameResourceOwner,
   WORKSPACE_INSPECTOR_REQUEST_EVENT,
+  type ResourceScope,
+  WORKSPACE_ANNOTATION_REQUEST_EVENT,
+  type WorkspaceAnnotationRequest,
   type WorkspaceInspectorRequest,
   type WorkspaceInspectorState,
   writeInspectorPreferences,
@@ -253,7 +273,7 @@ function ToastMark({
 }
 
 export type Theme = ThemePreference;
-type MobileView = "workspaces" | "session" | InspectorView;
+type MobileView = "workspaces" | "session" | "annotations" | InspectorView;
 type OpenInspectorOptions = {
   entry?: FileExplorerEntry;
   path?: string;
@@ -1152,6 +1172,29 @@ export default function App() {
   const [inspectorState, setInspectorState] =
     useState<WorkspaceInspectorState | null>(null);
   const inspectorStateRef = useRef<WorkspaceInspectorState | null>(null);
+  const resourceUiKey = connectionClientScopeKey(
+    connectionClient,
+    "resource-ui",
+  );
+  const {
+    annotations,
+    scope: annotationScope,
+    scopeRef: annotationScopeRef,
+    sessionRef: annotationSessionRef,
+    read: readAnnotationDraft,
+    select: selectAnnotationDraft,
+    update: updateAnnotationDraft,
+  } = useReviewAnnotationDraft(resourceUiKey);
+  const [annotationsOpen, setAnnotationsOpen] = useState(false);
+  const [focusedAnnotationId, setFocusedAnnotationId] = useState<string | null>(
+    null,
+  );
+  const [annotationPreferredPaneId, setAnnotationPreferredPaneId] = useState<
+    string | undefined
+  >();
+  const [deliveredPaneId, setDeliveredPaneId] = useState<string | null>(null);
+  const [annotationDeliveryBusy, setAnnotationDeliveryBusy] = useState(false);
+  const annotationAwaitingFocusRef = useRef<ResourceScope | null>(null);
   const inspectorFocusRequestRef = useRef<{
     state: WorkspaceInspectorState;
     source: Element | null;
@@ -1182,10 +1225,6 @@ export default function App() {
   const [activeFilePreview, setActiveFilePreview] =
     useState<ActiveFilePreviewSelection>(emptyActiveFilePreviewSelection);
   const fileQuickOpenRequestRef = useRef(0);
-  const resourceUiKey = connectionClientScopeKey(
-    connectionClient,
-    "resource-ui",
-  );
   const resourceRuntimeKeyRef = useRef(resourceUiKey);
   const focusedWorkspace = s.workspaces.find((w) => w.focused);
   const focusedWorkspaceTabCount = focusedWorkspace
@@ -1276,6 +1315,47 @@ export default function App() {
   const inspectorResourceStateKey = inspectorState
     ? resourceStateKey(inspectorState.scope)
     : null;
+  const annotationStorageKey = annotationScope
+    ? annotationDraftStorageKey(annotationScope)
+    : null;
+  const annotationWorkspace = annotationScope
+    ? resolveWorkspaceForScope(annotationScope, s.workspaces)
+    : undefined;
+  const annotationAgentPanes = useMemo(
+    () =>
+      reviewAgentPanes(
+        s.panes,
+        annotationWorkspace?.workspace_id ?? "",
+        annotationPreferredPaneId,
+      ),
+    [annotationPreferredPaneId, annotationWorkspace?.workspace_id, s.panes],
+  );
+  const commitAnnotations = useCallback(
+    (
+      update:
+        | ReviewAnnotation[]
+        | ((current: ReviewAnnotation[]) => ReviewAnnotation[]),
+    ) => {
+      if (!annotationScope) return;
+      updateAnnotationDraft(annotationScope, update);
+    },
+    [annotationScope, updateAnnotationDraft],
+  );
+  const setAnnotationDraftScope = useCallback(
+    (scope: ResourceScope, open = false, preferredPaneId?: string) => {
+      const changed = selectAnnotationDraft(scope);
+      setAnnotationsOpen(open);
+      if (changed) {
+        setFocusedAnnotationId(null);
+        setAnnotationPreferredPaneId(preferredPaneId);
+        setDeliveredPaneId(null);
+        setAnnotationDeliveryBusy(false);
+      } else if (preferredPaneId !== undefined) {
+        setAnnotationPreferredPaneId(preferredPaneId);
+      }
+    },
+    [selectAnnotationDraft],
+  );
 
   const commitInspectorState = useCallback(
     (next: WorkspaceInspectorState | null) => {
@@ -1300,6 +1380,7 @@ export default function App() {
     updateInspectorState((current) =>
       current ? { ...current, open: false } : current,
     );
+    setAnnotationsOpen(false);
     setMobileView("session");
     if (!mobile) {
       requestAnimationFrame(() => {
@@ -1424,6 +1505,12 @@ export default function App() {
         connectionClient.connectionId,
         workspace,
       );
+      if (
+        !annotationScopeRef.current ||
+        !sameResourceOwner(annotationScopeRef.current, scope)
+      ) {
+        setAnnotationDraftScope(scope, annotationsOpen);
+      }
       const current = inspectorStateRef.current;
       const sameOwner = !!current && sameResourceOwner(current.scope, scope);
       const stageWidth = inspectorStageRef.current?.clientWidth ?? 0;
@@ -1515,8 +1602,216 @@ export default function App() {
       finishInspectorFocus,
       loadInspectorFilePreview,
       mobile,
+      annotationsOpen,
+      annotationScopeRef,
+      setAnnotationDraftScope,
     ],
   );
+  const openAnnotations = useCallback(
+    (workspaceId?: string, preferredPaneId?: string) => {
+      const snapshot = store.get();
+      const workspace = workspaceId
+        ? snapshot.workspaces.find(
+            (candidate) => candidate.workspace_id === workspaceId,
+          )
+        : snapshot.workspaces.find((candidate) => candidate.focused);
+      if (!workspace) return;
+      const scope = resourceScopeForWorkspace(
+        connectionClient.connectionId,
+        workspace,
+      );
+      setAnnotationDraftScope(scope, true, preferredPaneId);
+      annotationAwaitingFocusRef.current = workspace.focused ? null : scope;
+      if (!workspace.focused) void store.focusWorkspace(workspace.workspace_id);
+      setSidebarHidden(false);
+      if (mobile) setMobileView("annotations");
+    },
+    [connectionClient.connectionId, mobile, setAnnotationDraftScope],
+  );
+  const toggleAnnotations = useCallback(() => {
+    if (annotationsOpen && (!mobile || mobileView === "annotations")) {
+      setAnnotationsOpen(false);
+      if (mobile)
+        setMobileView(
+          inspectorStateRef.current?.open
+            ? inspectorStateRef.current.view
+            : "session",
+        );
+      return;
+    }
+    openAnnotations();
+  }, [annotationsOpen, mobile, mobileView, openAnnotations]);
+  const reanchorFileAnnotations = useCallback(
+    (path: string, text: string) => {
+      if (!inspectorState || !connectionClient.isCurrent()) return;
+      updateAnnotationDraft(inspectorState.scope, (current) =>
+        reanchorFileReviewAnnotations(current, path, text),
+      );
+    },
+    [connectionClient, inspectorState, updateAnnotationDraft],
+  );
+  const reanchorDiffAnnotations = useCallback(
+    (path: string, kind: GitDiffEntry["kind"], patch: string) => {
+      if (!inspectorState || !connectionClient.isCurrent()) return;
+      updateAnnotationDraft(inspectorState.scope, (current) =>
+        reanchorDiffReviewAnnotations(current, path, kind, patch),
+      );
+    },
+    [connectionClient, inspectorState, updateAnnotationDraft],
+  );
+  const addAnnotation = useCallback(
+    (input: NewReviewAnnotation) => {
+      if (!inspectorState || !connectionClient.isCurrent()) return;
+      const annotation = createReviewAnnotation(input);
+      setAnnotationDraftScope(inspectorState.scope, true);
+      updateAnnotationDraft(inspectorState.scope, (current) => [
+        ...current,
+        annotation,
+      ]);
+      setFocusedAnnotationId(annotation.id);
+      setAnnotationsOpen(true);
+      if (mobile) setMobileView("annotations");
+    },
+    [
+      connectionClient,
+      inspectorState,
+      mobile,
+      setAnnotationDraftScope,
+      updateAnnotationDraft,
+    ],
+  );
+  const closeAnnotations = useCallback(() => {
+    setAnnotationsOpen(false);
+    if (mobile) {
+      setMobileView(
+        inspectorStateRef.current?.open
+          ? inspectorStateRef.current.view
+          : "session",
+      );
+      return;
+    }
+    document
+      .querySelector<HTMLElement>(
+        ".pane-layout-cell.is-active .xterm-helper-textarea, .pane-switcher-layout .xterm-helper-textarea, .workspace-terminal-surface > .terminal-shell .xterm-helper-textarea",
+      )
+      ?.focus();
+  }, [mobile]);
+  const clearAnnotations = useCallback(() => {
+    commitAnnotations([]);
+    setFocusedAnnotationId(null);
+    closeAnnotations();
+  }, [closeAnnotations, commitAnnotations]);
+  const copyFeedback = useCallback(
+    async (fallback = false) => {
+      const message = compileReviewFeedback(annotations);
+      if (!message) {
+        store.notify({
+          kind: "error",
+          message: "Add text to a review comment before delivery",
+        });
+        return;
+      }
+      const deliverySession = annotationSessionRef.current;
+      setAnnotationDeliveryBusy(true);
+      try {
+        await copyTextFromUserGesture(message);
+        store.notify({
+          kind: "success",
+          message: fallback
+            ? "No agent pane found; feedback copied"
+            : "Review feedback copied",
+          detail: `${annotations.length} comment${annotations.length === 1 ? "" : "s"}`,
+          autoDismissMs: 5000,
+        });
+      } catch (error) {
+        store.notify({
+          kind: "error",
+          message: "Failed to copy review feedback",
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        if (annotationSessionRef.current === deliverySession)
+          setAnnotationDeliveryBusy(false);
+      }
+    },
+    [annotations, annotationSessionRef],
+  );
+  const sendFeedback = useCallback(
+    async (paneId: string | null) => {
+      const target = annotationAgentPanes.find(
+        (pane) => pane.pane_id === paneId,
+      );
+      if (!target) {
+        await copyFeedback(true);
+        return;
+      }
+      const message = compileReviewFeedback(annotations);
+      if (!message) {
+        store.notify({
+          kind: "error",
+          message: "Add text to a review comment before delivery",
+        });
+        return;
+      }
+      const deliverySession = annotationSessionRef.current;
+      setAnnotationDeliveryBusy(true);
+      try {
+        const request = terminalPasteRequest(target.pane_id, message);
+        await connectionClient.call(request.method, request.params);
+        if (!connectionClient.isCurrent()) return;
+        const draftActive =
+          deliverySession !== null &&
+          annotationSessionRef.current === deliverySession;
+        if (draftActive) {
+          setDeliveredPaneId(target.pane_id);
+          commitAnnotations((current) =>
+            removeDeliveredReviewAnnotations(current, annotations),
+          );
+        }
+        store.notify({
+          kind: "success",
+          message: "Feedback pre-filled in the agent pane",
+          detail: draftActive
+            ? "Review the message there, then press Enter to submit it."
+            : "Original draft retained because its workspace was left or unloaded, or its connection changed. Review the message in the agent pane, then press Enter.",
+          autoDismissMs: 6000,
+        });
+      } catch (error) {
+        if (!connectionClient.isCurrent()) return;
+        store.notify({
+          kind: "error",
+          message: "Failed to pre-fill review feedback",
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        if (annotationSessionRef.current === deliverySession)
+          setAnnotationDeliveryBusy(false);
+      }
+    },
+    [
+      annotationAgentPanes,
+      annotationSessionRef,
+      annotations,
+      commitAnnotations,
+      connectionClient,
+      copyFeedback,
+    ],
+  );
+  const goToDeliveredAgent = useCallback(() => {
+    if (!deliveredPaneId || !connectionClient.isCurrent()) return;
+    const pane = store
+      .get()
+      .panes.find((candidate) => candidate.pane_id === deliveredPaneId);
+    if (!pane || pane.workspace_id !== annotationWorkspace?.workspace_id)
+      return;
+    activateTerminalSurface();
+    void store.focusPane(deliveredPaneId);
+  }, [
+    activateTerminalSurface,
+    annotationWorkspace?.workspace_id,
+    connectionClient,
+    deliveredPaneId,
+  ]);
   const openFileExplorer = useCallback(
     (workspaceId?: string, focusInspector = true) =>
       openInspector("files", workspaceId, { focusInspector }),
@@ -1873,12 +2168,12 @@ export default function App() {
       ) {
         return;
       }
-      const workspaceOpen = store
+      const workspace = store
         .get()
-        .workspaces.some(
-          (workspace) => workspace.workspace_id === detail.workspaceId,
+        .workspaces.find(
+          (candidate) => candidate.workspace_id === detail.workspaceId,
         );
-      if (!workspaceOpen) {
+      if (!workspace) {
         pendingInspectorRequestRef.current = detail;
         return;
       }
@@ -1895,6 +2190,66 @@ export default function App() {
         handleInspectorRequest,
       );
   }, [connectionClient, openInspector]);
+  useEffect(() => {
+    const handleAnnotationRequest = (event: Event) => {
+      const detail = (event as CustomEvent<WorkspaceAnnotationRequest>).detail;
+      if (
+        !detail ||
+        detail.connectionId !== connectionClient.connectionId ||
+        detail.generation !== connectionClient.generation ||
+        !connectionClient.isCurrent()
+      )
+        return;
+      const annotation = parseReviewAnnotation(detail.annotation);
+      const workspace = store
+        .get()
+        .workspaces.find(
+          (candidate) => candidate.workspace_id === detail.workspaceId,
+        );
+      if (
+        !annotation ||
+        annotation.source !== "terminal" ||
+        !workspace ||
+        !store
+          .get()
+          .panes.some(
+            (pane) =>
+              pane.pane_id === annotation.paneId &&
+              pane.workspace_id === detail.workspaceId,
+          )
+      )
+        return;
+      const scope = resourceScopeForWorkspace(
+        connectionClient.connectionId,
+        workspace,
+      );
+      setAnnotationDraftScope(scope, true, annotation.paneId);
+      updateAnnotationDraft(scope, (current) =>
+        current.some((item) => item.id === annotation.id)
+          ? current
+          : [...current, annotation],
+      );
+      setFocusedAnnotationId(annotation.id);
+      annotationAwaitingFocusRef.current = workspace.focused ? null : scope;
+      if (!workspace.focused) void store.focusWorkspace(workspace.workspace_id);
+      setSidebarHidden(false);
+      if (mobile) setMobileView("annotations");
+    };
+    window.addEventListener(
+      WORKSPACE_ANNOTATION_REQUEST_EVENT,
+      handleAnnotationRequest,
+    );
+    return () =>
+      window.removeEventListener(
+        WORKSPACE_ANNOTATION_REQUEST_EVENT,
+        handleAnnotationRequest,
+      );
+  }, [
+    connectionClient,
+    mobile,
+    setAnnotationDraftScope,
+    updateAnnotationDraft,
+  ]);
   useEffect(() => {
     const pending = pendingInspectorRequestRef.current;
     if (!pending) return;
@@ -2001,6 +2356,12 @@ export default function App() {
     commitInspectorState(null);
     setActiveDiff(emptyActiveDiffSelection());
     setActiveFilePreview(emptyActiveFilePreviewSelection());
+    annotationAwaitingFocusRef.current = null;
+    setAnnotationPreferredPaneId(undefined);
+    setAnnotationDeliveryBusy(false);
+    setDeliveredPaneId(null);
+    setAnnotationsOpen(false);
+    setFocusedAnnotationId(null);
     setPaneJumpOpen(false);
     setPaneJumpIndex(0);
     setMobileView("session");
@@ -2010,10 +2371,67 @@ export default function App() {
     store.init();
   }, []);
   useEffect(() => {
+    if (mobile && mobileView === "annotations")
+      setMobileControlsCollapsed(false);
+  }, [mobile, mobileView]);
+  useEffect(() => {
     if (!mobile) return;
     const current = inspectorStateRef.current;
-    setMobileView(current?.open ? current.view : "session");
-  }, [mobile]);
+    if (!annotationsOpen)
+      setMobileView(current?.open ? current.view : "session");
+  }, [annotationsOpen, mobile]);
+  useLayoutEffect(() => {
+    if (!annotationScope || annotationWorkspace) return;
+    selectAnnotationDraft(null);
+    annotationAwaitingFocusRef.current = null;
+    setAnnotationsOpen(false);
+    setFocusedAnnotationId(null);
+    setAnnotationPreferredPaneId(undefined);
+    setDeliveredPaneId(null);
+    setAnnotationDeliveryBusy(false);
+    if (mobileView === "annotations") setMobileView("session");
+  }, [annotationScope, annotationWorkspace, mobileView, selectAnnotationDraft]);
+  useEffect(() => {
+    if (!focusedWorkspace) return;
+    const scope = resourceScopeForWorkspace(
+      connectionClient.connectionId,
+      focusedWorkspace,
+    );
+    const pending = annotationAwaitingFocusRef.current;
+    if (
+      pending &&
+      !sameResourceOwner(pending, scope) &&
+      s.pendingFocusWorkspaceId === pending.workspaceId
+    )
+      return;
+    annotationAwaitingFocusRef.current = null;
+    const current = annotationScopeRef.current;
+    if (current && sameResourceOwner(current, scope)) return;
+    setAnnotationDraftScope(scope);
+  }, [
+    annotationScopeRef,
+    connectionClient.connectionId,
+    focusedWorkspace,
+    s.pendingFocusWorkspaceId,
+    resourceUiKey,
+    setAnnotationDraftScope,
+  ]);
+  useEffect(() => {
+    if (!annotationScope || !annotationWorkspace) return;
+    commitAnnotations((current) =>
+      current.map((annotation) => {
+        if (annotation.source !== "terminal") return annotation;
+        const stale = !s.panes.some(
+          (pane) =>
+            pane.pane_id === annotation.paneId &&
+            pane.workspace_id === annotationWorkspace.workspace_id,
+        );
+        return stale === !!annotation.stale
+          ? annotation
+          : { ...annotation, stale };
+      }),
+    );
+  }, [annotationScope, annotationWorkspace, commitAnnotations, s.panes]);
   useLayoutEffect(() => {
     const current = inspectorStateRef.current;
     if (!current?.open || !focusedWorkspace || s.pendingFocusWorkspaceId) {
@@ -2591,17 +3009,22 @@ export default function App() {
     e.preventDefault();
     const bounds = stage.getBoundingClientRect();
     const minimum =
-      current.dock === "right" ? INSPECTOR_MIN_RIGHT : INSPECTOR_MIN_BOTTOM;
+      (current.dock === "right" ? INSPECTOR_MIN_RIGHT : INSPECTOR_MIN_BOTTOM) /
+      (annotationsOpen ? 2 : 1);
     const maximum = inspectorMaximumSize(
       current.dock,
       bounds.width,
       bounds.height,
+      annotationsOpen,
     );
     const next = {
       ...current,
       size: Math.min(
         maximum,
-        Math.max(minimum, current.size + (increase ? 24 : -24)),
+        Math.max(
+          minimum,
+          Math.min(current.size, maximum) + (increase ? 24 : -24),
+        ),
       ),
     };
     commitInspectorState(next);
@@ -2615,16 +3038,22 @@ export default function App() {
     e.stopPropagation();
     const startX = e.clientX;
     const startY = e.clientY;
-    const startSize = current.size;
     const dock = current.dock;
     const bounds = stage.getBoundingClientRect();
-    const maxSize = inspectorMaximumSize(dock, bounds.width, bounds.height);
+    const maxSize = inspectorMaximumSize(
+      dock,
+      bounds.width,
+      bounds.height,
+      annotationsOpen,
+    );
+    const startSize = Math.min(current.size, maxSize);
     let finalSize = startSize;
     const onMove = (event: PointerEvent) => {
       finalSize = Math.min(
         maxSize,
         Math.max(
-          dock === "right" ? INSPECTOR_MIN_RIGHT : INSPECTOR_MIN_BOTTOM,
+          (dock === "right" ? INSPECTOR_MIN_RIGHT : INSPECTOR_MIN_BOTTOM) /
+            (annotationsOpen ? 2 : 1),
           startSize +
             (dock === "right"
               ? startX - event.clientX
@@ -2773,6 +3202,18 @@ export default function App() {
         </button>
         <button
           type="button"
+          className={mobileView === "annotations" ? "active" : ""}
+          title="Annotations"
+          aria-label="Show review annotations"
+          aria-pressed={annotationsOpen}
+          tabIndex={mobileControlsCollapsed ? -1 : 0}
+          onClick={toggleAnnotations}
+        >
+          <MessageSquareText size={16} />
+          <span className="mobile-nav-label">Annotations</span>
+        </button>
+        <button
+          type="button"
           className={mobileView === "history" ? "active" : ""}
           title={
             activePaneHasAgent || historyInspectorOpen
@@ -2783,7 +3224,13 @@ export default function App() {
           aria-pressed={historyInspectorOpen}
           tabIndex={mobileControlsCollapsed ? -1 : 0}
           disabled={!activePaneHasAgent && !historyInspectorOpen}
-          onClick={() => setAgentHistoryInspectorOpen(!historyInspectorOpen)}
+          onClick={() => {
+            if (historyInspectorOpen && mobileView !== "history") {
+              setMobileView("history");
+            } else {
+              setAgentHistoryInspectorOpen(!historyInspectorOpen);
+            }
+          }}
         >
           <History size={16} />
           <span className="mobile-nav-label">History</span>
@@ -3034,117 +3481,175 @@ export default function App() {
             key={`${resourceUiKey}:tabs`}
             mobile={mobile}
             inspectorOpen={inspectorState?.open === true}
+            annotationsOpen={annotationsOpen}
             onToggleInspector={toggleWorkspaceInspector}
+            onToggleAnnotations={toggleAnnotations}
           />
           <div
-            ref={inspectorStageRef}
-            className={`workspace-stage ${
-              inspectorState?.open
-                ? `has-inspector inspector-dock-${inspectorState.dock}`
-                : ""
-            } ${inspectorState?.open && inspectorState.expanded ? "is-inspector-expanded" : ""}`}
+            className={`workspace-surfaces ${annotationsOpen ? "has-annotations" : ""}`}
           >
-            <div className="workspace-terminal-surface">
-              <TerminalPaneLayout
-                terminalTheme={terminalTheme}
-                uiScale={uiScale}
-                mobileShortcuts={mobileTerminalShortcuts}
-                mobileSideShortcuts={mobileTerminalSideShortcuts}
-                composerOpen={terminalComposerOpen}
-                onComposerOpenChange={setTerminalComposerOpen}
-                agentHistoryOpen={agentHistoryOpen}
-                onAgentHistoryOpenChange={setAgentHistoryInspectorOpen}
-                onOpenWorkspaceFile={handleTerminalWorkspaceFile}
-              />
-            </div>
-            {inspectorState?.open && !inspectorState.expanded ? (
-              <div
-                className="workspace-inspector-resizer"
-                role="separator"
-                aria-label={`Resize ${inspectorState.dock} Inspector`}
-                aria-orientation={
-                  inspectorState.dock === "right" ? "vertical" : "horizontal"
-                }
-                tabIndex={0}
-                onKeyDown={resizeInspectorWithKeyboard}
-                onPointerDown={startInspectorResize}
-              />
-            ) : null}
-            {inspectorState ? (
-              <div
-                className={`workspace-inspector-slot ${
-                  inspectorState.open ? "" : "is-closed"
-                }`}
-                style={
-                  inspectorState.expanded
-                    ? undefined
-                    : inspectorState.dock === "right"
-                      ? { width: inspectorState.size }
-                      : { height: inspectorState.size }
-                }
-              >
-                <Suspense
-                  fallback={
-                    <TerminalLoadingFallback label="Loading Inspector" />
+            <div
+              ref={inspectorStageRef}
+              className={`workspace-stage ${
+                inspectorState?.open
+                  ? `has-inspector inspector-dock-${inspectorState.dock}`
+                  : ""
+              } ${inspectorState?.open && inspectorState.expanded ? "is-inspector-expanded" : ""}`}
+            >
+              <div className="workspace-terminal-surface">
+                <TerminalPaneLayout
+                  terminalTheme={terminalTheme}
+                  uiScale={uiScale}
+                  mobileShortcuts={mobileTerminalShortcuts}
+                  mobileSideShortcuts={mobileTerminalSideShortcuts}
+                  composerOpen={terminalComposerOpen}
+                  onComposerOpenChange={setTerminalComposerOpen}
+                  agentHistoryOpen={agentHistoryOpen}
+                  onAgentHistoryOpenChange={setAgentHistoryInspectorOpen}
+                  onOpenWorkspaceFile={handleTerminalWorkspaceFile}
+                />
+              </div>
+              {inspectorState?.open && !inspectorState.expanded ? (
+                <div
+                  className="workspace-inspector-resizer"
+                  role="separator"
+                  aria-label={`Resize ${inspectorState.dock} Inspector`}
+                  aria-orientation={
+                    inspectorState.dock === "right" ? "vertical" : "horizontal"
+                  }
+                  tabIndex={0}
+                  onKeyDown={resizeInspectorWithKeyboard}
+                  onPointerDown={startInspectorResize}
+                />
+              ) : null}
+              {inspectorState ? (
+                <div
+                  className={`workspace-inspector-slot ${
+                    inspectorState.open ? "" : "is-closed"
+                  }`}
+                  style={
+                    inspectorState.expanded
+                      ? undefined
+                      : inspectorState.dock === "right"
+                        ? { width: inspectorState.size }
+                        : { height: inspectorState.size }
                   }
                 >
-                  <WorkspaceInspectorHost
-                    key={`${resourceUiKey}:${resourceOwnerKey(inspectorState.scope)}`}
-                    state={inspectorState}
-                    onReady={finishInspectorFocus}
-                    visible={!mobile || mobileView !== "workspaces"}
-                    workspace={inspectorWorkspace}
-                    historyPane={inspectorHistoryPane}
-                    fileSelection={activeFilePreview}
-                    previewRequestRef={fileQuickOpenRequestRef}
-                    diffSelection={activeDiff}
-                    connectionClient={connectionClient}
-                    onFileSelectionChange={(selection) =>
-                      handleFilePreviewChange(
-                        resourceStateKey(inspectorState.scope),
-                        selection,
-                      )
+                  <Suspense
+                    fallback={
+                      <TerminalLoadingFallback label="Loading Inspector" />
                     }
-                    onDiffSelectionChange={(selection) =>
-                      handleDiffSelectionChange(
-                        resourceStateKey(inspectorState.scope),
-                        selection,
-                      )
-                    }
-                    onRefreshFile={() => {
-                      if (inspectorWorkspace && activeFilePreview.entry)
-                        loadInspectorFilePreview(
-                          inspectorWorkspace.workspace_id,
-                          activeFilePreview.entry,
-                          activeFilePreview.fragment,
-                        );
-                    }}
-                    onOpenDiffFile={openDiffFileInExplorer}
-                    onOpenDocument={(path, fragment) => {
-                      if (inspectorWorkspace)
-                        openFileExplorerFile(
-                          inspectorWorkspace.workspace_id,
-                          {
-                            name: path.split("/").pop() ?? path,
-                            path,
-                            type: "file",
-                            size: 0,
-                            mtime_ms: 0,
-                            hidden: false,
-                          },
-                          undefined,
-                          fragment,
-                        );
-                    }}
-                    onViewChange={setInspectorView}
-                    onDockChange={setInspectorDock}
-                    onExpandedChange={setInspectorExpanded}
-                    onClose={closeInspector}
-                    onBack={clearInspectorDetail}
-                  />
-                </Suspense>
-              </div>
-            ) : null}
+                  >
+                    <WorkspaceInspectorHost
+                      key={`${resourceUiKey}:${resourceOwnerKey(inspectorState.scope)}`}
+                      state={inspectorState}
+                      onReady={finishInspectorFocus}
+                      annotations={readAnnotationDraft(inspectorState.scope)}
+                      onCreateAnnotation={addAnnotation}
+                      onReanchorFileAnnotations={reanchorFileAnnotations}
+                      onReanchorDiffAnnotations={reanchorDiffAnnotations}
+                      onEditAnnotation={(id) => {
+                        if (!connectionClient.isCurrent()) return;
+                        setAnnotationDraftScope(inspectorState.scope, true);
+                        setFocusedAnnotationId(id);
+                        setAnnotationsOpen(true);
+                        if (mobile) setMobileView("annotations");
+                      }}
+                      visible={!mobile || mobileView === inspectorState.view}
+                      workspace={inspectorWorkspace}
+                      historyPane={inspectorHistoryPane}
+                      fileSelection={activeFilePreview}
+                      previewRequestRef={fileQuickOpenRequestRef}
+                      diffSelection={activeDiff}
+                      connectionClient={connectionClient}
+                      onFileSelectionChange={(selection) =>
+                        handleFilePreviewChange(
+                          resourceStateKey(inspectorState.scope),
+                          selection,
+                        )
+                      }
+                      onDiffSelectionChange={(selection) =>
+                        handleDiffSelectionChange(
+                          resourceStateKey(inspectorState.scope),
+                          selection,
+                        )
+                      }
+                      onRefreshFile={() => {
+                        if (inspectorWorkspace && activeFilePreview.entry)
+                          loadInspectorFilePreview(
+                            inspectorWorkspace.workspace_id,
+                            activeFilePreview.entry,
+                            activeFilePreview.fragment,
+                          );
+                      }}
+                      onOpenDiffFile={openDiffFileInExplorer}
+                      onOpenDocument={(path, fragment) => {
+                        if (inspectorWorkspace)
+                          openFileExplorerFile(
+                            inspectorWorkspace.workspace_id,
+                            {
+                              name: path.split("/").pop() ?? path,
+                              path,
+                              type: "file",
+                              size: 0,
+                              mtime_ms: 0,
+                              hidden: false,
+                            },
+                            undefined,
+                            fragment,
+                          );
+                      }}
+                      onViewChange={setInspectorView}
+                      onDockChange={setInspectorDock}
+                      onExpandedChange={setInspectorExpanded}
+                      onClose={closeInspector}
+                      onBack={clearInspectorDetail}
+                    />
+                  </Suspense>
+                </div>
+              ) : null}
+            </div>
+            <AnnotationPanel
+              key={annotationStorageKey}
+              open={annotationsOpen && !!annotationScope}
+              annotations={annotations}
+              agentPanes={annotationAgentPanes}
+              preferredPaneId={annotationPreferredPaneId}
+              busy={annotationDeliveryBusy}
+              focusedAnnotationId={focusedAnnotationId}
+              onClose={closeAnnotations}
+              onUpdateComment={(id, comment) =>
+                commitAnnotations((current) =>
+                  current.map((annotation) =>
+                    annotation.id === id
+                      ? { ...annotation, comment }
+                      : annotation,
+                  ),
+                )
+              }
+              onDelete={(id) => {
+                commitAnnotations((current) =>
+                  current.filter((annotation) => annotation.id !== id),
+                );
+                if (focusedAnnotationId === id) setFocusedAnnotationId(null);
+              }}
+              onMove={(id, delta) =>
+                commitAnnotations((current) =>
+                  moveReviewAnnotation(current, id, delta),
+                )
+              }
+              onGoToAgent={
+                deliveredPaneId &&
+                annotationAgentPanes.some(
+                  (pane) => pane.pane_id === deliveredPaneId,
+                )
+                  ? goToDeliveredAgent
+                  : undefined
+              }
+              onClear={clearAnnotations}
+              onCopy={() => void copyFeedback()}
+              onSend={(paneId) => void sendFeedback(paneId)}
+            />
           </div>
         </main>
       </div>

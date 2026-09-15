@@ -24,6 +24,9 @@ export function AnnotationComposerPopover({
   onClose: () => void;
 }) {
   useShortcutPreferences();
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [comment, setComment] = useState("");
@@ -42,6 +45,12 @@ export function AnnotationComposerPopover({
     ) {
       return;
     }
+    const returnFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    returnFocusRef.current = returnFocus;
+    const form = formRef.current;
     setComment("");
     setPosition({ x: draftX, y: draftY });
     const frame = requestAnimationFrame(() => {
@@ -64,24 +73,40 @@ export function AnnotationComposerPopover({
     const closeOnPointerDown = (event: PointerEvent) => {
       const target = event.target instanceof Node ? event.target : null;
       if (target && formRef.current?.contains(target)) return;
-      onClose();
+      onCloseRef.current();
     };
     window.addEventListener("pointerdown", closeOnPointerDown, {
       capture: true,
     });
     return () => {
       cancelAnimationFrame(frame);
+      if (form?.contains(document.activeElement) && returnFocus?.isConnected)
+        returnFocus.focus({ preventScroll: true });
       window.removeEventListener("pointerdown", closeOnPointerDown, {
         capture: true,
       });
     };
-  }, [draftQuote, draftTitle, draftX, draftY, onClose]);
+  }, [draftQuote, draftTitle, draftX, draftY]);
 
   if (!draft) return null;
 
+  const restoreFocus = () => {
+    if (
+      formRef.current?.contains(document.activeElement) &&
+      returnFocusRef.current?.isConnected
+    )
+      returnFocusRef.current.focus({ preventScroll: true });
+  };
+  const close = () => {
+    restoreFocus();
+    onClose();
+  };
   const save = () => {
     const value = comment.trim();
-    if (value) onSave(value);
+    if (value) {
+      restoreFocus();
+      onSave(value);
+    }
   };
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -97,10 +122,27 @@ export function AnnotationComposerPopover({
       aria-label="Add review comment"
       onSubmit={submit}
       onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Tab") {
+          const controls = Array.from(
+            formRef.current?.querySelectorAll<HTMLElement>(
+              "textarea, button:not(:disabled)",
+            ) ?? [],
+          );
+          const next = event.shiftKey
+            ? controls[controls.length - 1]
+            : controls[0];
+          if (
+            document.activeElement ===
+            (event.shiftKey ? controls[0] : controls[controls.length - 1])
+          ) {
+            event.preventDefault();
+            next?.focus();
+          }
+        }
         if (event.key === "Escape") {
           event.preventDefault();
-          event.stopPropagation();
-          onClose();
+          close();
         } else if (shortcutMatches(event.nativeEvent, "annotation.submit")) {
           event.preventDefault();
           save();
@@ -113,12 +155,13 @@ export function AnnotationComposerPopover({
         ref={textareaRef}
         value={comment}
         onChange={(event) => setComment(event.currentTarget.value)}
+        aria-label="Review comment"
         placeholder="Add a review comment"
         rows={3}
         maxLength={10_000}
       />
       <div className="annotation-composer-actions">
-        <button type="button" className="ghost" onClick={onClose}>
+        <button type="button" className="ghost" onClick={close}>
           Cancel
         </button>
         <button type="submit" disabled={!comment.trim()}>
