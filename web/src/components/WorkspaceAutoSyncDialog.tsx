@@ -4,6 +4,7 @@ import { UI_LOCALE } from "../uiLocale";
 import { useConnectionClient } from "../useConnectionClient";
 import { CloseButton } from "./CloseButton";
 import { focusDialogElement } from "./dialogFocus";
+import "./WorkspaceAutoSyncDialog.css";
 
 type AutoSyncStatus = "updated" | "up_to_date" | "skipped" | "failed";
 

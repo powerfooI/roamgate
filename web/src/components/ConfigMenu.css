@@ -1,0 +1,573 @@
+.config-menu {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.config-dropdown {
+  position: absolute;
+  z-index: 140;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(380px, calc(100vw - 24px));
+  max-height: calc(100vh - 72px);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--shell-border);
+  border-radius: 8px;
+  background: var(--shell-panel);
+  box-shadow: var(--shadow-lg);
+}
+
+.config-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 8px 11px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.config-summary > div {
+  display: grid;
+  gap: 2px;
+}
+
+.config-summary strong {
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.config-summary > div > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.config-connection-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 20px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.config-connection-summary .status-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.config-section {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.config-section:last-of-type {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.config-title {
+  margin: 0 8px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.config-preference-row,
+.config-runtime-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 6px 8px;
+}
+
+.config-item-icon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  background: var(--border-soft);
+  color: var(--muted);
+}
+
+.config-item-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+
+.config-item-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-item-copy span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-theme-control {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
+.config-theme-control button {
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.config-theme-control button:hover {
+  color: var(--text);
+}
+
+.config-theme-control button.is-active {
+  border-color: var(--border);
+  background: var(--panel-2);
+  color: var(--text-strong);
+}
+
+.config-scale-control {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
+.config-scale-control button {
+  min-width: 28px;
+  height: 26px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.config-scale-control button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.config-scale-control button:disabled {
+  opacity: 0.45;
+}
+
+.config-scale-control .config-scale-value {
+  min-width: 42px;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.config-accent-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.config-accent-control button {
+  --swatch: var(--accent);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.config-accent-control button[data-accent="blue"] {
+  --swatch: #7aa2f7;
+}
+
+.config-accent-control button[data-accent="neutral"] {
+  position: relative;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.config-accent-control button[data-accent="neutral"]::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 1px;
+  width: 14px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--muted);
+  transform: rotate(-45deg);
+}
+
+.config-accent-control button[data-accent="teal"] {
+  --swatch: #2dd4bf;
+}
+
+.config-accent-control button[data-accent="green"] {
+  --swatch: #54d17a;
+}
+
+.config-accent-control button[data-accent="amber"] {
+  --swatch: #f0b95a;
+}
+
+.config-accent-control button[data-accent="rose"] {
+  --swatch: #f471b5;
+}
+
+.config-accent-control button[data-accent="violet"] {
+  --swatch: #a78bfa;
+}
+
+.config-accent-control button:hover:not(:disabled) {
+  border-color: var(--panel);
+  transform: scale(1.08);
+}
+
+.config-accent-control button.is-active {
+  box-shadow:
+    0 0 0 1px var(--panel),
+    0 0 0 3px var(--text-strong);
+}
+
+.config-menu-item {
+  width: 100%;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border-color: transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+}
+
+.config-menu-item:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--border-soft);
+}
+
+.config-menu-item > svg {
+  color: var(--muted);
+}
+
+.config-menu-item.is-primary {
+  background: var(--accent-soft);
+}
+
+.config-menu-item.is-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.config-menu-item.is-primary .config-item-icon,
+.config-menu-item.is-primary > svg {
+  color: var(--accent);
+}
+
+.config-runtime-row code {
+  color: var(--muted);
+  font:
+    10.5px / 1.2 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: nowrap;
+}
+
+.config-details-toggle {
+  width: 100%;
+  min-height: 40px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 8px;
+  border-color: transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+}
+
+.config-details-toggle:hover {
+  border-color: transparent;
+  background: var(--border-soft);
+}
+
+.config-details-toggle > svg {
+  color: var(--muted);
+}
+
+.config-details {
+  margin: 2px 8px 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--input-bg);
+}
+
+.config-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 11px;
+}
+
+.config-row > span {
+  color: var(--muted);
+}
+
+.config-row code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-code);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes config-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Higher specificity than the mobile sheet rule so reduced motion wins
+     regardless of source order. */
+  .config-menu .config-dropdown {
+    animation: none;
+  }
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  /* Mobile application menu: a bottom sheet with tile actions instead of
+     the desktop dropdown list. */
+  .config-dropdown {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-height: min(78dvh, 640px);
+    max-height: min(
+      calc(78dvh / var(--ui-scale, 1)),
+      calc(640px / var(--ui-scale, 1))
+    );
+    padding: 4px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+    border: none;
+    border-top: 1px solid var(--shell-border);
+    border-radius: 14px 14px 0 0;
+    animation: config-sheet-in 160ms ease;
+  }
+
+  .config-dropdown::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: 2px auto 6px;
+    border-radius: 999px;
+    background: var(--border);
+  }
+
+  .config-summary {
+    align-items: center;
+    padding: 2px 4px 8px;
+  }
+
+  .config-section {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding: 8px 0;
+  }
+
+  .config-title,
+  .config-preference-row,
+  .config-runtime-row,
+  .config-details-toggle,
+  .config-details {
+    grid-column: 1 / -1;
+  }
+
+  .config-title {
+    margin: 0 2px;
+    font-size: 10px;
+  }
+
+  .config-preference-row,
+  .config-runtime-row,
+  .config-details-toggle {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    gap: 8px;
+    min-height: 38px;
+    padding: 4px 6px;
+  }
+
+  .config-item-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+  }
+
+  .config-item-copy {
+    gap: 0;
+  }
+
+  .config-item-copy span {
+    display: none;
+  }
+
+  .config-menu-item {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 6px;
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    background: var(--input-bg);
+  }
+
+  .config-menu-item > svg {
+    display: none;
+  }
+
+  .config-menu-item-desktop-only {
+    display: none;
+  }
+
+  .config-section-tiles-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .config-section-tiles-3 .config-menu-item .config-item-copy strong {
+    white-space: normal;
+  }
+
+  .config-menu-item:hover:not(:disabled) {
+    border-color: var(--border-soft);
+  }
+
+  /* Row-style menu actions (e.g. Terminal theme) sit inside preference
+     sections, so they keep the desktop row layout instead of the tile grid. */
+  .config-menu-item.config-menu-item-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    gap: 8px;
+    min-height: 38px;
+    padding: 4px 6px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+  }
+
+  .config-menu-item.config-menu-item-row > svg {
+    display: block;
+  }
+
+  .config-menu-item.config-menu-item-row .config-item-icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  .config-menu-item.config-menu-item-row .config-item-copy {
+    text-align: left;
+  }
+
+  .config-menu-item.config-menu-item-row .config-item-copy strong {
+    font-size: 12px;
+  }
+
+  .config-menu-item .config-item-icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .config-menu-item .config-item-copy {
+    width: 100%;
+    text-align: center;
+  }
+
+  .config-menu-item .config-item-copy strong {
+    font-size: 11px;
+  }
+
+  .config-theme-control button {
+    width: 30px;
+    height: 26px;
+  }
+
+  .config-accent-control button {
+    width: 18px;
+    height: 18px;
+  }
+
+  .config-accent-control button[data-accent="neutral"]::after {
+    top: 7px;
+    width: 12px;
+  }
+
+  .config-scale-control button {
+    min-width: 28px;
+    height: 26px;
+    padding: 0 5px;
+  }
+
+  .config-scale-control .config-scale-value {
+    min-width: 40px;
+  }
+}

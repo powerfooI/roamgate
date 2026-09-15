@@ -1,0 +1,79 @@
+.close-button {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-color: color-mix(in srgb, var(--border) 76%, transparent);
+  border-radius: 9px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--panel-2) 86%, white 14%),
+    color-mix(in srgb, var(--panel) 94%, black 6%)
+  );
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 9%, transparent),
+    0 1px 2px color-mix(in srgb, black 22%, transparent);
+}
+
+.close-button svg {
+  pointer-events: none;
+  transition: transform 140ms ease;
+}
+
+.close-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--panel-2) 78%, var(--accent) 22%),
+    color-mix(in srgb, var(--panel) 88%, var(--accent) 12%)
+  );
+  color: var(--text-strong);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
+    0 4px 10px color-mix(in srgb, black 26%, transparent);
+  transform: translateY(-1px);
+}
+
+.close-button:hover:not(:disabled) svg {
+  transform: rotate(4deg);
+}
+
+.close-button:active:not(:disabled) {
+  box-shadow: inset 0 1px 3px color-mix(in srgb, black 22%, transparent);
+  transform: translateY(0) scale(0.96);
+}
+
+.close-button-toast {
+  width: 28px;
+  height: 28px;
+  margin: -2px -2px 0 0;
+  border-color: transparent;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-2) 50%, transparent);
+  box-shadow: none;
+}
+
+.close-button-toast:hover:not(:disabled) {
+  border-color: color-mix(
+    in srgb,
+    var(--toast-tone, var(--accent)) 24%,
+    transparent
+  );
+  background: color-mix(
+    in srgb,
+    var(--toast-tone, var(--accent)) 12%,
+    var(--panel-2)
+  );
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .close-button,
+  .close-button svg {
+    transition: none;
+  }
+}

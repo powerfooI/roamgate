@@ -3,7 +3,9 @@ import { createRoot } from "react-dom/client";
 import { ImagePreview } from "./ImagePreview";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { MarkdownPreview } from "./markdown";
-import "../styles.css";
+import "../styles/tokens.css";
+import "../styles/base.css";
+import "../styles/vendor.css";
 
 const failures: string[] = [];
 const check = (condition: boolean, message: string) => {

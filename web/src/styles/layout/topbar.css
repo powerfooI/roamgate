@@ -1,0 +1,246 @@
+.topbar {
+  position: relative;
+  z-index: 120;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--shell-border);
+  background: var(--shell-topbar);
+  box-shadow: inset 0 3px 0 var(--shell-topbar-mark);
+}
+
+.topbar-start,
+.topbar-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-start {
+  overflow: hidden;
+}
+
+.topbar-actions {
+  justify-self: end;
+}
+
+.topbar-command-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--topbar-control-border);
+  border-radius: 8px;
+  background: var(--topbar-control-bg);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--bg) 28%, transparent);
+}
+
+.brand {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  gap: 8px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.brand-title {
+  color: var(--text-strong);
+}
+
+.brand-version {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--topbar-control-border);
+  border-radius: 5px;
+  background: var(--topbar-control-bg);
+  color: var(--topbar-control-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.logo {
+  width: 24px;
+  height: 24px;
+  display: block;
+  border-radius: 6px;
+  background: #faf9f6;
+}
+
+.topbar-button {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--topbar-control-text);
+}
+
+.topbar-button.icon-button {
+  width: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.topbar-button:hover,
+.topbar-button.is-active {
+  background: var(--topbar-control-hover-bg);
+  color: var(--text-strong);
+}
+
+.topbar-command-group .topbar-button {
+  border-color: transparent;
+}
+
+.topbar-command-group .topbar-button:hover {
+  border-color: transparent;
+}
+
+.topbar-command-group .topbar-button.is-active {
+  border-color: var(--topbar-control-active-border);
+  background: var(--topbar-control-active-bg);
+}
+
+.view-switcher {
+  display: flex;
+  align-items: center;
+}
+
+.view-switcher button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  background: transparent;
+  color: var(--topbar-control-text);
+}
+
+.view-switcher button:hover {
+  border-color: transparent;
+  background: var(--topbar-control-hover-bg);
+  color: var(--text-strong);
+}
+
+.view-switcher button.is-active {
+  border-color: var(--topbar-control-active-border);
+  background: var(--topbar-control-active-bg);
+  color: var(--text-strong);
+}
+
+.topbar-view-switcher {
+  justify-self: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--topbar-control-border);
+  border-radius: 8px;
+  background: var(--topbar-control-bg);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--bg) 28%, transparent);
+}
+
+.menu-update-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--shell-topbar);
+  border-radius: 50%;
+  background: var(--red);
+}
+
+.app.zen .topbar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  transform: translateY(calc(-100% + 6px));
+  transition: transform 0.15s ease;
+}
+
+.app.zen .topbar:hover,
+.app.zen .topbar:focus-within {
+  transform: none;
+}
+
+/* A popover opened from the keyboard must not measure a sliding anchor, and
+   its trigger must stay visible while the pointer moves to the portal. */
+.app.zen .topbar:has([data-state="open"]) {
+  transform: none;
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app.zen .topbar {
+    transition: none;
+  }
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: calc(40px + env(safe-area-inset-top, 0px));
+    padding: calc(6px + env(safe-area-inset-top, 0px))
+      calc(10px + env(safe-area-inset-right, 0px)) 6px
+      calc(10px + env(safe-area-inset-left, 0px));
+    gap: 8px;
+  }
+
+  .brand {
+    min-width: 0;
+    overflow: hidden;
+    gap: 6px;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .brand-version {
+    display: none;
+  }
+
+  .topbar-button {
+    height: 28px;
+    padding: 0 9px;
+  }
+
+  .topbar-button.icon-button {
+    width: 28px;
+    padding: 0;
+  }
+
+  .topbar-view-switcher {
+    display: none;
+  }
+
+  .topbar-start,
+  .topbar-actions {
+    gap: 8px;
+  }
+
+  .topbar-time {
+    display: none;
+  }
+}
+
+@media (max-width: 360px) {
+  .brand {
+    flex: 0 0 auto;
+  }
+
+  .brand-title {
+    display: none;
+  }
+}

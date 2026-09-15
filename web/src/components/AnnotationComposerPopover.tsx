@@ -5,6 +5,7 @@ import {
 } from "../shortcutPreferences";
 import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
+import "./AnnotationComposerPopover.css";
 
 export type AnnotationComposerDraft = {
   x: number;

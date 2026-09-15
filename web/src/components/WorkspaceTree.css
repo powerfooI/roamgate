@@ -1,0 +1,217 @@
+/* ===== tree ===== */
+.tree {
+  margin: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.workspace-tree-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workspace-tree-panel:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.workspace-tree-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+  overflow: auto;
+}
+
+.tree-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  cursor: default;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tree-row * {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.tree-row:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 72%, transparent);
+  outline-offset: -2px;
+}
+
+.tree-row.is-focused {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.tree-row.is-focused.has-active-agent {
+  background: color-mix(in srgb, var(--accent-soft) 48%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 72%, transparent);
+}
+
+.tree-row.is-loading {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  background: color-mix(in srgb, var(--accent-soft) 60%, transparent);
+}
+
+.tree-row.is-focused > .ws-label {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.workspace-group-toggle {
+  width: 16px;
+  height: 24px;
+  flex: 0 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.workspace-group-toggle:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
+}
+
+.workspace-group-toggle:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ws-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-row.has-tab-count > .ws-label {
+  flex: 0 1 auto;
+}
+
+.workspace-tab-count {
+  flex: 1 0 auto;
+  color: color-mix(in srgb, var(--muted) 55%, transparent);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.tree-row.is-focused > .workspace-tab-count {
+  color: color-mix(in srgb, var(--muted) 85%, transparent);
+}
+
+.tree-row.is-child strong {
+  font-weight: 500;
+}
+
+.workspace-pin {
+  flex: 0 0 auto;
+  color: var(--muted);
+  transform: rotate(-18deg);
+}
+
+.tree-row.is-pinned:not(.is-focused) {
+  background: color-mix(in srgb, var(--panel-2) 62%, transparent);
+}
+
+.tree-row.is-dragging {
+  opacity: 0.45;
+}
+
+.tree-row.drop-before::after,
+.tree-row.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.tree-row.drop-before::after {
+  top: -1px;
+}
+
+.tree-row.drop-after::after {
+  bottom: -1px;
+}
+
+.wt-badge {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.sidebar-content > .panel.tree {
+  flex: 1 1 0;
+  margin: 0;
+}
+
+.agent-row.drop-before::after,
+.agent-row.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.agent-row.drop-before::after {
+  top: -1px;
+}
+
+.agent-row.drop-after::after {
+  bottom: -1px;
+}
+
+/* ===== badges ===== */
+.tree-row > .badge {
+  max-width: 60px;
+  overflow: hidden;
+  flex: 0 1 auto;
+  text-overflow: ellipsis;
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .panel.tree {
+    border: none;
+    border-radius: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+.twisty {
+  width: 16px;
+  flex: 0 0 16px;
+  display: inline-block;
+  color: var(--muted);
+}

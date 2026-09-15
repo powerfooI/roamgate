@@ -4,7 +4,10 @@
 
 This repo contains a Bun-powered bridge and a React/Vite frontend for Herdr.
 Frontend code lives in `web/src`, with reusable UI under `web/src/components`,
-assets under `web/src/assets`, and global styling in `web/src/styles.css`.
+assets under `web/src/assets`, and styling split between `web/src/styles`
+(theme tokens, base primitives, vendor overrides, app-shell layout) and
+co-located `web/src/components/*.css` files (see the style organization
+guidelines in `CONTRIBUTING.md`).
 Server and bridge code lives in `server/src`. Release helpers live in `scripts/`.
 Generated build output belongs in `web/dist`, `server/public`,
 `server/src/public-files.gen.ts`, `server/roamgate*`, legacy `server/herdr-gui*`,

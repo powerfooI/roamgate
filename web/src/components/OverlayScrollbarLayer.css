@@ -1,0 +1,39 @@
+.overlay-scrollbar-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 4900;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.overlay-scrollbar-thumb {
+  position: absolute;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--overlay-scrollbar-thumb);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--panel) 32%, transparent);
+  opacity: 0;
+  pointer-events: auto;
+  touch-action: none;
+  transition:
+    opacity 160ms ease,
+    background 120ms ease;
+}
+
+.overlay-scrollbar-layer.is-visible .overlay-scrollbar-thumb {
+  opacity: 1;
+}
+
+.overlay-scrollbar-thumb:hover,
+.overlay-scrollbar-thumb:active {
+  background: var(--overlay-scrollbar-thumb-hover);
+}
+
+.overlay-scrollbar-thumb.is-vertical {
+  cursor: ns-resize;
+}
+
+.overlay-scrollbar-thumb.is-horizontal {
+  cursor: ew-resize;
+}

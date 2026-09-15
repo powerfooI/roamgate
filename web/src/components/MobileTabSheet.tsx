@@ -12,6 +12,7 @@ import { summarizeTabAgents } from "./agentSession";
 import { CloseButton } from "./CloseButton";
 import { focusDialogElement } from "./dialogFocus";
 import { requestCloseTab, tabName } from "./TabBar";
+import "./MobileTabSheet.css";
 
 /**
  * Bottom-sheet tab switcher for narrow layouts. The tab strip hides itself on

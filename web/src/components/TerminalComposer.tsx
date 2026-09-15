@@ -36,6 +36,7 @@ import {
   writeTerminalComposerSelection,
 } from "../terminalComposer";
 import { MessageDialog } from "./ModalDialogs";
+import "./TerminalComposer.css";
 
 const TERMINAL_COMPOSER_HELP =
   "Input Composer uses your phone’s native editor for reliable IME, dictation, multiline text, and cursor editing before anything is sent to the terminal. Adding an image opens the system file picker, which takes focus from the composer and may dismiss the keyboard. After you choose an image, its uploaded path is inserted into the draft; tap the text area to reopen the keyboard if needed.";

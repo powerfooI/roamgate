@@ -40,6 +40,36 @@ Releases: package and inspect every supported archive/checksum; see
 [build commands](docs/DEPLOYMENT.md#build-a-standalone-executable) and
 [release policy](AGENTS.md#release-notes).
 
+## Style Organization
+
+Global styling is split by responsibility; there is no monolithic stylesheet.
+
+- `web/src/styles/tokens.css`: theme variables only (`:root`, `data-theme`,
+  `data-accent` selectors).
+- `web/src/styles/base.css`: element resets and shared primitives (`.modal`,
+  `.form-field`, `.badge`, `.status-*`, `.git-*`, `.panel*`, loading states).
+  Styles used by several unrelated components belong here, not in one
+  component's file.
+- `web/src/styles/vendor.css`: shared syntax highlighting and diff renderer
+  overrides. Consumer-specific library overrides live with their components.
+- `web/src/styles/layout/*.css`: app-shell regions (`app`, `topbar`,
+  `sidebar`, `toast`, `mobile-nav`), imported once by `App.tsx`.
+- `web/src/components/<Name>.css`: styles for one component, imported by that
+  component (`import "./<Name>.css"`) and deleted together with it. The same
+  pattern applies to `web/src/components/ui/` primitives.
+
+Keep class names prefixed with the component name (for example
+`.agent-history-card-title`) so selectors stay searchable and collision-free.
+Media queries (including mobile adaptations) live in the owning file next to
+the rules they adjust; do not create a separate mobile stylesheet.
+
+App shell and Suspense fallback styles must load before the lazy content they
+surround: use `styles/base.css` or `styles/layout/`. Styles shared across
+independently loaded features belong in a shared stylesheet imported by each
+consumer, or in `styles/base.css` when needed globally. A feature's components
+may share co-located CSS when their explicit static imports guarantee it loads
+on every rendering path; do not rely on an unrelated feature being opened.
+
 ## Pages Website and Tutorial
 
 Edit `site/` for the landing page; **only `docs/TUTORIAL.md`** for tutorial text.

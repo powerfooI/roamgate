@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import type { ButtonHTMLAttributes } from "react";
+import "./CloseButton.css";
 
 type CloseButtonProps = Omit<
   ButtonHTMLAttributes<HTMLButtonElement>,

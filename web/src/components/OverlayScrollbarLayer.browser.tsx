@@ -1,6 +1,8 @@
 import { createRoot } from "react-dom/client";
 import { OverlayScrollbarLayer } from "./OverlayScrollbarLayer";
-import "../styles.css";
+import "../styles/tokens.css";
+import "../styles/base.css";
+import "../styles/vendor.css";
 
 const failures: string[] = [];
 function check(condition: boolean, message: string) {

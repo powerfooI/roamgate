@@ -32,6 +32,7 @@ import {
 } from "./agentSession";
 import { CloseButton } from "./CloseButton";
 import { focusDialogElement } from "./dialogFocus";
+import "./AgentSessionPreviewDialog.css";
 
 function formatStepTime(timestamp?: string) {
   if (!timestamp) return "";

@@ -14,7 +14,9 @@ import {
   resourceScopeForWorkspace,
   WORKSPACE_INSPECTOR_REQUEST_EVENT,
 } from "./workspaceResource";
-import "./styles.css";
+import "./styles/tokens.css";
+import "./styles/base.css";
+import "./styles/vendor.css";
 
 const failures: string[] = [];
 const check = (condition: boolean, message: string) => {

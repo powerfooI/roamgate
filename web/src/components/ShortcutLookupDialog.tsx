@@ -22,6 +22,7 @@ import {
   updateShortcut,
   useShortcutPreferences,
 } from "../shortcutPreferences";
+import "./ShortcutLookupDialog.css";
 
 export function ShortcutLookupDialog({
   open,

@@ -81,6 +81,7 @@ import {
   uploadExplorerFile,
   deleteExplorerEntry,
 } from "./fileExplorerResources";
+import "./FileExplorerDialog.css";
 
 const FilePreviewContent = lazyWithReload("file-preview", () =>
   import("./FilePreviewContent").then((module) => ({

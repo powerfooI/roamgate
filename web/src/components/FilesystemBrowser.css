@@ -61,3 +61,224 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.file-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--viewer-border);
+  border-radius: 8px;
+  background: var(--viewer-content-bg);
+  color: var(--muted);
+}
+
+.file-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.file-hidden-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.file-hidden-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+}
+
+.file-tree {
+  max-height: min(560px, calc(100vh - 260px));
+  overflow: auto;
+  border: 1px solid var(--viewer-border);
+  border-radius: 8px;
+  background: var(--viewer-content-bg);
+}
+
+.file-tree.is-drop-target {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-soft);
+}
+
+.file-explorer-side .file-tree {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
+}
+
+.file-row {
+  display: grid;
+  grid-template-columns: 18px 22px minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 4px 8px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.file-explorer-side .file-row {
+  grid-template-columns: 18px 22px minmax(0, 1fr) auto auto auto;
+}
+
+.file-explorer-side .file-meta {
+  display: none;
+}
+
+.file-row:hover {
+  background: var(--panel-2);
+}
+
+.file-row.is-selected {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+
+.file-row.is-focused,
+.file-row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+}
+
+.file-row.is-drop-target {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  outline: 1px dashed var(--accent);
+  outline-offset: -3px;
+}
+
+.file-row.is-uploading {
+  color: var(--text-strong);
+}
+
+.file-row.is-ignored .file-icon,
+.file-row.is-ignored .file-name,
+.file-row.is-ignored .file-meta {
+  opacity: 0.48;
+}
+
+.file-row.is-ignored:hover .file-icon,
+.file-row.is-ignored:hover .file-name,
+.file-row.is-ignored:hover .file-meta {
+  opacity: 0.7;
+}
+
+.file-git-status {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 2px;
+  white-space: nowrap;
+}
+
+.file-row:hover .git-status-code {
+  opacity: 1;
+}
+
+.file-row-muted {
+  display: block;
+  color: var(--muted);
+}
+
+.file-upload-status {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent-soft) 70%, var(--input-bg));
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.file-row-loading {
+  grid-template-columns: 18px minmax(0, 1fr);
+  color: var(--muted);
+}
+
+.file-row-loading:hover {
+  background: transparent;
+}
+
+.file-twisty {
+  width: 18px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-twisty:disabled {
+  opacity: 0;
+}
+
+.file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.file-meta {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.file-actions {
+  /* Pin to the last grid track so conditional columns (git status, meta,
+     spinner) never shift the actions button horizontally. */
+  grid-column: -2 / -1;
+  display: inline-flex;
+  gap: 3px;
+}
+
+.file-action {
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-explorer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}

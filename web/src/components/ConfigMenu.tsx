@@ -51,6 +51,7 @@ import {
 } from "../terminalThemes";
 import { AutoSyncRepositoriesDialog } from "./AutoSyncRepositoriesDialog";
 import { MobileTerminalShortcutsDialog } from "./MobileTerminalShortcutsDialog";
+import "./ConfigMenu.css";
 
 const ShortcutLookupDialog = lazyWithReload("keyboard-shortcuts", () =>
   import("./ShortcutLookupDialog").then((module) => ({

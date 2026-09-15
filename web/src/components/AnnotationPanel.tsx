@@ -16,6 +16,7 @@ import {
 import type { Pane } from "../types";
 import { ConfirmDialog } from "./ModalDialogs";
 import { ThemedSelect } from "./ThemedSelect";
+import "./AnnotationPanel.css";
 
 function annotationLocation(annotation: ReviewAnnotation) {
   if (annotation.source === "diff") {

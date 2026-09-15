@@ -17,6 +17,7 @@ import {
   terminalComposerDraftPaneIds,
 } from "../terminalComposer";
 import { summarizeTabAgents } from "./agentSession";
+import "./TabBar.css";
 
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;

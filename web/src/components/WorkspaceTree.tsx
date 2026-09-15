@@ -78,6 +78,7 @@ import {
   workspaceTreeItemIsTabStop,
 } from "./treeKeyboard";
 import { TREE_DEPTH_INDENT } from "./treeIndent";
+import "./WorkspaceTree.css";
 
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;

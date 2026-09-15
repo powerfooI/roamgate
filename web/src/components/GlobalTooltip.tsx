@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import "./GlobalTooltip.css";
 
 type TooltipPlacement = "top" | "bottom";
 

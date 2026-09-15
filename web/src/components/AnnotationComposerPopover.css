@@ -1,0 +1,70 @@
+.annotation-composer-popover blockquote {
+  max-height: 82px;
+  margin: 0;
+  overflow: auto;
+  padding: 6px 8px;
+  border-left: 2px solid var(--accent);
+  background: var(--viewer-code-bg);
+  color: var(--text-code);
+  font: 10px / 1.45 var(--mono-font);
+  white-space: pre-wrap;
+}
+
+.annotation-composer-popover textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  padding: 7px 8px;
+  border: 1px solid var(--viewer-border);
+  border-radius: 7px;
+  outline: none;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.annotation-composer-popover textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.annotation-composer-popover {
+  position: fixed;
+  z-index: 1200;
+  width: min(340px, calc(100vw - 16px));
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--viewer-border);
+  border-radius: 9px;
+  background: var(--viewer-panel-bg);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+
+.annotation-composer-popover > strong {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-composer-popover small {
+  color: var(--muted);
+  font-size: 9px;
+  text-align: right;
+}
+
+.annotation-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.annotation-composer-actions button {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 11px;
+}

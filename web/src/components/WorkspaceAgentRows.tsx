@@ -11,6 +11,7 @@ import { shouldShowAgentStatusLabel } from "./agentSession";
 import { AgentStatusIcon } from "./AgentStatusIcon";
 import { observeClampedContextMenu } from "./contextMenuPosition";
 import { TREE_DEPTH_INDENT } from "./treeIndent";
+import "./WorkspaceAgentRows.css";
 
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;

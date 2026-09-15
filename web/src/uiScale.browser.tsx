@@ -2,7 +2,10 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import "./styles.css";
+import "./styles/tokens.css";
+import "./styles/base.css";
+import "./styles/vendor.css";
+import "./components/TerminalView.css";
 import { terminalFontOptions } from "./appearance";
 import {
   Popover,

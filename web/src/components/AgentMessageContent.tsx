@@ -3,6 +3,7 @@ import { Copy, X } from "lucide-react";
 import { UI_LOCALE } from "../uiLocale";
 import { CloseButton } from "./CloseButton";
 import { MarkdownPreview } from "./markdown";
+import "./AgentMessageContent.css";
 
 export type AgentMessage = {
   id: string;

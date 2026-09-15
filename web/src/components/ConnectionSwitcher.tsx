@@ -37,6 +37,7 @@ import { CloseButton } from "./CloseButton";
 import { focusDialogElement } from "./dialogFocus";
 import { ConfirmDialog } from "./ModalDialogs";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import "./ConnectionSwitcher.css";
 
 type Draft = {
   id: string;

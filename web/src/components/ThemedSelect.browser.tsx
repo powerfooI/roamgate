@@ -1,7 +1,9 @@
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { ArrowDownWideNarrow } from "lucide-react";
-import "../styles.css";
+import "../styles/tokens.css";
+import "../styles/base.css";
+import "../styles/vendor.css";
 import { ThemedSelect } from "./ThemedSelect";
 
 const failures: string[] = [];

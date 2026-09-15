@@ -1,0 +1,75 @@
+.mermaid-diagram {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 12px 0;
+}
+
+.mermaid-svg > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  /* Scoped replacement for the beautiful-mermaid <style> block that is
+     stripped before injection; values derive from the per-diagram --bg/--fg
+     (and optional --line/--muted overrides) set inline by the renderer. */
+  --_text: var(--fg);
+  --_text-sec: var(--muted, color-mix(in srgb, var(--fg) 60%, var(--bg)));
+  --_text-muted: var(--muted, color-mix(in srgb, var(--fg) 40%, var(--bg)));
+  --_text-faint: color-mix(in srgb, var(--fg) 25%, var(--bg));
+  --_line: var(--line, color-mix(in srgb, var(--fg) 50%, var(--bg)));
+  --_arrow: var(--accent, color-mix(in srgb, var(--fg) 85%, var(--bg)));
+  --_node-fill: var(--surface, color-mix(in srgb, var(--fg) 3%, var(--bg)));
+  --_node-stroke: var(--border, color-mix(in srgb, var(--fg) 20%, var(--bg)));
+  --_group-fill: var(--bg);
+  --_group-hdr: color-mix(in srgb, var(--fg) 5%, var(--bg));
+  --_inner-stroke: color-mix(in srgb, var(--fg) 12%, var(--bg));
+  --_key-badge: color-mix(in srgb, var(--fg) 10%, var(--bg));
+}
+
+.mermaid-diagram text {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+}
+
+.mermaid-diagram.is-loading,
+.mermaid-diagram.is-empty {
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.mermaid-diagram.is-empty {
+  justify-content: center;
+  padding: 24px 12px;
+}
+
+.mermaid-diagram-error {
+  margin: 0.85em 0;
+  padding: 8px 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: 7px;
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  font-size: 12.5px;
+}
+
+.mermaid-diagram-error pre {
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre;
+}
+
+.mermaid-diagram-error summary {
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.file-preview-mermaid.mermaid-diagram-error {
+  display: block;
+  margin: 16px;
+}

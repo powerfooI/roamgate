@@ -21,6 +21,7 @@ import {
 import { CloseButton } from "./CloseButton";
 import { focusDialogElement } from "./dialogFocus";
 import { ConfirmDialog } from "./ModalDialogs";
+import "./TerminalThemeDialog.css";
 
 // Editor fallback palette for colors a source theme leaves unset (xterm
 // defaults, e.g. Herdr Dark's ANSI colors).

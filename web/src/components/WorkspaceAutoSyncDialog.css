@@ -1,0 +1,108 @@
+.workspace-auto-sync-modal {
+  width: min(520px, 100%);
+}
+
+.auto-sync-description {
+  margin: -2px 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.auto-sync-description code {
+  color: var(--text-code);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.auto-sync-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.auto-sync-toggle-row > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.auto-sync-toggle-row strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.auto-sync-toggle-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auto-sync-loading {
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.auto-sync-summary {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
+.auto-sync-summary-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.auto-sync-summary-row > span {
+  color: var(--muted);
+}
+
+.auto-sync-summary-row code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-code);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-sync-result {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.auto-sync-result-updated,
+.auto-sync-result-up_to_date {
+  border-color: color-mix(in srgb, var(--green) 45%, var(--border));
+  color: var(--success-text);
+}
+
+.auto-sync-result-failed {
+  border-color: color-mix(in srgb, var(--red) 45%, var(--border));
+  color: var(--danger-text);
+}

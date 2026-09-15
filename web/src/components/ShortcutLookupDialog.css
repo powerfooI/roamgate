@@ -1,0 +1,213 @@
+.shortcut-modal {
+  width: min(860px, 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.shortcut-list {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  gap: 14px;
+  padding-right: 2px;
+}
+
+.shortcut-section {
+  display: grid;
+  gap: 8px;
+}
+
+.shortcut-section h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.shortcut-section dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
+.shortcut-row dt,
+.shortcut-row dd {
+  margin: 0;
+}
+
+.shortcut-row dd {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.shortcut-row kbd {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  font:
+    12px / 1.2 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: normal;
+}
+
+/* The shortcut editor shares the modal and appearance tokens. */
+.shortcut-modal {
+  max-height: calc(100dvh - 36px);
+  gap: 12px;
+}
+
+.shortcut-modal .modal-head {
+  flex-shrink: 0;
+}
+
+.shortcut-modal .modal-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.keybinding-settings {
+  display: grid;
+  gap: 8px;
+}
+
+.keybinding-settings p,
+.keybinding-editor p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.keybinding-preset {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.keybinding-settings input,
+.keybinding-editor input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.keybinding-preset-actions,
+.keybinding-editor-actions,
+.keybinding-delete {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.keybinding-preset-actions input {
+  flex: 1;
+  min-width: 120px;
+  width: auto;
+}
+
+.shortcut-modal .shortcut-row {
+  grid-template-columns: minmax(0, 1fr) minmax(130px, 1fr);
+  font-size: 13px;
+}
+
+.keybinding-edit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+}
+
+.keybinding-edit span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.keybinding-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.keybinding-editor label {
+  display: grid;
+  gap: 6px;
+}
+
+.keybinding-error {
+  color: var(--danger, #e87979);
+}
+
+.keybinding-reference p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.shortcut-modal .modal-actions {
+  flex-shrink: 0;
+  margin-top: 0;
+}
+
+.shortcut-modal .modal-actions > span {
+  flex: 1;
+  font-size: 11px;
+}
+
+@media (max-width: 768px) {
+  .shortcut-modal {
+    padding: 14px;
+    gap: 10px;
+  }
+
+  .shortcut-modal .shortcut-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+
+  .keybinding-preset {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .keybinding-preset-actions input {
+    flex-basis: 100%;
+  }
+
+  .keybinding-settings input,
+  .keybinding-editor input {
+    font-size: 16px;
+  }
+}

@@ -25,6 +25,7 @@ import {
   CommandList,
 } from "./ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import "./MobileTerminalShortcutsDialog.css";
 
 const OPTION_GROUPS = ["Control", "Basic", "Navigation", "Modified"] as const;
 let nextShortcutId = 1;

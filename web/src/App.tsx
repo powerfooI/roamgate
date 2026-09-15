@@ -155,6 +155,11 @@ import {
   writeInspectorPreferences,
   writeResourceFileSelection,
 } from "./workspaceResource";
+import "./styles/layout/app.css";
+import "./styles/layout/topbar.css";
+import "./styles/layout/sidebar.css";
+import "./styles/layout/toast.css";
+import "./styles/layout/mobile-nav.css";
 
 const WorkspaceInspectorHost = lazyWithReload("workspace-inspector", () =>
   import("./components/WorkspaceInspectorHost").then((module) => ({

@@ -58,6 +58,7 @@ import {
   readDiffCollapseState,
   writeDiffCollapseState,
 } from "./diffContentState";
+import "./DiffContentView.css";
 
 type DiffViewMode = "split" | "unified";
 type AppTheme = "dark" | "light";

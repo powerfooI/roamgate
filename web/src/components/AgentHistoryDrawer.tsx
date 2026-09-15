@@ -45,6 +45,7 @@ import {
   formatTokenTotal,
   tokenUsage,
 } from "./agentSession";
+import "./AgentHistoryDrawer.css";
 
 function formatHistoryTime(sentAt: string) {
   const time = new Date(sentAt);

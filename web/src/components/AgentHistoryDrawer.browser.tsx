@@ -1,7 +1,9 @@
 import { createRoot } from "react-dom/client";
 import { bridge } from "../api";
 import { AgentHistoryDrawer } from "./AgentHistoryDrawer";
-import "../styles.css";
+import "../styles/tokens.css";
+import "../styles/base.css";
+import "../styles/vendor.css";
 
 const failures: string[] = [];
 function check(condition: boolean, message: string) {
@@ -125,6 +127,25 @@ async function run() {
           !!reader && getComputedStyle(reader).borderTopWidth === "0px",
           "Reader must not have a nested card border",
         );
+        const readerHeader = container.querySelector<HTMLElement>(
+          ".agent-history-wide-detail .agent-message-modal-head",
+        );
+        check(
+          !!readerHeader && getComputedStyle(readerHeader).display === "flex",
+          `${theme} ${width}: inline message header must keep its flex layout`,
+        );
+        const title = readerHeader?.firstElementChild;
+        const controls = readerHeader?.lastElementChild;
+        if (title && controls) {
+          const titleRect = title.getBoundingClientRect();
+          const controlsRect = controls.getBoundingClientRect();
+          check(
+            controlsRect.left >= titleRect.right &&
+              controlsRect.top < titleRect.bottom &&
+              controlsRect.bottom > titleRect.top,
+            `${theme} ${width}: inline message actions must stay beside the title`,
+          );
+        }
         const action = actions?.querySelector("button");
         action?.focus();
         check(

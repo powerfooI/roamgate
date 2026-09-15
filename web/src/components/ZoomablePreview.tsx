@@ -1,4 +1,4 @@
-import "./visualPreview.css";
+import "./ZoomablePreview.css";
 import {
   useEffect,
   useLayoutEffect,

@@ -11,6 +11,7 @@ import {
   overlayScrollbarExcludedElement,
   type OverlayThumbGeometry,
 } from "./overlayScrollbar";
+import "./OverlayScrollbarLayer.css";
 
 type Axis = "vertical" | "horizontal";
 

@@ -1,0 +1,435 @@
+.connection-switcher {
+  position: relative;
+  min-width: 0;
+  max-width: min(360px, 42vw);
+  flex: 0 1 auto;
+}
+
+.connection-switcher-trigger {
+  width: fit-content;
+  min-width: 0;
+  max-width: 100%;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-color: var(--topbar-control-border);
+  border-radius: 7px;
+  background: var(--topbar-control-bg);
+  color: var(--topbar-control-text);
+}
+
+.connection-switcher-trigger:hover,
+.connection-switcher-trigger.is-active {
+  border-color: var(--topbar-control-active-border);
+  background: var(--topbar-control-active-bg);
+  color: var(--text-strong);
+}
+
+.connection-switcher-trigger.has-browser-warning {
+  border-color: rgba(240, 196, 83, 0.4);
+  background: var(--warning-soft);
+}
+
+.connection-switcher-warning {
+  flex: 0 0 auto;
+  color: var(--warning-text);
+}
+
+.connection-switcher-label,
+.connection-switcher-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-switcher-label {
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.connection-switcher-meta {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.connection-runtime-dot,
+.connection-browser-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.connection-runtime-ready {
+  background: var(--green);
+}
+
+.connection-runtime-connecting,
+.connection-runtime-reconnecting,
+.connection-runtime-stopping {
+  background: var(--yellow);
+}
+
+.connection-runtime-error,
+.connection-runtime-disconnected {
+  background: var(--red);
+}
+
+.connection-switcher-popover {
+  z-index: 5000;
+  width: min(380px, calc(100vw - 24px));
+  max-height: calc(
+    var(--radix-popover-content-available-height, calc(100dvh - 24px)) /
+    var(--ui-scale, 1)
+  );
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--shell-border);
+  border-radius: 9px;
+  background: var(--shell-panel);
+  box-shadow: var(--shadow-lg);
+}
+
+.connection-browser-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.browser-connected {
+  background: var(--blue);
+}
+
+.browser-connecting,
+.browser-paused {
+  background: var(--yellow);
+}
+
+.browser-disconnected {
+  background: var(--red);
+}
+
+.connection-browser-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 5px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.connection-browser-actions button {
+  min-width: min(150px, 100%);
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 150px;
+  padding: 7px 8px;
+  border-color: var(--border-soft);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.connection-browser-actions button:hover,
+.connection-browser-actions button:focus-visible {
+  background: var(--panel-2);
+}
+
+.connection-browser-actions button.is-warning {
+  border-color: rgba(240, 196, 83, 0.32);
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+
+.connection-browser-actions button.is-warning:hover,
+.connection-browser-actions button.is-warning:focus-visible {
+  border-color: rgba(240, 196, 83, 0.5);
+  background: color-mix(in srgb, var(--warning-soft) 78%, var(--yellow));
+}
+
+.connection-switcher-list {
+  min-height: 0;
+  max-height: min(360px, 55vh);
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 5px;
+}
+
+.connection-switcher-option {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.connection-switcher-option:hover,
+.connection-switcher-option:focus-visible {
+  border-color: transparent;
+  background: var(--panel-2);
+}
+
+.connection-switcher-option > span:nth-child(2) {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.connection-switcher-option strong,
+.connection-switcher-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-switcher-option small {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.connection-switcher-manage {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.connection-switcher-manage:hover,
+.connection-switcher-manage:focus-visible {
+  background: var(--panel-2);
+}
+
+.connection-manager-modal {
+  width: min(820px, 100%);
+  max-height: min(
+    820px,
+    calc(
+      100dvh -
+      36px -
+      env(safe-area-inset-top, 0px) -
+      env(safe-area-inset-bottom, 0px)
+    )
+  );
+}
+
+.connection-manager-modal .modal-head {
+  align-items: flex-start;
+}
+
+.connection-manager-modal .modal-head p {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.connection-manager-modal > .connection-browser-status {
+  margin-top: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+}
+
+.connection-manager-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.connection-manager-toolbar button,
+.connection-profile-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.connection-manager-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.connection-manager-card {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel-2) 55%, transparent);
+}
+
+.connection-manager-card-head {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.connection-manager-card-head > div:nth-child(2) {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.connection-manager-card-head strong,
+.connection-manager-card-head > div:nth-child(2) > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-manager-card-head > div:nth-child(2) > span,
+.connection-profile-policy {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.connection-profile-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.connection-profile-badges span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 10px;
+}
+
+.connection-profile-paths {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.connection-profile-paths code {
+  overflow: hidden;
+  color: var(--text-code);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-profile-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  overflow-wrap: anywhere;
+  color: var(--danger-text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.connection-profile-error svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.connection-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.connection-profile-actions button {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.connection-profile-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 13px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.connection-profile-checkbox input {
+  width: auto;
+}
+
+.connection-profile-security-note {
+  margin: 11px 0 0;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .connection-switcher {
+    max-width: min(220px, 42vw);
+  }
+
+  .connection-switcher-trigger {
+    height: 28px;
+  }
+
+  .connection-switcher-meta {
+    display: none;
+  }
+
+  .connection-switcher-popover {
+    width: calc(
+      100vw -
+      16px -
+      env(safe-area-inset-left, 0px) -
+      env(safe-area-inset-right, 0px)
+    );
+  }
+
+  .connection-manager-modal {
+    width: 100%;
+    max-height: calc(
+      100dvh -
+      20px -
+      env(safe-area-inset-top, 0px) -
+      env(safe-area-inset-bottom, 0px)
+    );
+  }
+
+  .connection-manager-card-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .connection-profile-badges {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
+  .connection-profile-actions button {
+    flex: 1 1 auto;
+  }
+}

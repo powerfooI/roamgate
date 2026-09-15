@@ -1,0 +1,380 @@
+.app.zen .workspace-terminal-surface > .terminal-shell .terminal-view {
+  border-width: 0;
+  border-radius: 0;
+}
+
+.pane-layout-cell .terminal-view {
+  border-color: var(--border-soft);
+  border-radius: 8px;
+}
+
+.pane-layout-cell.is-active .terminal-view {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-soft);
+}
+
+.terminal-view {
+  /* xterm measures cells without CSS zoom; scale its font in TerminalView. */
+  zoom: calc(1 / var(--ui-scale, 1));
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--terminal-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  touch-action: none;
+}
+
+.terminal-view .xterm {
+  height: 100%;
+  padding: 4px 0 4px 4px;
+  box-sizing: border-box;
+  touch-action: none;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  font-variant-ligatures: none;
+  font-feature-settings:
+    "liga" 0,
+    "calt" 0;
+}
+
+.terminal-view .xterm.xterm-apple-row-spacing-fix .xterm-rows {
+  /*
+   * xterm's DOM renderer derives a fractional correction from integer
+   * offsetWidth measurements. With SF Mono that correction accumulates across
+   * the row and pushes the final cells past xterm's clipped row viewport.
+   */
+  letter-spacing: 0 !important;
+}
+
+.terminal-view .xterm:not(.allow-transparency) .xterm-viewport {
+  /* xterm.css hard-codes black here, which otherwise leaks through below the
+     final fractional-height row and around the terminal padding. Include
+     xterm's transparency state so this wins even when its CSS loads later. */
+  background-color: var(--terminal-canvas-background, var(--terminal-bg));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: none;
+}
+
+.terminal-view .xterm .composition-view {
+  background-color: var(--terminal-canvas-background, var(--terminal-bg));
+  color: var(--terminal-canvas-foreground, var(--terminal-fg));
+}
+
+.terminal-pane-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(32, 35, 49, 0.88);
+  box-shadow: var(--shadow-lg);
+  opacity: 0.24;
+  transition:
+    opacity 120ms ease,
+    border-color 120ms ease;
+}
+
+.terminal-shell:hover .terminal-pane-toolbar,
+.terminal-pane-toolbar:focus-within {
+  border-color: var(--border);
+  opacity: 1;
+}
+
+.terminal-pane-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  color: #c9cdd6;
+  background: transparent;
+  touch-action: manipulation;
+}
+
+.terminal-pane-action:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.terminal-pane-action.is-danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+.terminal-empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+}
+
+.terminal-mobile-keys,
+.terminal-mobile-side-shortcuts {
+  display: none;
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .keyboard-open .terminal-mobile-keys,
+  .keyboard-open .terminal-mobile-side-shortcuts,
+  .app:has(.terminal-composer-input:focus) .terminal-mobile-keys,
+  .app:has(.terminal-composer-input:focus) .terminal-mobile-side-shortcuts {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .terminal-mobile-keys {
+    position: absolute;
+    top: 10px;
+    right: calc(8px + env(safe-area-inset-right, 0px));
+    z-index: 7;
+    display: flex;
+    flex-direction: row-reverse;
+    align-items: center;
+    gap: 6px;
+    pointer-events: none;
+  }
+
+  .terminal-mobile-keys-toggle,
+  .terminal-mobile-keys-panel {
+    border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+    background: color-mix(in srgb, var(--panel) 68%, transparent);
+    box-shadow: var(--shadow-lg);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+
+  .terminal-mobile-keys-toggle {
+    width: 36px;
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-radius: 999px;
+    color: var(--text-strong);
+    pointer-events: auto;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .terminal-mobile-key-spacer {
+    width: 48px;
+    height: 28px;
+    pointer-events: none;
+  }
+
+  .terminal-mobile-keys-toggle:active,
+  .terminal-mobile-keys.is-open .terminal-mobile-keys-toggle {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .terminal-mobile-keys-panel {
+    max-width: calc(100vw - 62px - env(safe-area-inset-right, 0px));
+    padding: 3px;
+    overflow-x: auto;
+    /* Anchor overflow at the right edge so the directional and page keys stay
+       visible on narrow screens. The nested grid resets item order to LTR. */
+    direction: rtl;
+    border-radius: 12px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(10px) scale(0.9);
+    transform-origin: right top;
+    transition:
+      opacity 140ms ease,
+      transform 160ms ease;
+    scrollbar-width: none;
+  }
+
+  .terminal-mobile-keys-panel::-webkit-scrollbar {
+    display: none;
+  }
+
+  .terminal-mobile-keys-grid {
+    width: max-content;
+    display: grid;
+    grid-template-columns: repeat(var(--mobile-shortcut-columns), 48px);
+    direction: ltr;
+    gap: 2px;
+  }
+
+  .terminal-mobile-keys-row {
+    width: 100%;
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(var(--mobile-shortcut-columns), 48px);
+    gap: 2px;
+  }
+
+  .terminal-mobile-keys.is-open .terminal-mobile-keys-panel {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0) scale(1);
+  }
+
+  .terminal-mobile-keys-panel button {
+    width: 48px;
+    min-width: 0;
+    height: 28px;
+    flex: 0 0 48px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    border: 1px solid color-mix(in srgb, var(--border) 72%, var(--text) 28%);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--panel-2) 76%, transparent);
+    color: var(--text-strong);
+    overflow: hidden;
+    font:
+      700 11px / 1 ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      Consolas,
+      monospace;
+    letter-spacing: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .terminal-mobile-keys-panel button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+    background: color-mix(in srgb, var(--accent-soft) 55%, var(--panel-2));
+  }
+
+  .terminal-mobile-keys-panel button:active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .terminal-mobile-side-shortcuts {
+    /* Anchor to the mobile viewport rather than the shrinking terminal, so
+       Composer and shortcut-row changes cannot move this control stack. */
+    position: fixed;
+    top: 45%;
+    right: calc(8px + env(safe-area-inset-right, 0px));
+    z-index: 5;
+    display: grid;
+    gap: 3px;
+    transform: translateY(-50%);
+    pointer-events: auto;
+  }
+
+  .terminal-mobile-side-shortcut-spacer {
+    width: 42px;
+    height: 32px;
+    pointer-events: none;
+  }
+
+  .terminal-mobile-side-shortcuts button {
+    width: 42px;
+    height: 32px;
+    padding: 0 4px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--border) 72%, var(--text) 28%);
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--panel) 70%, transparent);
+    box-shadow: var(--shadow-lg);
+    color: var(--text-strong);
+    font:
+      700 10px / 1 ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      Consolas,
+      monospace;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+
+  .terminal-mobile-side-shortcuts button:active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  @media (hover: none) and (pointer: coarse) and (forced-colors: none) {
+    .terminal-mobile-keys:not(.is-open)
+      .terminal-mobile-keys-toggle:hover:not(:disabled):not(:active) {
+      border-color: color-mix(in srgb, var(--border) 72%, transparent);
+      background: color-mix(in srgb, var(--panel) 68%, transparent);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .terminal-mobile-keys-panel button:hover:not(:disabled):not(:active) {
+      border-color: color-mix(in srgb, var(--border) 72%, var(--text) 28%);
+      background: color-mix(in srgb, var(--panel-2) 76%, transparent);
+      box-shadow: none;
+    }
+
+    .terminal-mobile-side-shortcuts button:hover:not(:disabled):not(:active) {
+      border-color: color-mix(in srgb, var(--border) 72%, var(--text) 28%);
+      background: color-mix(in srgb, var(--panel) 70%, transparent);
+      box-shadow: var(--shadow-lg);
+    }
+  }
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .terminal-view {
+    border-right: none;
+    border-bottom: none;
+    border-left: none;
+    border-radius: 0;
+  }
+
+  .pane-layout-cell .terminal-view {
+    border-radius: 0;
+  }
+
+  .terminal-pane-toolbar {
+    display: none;
+  }
+
+  .terminal-view .xterm {
+    padding: 5px 0 calc(6px + env(safe-area-inset-bottom, 0px)) 6px;
+  }
+
+  /* The composer already carries the bottom safe-area padding, so the
+     terminal above it drops the extra inset that otherwise reads as a gap. */
+  .terminal-shell:has(.terminal-composer) .terminal-view .xterm {
+    padding-bottom: 6px;
+  }
+
+  .terminal-empty {
+    border-radius: 0;
+  }
+}

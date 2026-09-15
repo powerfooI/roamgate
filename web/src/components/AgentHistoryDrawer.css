@@ -1,0 +1,723 @@
+@media (prefers-reduced-motion: reduce) {
+  .agent-history-minimap-bar {
+    transition: none;
+  }
+}
+
+.workspace-inspector-resource.inspector-history-resource .agent-history-wide {
+  gap: 0;
+}
+
+.workspace-inspector.is-compact .agent-history-drawer.is-embedded {
+  border: 0;
+  border-radius: 0;
+}
+
+.agent-history-drawer {
+  flex: 0 0 0;
+  width: 0;
+  min-width: 0;
+  max-width: min(400px, 38vw);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--shell-panel);
+  border: 0 solid transparent;
+  border-radius: 10px;
+  opacity: 0;
+  transform: translateX(10px);
+  transition:
+    flex-basis 180ms ease,
+    width 180ms ease,
+    opacity 160ms ease,
+    transform 180ms ease,
+    border-color 160ms ease;
+  pointer-events: none;
+}
+
+.agent-history-drawer.is-open {
+  flex-basis: min(400px, 38vw);
+  width: min(400px, 38vw);
+  border-width: 1px;
+  border-color: var(--border);
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.agent-history-drawer.is-embedded {
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  flex: 1 1 auto;
+  border-width: 1px;
+  border-color: var(--border);
+  opacity: 1;
+  transform: none;
+  transition: none;
+  pointer-events: auto;
+}
+
+.agent-history-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.agent-history-identity {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-history-title {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.agent-history-title strong {
+  color: var(--text-strong);
+  font-size: 13px;
+  line-height: 1.15;
+}
+
+.agent-history-title span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-history-actions {
+  display: inline-flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.agent-history-icon,
+.agent-history-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+}
+
+.agent-history-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.agent-history-icon:hover,
+.agent-history-copy:hover {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+
+.agent-history-icon:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.agent-history-icon.is-loading svg {
+  animation: row-spinner 0.8s linear infinite;
+}
+
+.agent-history-status {
+  flex: 0 0 auto;
+  max-width: 72px;
+  overflow: hidden;
+  padding: 2px 6px;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+}
+
+.agent-history-status.is-idle,
+.agent-history-status.is-done {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 48%, var(--border));
+}
+
+.agent-history-status.is-working {
+  color: var(--yellow);
+  border-color: color-mix(in srgb, var(--yellow) 48%, var(--border));
+}
+
+.agent-history-status.is-blocked,
+.agent-history-status.is-error {
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+}
+
+.agent-history-error {
+  margin: 10px 12px 0;
+  padding: 9px 10px;
+  color: var(--danger-text);
+  font-size: 12px;
+  line-height: 1.35;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+}
+
+.agent-history-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  margin: 10px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  background: var(--input-bg);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+
+.agent-history-timeline {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 10px 10px 12px;
+  overflow: auto;
+}
+
+.agent-history-tool-id,
+.agent-history-tool-label {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-history-tool-label {
+  margin-bottom: 5px;
+}
+
+.agent-history-copy {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+}
+
+.agent-history-overview {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--panel-2) 52%, transparent);
+}
+
+.agent-history-details > .agent-history-overview {
+  margin-bottom: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+
+.agent-history-overview > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px 8px;
+  border-right: 1px solid var(--border-soft);
+}
+
+.agent-history-overview > div:nth-child(3) {
+  border-right: none;
+}
+
+.agent-history-overview strong {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-history-overview > div > span,
+.agent-history-overview p {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.agent-history-overview p {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.agent-history-unavailable {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 9px;
+  margin: 12px;
+  padding: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
+.agent-history-unavailable strong {
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.agent-history-unavailable p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.agent-history-command-row {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.agent-history-command-row code {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  padding: 6px 8px;
+  color: var(--text-code);
+  font-family: var(--mono-font);
+  font-size: 10px;
+  white-space: nowrap;
+  background: var(--code-bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+}
+
+.agent-history-tabs {
+  flex: 0 0 auto;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.agent-history-tab-list {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agent-history-tab-list button[role="tab"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 8px;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.agent-history-tab-list > button[role="tab"].is-active {
+  color: var(--text-strong);
+  border-bottom-color: var(--accent);
+}
+
+.agent-history-tab-list button[role="tab"] > span {
+  min-width: 18px;
+  padding: 1px 5px;
+  color: var(--muted);
+  font-size: 9px;
+  background: var(--panel-2);
+  border-radius: 999px;
+}
+
+.agent-history-minimap-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.agent-history-minimap {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  /* Fixed height so the wave's taller bars grow into the padding instead of
+     pushing the timeline around. */
+  height: 30px;
+  box-sizing: border-box;
+  padding: 7px 10px 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  /* Keep horizontal gestures at the strip's scroll bounds from chaining to
+     the page, where a trackpad swipe could trigger browser back/forward. */
+  overscroll-behavior-x: contain;
+  /* Horizontal drags pan the strip natively; taps jump via pointer
+     handlers. */
+  touch-action: pan-x pan-y;
+}
+
+.agent-history-minimap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.agent-history-minimap::-webkit-scrollbar {
+  display: none;
+}
+
+/* Thin position indicator for the strip's own horizontal scroll; the global
+   overlay scrollbar is excluded here because its thumb is too heavy for a
+   30px strip. */
+.agent-history-minimap-scrollbar {
+  position: absolute;
+  right: 10px;
+  bottom: 1px;
+  left: 10px;
+  height: 3px;
+  pointer-events: none;
+}
+
+.agent-history-minimap-scrollbar-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 1.5px;
+  background: var(--accent);
+  opacity: 0.55;
+}
+
+.agent-history-minimap-bar {
+  /* Bars overflow the strip once they hit the min-width floor, so the strip
+     scrolls horizontally; the stride-based mapping then turns any horizontal
+     position into a message index. */
+  flex: 1 1 0;
+  min-width: 2px;
+  height: 10px;
+  padding: 0;
+  border: none;
+  border-radius: 1.5px;
+  background: var(--muted);
+  opacity: 0.45;
+  /* The wave grows bars via transform (compositor-only) instead of height:
+     no layout thrash while scrolling, and immune to repaint issues on
+     mobile browsers inside transformed/overflow-hidden ancestors. */
+  transform-origin: bottom;
+  transition:
+    transform 140ms ease,
+    opacity 140ms ease;
+}
+
+.agent-history-minimap-bar.is-user {
+  background: var(--blue);
+}
+
+.agent-history-minimap-bar.is-assistant {
+  background: var(--green);
+}
+
+.agent-history-minimap-bar.is-tool {
+  background: var(--yellow);
+}
+
+.agent-history-minimap-bar.is-in-view {
+  transform: scaleY(1.6);
+  opacity: 1;
+}
+
+.agent-history-minimap-bar:hover,
+.agent-history-minimap-bar:focus-visible {
+  opacity: 1;
+}
+
+.agent-history-messages {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.agent-history-drawer.is-wide .agent-history-drawer-head {
+  padding: 8px 12px;
+}
+
+.agent-history-drawer.is-wide .agent-history-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.agent-history-drawer.is-wide .agent-history-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 0 12px;
+  background: var(--viewer-header-bg);
+}
+
+.agent-history-drawer.is-wide .agent-history-tab-list {
+  display: flex;
+  align-self: stretch;
+}
+
+.agent-history-drawer.is-wide .agent-history-tab-list button[role="tab"] {
+  padding: 9px 12px;
+  font-size: 12px;
+}
+
+.agent-history-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 4px 0;
+}
+
+.agent-history-toolbar-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.agent-history-toolbar-actions button:hover {
+  color: var(--text-strong);
+  background: var(--accent-soft);
+}
+
+.agent-history-toolbar-actions button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.agent-history-wide {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  grid-template-columns:
+    clamp(240px, var(--agent-history-list-width, 40%), calc(100% - 308px))
+    8px minmax(300px, 1fr);
+  overflow: hidden;
+}
+
+.agent-history-wide-list {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.agent-history-wide-detail {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--input-bg);
+}
+
+.agent-history-wide-placeholder {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.agent-history-wide-list .agent-history-timeline {
+  gap: 0;
+  padding: 0;
+}
+
+.agent-history-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+.agent-history-content .agent-history-timeline {
+  min-height: auto;
+  overflow: visible;
+}
+
+.agent-history-details {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: grid;
+  align-content: start;
+  gap: 0;
+  padding: 8px 12px;
+  overflow: auto;
+}
+
+.agent-history-detail-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.agent-history-detail-row > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.agent-history-detail-row > code {
+  overflow: hidden;
+  color: var(--text-code);
+  font-family: var(--mono-font);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-history-tool-load {
+  display: block;
+  width: 100%;
+  padding: 14px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.agent-history-tool-load:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.agent-history-tool-load:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.agent-history-footer {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--shell-panel);
+}
+
+.agent-history-footer button,
+.agent-history-unavailable > button {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 9px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+}
+
+.agent-history-footer .primary-btn {
+  color: var(--text-strong);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--accent-soft);
+}
+
+.agent-history-footer button:hover,
+.agent-history-unavailable > button:hover {
+  color: var(--text-strong);
+  border-color: var(--accent);
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .agent-history-drawer {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+    width: auto;
+    max-width: none;
+    flex-basis: auto;
+    border-radius: 0;
+    transform: translateX(18px);
+    /* The mobile app height includes the bottom safe area; keep the drawer's
+       content (especially the footer buttons) above it so it stays tappable
+       and clear of the browser's bottom chrome. */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .agent-history-drawer.is-open {
+    width: auto;
+    flex-basis: auto;
+    border-width: 1px 0 0;
+    transform: translateX(0);
+  }
+
+  .agent-history-drawer.is-embedded {
+    position: relative;
+    inset: auto;
+    z-index: auto;
+    width: 100%;
+    height: 100%;
+    flex: 1 1 auto;
+    border-width: 0;
+    transform: none;
+  }
+
+  .agent-history-drawer-head {
+    padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  }
+
+  .agent-history-drawer.is-embedded .agent-history-drawer-head {
+    padding-top: 10px;
+  }
+
+  .agent-history-timeline {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  }
+}

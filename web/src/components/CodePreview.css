@@ -1,0 +1,32 @@
+.markdown-annotate-button {
+  position: fixed;
+  z-index: 1190;
+  min-height: 34px;
+  padding: 0 10px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: var(--shadow-md);
+}
+
+.code-preview {
+  flex: 1 1 auto;
+  min-height: 240px;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  color: var(--text-code);
+  font-family: var(--mono-font);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.code-preview {
+  padding: 0;
+}

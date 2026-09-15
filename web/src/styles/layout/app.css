@@ -1,0 +1,832 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ===== main 2-column body (sidebar | resizer | main) ===== */
+.body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 284px 8px 1fr; /* overridden inline */
+  padding: 12px;
+  overflow: hidden;
+}
+
+.resizer {
+  cursor: col-resize;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.resizer:hover {
+  background: var(--accent-hover);
+}
+
+.resizer:active {
+  background: var(--accent-active);
+}
+
+.main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 4px;
+  overflow: hidden;
+}
+
+.main-diff-mode {
+  gap: 8px;
+}
+
+.main-view {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.main-view.is-hidden {
+  display: none;
+}
+
+.main-diff-mode .main-view {
+  gap: 8px;
+}
+
+.workspace-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  gap: 0;
+  overflow: hidden;
+  container-name: workspace-stage;
+  container-type: size;
+}
+
+.workspace-terminal-surface {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workspace-terminal-surface > .terminal-shell,
+.workspace-terminal-surface > .pane-layout,
+.workspace-terminal-surface > .pane-switcher-layout {
+  flex: 1 1 auto;
+}
+
+.workspace-stage.is-inspector-expanded .workspace-terminal-surface {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.sidebar-hidden .body {
+  grid-template-columns: 1fr !important;
+}
+
+.sidebar-hidden .resizer {
+  display: none;
+}
+
+.sidebar-hidden .main {
+  padding-left: 0;
+}
+
+/* Zen mode leaves only the terminal on screen. The topbar keeps a thin edge
+   so the connection switcher, command menu, and settings stay reachable with
+   the pointer without leaving Zen; the shortcut and the Appearance switch
+   remain the keyboard and menu paths back. */
+.app.zen {
+  position: relative;
+}
+
+/* Only the topbar's reveal edge is reserved; the terminal runs flush to every
+   other side, without its own border or corner radius. Split layouts keep
+   their pane borders so the focused pane stays identifiable. */
+.app.zen .body {
+  padding: 6px 0 0;
+}
+
+.pane-jump-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  pointer-events: none;
+}
+
+.pane-jump-popover {
+  width: min(520px, calc(100vw - 36px));
+  max-height: min(520px, calc(100vh - 80px));
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 14px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--panel-2) 92%, white 8%),
+    color-mix(in srgb, var(--panel) 96%, black 4%)
+  );
+  box-shadow: var(--shadow-modal);
+  pointer-events: auto;
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+
+.pane-jump-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 14px 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.pane-jump-head strong {
+  color: var(--text-strong);
+  font-size: 15px;
+}
+
+.pane-jump-head span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-jump-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: auto;
+  padding: 8px;
+}
+
+.pane-jump-item {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.pane-jump-item.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 64%, var(--border));
+  background: var(--accent-soft);
+}
+
+.pane-jump-item:hover {
+  background: var(--accent-hover);
+}
+
+.pane-jump-item.is-current:not(.is-selected) {
+  border-color: var(--border-soft);
+  background: color-mix(in srgb, var(--panel-2) 62%, transparent);
+}
+
+.pane-jump-status {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--muted);
+  box-shadow: 0 0 0 3px var(--border-soft);
+}
+
+.pane-jump-status.status-working {
+  background: var(--yellow);
+}
+
+.pane-jump-status.status-idle,
+.pane-jump-status.status-done {
+  background: var(--green);
+}
+
+.pane-jump-status.status-blocked,
+.pane-jump-status.status-error {
+  background: var(--red);
+}
+
+.pane-jump-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pane-jump-title-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pane-jump-title-line > strong,
+.pane-jump-subtitle,
+.pane-jump-agent-name,
+.pane-jump-agent-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-jump-title-line > strong {
+  min-width: 0;
+  color: var(--text-strong);
+  font-size: 14px;
+}
+
+.pane-jump-subtitle {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pane-jump-agent-identity {
+  position: relative;
+  width: 23px;
+  height: 23px;
+  flex: 0 0 23px;
+}
+
+.pane-jump-agent-identity .pane-jump-status {
+  position: absolute;
+  right: -2px;
+  bottom: -1px;
+  width: 7px;
+  height: 7px;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+
+.pane-jump-agent-name {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.pane-jump-agent-status {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.pane-jump-current-badge {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid rgba(143, 183, 255, 0.72);
+  border-radius: 999px;
+  background: rgba(122, 162, 247, 0.18);
+  color: #dbe8ff;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 0 12px rgba(122, 162, 247, 0.16);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+/* ===== terminal (xterm.js) ===== */
+.main-view > .terminal-shell {
+  flex: 1 1 auto;
+}
+
+.main-view > .pane-layout {
+  flex: 1 1 auto;
+}
+
+.main-view > .pane-switcher-layout {
+  flex: 1 1 auto;
+}
+
+.pane-layout {
+  position: relative;
+  min-height: 0;
+  background: var(--terminal-bg);
+}
+
+.pane-switcher-layout {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--terminal-bg);
+}
+
+.pane-switcher-layout > .terminal-shell {
+  flex: 1 1 auto;
+}
+
+.pane-switcher {
+  display: none;
+}
+
+.pane-switcher-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pane-switcher-label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.pane-switcher-label strong,
+.pane-switcher-label span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-layout-cell {
+  position: absolute;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 3px;
+}
+
+.pane-layout-cell > .terminal-shell {
+  flex: 1 1 auto;
+}
+
+.pane-resize-handle {
+  position: absolute;
+  z-index: 4;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    background 120ms ease;
+}
+
+.pane-resize-handle.is-vertical {
+  width: 10px;
+  transform: translateX(-50%);
+  cursor: col-resize;
+}
+
+.pane-resize-handle.is-horizontal {
+  height: 10px;
+  transform: translateY(-50%);
+  cursor: row-resize;
+}
+
+.pane-resize-handle::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.pane-resize-handle.is-vertical::after {
+  top: 8px;
+  bottom: 8px;
+  left: 4px;
+  width: 2px;
+}
+
+.pane-resize-handle.is-horizontal::after {
+  right: 8px;
+  bottom: 4px;
+  left: 8px;
+  height: 2px;
+}
+
+.pane-resize-handle:hover,
+.pane-resize-handle:active {
+  background: var(--accent-soft);
+  opacity: 1;
+}
+
+.terminal-shell {
+  position: relative;
+  min-height: 0;
+  display: flex;
+}
+
+/* Flex child that owns the terminal region. The mobile composer docks below
+   it as a sibling, so overlays that must center over the terminal (side
+   shortcuts) anchor here instead of the whole shell. */
+.terminal-main {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.mobile-controls-toggle,
+.mobile-workspace-shortcut {
+  display: none;
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .app {
+    height: var(--app-height, var(--app-viewport-height, 100dvh));
+    min-height: var(--app-height, var(--app-viewport-height, 100dvh));
+    transform: translateY(var(--app-viewport-offset-top, 0px));
+    /* The app stays full-height behind the keyboard; lift the content above
+       the keyboard with padding instead. */
+    padding-bottom: var(
+      --keyboard-inset-content,
+      var(--keyboard-inset-bottom, 0px)
+    );
+  }
+
+  .keyboard-open .app {
+    /* iOS counts the floating keyboard accessory bar as occluded area, so
+       whatever the padding leaves exposed keeps the terminal background
+       instead of flashing the webview's black backdrop. Keyboard-closed
+       views keep the default shell background. */
+    background: var(--terminal-bg);
+  }
+
+  /* Keep the floating control stack at one stable screen position across
+     Composer, tab, and workspace transitions. */
+  .app {
+    --mobile-floating-controls-lift: 112px;
+  }
+
+  .mobile-controls-toggle {
+    position: relative;
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    padding: 0;
+    color: var(--muted);
+  }
+
+  .mobile-controls-toggle:active {
+    background: var(--accent-soft);
+    color: var(--text-strong);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+
+  .mobile-workspace-shortcut {
+    position: fixed;
+    right: calc(10px + env(safe-area-inset-right, 0px));
+    bottom: calc(
+      156px +
+      var(--mobile-floating-controls-lift, 0px) +
+      env(safe-area-inset-bottom, 0px)
+    );
+    z-index: 73;
+    width: 42px;
+    height: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--panel) 76%, transparent);
+    color: var(--muted);
+    box-shadow: var(--shadow-lg);
+    transform: translate3d(0, 0, 0) scale(1);
+    transform-origin: right bottom;
+    opacity: 1;
+    transition:
+      opacity 160ms ease,
+      background 120ms ease,
+      border-color 120ms ease,
+      transform 180ms ease;
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+
+  .mobile-workspace-shortcut svg {
+    width: 32px;
+    height: 32px;
+    padding: 7px;
+    border-radius: 999px;
+  }
+
+  .mobile-workspace-shortcut.is-active,
+  .mobile-workspace-shortcut:active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text-strong);
+  }
+
+  .mobile-controls-collapsed .mobile-workspace-shortcut {
+    opacity: 0;
+    pointer-events: none;
+    transform: translate3d(0, 50px, 0) scale(0.72);
+  }
+
+  .mobile-controls-toggle {
+    color: var(--text-strong);
+  }
+
+  /* While the on-screen keyboard is open the floating controls cover too
+     much of the terminal, so fade them out until the keyboard closes. Some
+     mobile browsers do not expose Composer keyboard geometry, so its focused
+     textarea is the direct fallback signal. */
+  .keyboard-open .mobile-workspace-shortcut,
+  .app:has(.terminal-composer-input:focus) .mobile-workspace-shortcut {
+    opacity: 0;
+    pointer-events: none;
+    transform: translate3d(0, 12px, 0) scale(0.85);
+  }
+
+  .body {
+    grid-template-columns: 1fr !important;
+    padding: 0;
+    min-height: 0;
+    overflow: hidden;
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+
+  .resizer {
+    display: none;
+  }
+
+  /* show one mobile view at a time */
+  .body.mobile-view-workspaces .main {
+    display: none;
+  }
+
+  .main {
+    padding: 0;
+    gap: 0;
+  }
+
+  .pane-switcher {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) 34px;
+    align-items: center;
+    gap: 6px;
+    min-height: 40px;
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--shell-border);
+    background: var(--shell-panel);
+  }
+
+  .pane-switcher-button {
+    width: 34px;
+    height: 30px;
+    padding: 0;
+    border-radius: 7px;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .pane-switcher-label strong {
+    color: var(--text-strong);
+    font-size: 12px;
+    line-height: 1.1;
+  }
+
+  .pane-switcher-label span {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.1;
+  }
+
+  /* With the composer open the shell stacks its children vertically, so the
+     terminal shrinks to make room instead of being covered by an overlay. */
+  .terminal-shell:has(.terminal-composer) {
+    flex-direction: column;
+  }
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  @media (hover: none) and (pointer: coarse) and (forced-colors: none) {
+    .mobile-workspace-shortcut:hover:not(:disabled):not(.is-active):not(
+        :active
+      ) {
+      border-color: color-mix(in srgb, var(--border) 72%, transparent);
+      background: color-mix(in srgb, var(--panel) 76%, transparent);
+      box-shadow: var(--shadow-lg);
+      color: var(--muted);
+    }
+  }
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .pane-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .pane-layout-cell {
+    position: relative;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    height: min(62dvh, 440px) !important;
+    flex: 0 0 min(62dvh, 440px);
+    padding: 0;
+  }
+
+  .pane-resize-handle {
+    display: none;
+  }
+
+  .layout-pane-head {
+    font-size: 12px;
+  }
+}
+
+/* Viewport geometry probe for debugging mobile keyboard layout (opt-in via
+   ?debugViewport=1). */
+.viewport-debug-overlay {
+  position: fixed;
+  top: calc(4px + env(safe-area-inset-top, 0px));
+  left: calc(4px + env(safe-area-inset-left, 0px));
+  z-index: 9999;
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.82);
+  color: #7dff8a;
+  font:
+    11px / 1.5 ui-monospace,
+    Menlo,
+    monospace;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
+/* Inspector shell (rendered eagerly by App; the panel content styles live in
+   components/WorkspaceInspectorHost.css). */
+.workspace-stage.inspector-dock-right {
+  flex-direction: row;
+}
+
+.workspace-stage.inspector-dock-bottom {
+  flex-direction: column;
+}
+
+.workspace-inspector-slot {
+  position: relative;
+  z-index: 3;
+  min-width: 360px;
+  min-height: 220px;
+  max-width: 65%;
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.workspace-inspector-slot.is-closed {
+  display: none;
+}
+
+.inspector-dock-right .workspace-inspector-slot {
+  height: 100%;
+  max-height: none;
+}
+
+.inspector-dock-bottom .workspace-inspector-slot {
+  width: 100%;
+  max-width: none;
+  max-height: 72%;
+}
+
+.workspace-inspector-resizer {
+  position: relative;
+  z-index: 5;
+  flex: 0 0 7px;
+  border-radius: 4px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.inspector-dock-right .workspace-inspector-resizer {
+  cursor: col-resize;
+}
+
+.inspector-dock-bottom .workspace-inspector-resizer {
+  cursor: row-resize;
+}
+
+.workspace-inspector-resizer:hover,
+.workspace-inspector-resizer:focus-visible {
+  outline: none;
+  background: var(--accent-hover);
+}
+
+.workspace-stage.is-inspector-expanded .workspace-inspector-slot {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none;
+  max-height: none;
+  min-width: 0;
+  min-height: 0;
+}
+
+@container workspace-stage (max-width: 999px) {
+  .workspace-inspector-resizer {
+    display: none;
+  }
+
+  .workspace-inspector-slot {
+    position: absolute;
+    z-index: 10;
+    max-width: none;
+    max-height: none;
+    box-shadow: -12px 0 36px color-mix(in srgb, var(--bg) 42%, transparent);
+  }
+
+  .inspector-dock-right .workspace-inspector-slot {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(560px, 100%) !important;
+    height: 100% !important;
+    min-width: min(360px, 100%);
+  }
+
+  .inspector-dock-bottom .workspace-inspector-slot {
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100% !important;
+    height: min(78%, 720px) !important;
+    min-width: 0;
+  }
+}
+
+@container workspace-stage (max-height: 466px) {
+  .workspace-inspector-resizer {
+    display: none;
+  }
+
+  .inspector-dock-right .workspace-inspector-slot,
+  .inspector-dock-bottom .workspace-inspector-slot {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none;
+    max-height: none;
+    min-width: 0;
+    min-height: 0;
+  }
+}
+
+@container workspace-stage (max-width: 699px) {
+  .inspector-dock-right .workspace-inspector-slot,
+  .inspector-dock-bottom .workspace-inspector-slot {
+    inset: 0;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0;
+    border-radius: 0;
+  }
+}

@@ -1,0 +1,30 @@
+.agent-message-mode-toggle {
+  flex: 0 0 auto;
+  height: 24px;
+  margin-right: 4px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: var(--viewer-panel-bg);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.agent-message-mode-toggle:hover {
+  color: var(--text-strong);
+  border-color: var(--accent);
+}
+
+.agent-message-markdown {
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .agent-message-markdown {
+    font-size: 12px;
+    line-height: 1.55;
+  }
+}

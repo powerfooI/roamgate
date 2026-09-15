@@ -1,0 +1,83 @@
+.themed-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.themed-select-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.themed-select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.themed-select-content {
+  /* Selects also live inside modal dialogs (z-index 5000). */
+  z-index: 5010;
+  min-width: var(--radix-popover-trigger-width);
+  padding: 4px;
+}
+
+.annotation-target-picker .themed-select-trigger {
+  min-width: 0;
+  height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--viewer-border);
+  border-radius: 7px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.layout-preferences .themed-select-trigger {
+  min-width: 0;
+  max-width: 160px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.keybinding-settings .themed-select-trigger {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+:where(html[data-layout="mobile"]) {
+  .layout-preferences .themed-select-trigger {
+    min-height: 36px;
+    font-size: 16px;
+  }
+
+  .layout-preferences .themed-select-trigger {
+    max-width: 190px;
+  }
+}
+
+@media (max-width: 768px) {
+  .keybinding-settings .themed-select-trigger {
+    font-size: 16px;
+  }
+}

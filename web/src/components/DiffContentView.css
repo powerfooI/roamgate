@@ -1,0 +1,233 @@
+.workspace-inspector .diff-content-view {
+  border-radius: 8px;
+}
+
+.workspace-inspector.is-compact .diff-content-view {
+  border: 0;
+  border-radius: 0;
+}
+
+.file-preview-changes > .diff-content-view {
+  border: none;
+  border-radius: 0;
+}
+
+.diff-content-view {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--viewer-border);
+  border-radius: 10px;
+  background: var(--diff-bg);
+}
+
+.diff-content-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  /* Same height as the navigation header (scope toggle block + its
+     margin), so both header rows read as one line. */
+  min-height: 46px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--viewer-border);
+  background: var(--viewer-header-bg);
+}
+
+.diff-content-view.is-embedded .diff-content-head {
+  min-height: 38px;
+  justify-content: flex-end;
+  padding: 5px 8px;
+}
+
+.diff-content-view.is-embedded .diff-content-actions {
+  flex-basis: auto;
+}
+
+.diff-content-title {
+  min-width: 0;
+  /* Grow so the display controls and search cluster stay right-aligned. */
+  flex: 1 1 auto;
+  display: grid;
+  gap: 1px;
+}
+
+.diff-content-title strong,
+.diff-content-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-content-title span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.diff-content-actions {
+  min-width: 0;
+  max-width: min(560px, 100%);
+  /* After the display controls: on narrow widths the search wraps to its
+     own full-width row below the title row. */
+  order: 2;
+  flex: 1 1 220px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.diff-file-html {
+  min-width: 0;
+  /* Scope horizontal scrolling to the code area so the file header and state
+     banners stay put in no-wrap mode (previously the whole wrapper scrolled
+     and carried the header off screen). */
+  overflow-x: auto;
+}
+
+.diff-review-annotation {
+  max-width: min(440px, 100%);
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, transparent);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--text-strong);
+  font: 11px / 1.2 var(--sans-font);
+}
+
+.diff-review-annotation span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-review-annotation.is-stale {
+  border-color: var(--warning-text);
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+
+.diff-raw-patch {
+  max-width: 100%;
+  max-height: 60vh;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  background: var(--diff-bg);
+  color: var(--diff-text);
+  font:
+    12px / 18px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: pre;
+}
+
+.diff-image-preview {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  padding: 18px;
+  background:
+    linear-gradient(
+      45deg,
+      color-mix(in srgb, var(--panel) 92%, transparent) 25%,
+      transparent 25%
+    ),
+    linear-gradient(
+      -45deg,
+      color-mix(in srgb, var(--panel) 92%, transparent) 25%,
+      transparent 25%
+    ),
+    linear-gradient(
+      45deg,
+      transparent 75%,
+      color-mix(in srgb, var(--panel) 92%, transparent) 75%
+    ),
+    linear-gradient(
+      -45deg,
+      transparent 75%,
+      color-mix(in srgb, var(--panel) 92%, transparent) 75%
+    );
+  background-color: var(--diff-bg);
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  background-size: 16px 16px;
+}
+
+.diff-image-preview-img {
+  max-width: min(100%, 1080px);
+  max-height: 72vh;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+}
+
+.diff2html-wrapper .diff-search-match {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--yellow) 42%, transparent);
+  color: var(--text-strong);
+  outline: 1px solid color-mix(in srgb, var(--yellow) 48%, transparent);
+}
+
+.diff2html-wrapper .diff-search-match.is-current {
+  background: color-mix(in srgb, var(--yellow) 72%, transparent);
+  color: var(--text-strong);
+  outline-color: var(--yellow);
+}
+
+.diff-line-add {
+  color: var(--success-text);
+  background: var(--success-soft);
+}
+
+.diff-line-del {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+
+.diff-line-hunk {
+  color: var(--blue);
+  background: var(--accent-soft);
+}
+
+.diff-line-meta {
+  color: var(--muted);
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .diff-content-head {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .diff-content-title {
+    flex: 1 1 auto;
+  }
+
+  .diff-content-actions {
+    flex: 1 1 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+}

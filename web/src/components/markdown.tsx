@@ -3,6 +3,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { marked } from "marked";
 import { lazyWithReload } from "../lazyWithReload";
+import "./markdown.css";
 const MermaidDiagram = lazyWithReload("mermaid-preview", () =>
   import("./MermaidDiagram").then((module) => ({
     default: module.MermaidDiagram,

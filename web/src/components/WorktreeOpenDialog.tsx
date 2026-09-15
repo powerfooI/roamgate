@@ -5,6 +5,7 @@ import type { ExistingWorktree, WorktreeList } from "../types";
 import { resolveWorktreeOpenSource } from "../worktree";
 import { CloseButton } from "./CloseButton";
 import { focusDialogElement } from "./dialogFocus";
+import "./WorktreeOpenDialog.css";
 
 function worktreeTitle(worktree: ExistingWorktree) {
   if (worktree.branch) return worktree.branch;

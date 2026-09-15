@@ -16,6 +16,7 @@ import opencodeIcon from "@lobehub/icons-static-svg/icons/opencode.svg?raw";
 import qoderIcon from "@lobehub/icons-static-svg/icons/qoder-color.svg?raw";
 import piIcon from "../assets/pi-logo.svg?raw";
 import { cn } from "../utils";
+import "./AgentIcon.css";
 
 type AgentKind =
   | "pi"

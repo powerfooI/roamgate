@@ -1,0 +1,182 @@
+.auto-sync-repositories-modal {
+  width: min(680px, 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.auto-sync-repositories-modal > .modal-head {
+  flex: 0 0 auto;
+}
+
+.auto-sync-repositories-modal > .modal-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.auto-sync-repositories-modal > .modal-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auto-sync-config-loading {
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.auto-sync-config-content {
+  min-height: 0;
+  overflow: auto;
+}
+
+.auto-sync-config-list {
+  display: grid;
+  gap: 8px;
+}
+
+.auto-sync-config-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 92px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
+.auto-sync-config-main {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.auto-sync-config-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.auto-sync-config-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-sync-config-main > code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-code);
+  font:
+    11px / 1.35 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-sync-config-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.auto-sync-config-main > p {
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-sync-config-empty {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.auto-sync-config-empty strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.auto-sync-config-empty span {
+  max-width: 360px;
+  font-size: 12px;
+}
+
+.auto-sync-config-store {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.auto-sync-config-store code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-code);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-sync-status {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.auto-sync-status-updated,
+.auto-sync-status-up_to_date {
+  border-color: color-mix(in srgb, var(--green) 45%, var(--border));
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+
+.auto-sync-status-syncing {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+
+.auto-sync-status-skipped {
+  border-color: color-mix(in srgb, var(--yellow) 45%, var(--border));
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+
+.auto-sync-status-failed {
+  border-color: color-mix(in srgb, var(--red) 45%, var(--border));
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}

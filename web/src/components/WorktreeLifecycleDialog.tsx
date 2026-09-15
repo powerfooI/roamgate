@@ -29,6 +29,7 @@ import { WorktreeHooksDialog } from "./WorktreeHooksDialog";
 import { WorktreeOpenDialog } from "./WorktreeOpenDialog";
 import { WorktreeLifecycleRow as WorktreeLifecycleRowItem } from "./WorktreeLifecycleRow";
 import { focusDialogElement } from "./dialogFocus";
+import "./WorktreeLifecycleDialog.css";
 
 type LifecycleOperation = {
   key: string;

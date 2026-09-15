@@ -23,7 +23,7 @@ let mermaidDiagramCounter = 0;
  * Rewrites renderer output for safe inline embedding:
  * - drops the bundled <style> block, whose bare `svg`/`text` selectors and
  *   Google Fonts @import would leak into the whole document (the scoped
- *   replacement lives in styles.css under .mermaid-diagram);
+ *   replacement lives in components/MermaidDiagram.css);
  * - prefixes svg-internal ids so multiple diagrams on one page cannot share
  *   `arrowhead`/node ids and cross-reference each other's markers.
  */

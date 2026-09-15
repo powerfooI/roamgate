@@ -3,6 +3,7 @@ import { Copy } from "lucide-react";
 import { historyEntryLabel, type HistoryEntry } from "./agentHistory";
 import { formatBytes } from "./agentSession";
 import { UI_LOCALE } from "../uiLocale";
+import "./AgentHistoryCard.css";
 
 export const HISTORY_PREVIEW_CHARS = 4000;
 

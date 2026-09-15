@@ -3,6 +3,7 @@ import {
   type HistoryCategory,
   type HistoryFilters,
 } from "./agentHistory";
+import "./AgentHistoryFilters.css";
 
 const labels: Record<HistoryCategory, string> = {
   user: "User",

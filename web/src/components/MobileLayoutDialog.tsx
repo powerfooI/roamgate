@@ -10,6 +10,7 @@ import {
   updateLayoutPreferences,
   useLayoutPreferences,
 } from "../layoutPreferences";
+import "./MobileLayoutDialog.css";
 
 export function MobileLayoutDialog({
   open,

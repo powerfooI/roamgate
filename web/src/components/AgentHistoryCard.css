@@ -1,0 +1,207 @@
+@media (prefers-reduced-motion: reduce) {
+  .agent-history-card.is-minimap-target {
+    animation: none;
+  }
+}
+
+.agent-history-card {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 42px
+    ),
+    var(--input-bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+}
+
+.agent-history-card.is-user {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--blue) 13%, transparent),
+      transparent 48px
+    ),
+    var(--input-bg);
+}
+
+.agent-history-card.is-assistant {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--green) 13%, transparent),
+      transparent 48px
+    ),
+    var(--input-bg);
+}
+
+.agent-history-card.is-tool {
+  border-left-color: var(--yellow);
+}
+
+.agent-history-card.is-tool .agent-history-card-role {
+  color: var(--yellow);
+}
+
+.agent-history-card-role {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-history-card:hover {
+  border-color: var(--border);
+}
+
+.agent-history-card.is-minimap-target {
+  animation: agent-history-card-flash 1.1s ease-out;
+}
+
+@keyframes agent-history-card-flash {
+  0% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+  100% {
+    border-color: var(--border-soft);
+    box-shadow: none;
+  }
+}
+
+.agent-history-card-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.agent-history-card-meta small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.agent-history-card-meta time {
+  color: var(--text-strong);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.agent-history-card-meta span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-history-card pre {
+  max-height: 145px;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-code);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-history-wide-list .agent-history-card {
+  gap: 5px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+  background: transparent;
+}
+
+.agent-history-wide-list .agent-history-card:hover {
+  background: var(--panel-2);
+}
+
+.agent-history-wide-list .agent-history-card.is-selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.agent-history-wide-list .agent-history-card pre {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  max-height: calc(1.45em * 2);
+  font-family: inherit;
+}
+
+.agent-history-wide-list .agent-history-card-open::after,
+.agent-history-wide-list .agent-history-card-open > span {
+  display: none;
+}
+
+.agent-history-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.agent-history-card-open {
+  position: relative;
+  min-width: 0;
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.agent-history-card-open.is-truncated::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 34px;
+  background: linear-gradient(transparent, var(--input-bg));
+  pointer-events: none;
+}
+
+.agent-history-card-open > span {
+  position: absolute;
+  right: 5px;
+  bottom: 3px;
+  z-index: 1;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.agent-history-card-meta .agent-history-card-role {
+  color: var(--blue);
+  font-size: 10px;
+}
+
+.agent-history-card.is-assistant .agent-history-card-role {
+  color: var(--green);
+}
+
+.agent-history-card-meta time {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .agent-history-card pre {
+    max-height: 145px;
+    font-size: 12px;
+  }
+}

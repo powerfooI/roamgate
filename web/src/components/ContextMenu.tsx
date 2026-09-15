@@ -17,6 +17,7 @@ import { isWorkspacePinned } from "../workspacePins";
 import { workspaceDisplayName } from "../workspaceTreeBadges";
 import { copyTextFromUserGesture } from "../terminalClipboard";
 import { observeClampedContextMenu } from "./contextMenuPosition";
+import "./ContextMenu.css";
 
 export interface ContextMenuState {
   x: number;

@@ -125,6 +125,7 @@ import { applyTerminalTheme } from "../terminalThemes";
 import { paneHasAgentHistory } from "./agentSession";
 import { ConfirmDialog, MessageDialog } from "./ModalDialogs";
 import { TerminalComposer } from "./TerminalComposer";
+import "./TerminalView.css";
 
 function focusTerminalEndpoint(
   client: ConnectionClient,

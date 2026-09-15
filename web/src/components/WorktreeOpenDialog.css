@@ -1,0 +1,64 @@
+.worktree-open-modal {
+  width: min(680px, 100%);
+}
+
+.worktree-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(420px, calc(100vh - 280px));
+  margin-top: 10px;
+  overflow: auto;
+}
+
+.worktree-search-field {
+  margin-top: 12px;
+}
+
+.worktree-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 9px 10px;
+  text-align: left;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.worktree-option:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.worktree-option-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.worktree-option-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-option-path {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-option-tags {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}

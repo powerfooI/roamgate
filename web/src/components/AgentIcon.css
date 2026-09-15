@@ -1,0 +1,82 @@
+.command-item-icon .agent-icon {
+  margin: 0;
+}
+
+.agent-status-icon .agent-icon.is-compact {
+  width: 19px;
+  height: 19px;
+  flex-basis: 19px;
+  border-radius: 5px;
+}
+
+.agent-status-icon .agent-icon.is-compact svg {
+  width: 14px;
+  height: 14px;
+}
+
+.agent-icon {
+  width: 27px;
+  height: 27px;
+  flex: 0 0 auto;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--input-bg);
+  color: var(--muted);
+}
+
+.agent-icon.is-compact {
+  width: 23px;
+  height: 23px;
+  flex-basis: 23px;
+  border-radius: 6px;
+}
+
+.agent-icon-svg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.agent-icon.is-compact svg {
+  width: 17px;
+  height: 17px;
+}
+
+.agent-icon[data-agent="cursor"] {
+  color: #ffffff;
+}
+
+.agent-icon[data-agent="kimi"] {
+  border-color: rgba(23, 131, 255, 0.42);
+  background: #151b2a;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.agent-icon[data-agent="cline"],
+.agent-icon[data-agent="opencode"],
+.agent-icon[data-agent="kilo"] {
+  color: #d8b4fe;
+}
+
+.agent-icon[data-agent="copilot"] {
+  color: #9fc5ff;
+}
+
+.agent-icon[data-agent="grok"] {
+  color: #f7c46f;
+}
+
+.agent-icon[data-agent="pi"] {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border-soft));
+  color: var(--text);
+}

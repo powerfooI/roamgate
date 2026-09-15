@@ -1,0 +1,300 @@
+:root {
+  color-scheme: dark;
+  --bg: #1a1b26;
+  --topbar: #202331;
+  --panel: #202331;
+  --panel-2: #24283b;
+  --input-bg: #11141b;
+  --terminal-bg: #0b0d12;
+  --terminal-fg: #c9cdd6;
+  --border: #2f3549;
+  --border-soft: rgba(255, 255, 255, 0.07);
+  --text: #d5dcff;
+  --text-strong: #ffffff;
+  --text-code: #d6d9e2;
+  --muted: #737aa2;
+  --accent: #7aa2f7;
+  --accent-2: #3d7dff;
+  --accent-soft: rgba(122, 162, 247, 0.18);
+  --accent-hover: rgba(122, 162, 247, 0.28);
+  --accent-active: rgba(122, 162, 247, 0.45);
+  --shell-bg: var(--bg);
+  --shell-panel: var(--panel);
+  --shell-topbar: var(--topbar);
+  --shell-border: var(--border);
+  --shell-topbar-mark: transparent;
+  --topbar-control-bg: color-mix(in srgb, var(--panel) 84%, transparent);
+  --topbar-control-border: var(--border);
+  --topbar-control-text: color-mix(in srgb, var(--muted) 82%, var(--text));
+  --topbar-control-hover-bg: var(--panel-2);
+  --topbar-control-active-bg: var(--accent-soft);
+  --topbar-control-active-border: color-mix(
+    in srgb,
+    var(--accent) 62%,
+    var(--border)
+  );
+  --viewer-panel-bg: var(--panel);
+  --viewer-header-bg: var(--panel);
+  --viewer-content-bg: var(--input-bg);
+  --viewer-code-bg: var(--input-bg);
+  --viewer-border: var(--border);
+  --green: #54d17a;
+  --red: #ff6b6b;
+  --yellow: #f0c453;
+  --blue: #7aa2f7;
+  --danger-border: #5a2b2b;
+  --danger-text: #ffb3b3;
+  --danger-soft: rgba(255, 107, 107, 0.14);
+  --success-soft: rgba(84, 209, 122, 0.12);
+  --warning-soft: rgba(240, 196, 83, 0.12);
+  --success-text: #9ce9b6;
+  --warning-text: #ffe0a3;
+  --diff-bg: #0b0d12;
+  --diff-line-bg: #0f1219;
+  --diff-text: #d6d9e2;
+  --diff-hunk-bg: #1b2940;
+  --diff-hunk-text: #8fb7ff;
+  --diff-add-bg: rgba(46, 160, 67, 0.24);
+  --diff-add-inline-bg: rgba(84, 209, 122, 0.46);
+  --diff-add-inline-text: #e6ffef;
+  --diff-del-bg: rgba(248, 81, 73, 0.22);
+  --diff-del-inline-bg: rgba(255, 107, 107, 0.48);
+  --diff-del-inline-text: #ffe3e3;
+  --syntax-comment: #6d758f;
+  --syntax-keyword: #bb9af7;
+  --syntax-string: #9ece6a;
+  --syntax-number: #ff9e64;
+  --syntax-function: #7aa2f7;
+  --syntax-property: #89ddff;
+  --syntax-variable: #c0caf5;
+  --syntax-type: #2ac3de;
+  --syntax-operator: #89ddff;
+  --syntax-punctuation: #a9b1d6;
+  --syntax-meta: #7f849c;
+  --shadow-lg: 0 18px 44px rgba(0, 0, 0, 0.45);
+  --shadow-modal: 0 18px 48px rgba(0, 0, 0, 0.5);
+  --shadow-tooltip: 0 10px 28px rgba(0, 0, 0, 0.38);
+  --modal-backdrop: rgba(0, 0, 0, 0.56);
+  --overlay-scrollbar-thumb: rgba(165, 176, 210, 0.62);
+  --overlay-scrollbar-thumb-hover: rgba(196, 207, 238, 0.86);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #e1e2e7;
+  --topbar: #d8d9e0;
+  --panel: #d8d9e0;
+  --panel-2: #c4c8da;
+  --input-bg: #f6f7f9;
+  --terminal-bg: #f6f7f9;
+  --terminal-fg: #2b3245;
+  --border: #b6bbd1;
+  --border-soft: rgba(31, 47, 102, 0.12);
+  --text: #1f2f66;
+  --text-strong: #101936;
+  --text-code: #26345f;
+  --muted: #68709a;
+  --accent: #2e7de9;
+  --accent-2: #1f5fd6;
+  --accent-soft: rgba(46, 125, 233, 0.14);
+  --accent-hover: rgba(46, 125, 233, 0.2);
+  --accent-active: rgba(46, 125, 233, 0.3);
+  --green: #248b4c;
+  --red: #d03b3b;
+  --yellow: #a36f00;
+  --blue: #2e7de9;
+  --danger-border: #d8a2a2;
+  --danger-text: #9f2626;
+  --danger-soft: rgba(208, 59, 59, 0.11);
+  --success-soft: rgba(36, 139, 76, 0.11);
+  --warning-soft: rgba(163, 111, 0, 0.12);
+  --success-text: #176c37;
+  --warning-text: #805c00;
+  --diff-bg: #f7f8fb;
+  --diff-line-bg: #ffffff;
+  --diff-text: #24304f;
+  --diff-hunk-bg: #dfe9fb;
+  --diff-hunk-text: #1f5fd6;
+  --diff-add-bg: rgba(36, 139, 76, 0.17);
+  --diff-add-inline-bg: rgba(36, 139, 76, 0.32);
+  --diff-add-inline-text: #0f4d28;
+  --diff-del-bg: rgba(208, 59, 59, 0.16);
+  --diff-del-inline-bg: rgba(208, 59, 59, 0.3);
+  --diff-del-inline-text: #7e1f1f;
+  --syntax-comment: #7a839e;
+  --syntax-keyword: #7b45c6;
+  --syntax-string: #347a2a;
+  --syntax-number: #a85c00;
+  --syntax-function: #1f5fd6;
+  --syntax-property: #1f5fd6;
+  --syntax-variable: #8a5c00;
+  --syntax-type: #00728a;
+  --syntax-operator: #0f6c8c;
+  --syntax-punctuation: #495578;
+  --syntax-meta: #7a839e;
+  --shadow-lg: 0 18px 44px rgba(31, 47, 102, 0.16);
+  --shadow-modal: 0 18px 48px rgba(31, 47, 102, 0.18);
+  --shadow-tooltip: 0 10px 28px rgba(31, 47, 102, 0.2);
+  --modal-backdrop: rgba(31, 47, 102, 0.28);
+  --overlay-scrollbar-thumb: rgba(72, 84, 126, 0.5);
+  --overlay-scrollbar-thumb-hover: rgba(46, 74, 148, 0.76);
+}
+
+:root[data-accent="teal"] {
+  --accent: #2dd4bf;
+  --accent-2: #14b8a6;
+  --accent-soft: rgba(45, 212, 191, 0.18);
+  --accent-hover: rgba(45, 212, 191, 0.28);
+  --accent-active: rgba(45, 212, 191, 0.45);
+}
+
+:root[data-accent]:not([data-accent="neutral"]) {
+  --shell-bg: color-mix(in srgb, var(--bg) 94%, var(--accent));
+  --shell-panel: color-mix(in srgb, var(--panel) 89%, var(--accent));
+  --shell-topbar: color-mix(in srgb, var(--topbar) 78%, var(--accent));
+  --shell-border: color-mix(in srgb, var(--border) 76%, var(--accent));
+  --shell-topbar-mark: color-mix(in srgb, var(--accent) 86%, transparent);
+  --topbar-control-bg: color-mix(in srgb, var(--panel-2) 82%, var(--accent));
+  --topbar-control-border: color-mix(in srgb, var(--border) 64%, var(--accent));
+  --topbar-control-text: color-mix(in srgb, var(--text) 82%, var(--accent));
+  --topbar-control-hover-bg: color-mix(
+    in srgb,
+    var(--panel-2) 70%,
+    var(--accent)
+  );
+  --topbar-control-active-bg: color-mix(
+    in srgb,
+    var(--panel-2) 56%,
+    var(--accent)
+  );
+  --topbar-control-active-border: color-mix(
+    in srgb,
+    var(--accent) 65%,
+    var(--border)
+  );
+  --viewer-panel-bg: color-mix(in srgb, var(--panel) 88%, var(--accent));
+  --viewer-header-bg: color-mix(in srgb, var(--panel) 82%, var(--accent));
+  --viewer-content-bg: color-mix(in srgb, var(--input-bg) 92%, var(--accent));
+  --viewer-code-bg: color-mix(in srgb, var(--input-bg) 95%, var(--accent));
+  --viewer-border: color-mix(in srgb, var(--border) 70%, var(--accent));
+  --diff-bg: color-mix(in srgb, var(--terminal-bg) 95%, var(--accent));
+  --diff-line-bg: color-mix(in srgb, var(--terminal-bg) 91%, var(--accent));
+  --diff-hunk-bg: color-mix(
+    in srgb,
+    var(--viewer-content-bg) 76%,
+    var(--accent)
+  );
+  --diff-hunk-text: color-mix(in srgb, var(--text) 76%, var(--accent));
+}
+
+:root[data-accent="green"] {
+  --accent: #54d17a;
+  --accent-2: #22c55e;
+  --accent-soft: rgba(84, 209, 122, 0.18);
+  --accent-hover: rgba(84, 209, 122, 0.28);
+  --accent-active: rgba(84, 209, 122, 0.45);
+}
+
+:root[data-accent="amber"] {
+  --accent: #f0b95a;
+  --accent-2: #d98b23;
+  --accent-soft: rgba(240, 185, 90, 0.18);
+  --accent-hover: rgba(240, 185, 90, 0.28);
+  --accent-active: rgba(240, 185, 90, 0.45);
+}
+
+:root[data-accent="rose"] {
+  --accent: #f471b5;
+  --accent-2: #db4b8f;
+  --accent-soft: rgba(244, 113, 181, 0.18);
+  --accent-hover: rgba(244, 113, 181, 0.28);
+  --accent-active: rgba(244, 113, 181, 0.45);
+}
+
+:root[data-accent="violet"] {
+  --accent: #a78bfa;
+  --accent-2: #8b5cf6;
+  --accent-soft: rgba(167, 139, 250, 0.18);
+  --accent-hover: rgba(167, 139, 250, 0.28);
+  --accent-active: rgba(167, 139, 250, 0.45);
+}
+
+:root[data-theme="light"][data-accent="teal"] {
+  --accent: #087f73;
+  --accent-2: #0f766e;
+  --accent-soft: rgba(8, 127, 115, 0.14);
+  --accent-hover: rgba(8, 127, 115, 0.21);
+  --accent-active: rgba(8, 127, 115, 0.32);
+}
+
+:root[data-theme="light"][data-accent="green"] {
+  --accent: #27834a;
+  --accent-2: #1f713e;
+  --accent-soft: rgba(39, 131, 74, 0.14);
+  --accent-hover: rgba(39, 131, 74, 0.21);
+  --accent-active: rgba(39, 131, 74, 0.32);
+}
+
+:root[data-theme="light"][data-accent="amber"] {
+  --accent: #a45c00;
+  --accent-2: #8d4e00;
+  --accent-soft: rgba(164, 92, 0, 0.14);
+  --accent-hover: rgba(164, 92, 0, 0.21);
+  --accent-active: rgba(164, 92, 0, 0.32);
+}
+
+:root[data-theme="light"][data-accent="rose"] {
+  --accent: #b72f6c;
+  --accent-2: #9f285d;
+  --accent-soft: rgba(183, 47, 108, 0.14);
+  --accent-hover: rgba(183, 47, 108, 0.21);
+  --accent-active: rgba(183, 47, 108, 0.32);
+}
+
+:root[data-theme="light"][data-accent="violet"] {
+  --accent: #6d43bf;
+  --accent-2: #5c35aa;
+  --accent-soft: rgba(109, 67, 191, 0.14);
+  --accent-hover: rgba(109, 67, 191, 0.21);
+  --accent-active: rgba(109, 67, 191, 0.32);
+}
+
+:root[data-theme="light"][data-accent]:not([data-accent="neutral"]) {
+  --topbar-control-bg: color-mix(in srgb, var(--input-bg) 86%, var(--accent));
+  --topbar-control-border: color-mix(in srgb, var(--border) 68%, var(--accent));
+  --topbar-control-text: color-mix(in srgb, var(--text) 86%, var(--accent));
+  --topbar-control-hover-bg: color-mix(
+    in srgb,
+    var(--input-bg) 76%,
+    var(--accent)
+  );
+  --topbar-control-active-bg: color-mix(
+    in srgb,
+    var(--input-bg) 62%,
+    var(--accent)
+  );
+  --topbar-control-active-border: color-mix(
+    in srgb,
+    var(--accent) 58%,
+    var(--border)
+  );
+  --viewer-panel-bg: color-mix(in srgb, var(--panel) 92%, var(--accent));
+  --viewer-header-bg: color-mix(in srgb, var(--panel) 87%, var(--accent));
+  --viewer-content-bg: color-mix(in srgb, var(--input-bg) 96%, var(--accent));
+  --viewer-code-bg: color-mix(in srgb, var(--input-bg) 98%, var(--accent));
+  --viewer-border: color-mix(in srgb, var(--border) 76%, var(--accent));
+  --diff-bg: color-mix(in srgb, var(--input-bg) 98%, var(--accent));
+  --diff-line-bg: color-mix(in srgb, var(--input-bg) 95%, var(--accent));
+  --diff-hunk-bg: color-mix(
+    in srgb,
+    var(--viewer-content-bg) 82%,
+    var(--accent)
+  );
+  --diff-hunk-text: color-mix(in srgb, var(--text) 82%, var(--accent));
+}
+
+:root[data-theme="light"] .pane-jump-current-badge {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent) 16%, white);
+  color: #123b82;
+}

@@ -1,0 +1,180 @@
+.terminal-composer {
+  display: none;
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .terminal-composer {
+    /* In-flow at the bottom of the column shell. The app shell owns the main
+       keyboard lift; only iOS gets a small additional form-accessory-bar gap. */
+    margin-bottom: var(--keyboard-inset-composer-gap, 0px);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px calc(8px + env(safe-area-inset-right, 0px))
+      calc(12px + env(safe-area-inset-bottom, 0px))
+      calc(8px + env(safe-area-inset-left, 0px));
+    border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+    background: color-mix(in srgb, var(--panel) 86%, transparent);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+
+  .terminal-composer-input {
+    width: 100%;
+    min-height: 38px;
+    max-height: 32dvh;
+    resize: none;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--text-strong);
+    font-size: 16px;
+    line-height: 1.4;
+    overscroll-behavior: contain;
+  }
+
+  .terminal-composer-input:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+  }
+
+  .terminal-composer-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .terminal-composer-hint {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 11px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .terminal-composer-actions button {
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    border: 1px solid color-mix(in srgb, var(--border) 72%, var(--text) 28%);
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--panel-2) 76%, transparent);
+    color: var(--text-strong);
+    font-size: 12px;
+    font-weight: 600;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .terminal-composer-actions button:disabled {
+    opacity: 0.45;
+  }
+
+  .terminal-composer-close,
+  .terminal-composer-shortcuts-toggle,
+  .terminal-composer-attach,
+  .terminal-composer-help {
+    width: 30px;
+    padding: 0;
+    flex: 0 0 auto;
+  }
+
+  .terminal-composer-submit {
+    padding: 0 10px;
+    flex: 0 0 auto;
+  }
+
+  .terminal-composer-submit.is-primary,
+  .terminal-composer-shortcuts-toggle.is-open {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .terminal-composer-actions button:active:not(:disabled) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .terminal-composer-shortcuts {
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(
+        var(--mobile-shortcut-columns),
+        minmax(0, 1fr)
+      );
+    gap: 2px;
+  }
+
+  .terminal-composer-shortcut-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(
+        var(--mobile-shortcut-columns),
+        minmax(0, 1fr)
+      );
+    gap: 2px;
+  }
+
+  .terminal-composer-shortcut-spacer {
+    width: 48px;
+    height: 28px;
+    pointer-events: none;
+  }
+
+  .terminal-composer-shortcuts button {
+    width: 100%;
+    max-width: 48px;
+    min-width: 0;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    border: 1px solid color-mix(in srgb, var(--border) 72%, var(--text) 28%);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--panel-2) 76%, transparent);
+    color: var(--text-strong);
+    overflow: hidden;
+    font:
+      700 11px / 1 ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      Consolas,
+      monospace;
+    letter-spacing: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .terminal-composer-shortcuts button:active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  @media (hover: none) and (pointer: coarse) and (forced-colors: none) {
+    .terminal-composer-shortcuts button:hover:not(:disabled):not(:active) {
+      border-color: color-mix(in srgb, var(--border) 72%, var(--text) 28%);
+      background: color-mix(in srgb, var(--panel-2) 76%, transparent);
+      box-shadow: none;
+    }
+  }
+}

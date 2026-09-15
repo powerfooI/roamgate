@@ -1,6 +1,7 @@
 import { cn } from "../utils";
 import { AgentIcon } from "./AgentIcon";
 import { agentStateKind } from "./agentSession";
+import "./AgentStatusIcon.css";
 
 export function AgentStatusIcon({
   agent,

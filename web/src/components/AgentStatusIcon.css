@@ -1,0 +1,36 @@
+.agent-status-icon {
+  position: relative;
+  width: 21px;
+  height: 21px;
+  flex: 0 0 21px;
+  display: inline-flex;
+  align-items: flex-start;
+}
+
+.agent-status-icon-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--panel);
+  border-radius: 999px;
+  background: var(--muted);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.agent-status-icon-dot.is-working {
+  background: var(--yellow);
+}
+
+.agent-status-icon-dot.is-blocked {
+  background: var(--red);
+}
+
+.agent-status-icon-dot.is-done {
+  background: var(--blue);
+}
+
+.agent-status-icon-dot.is-idle {
+  background: var(--green);
+}

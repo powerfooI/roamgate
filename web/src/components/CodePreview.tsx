@@ -6,6 +6,7 @@ import {
   isPreviewKeyboardTarget,
   selectAllInPreviewEditor,
 } from "./previewSelection";
+import "./CodePreview.css";
 
 type CodePreviewDeps = Awaited<ReturnType<typeof importCodePreviewDeps>>;
 

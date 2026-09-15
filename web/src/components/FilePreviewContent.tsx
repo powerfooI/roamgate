@@ -51,6 +51,7 @@ import {
   normalizeFilesystemPath,
 } from "../filesystemPaths";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
+import "./FilePreviewContent.css";
 
 export type ActiveFilePreviewSelection = {
   entry: FileExplorerEntry | null;

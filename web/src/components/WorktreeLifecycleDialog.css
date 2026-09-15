@@ -1,0 +1,559 @@
+.worktree-lifecycle-modal {
+  width: min(920px, 100%);
+  height: min(760px, calc(100dvh - 36px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.lifecycle-head {
+  flex: 0 0 auto;
+  align-items: flex-start;
+  margin: 0;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--shell-panel) 88%, var(--accent));
+}
+
+.lifecycle-head > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.lifecycle-head h2 {
+  color: var(--text-strong);
+}
+
+.lifecycle-head p {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lifecycle-head p code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-code);
+  font:
+    11px / 1.35 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifecycle-kicker {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.lifecycle-head-actions,
+.lifecycle-toolbar,
+.lifecycle-row-actions {
+  display: flex;
+  align-items: center;
+}
+
+.lifecycle-head-actions {
+  flex: 0 0 auto;
+  gap: 3px;
+}
+
+.lifecycle-icon-button {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.lifecycle-toolbar {
+  flex: 0 0 auto;
+  gap: 8px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.lifecycle-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 32px;
+}
+
+.lifecycle-operation {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 18px 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
+.lifecycle-operation.is-running {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--accent-soft);
+}
+
+.lifecycle-operation.is-succeeded {
+  border-color: color-mix(in srgb, var(--green) 45%, var(--border));
+  background: var(--success-soft);
+}
+
+.lifecycle-operation.is-warning {
+  border-color: color-mix(in srgb, var(--yellow) 48%, var(--border));
+  background: var(--warning-soft);
+}
+
+.lifecycle-operation.is-failed {
+  border-color: color-mix(in srgb, var(--red) 48%, var(--border));
+  background: var(--danger-soft);
+}
+
+.lifecycle-operation > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.lifecycle-operation strong {
+  color: var(--text-strong);
+  font-size: 12px;
+}
+
+.lifecycle-operation span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.lifecycle-operation-mark {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--green);
+}
+
+.lifecycle-operation.is-failed .lifecycle-operation-mark {
+  background: var(--red);
+}
+
+.lifecycle-operation.is-warning .lifecycle-operation-mark {
+  background: var(--yellow);
+}
+
+.lifecycle-loading,
+.lifecycle-empty {
+  min-height: 320px;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.lifecycle-empty {
+  flex-direction: column;
+  padding: 28px;
+  text-align: center;
+}
+
+.lifecycle-empty strong {
+  color: var(--text-strong);
+}
+
+.lifecycle-empty span {
+  max-width: 560px;
+}
+
+.lifecycle-empty.is-error span {
+  color: var(--danger-text);
+}
+
+.lifecycle-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 14px 18px 18px;
+}
+
+.lifecycle-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
+.lifecycle-overview > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-right: 1px solid var(--border-soft);
+}
+
+.lifecycle-overview > div:last-child {
+  border-right: none;
+}
+
+.lifecycle-overview strong {
+  color: var(--text-strong);
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.lifecycle-overview span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.lifecycle-policy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 10px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.lifecycle-policy-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lifecycle-policy-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.lifecycle-policy-main > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.lifecycle-policy-main strong {
+  color: var(--text-strong);
+  font-size: 12px;
+}
+
+.lifecycle-policy-main div > span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifecycle-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.lifecycle-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
+.lifecycle-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.lifecycle-row-main {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.lifecycle-row-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.lifecycle-row-title > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.lifecycle-row-title strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifecycle-open-state {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.lifecycle-open-state::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--muted);
+  opacity: 0.6;
+}
+
+.lifecycle-open-state.is-open {
+  color: var(--success-text);
+}
+
+.lifecycle-open-state.is-open::before {
+  background: var(--green);
+  opacity: 1;
+}
+
+.lifecycle-row-main > code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-code);
+  font:
+    11px / 1.35 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifecycle-row-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.lifecycle-row-meta .has-changes {
+  color: var(--warning-text);
+}
+
+.lifecycle-sync-status,
+.lifecycle-prunable {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lifecycle-sync-status::before,
+.lifecycle-prunable::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.lifecycle-sync-updated,
+.lifecycle-sync-up_to_date {
+  color: var(--success-text);
+}
+
+.lifecycle-sync-running {
+  color: var(--accent);
+}
+
+.lifecycle-sync-failed,
+.lifecycle-prunable {
+  color: var(--danger-text);
+}
+
+.lifecycle-sync-skipped {
+  color: var(--warning-text);
+}
+
+.lifecycle-row-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 0;
+  padding: 2px;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 76%, transparent);
+}
+
+.lifecycle-row-actions > button {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  font-size: 11px;
+}
+
+.lifecycle-row-actions > :not(:first-child) {
+  border-left: 1px solid var(--border-soft);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.lifecycle-row-actions > :not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.lifecycle-row-actions > button:not(:disabled):hover {
+  background: var(--accent-soft);
+}
+
+.lifecycle-pull-button {
+  color: var(--text);
+}
+
+.lifecycle-sync-toggle {
+  color: var(--muted);
+}
+
+.lifecycle-sync-toggle.is-active {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 54%, transparent);
+}
+
+.lifecycle-sync-toggle.is-active svg {
+  color: var(--accent);
+}
+
+.lifecycle-remove-button {
+  color: var(--danger-text);
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .worktree-lifecycle-modal {
+    width: 100%;
+    height: calc(
+      100dvh -
+      24px -
+      env(safe-area-inset-top, 0px) -
+      env(safe-area-inset-bottom, 0px)
+    );
+    max-height: none;
+  }
+
+  .lifecycle-head {
+    padding: 13px 14px 11px;
+  }
+
+  .lifecycle-head p {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .lifecycle-head p code {
+    width: 100%;
+  }
+
+  .lifecycle-toolbar {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+    padding: 8px 10px;
+  }
+
+  .lifecycle-toolbar button {
+    min-width: 0;
+    padding: 6px;
+    font-size: 11px;
+  }
+
+  .lifecycle-toolbar button svg {
+    display: none;
+  }
+
+  .lifecycle-operation {
+    margin: 8px 10px 0;
+  }
+
+  .lifecycle-content {
+    padding: 10px 10px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .lifecycle-overview strong {
+    font-size: 16px;
+  }
+
+  .lifecycle-policy {
+    padding-right: 5px;
+    padding-left: 5px;
+  }
+
+  .lifecycle-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+    padding: 10px;
+  }
+
+  .lifecycle-row-title {
+    flex-wrap: wrap;
+  }
+
+  .lifecycle-row-title strong {
+    flex: 1 1 140px;
+  }
+
+  .lifecycle-row-actions {
+    justify-content: flex-start;
+    justify-self: start;
+  }
+
+  .lifecycle-row-actions > button:first-child {
+    min-width: 62px;
+  }
+}

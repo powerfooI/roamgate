@@ -1,0 +1,435 @@
+.cm-review-annotation-marker {
+  min-width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.cm-review-annotation-marker.is-stale {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+  box-shadow: inset 0 0 0 1px var(--warning-border, var(--border));
+}
+
+.pierre-diff-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--diff-bg);
+  scrollbar-gutter: stable;
+}
+
+.pierre-diff-scroll-content,
+.pierre-diff-surface,
+.pierre-diff-surface > diffs-container {
+  min-width: 0;
+  width: 100%;
+}
+
+.pierre-diff-surface {
+  overflow: hidden;
+  background: var(--diff-bg);
+}
+
+.pierre-diff-surface > diffs-container {
+  display: block;
+}
+
+.diff2html-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Only scroll vertically here. Horizontal scrolling is scoped to each
+     .diff-file-html code area; nothing else may carry the file headers off
+     screen, so clamp this axis instead of letting it scroll again. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--diff-bg);
+}
+
+.diff2html-wrapper .d2h-wrapper {
+  width: 100%;
+  min-width: 0;
+  color: var(--diff-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.diff2html-wrapper .d2h-files-diff {
+  width: 100%;
+  min-width: 0;
+}
+
+.diff2html-wrapper .d2h-file-diff {
+  width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.diff2html-wrapper .d2h-file-side-diff {
+  flex: 1 1 0;
+  width: 50%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.diff2html-wrapper .d2h-file-wrapper {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: var(--diff-bg);
+}
+
+.diff2html-wrapper .d2h-file-header {
+  display: none;
+}
+
+.diff2html-wrapper .d2h-diff-table {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  table-layout: fixed;
+  width: 100%;
+  min-width: 0;
+}
+
+.diff2html-wrapper .d2h-diff-tbody tr {
+  height: 18px;
+}
+
+.diff2html-wrapper .d2h-code-line,
+.diff2html-wrapper .d2h-code-side-line {
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 0 12px 0 8px;
+  width: 100%;
+  line-height: 18px;
+  overflow-wrap: normal;
+  white-space: normal;
+}
+
+.diff2html-wrapper .d2h-code-linenumber,
+.diff2html-wrapper .d2h-code-side-linenumber {
+  position: static;
+  display: table-cell;
+  vertical-align: top;
+  padding: 0 0.5em;
+  border-color: var(--border-soft);
+  background: var(--diff-bg);
+  color: var(--muted);
+  line-height: 18px;
+}
+
+.diff2html-wrapper .d2h-code-linenumber {
+  width: 7.5em;
+  min-width: 7.5em;
+}
+
+.diff2html-wrapper .d2h-code-side-linenumber {
+  width: 4em;
+  min-width: 4em;
+}
+
+.diff2html-wrapper .d2h-code-line-ctn {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--diff-text);
+  width: auto;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.diff2html-wrapper.is-nowrap.is-split .d2h-wrapper,
+.diff2html-wrapper.is-nowrap.is-split .d2h-files-diff,
+.diff2html-wrapper.is-nowrap.is-split .d2h-file-diff,
+.diff2html-wrapper.is-nowrap.is-split .d2h-file-wrapper {
+  width: 100%;
+  min-width: 100%;
+}
+
+.diff2html-wrapper.is-nowrap.is-split .d2h-file-diff {
+  overflow-x: hidden;
+}
+
+.diff2html-wrapper.is-nowrap.is-split .d2h-file-side-diff {
+  flex: 0 0 50%;
+  width: 50%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.diff2html-wrapper.is-nowrap.is-unified .d2h-wrapper,
+.diff2html-wrapper.is-nowrap.is-unified .d2h-files-diff,
+.diff2html-wrapper.is-nowrap.is-unified .d2h-file-diff,
+.diff2html-wrapper.is-nowrap.is-unified .d2h-file-wrapper {
+  width: max-content;
+  min-width: 100%;
+}
+
+.diff2html-wrapper.is-nowrap.is-unified .d2h-file-diff {
+  overflow-x: visible;
+}
+
+.diff2html-wrapper.is-nowrap .d2h-diff-table {
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
+}
+
+.diff2html-wrapper.is-nowrap .d2h-code-line,
+.diff2html-wrapper.is-nowrap .d2h-code-side-line {
+  min-width: max-content;
+  width: max-content;
+  white-space: nowrap;
+}
+
+.diff2html-wrapper.is-nowrap .d2h-code-line-ctn {
+  flex: 0 0 auto;
+  min-width: max-content;
+  overflow-wrap: normal;
+  white-space: pre;
+}
+
+/* Compact layout (narrow inspector panes and small screens) defaults to
+   horizontally scrolled long lines; the wrap toggle opts into wrapping.
+   These rules follow the component's is-compact class rather than a viewport
+   media query so they also apply inside narrow desktop inspector panes. */
+.diff2html-wrapper.is-compact {
+  box-sizing: border-box;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.diff2html-wrapper.is-compact .d2h-wrapper,
+.diff2html-wrapper.is-compact .d2h-files-diff,
+.diff2html-wrapper.is-compact .d2h-file-diff,
+.diff2html-wrapper.is-compact .d2h-file-wrapper {
+  width: max-content;
+  min-width: 100%;
+}
+
+.diff2html-wrapper.is-compact .d2h-file-diff {
+  overflow-x: visible;
+}
+
+.diff2html-wrapper.is-compact .d2h-diff-table {
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
+}
+
+.diff2html-wrapper.is-compact .d2h-code-line,
+.diff2html-wrapper.is-compact .d2h-code-side-line {
+  min-width: max-content;
+  width: max-content;
+  white-space: nowrap;
+}
+
+/* Unified rows carry two line-number cells; 7.5em each would consume half
+   of a narrow pane before any code is visible. */
+.diff2html-wrapper.is-compact .d2h-code-linenumber {
+  width: 3.4em;
+  min-width: 3.4em;
+  padding: 0 0.25em;
+}
+
+.diff2html-wrapper.is-compact .d2h-code-line-ctn {
+  flex: 0 0 auto;
+  min-width: max-content;
+  overflow-wrap: normal;
+  white-space: pre;
+}
+
+.diff2html-wrapper.is-wrapped .d2h-wrapper,
+.diff2html-wrapper.is-wrapped .d2h-files-diff,
+.diff2html-wrapper.is-wrapped .d2h-file-diff,
+.diff2html-wrapper.is-wrapped .d2h-file-wrapper {
+  width: 100%;
+  min-width: 0;
+}
+
+.diff2html-wrapper.is-wrapped .d2h-file-diff {
+  overflow-x: hidden;
+}
+
+.diff2html-wrapper.is-wrapped .d2h-diff-table {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 0;
+}
+
+.diff2html-wrapper.is-wrapped .d2h-code-line,
+.diff2html-wrapper.is-wrapped .d2h-code-side-line {
+  min-width: 0;
+  width: 100%;
+  white-space: normal;
+}
+
+.diff2html-wrapper.is-wrapped .d2h-code-line-ctn {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.syntax-highlighted .hljs {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.syntax-highlighted .hljs-comment,
+.syntax-highlighted .hljs-quote {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+
+.syntax-highlighted .hljs-meta,
+.syntax-highlighted .hljs-doctag {
+  color: var(--syntax-meta);
+}
+
+.syntax-highlighted .hljs-keyword,
+.syntax-highlighted .hljs-selector-tag,
+.syntax-highlighted .hljs-name {
+  color: var(--syntax-keyword);
+}
+
+.syntax-highlighted .hljs-string,
+.syntax-highlighted .hljs-template-string,
+.syntax-highlighted .hljs-regexp,
+.syntax-highlighted .hljs-addition {
+  color: var(--syntax-string);
+}
+
+.syntax-highlighted .hljs-number,
+.syntax-highlighted .hljs-literal,
+.syntax-highlighted .hljs-symbol,
+.syntax-highlighted .hljs-bullet {
+  color: var(--syntax-number);
+}
+
+.syntax-highlighted .hljs-title,
+.syntax-highlighted .hljs-title.function_,
+.syntax-highlighted .hljs-function,
+.syntax-highlighted .hljs-section {
+  color: var(--syntax-function);
+}
+
+.syntax-highlighted .hljs-attr,
+.syntax-highlighted .hljs-attribute,
+.syntax-highlighted .hljs-property {
+  color: var(--syntax-property);
+}
+
+.syntax-highlighted .hljs-variable,
+.syntax-highlighted .hljs-template-variable,
+.syntax-highlighted .hljs-params {
+  color: var(--syntax-variable);
+}
+
+.syntax-highlighted .hljs-type,
+.syntax-highlighted .hljs-class .hljs-title,
+.syntax-highlighted .hljs-built_in {
+  color: var(--syntax-type);
+}
+
+.syntax-highlighted .hljs-operator,
+.syntax-highlighted .hljs-link {
+  color: var(--syntax-operator);
+}
+
+.syntax-highlighted .hljs-punctuation,
+.syntax-highlighted .hljs-subst {
+  color: var(--syntax-punctuation);
+}
+
+.syntax-highlighted .hljs-deletion {
+  color: var(--danger-text);
+}
+
+.diff2html-wrapper .d2h-code-line-prefix {
+  flex: 0 0 1.25ch;
+  width: 1.25ch;
+  min-width: 1.25ch;
+  line-height: 18px;
+  white-space: pre;
+}
+
+.diff2html-wrapper .d2h-code-line del,
+.diff2html-wrapper .d2h-code-line ins,
+.diff2html-wrapper .d2h-code-side-line del,
+.diff2html-wrapper .d2h-code-side-line ins {
+  display: inline;
+  padding: 0 1px;
+  border-radius: 3px;
+  line-height: inherit;
+  vertical-align: baseline;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.diff2html-wrapper .d2h-info {
+  background: var(--diff-hunk-bg);
+  color: var(--diff-hunk-text);
+}
+
+.diff2html-wrapper .d2h-info .d2h-code-line-ctn,
+.diff2html-wrapper .d2h-info .d2h-code-line-prefix {
+  color: var(--diff-hunk-text);
+}
+
+.diff2html-wrapper .d2h-ins {
+  background: var(--diff-add-bg);
+}
+
+.diff2html-wrapper .d2h-del {
+  background: var(--diff-del-bg);
+}
+
+.diff2html-wrapper .d2h-file-diff .d2h-ins.d2h-change,
+.diff2html-wrapper .d2h-file-diff .d2h-ins.d2h-change .d2h-code-line {
+  background: var(--diff-add-bg);
+}
+
+.diff2html-wrapper .d2h-file-diff .d2h-del.d2h-change,
+.diff2html-wrapper .d2h-file-diff .d2h-del.d2h-change .d2h-code-line {
+  background: var(--diff-del-bg);
+}
+
+.diff2html-wrapper .d2h-ins .d2h-code-line-ctn,
+.diff2html-wrapper .d2h-del .d2h-code-line-ctn,
+.diff2html-wrapper .d2h-ins .d2h-code-line-prefix,
+.diff2html-wrapper .d2h-del .d2h-code-line-prefix {
+  color: var(--diff-text);
+}
+
+.diff2html-wrapper .d2h-code-line ins,
+.diff2html-wrapper .d2h-code-side-line ins {
+  background: var(--diff-add-inline-bg);
+  color: var(--diff-add-inline-text);
+}
+
+.diff2html-wrapper .d2h-code-line del,
+.diff2html-wrapper .d2h-code-side-line del {
+  background: var(--diff-del-inline-bg);
+  color: var(--diff-del-inline-text);
+}
+
+.diff2html-wrapper .d2h-code-line ins [class*="hljs-"],
+.diff2html-wrapper .d2h-code-side-line ins [class*="hljs-"],
+.diff2html-wrapper .d2h-code-line del [class*="hljs-"],
+.diff2html-wrapper .d2h-code-side-line del [class*="hljs-"] {
+  color: inherit;
+}
+
+.diff2html-wrapper .d2h-code-side-emptyplaceholder,
+.diff2html-wrapper .d2h-emptyplaceholder {
+  background: color-mix(in srgb, var(--diff-bg) 88%, var(--panel));
+}

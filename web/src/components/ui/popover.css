@@ -1,0 +1,16 @@
+/* Radix positions its portal in viewport pixels. Cancel page zoom around
+   that positioning wrapper, then restore it only for the menu content. */
+.popover-portal {
+  zoom: var(--popover-portal-zoom, calc(1 / var(--ui-scale, 1)));
+}
+
+.popover-content {
+  zoom: var(--popover-content-zoom, var(--ui-scale, 1));
+  max-width: calc(100vw / var(--ui-scale, 1) - 16px);
+  z-index: 70;
+  border: 1px solid var(--shell-border);
+  border-radius: 8px;
+  background: var(--shell-panel);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}

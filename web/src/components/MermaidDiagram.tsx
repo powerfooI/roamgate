@@ -6,6 +6,7 @@ import {
 } from "../mermaidRender";
 
 import { ZoomablePreview } from "./ZoomablePreview";
+import "./MermaidDiagram.css";
 
 type MermaidDiagramState =
   | { kind: "loading" }

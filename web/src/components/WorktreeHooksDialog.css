@@ -1,0 +1,103 @@
+.worktree-hooks-modal {
+  width: min(760px, 100%);
+}
+
+.hook-fields {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.hook-field {
+  display: grid;
+  gap: 6px;
+}
+
+.hook-field > span {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hook-field pre {
+  min-height: 76px;
+  max-height: 220px;
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--terminal-bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.hook-field pre.is-empty {
+  color: var(--muted);
+}
+
+.hook-doc-note {
+  margin: -4px 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.hook-doc-note code {
+  color: var(--text-code);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.hook-doc-note a {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.hook-doc-note a:hover {
+  text-decoration: underline;
+}
+
+.hook-loading {
+  min-height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.hook-summary {
+  display: grid;
+  gap: 5px;
+  margin: 10px 0;
+}
+
+.hook-summary-row {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.hook-summary-row > span {
+  color: var(--muted);
+}
+
+.hook-summary-row code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-code);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

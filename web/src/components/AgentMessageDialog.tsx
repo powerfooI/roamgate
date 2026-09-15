@@ -6,6 +6,7 @@ import {
   agentMessageRoleLabel,
   type AgentMessage,
 } from "./AgentMessageContent";
+import "./AgentMessageDialog.css";
 
 export function AgentMessageDialog({
   message,

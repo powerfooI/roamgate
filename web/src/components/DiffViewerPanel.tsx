@@ -57,6 +57,7 @@ import {
 import { keyboardContextMenuPoint, treeKeyboardAction } from "./treeKeyboard";
 import { ActionsMenu } from "./ActionsMenu";
 import { ConfirmDialog } from "./ModalDialogs";
+import "./DiffViewerPanel.css";
 
 export type ActiveDiffSelection = {
   entry: GitDiffEntry | null;

@@ -1,0 +1,833 @@
+@font-face {
+  font-family: "Herdr Nerd Symbols";
+  src: url("../assets/herdr-nerd-symbols.woff2") format("woff2");
+  font-display: swap;
+  unicode-range: U+E000-F8FF, U+F0000-FFFFD, U+100000-10FFFD;
+}
+
+* {
+  box-sizing: border-box;
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
+}
+
+html {
+  /* Disable double-tap zoom and the touch click delay. Pinch zoom is handled
+     by the viewport meta and gesture event suppression. */
+  touch-action: manipulation;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  background: var(--shell-bg);
+  color: var(--text);
+  font:
+    15px / 1.45 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+}
+
+button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+@media (forced-colors: active) {
+  button:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.ghost {
+  border-color: transparent;
+  background: transparent;
+  padding: 4px 7px;
+}
+
+button.ghost:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+
+button.danger {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+button.danger:hover:not(:disabled) {
+  border-color: var(--red);
+}
+
+input,
+textarea {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--text);
+  padding: 8px 11px;
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  resize: none;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    background-color 140ms ease;
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  text-transform: capitalize;
+  color: var(--muted);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.status-connected .status-dot {
+  background: var(--green);
+}
+
+.status-connecting .status-dot {
+  background: var(--yellow);
+}
+
+.status-disconnected .status-dot {
+  background: var(--red);
+}
+
+.status-paused .status-dot {
+  background: var(--yellow);
+}
+
+.menu-button {
+  position: relative;
+}
+
+.errorbar {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--danger-border);
+  font-size: 13px;
+}
+
+@keyframes toast-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.panel {
+  background: var(--shell-panel);
+  border: 1px solid var(--shell-border);
+  border-radius: 12px;
+  padding: 14px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.panel h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.panel-head h2 {
+  margin: 0;
+}
+
+.panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.panel-action {
+  height: 24px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel-action:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.panel-add {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel-add:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover {
+  background: var(--panel-2);
+}
+
+.row-spinner {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: row-spinner 0.8s linear infinite;
+}
+
+@keyframes row-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.git-status {
+  min-width: 0;
+  max-width: min(55%, 168px);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+
+.git-badge {
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 15px;
+  padding: 0 5px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--panel-2);
+}
+
+.git-branch {
+  max-width: 92px;
+  color: var(--text);
+}
+
+/* Count badges are sized purely by their content: never shrink or cap them,
+   so counts stay fully visible. Only the branch badge ellipsizes, and its
+   full text stays available via the row tooltip. */
+.git-dirty,
+.git-ahead,
+.git-behind {
+  flex: 0 0 auto;
+  max-width: none;
+}
+
+.git-dirty {
+  color: var(--yellow);
+  border-color: color-mix(in srgb, var(--yellow) 45%, var(--border));
+}
+
+.git-ahead,
+.git-behind {
+  color: var(--blue);
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--border));
+}
+
+.git-badge-error {
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+/* ===== modal ===== */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: calc(18px + env(safe-area-inset-top, 0px))
+    calc(18px + env(safe-area-inset-right, 0px))
+    calc(18px + env(safe-area-inset-bottom, 0px))
+    calc(18px + env(safe-area-inset-left, 0px));
+  background: var(--modal-backdrop);
+  -webkit-backdrop-filter: blur(8px) saturate(0.9);
+  backdrop-filter: blur(8px) saturate(0.9);
+  animation: modal-backdrop-in 160ms ease-out;
+}
+
+.modal {
+  position: relative;
+  width: min(720px, 100%);
+  max-height: min(760px, calc(100vh - 36px));
+  overflow: auto;
+  /* Auto margins center the modal like align/justify-content would, but let
+     an oversized modal align to the start edge instead so the backdrop can
+     scroll every part of it into view (flex centering would clip the top
+     beyond reach whenever the containing block is shorter than the modal). */
+  margin: auto;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--shell-border) 84%, var(--text) 16%);
+  border-radius: 16px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--shell-panel) 93%, white 7%),
+    var(--shell-panel) 96px
+  );
+  box-shadow:
+    var(--shadow-modal),
+    inset 0 1px 0 color-mix(in srgb, white 9%, transparent);
+  outline: none;
+  isolation: isolate;
+  animation: modal-in 190ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes modal-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-backdrop,
+  .modal {
+    animation: none;
+  }
+}
+
+.compact-modal {
+  width: min(460px, 100%);
+}
+
+.is-spinning {
+  animation: toast-loading-spin 0.8s linear infinite;
+}
+
+.modal-head,
+.modal .modal-head {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.modal-head > :first-child {
+  min-width: 0;
+}
+
+.modal-head h2,
+.modal-head h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 720;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+}
+
+.git-status-code {
+  min-width: 10px;
+  color: var(--muted);
+  font:
+    800 10px / 1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  text-align: center;
+  opacity: 0.72;
+}
+
+.git-status-u {
+  color: var(--blue);
+}
+
+.git-status-a {
+  color: var(--success-text);
+}
+
+.git-status-m {
+  color: var(--warning-text);
+}
+
+.git-status-d {
+  color: var(--danger-text);
+}
+
+.git-status-c {
+  color: var(--danger-text);
+}
+
+.file-loading-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: row-spinner 0.8s linear infinite;
+}
+
+.file-loading-text {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.is-spinning {
+  animation: row-spinner 0.8s linear infinite;
+}
+
+.file-preview-banner {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--viewer-border);
+  background: var(--accent-soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@keyframes file-skeleton-pulse {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+
+.modal-body-text {
+  margin: 10px 0 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 14px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.check-row input {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  margin: 0;
+}
+
+.settings-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--input-bg);
+  transition:
+    border-color 150ms ease,
+    background 150ms ease;
+}
+
+.settings-switch > span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition:
+    transform 150ms ease,
+    background 150ms ease;
+}
+
+.settings-switch.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.settings-switch.is-on > span {
+  background: white;
+  transform: translateX(16px);
+}
+
+.settings-switch:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 2px;
+}
+
+.settings-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.form-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.form-field > span {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.modal-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.modal-meta code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--blue);
+}
+
+.modal-error {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+  color: var(--danger-text);
+  font-size: 13px;
+}
+
+.modal-message {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+  color: var(--success-text);
+  font-size: 13px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 2px;
+}
+
+.modal-actions > button {
+  min-height: 34px;
+  padding-inline: 14px;
+  font-weight: 650;
+}
+
+.modal-actions > button:last-child:not(.ghost):not(.danger) {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  background: var(--accent-soft);
+  color: var(--text-strong);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
+}
+
+.modal-actions
+  > button:last-child:not(.ghost):not(.danger):hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.modal-actions > button:last-child:not(.ghost):not(.danger):focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  box-shadow:
+    0 0 0 3px var(--accent-soft),
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
+}
+
+.badge {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.badge-working {
+  color: var(--warning-text);
+  border-color: var(--yellow);
+  background: var(--warning-soft);
+}
+
+.badge-done {
+  color: var(--success-text);
+  border-color: var(--green);
+  background: var(--success-soft);
+}
+
+.badge-blocked {
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.badge-idle {
+  color: var(--blue);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.terminal-loading {
+  position: absolute;
+  inset: 1px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 9px;
+  /* Follow the terminal theme: the hard-coded dark values matched the dark
+     palette but flashed black over the light terminal on every paste. */
+  background: color-mix(in srgb, var(--terminal-bg) 78%, transparent);
+  color: var(--terminal-fg);
+  font:
+    13px / 1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  pointer-events: none;
+}
+
+.terminal-loading-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: terminal-loading-pulse 1s ease-in-out infinite;
+}
+
+.terminal-loading.is-error {
+  padding: 24px;
+  color: var(--danger-text);
+  line-height: 1.45;
+  text-align: center;
+}
+
+@keyframes terminal-loading-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .settings-switch {
+    width: 36px;
+    height: 20px;
+  }
+
+  .settings-switch > span {
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+  }
+
+  .settings-switch.is-on > span {
+    transform: translateX(16px);
+  }
+
+  .panel-action-icon {
+    width: 26px;
+    height: 26px;
+  }
+
+  &,
+  body,
+  #root {
+    height: 100dvh;
+  }
+
+  body {
+    background: var(--shell-topbar);
+  }
+
+  .status {
+    gap: 0;
+    font-size: 0;
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+  }
+
+  .modal-backdrop {
+    padding: calc(10px + env(safe-area-inset-top, 0px))
+      calc(10px + env(safe-area-inset-right, 0px))
+      calc(10px + env(safe-area-inset-bottom, 0px))
+      calc(10px + env(safe-area-inset-left, 0px));
+  }
+
+  .terminal-loading {
+    inset: 0;
+    border-radius: 0;
+  }
+}
+
+/* Shared state blocks (also used as Suspense fallbacks for lazy chunks). */
+.diff-content-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.diff-content-state.is-error {
+  color: var(--danger-text);
+}
+
+.file-preview-state {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.file-preview-state.is-error {
+  color: var(--danger-text);
+}
+
+/* Shared inline spinner (hooks, auto-sync, lifecycle dialogs). */
+.hook-loading-mark {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 999px;
+  animation: toast-loading-spin 0.8s linear infinite;
+}

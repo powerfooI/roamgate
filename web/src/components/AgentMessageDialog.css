@@ -1,0 +1,113 @@
+.agent-history-wide-detail .agent-message-modal-head {
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-bottom: 0;
+  padding: 12px 16px;
+  background: var(--viewer-header-bg);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.agent-history-wide-detail .agent-message-modal-head h3 {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.agent-history-wide-detail .agent-message-modal-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+  padding: 16px;
+  border: 0;
+  border-radius: 0;
+  overflow: auto;
+}
+
+.agent-message-modal {
+  width: min(820px, 100%);
+  /* The dialog renders in document.body via a portal; the 100% cap keeps it
+     inside its fixed backdrop even when visual viewport units (dvh) resolve
+     larger than the visible area on mobile. */
+  max-height: min(760px, calc(100dvh - 36px), 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.agent-message-modal-head {
+  flex: 0 0 auto;
+}
+
+.agent-message-modal-head > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.agent-message-modal-head time {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-message-modal-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.agent-message-modal-content {
+  min-height: 0;
+  max-height: min(660px, calc(100dvh - 122px));
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  color: var(--text-code);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.agent-message-modal-content.is-rendered {
+  color: var(--text);
+  font-family: inherit;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .agent-message-modal {
+    max-height: min(
+      calc(
+        100dvh -
+        36px -
+        env(safe-area-inset-top, 0px) -
+        env(safe-area-inset-bottom, 0px)
+      ),
+      100%
+    );
+  }
+
+  .agent-message-modal-content {
+    max-height: calc(
+      100dvh -
+      128px -
+      env(safe-area-inset-top, 0px) -
+      env(safe-area-inset-bottom, 0px)
+    );
+    font-size: 12px;
+    line-height: 1.5;
+  }
+}

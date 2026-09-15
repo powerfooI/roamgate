@@ -1,0 +1,227 @@
+.workspace-inspector .file-preview {
+  border-radius: 8px;
+}
+
+.workspace-inspector.is-compact .file-preview {
+  border: 0;
+  border-radius: 0;
+}
+
+.file-preview {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--viewer-border);
+  border-radius: 8px;
+  background: var(--viewer-content-bg);
+}
+
+.file-explorer-side .file-preview {
+  flex: 1 1 42%;
+  min-height: 180px;
+}
+
+.file-preview-head {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--viewer-border);
+  background: var(--viewer-header-bg);
+}
+
+.file-preview-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.file-preview-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-preview-head-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.file-preview-back {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+  padding: 0 8px 0 5px;
+  border-radius: 7px;
+  background: var(--viewer-panel-bg);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.file-preview-back:hover {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+
+.file-preview-mode-toggle,
+.file-preview-refresh,
+.file-preview-copy,
+.file-preview-changes-toggle {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 7px;
+  background: var(--viewer-panel-bg);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.file-preview-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  padding: 0;
+}
+
+.file-preview-mode-options {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.file-preview-mode-options button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.file-preview-refresh:hover:not(:disabled),
+.file-preview-copy:hover,
+.file-preview-changes-toggle:hover,
+.file-preview-changes-toggle[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+
+.file-preview-changes-toggle[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.file-preview-head span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-preview-file-content,
+.file-preview-changes {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.file-preview-pdf {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: var(--panel);
+}
+
+.file-preview-code {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+  z-index: 0;
+}
+
+.file-preview-code .cm-editor {
+  height: 100%;
+}
+
+.file-preview-code .cm-focused {
+  outline: none;
+}
+
+.file-preview-code .cm-review-annotation-gutter {
+  min-width: 28px;
+  border-right: 1px solid var(--border-soft);
+  background: var(--viewer-code-bg);
+}
+
+.file-preview-code .cm-review-annotation-gutter .cm-gutterElement {
+  min-width: 28px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.file-preview-code
+  .cm-review-annotation-gutter
+  .cm-gutterElement:not(:has(.cm-review-annotation-marker))::before {
+  opacity: 0;
+  color: var(--accent);
+  content: "+";
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.file-preview-code
+  .cm-review-annotation-gutter:hover
+  .cm-gutterElement::before {
+  opacity: 0.72;
+}
+
+.file-preview-code .cm-line[data-review-annotated="true"] {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.file-preview-mermaid {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+}
+
+.terminal-preview-modal .file-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.main-view > .file-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  border-radius: 10px;
+}
+
+/* Keep mobile styling in sync with the saved layout and URL override. */
+:where(html[data-layout="mobile"]) {
+  .file-preview {
+    min-height: 220px;
+  }
+}

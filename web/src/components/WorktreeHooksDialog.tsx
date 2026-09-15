@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { store } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
 import { CloseButton } from "./CloseButton";
+import "./WorktreeHooksDialog.css";
 
 const HOOKS = [
   ["setup", "Setup"],

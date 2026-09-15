@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import { cn } from "../utils";
 import { Command, CommandItem, CommandList } from "./ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import "./ThemedSelect.css";
 
 export type ThemedSelectOption = {
   value: string;
