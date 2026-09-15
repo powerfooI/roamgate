@@ -35,6 +35,7 @@ import {
   reanchorDiffReviewAnnotations,
   reanchorFileReviewAnnotations,
   reviewAgentPanes,
+  removeDeliveredReviewAnnotations,
   writeReviewAnnotations,
   type NewReviewAnnotation,
   type ReviewAnnotation,
@@ -208,6 +209,8 @@ function InspectorSplitResizer({
 export function WorkspaceInspectorHost({
   state,
   onReady,
+  onAnnotationsReceived,
+  onGoToAgent,
   visible,
   workspace,
   historyPane,
@@ -228,6 +231,8 @@ export function WorkspaceInspectorHost({
 }: {
   state: WorkspaceInspectorState;
   onReady?: () => void;
+  onAnnotationsReceived: (ids: string[]) => void;
+  onGoToAgent: (paneId: string) => void;
   visible: boolean;
   workspace?: Workspace;
   historyPane?: Pane;
@@ -260,6 +265,13 @@ export function WorkspaceInspectorHost({
   const splitId = useId();
   const allPanes = useStoreSelector((snapshot) => snapshot.panes);
   const annotationStorageKey = annotationDraftStorageKey(state.scope);
+  const activeDraftKeyRef = useRef<string | null>(annotationStorageKey);
+  useLayoutEffect(() => {
+    activeDraftKeyRef.current = annotationStorageKey;
+    return () => {
+      activeDraftKeyRef.current = null;
+    };
+  }, [annotationStorageKey]);
   const [annotations, setAnnotations] = useState<ReviewAnnotation[]>(() =>
     readReviewAnnotations(roamgateLocalStorage, annotationStorageKey),
   );
@@ -267,6 +279,7 @@ export function WorkspaceInspectorHost({
   const [focusedAnnotationId, setFocusedAnnotationId] = useState<string | null>(
     null,
   );
+  const [deliveredPaneId, setDeliveredPaneId] = useState<string | null>(null);
   const [annotationDeliveryBusy, setAnnotationDeliveryBusy] = useState(false);
   const [hostWidth, setHostWidth] = useState(0);
   const [fileDiffState, setFileDiffState] = useState<{
@@ -371,7 +384,6 @@ export function WorkspaceInspectorHost({
       setAnnotationDeliveryBusy(true);
       try {
         await copyTextFromUserGesture(message);
-        clearAnnotations();
         store.notify({
           kind: "success",
           message: fallback
@@ -390,7 +402,7 @@ export function WorkspaceInspectorHost({
         setAnnotationDeliveryBusy(false);
       }
     },
-    [annotations, clearAnnotations],
+    [annotations],
   );
   const sendFeedback = useCallback(
     async (paneId: string | null) => {
@@ -412,11 +424,19 @@ export function WorkspaceInspectorHost({
         const request = terminalPasteRequest(target.pane_id, message);
         await connectionClient.call(request.method, request.params);
         if (!connectionClient.isCurrent()) return;
-        clearAnnotations();
+        const draftActive = activeDraftKeyRef.current === annotationStorageKey;
+        if (draftActive) {
+          setDeliveredPaneId(target.pane_id);
+          commitAnnotations((current) =>
+            removeDeliveredReviewAnnotations(current, annotations),
+          );
+        }
         store.notify({
           kind: "success",
           message: "Feedback pre-filled in the agent pane",
-          detail: "Review the message there, then press Enter to submit it.",
+          detail: draftActive
+            ? "Review the message there, then press Enter to submit it."
+            : "Original draft retained because its Inspector was unloaded. Review the message in the agent pane, then press Enter.",
           autoDismissMs: 6000,
         });
       } catch (error) {
@@ -430,7 +450,14 @@ export function WorkspaceInspectorHost({
         setAnnotationDeliveryBusy(false);
       }
     },
-    [agentPanes, annotations, clearAnnotations, connectionClient, copyFeedback],
+    [
+      agentPanes,
+      annotations,
+      annotationStorageKey,
+      commitAnnotations,
+      connectionClient,
+      copyFeedback,
+    ],
   );
   const fileDiffEntries =
     fileDiffState.resourceKey === contentResourceKey
@@ -536,6 +563,36 @@ export function WorkspaceInspectorHost({
     setAnnotationsOpen(false);
     setFocusedAnnotationId(null);
   }, [annotationStorageKey]);
+
+  useEffect(() => {
+    const pending = state.pendingAnnotations;
+    if (!pending?.length) return;
+    commitAnnotations((current) => [
+      ...current,
+      ...pending.filter(
+        (annotation) => !current.some((item) => item.id === annotation.id),
+      ),
+    ]);
+    setFocusedAnnotationId(pending[pending.length - 1].id);
+    setAnnotationsOpen(true);
+    onAnnotationsReceived(pending.map((annotation) => annotation.id));
+  }, [state.pendingAnnotations, commitAnnotations, onAnnotationsReceived]);
+
+  useEffect(() => {
+    commitAnnotations((current) =>
+      current.map((annotation) => {
+        if (annotation.source !== "terminal") return annotation;
+        const stale = !allPanes.some(
+          (pane) =>
+            pane.pane_id === annotation.paneId &&
+            pane.workspace_id === workspace?.workspace_id,
+        );
+        return stale === !!annotation.stale
+          ? annotation
+          : { ...annotation, stale };
+      }),
+    );
+  }, [allPanes, workspace?.workspace_id, commitAnnotations]);
 
   useEffect(() => {
     if (state.view !== "files" || !fileSelection.entry) return;
@@ -1022,6 +1079,12 @@ export function WorkspaceInspectorHost({
               commitAnnotations((current) =>
                 moveReviewAnnotation(current, id, delta),
               )
+            }
+            onGoToAgent={
+              deliveredPaneId &&
+              agentPanes.some((pane) => pane.pane_id === deliveredPaneId)
+                ? () => onGoToAgent(deliveredPaneId)
+                : undefined
             }
             onClear={clearAnnotations}
             onCopy={() => void copyFeedback()}

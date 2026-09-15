@@ -13,6 +13,9 @@ import {
   reanchorDiffReviewAnnotations,
   reanchorFileReviewAnnotations,
   reviewAgentPanes,
+  removeDeliveredReviewAnnotations,
+  MAX_QUOTE_LENGTH,
+  type TerminalReviewAnnotation,
   writeReviewAnnotations,
   type DiffReviewAnnotation,
   type FileLineReviewAnnotation,
@@ -413,5 +416,96 @@ describe("compiled feedback and delivery targets", () => {
       reviewAgentPanes(panes, "w1", "origin").map((pane) => pane.pane_id),
     ).toEqual(["origin", "focused"]);
     expect(reviewAgentPanes(panes, "missing")).toEqual([]);
+  });
+});
+
+describe("terminal review annotations", () => {
+  const terminal: TerminalReviewAnnotation = {
+    id: "terminal-annotation",
+    source: "terminal",
+    anchor: "quote",
+    paneId: "pane-one",
+    title: "Agent · pane-one",
+    quote: "Selected output\nnext line",
+    comment: "Explain this result.",
+    createdAt: 2,
+  };
+  test("persists mixed sources without requiring or retaining buffer coordinates", () => {
+    const storage = memoryStorage();
+    const file: FileLineReviewAnnotation = {
+      id: "file",
+      source: "file",
+      anchor: "line",
+      path: "file.ts",
+      line: 1,
+      quote: "code",
+      comment: "Fix",
+      createdAt: 3,
+    };
+    const mixed = [diffAnnotation(), terminal, file];
+    expect(writeReviewAnnotations(storage, "mixed", mixed)).toBe(true);
+    expect(readReviewAnnotations(storage, "mixed")).toEqual(mixed);
+    expect(
+      parseReviewAnnotation({
+        ...terminal,
+        path: "ignored",
+        line: 99,
+        bufferY: 42,
+      }),
+    ).toEqual(terminal);
+    expect(moveReviewAnnotation(mixed, terminal.id, -1)[0]).toEqual(terminal);
+    expect(reanchorFileReviewAnnotations(mixed, "file.ts", "code")[1]).toBe(
+      terminal,
+    );
+    expect(
+      reanchorDiffReviewAnnotations(
+        mixed,
+        "src/app.ts",
+        "unstaged",
+        diffPatch,
+      )[1],
+    ).toBe(terminal);
+    const feedback = compileReviewFeedback(mixed);
+    expect(feedback).toContain(
+      "2. terminal pane `Agent · pane-one` (selected passage):\n> Selected output\n> next line\n\nExplain this result.",
+    );
+    expect(feedback).toContain("3. `file.ts` (line 1)");
+  });
+  test("rejects malformed terminal quotes and preserves old drafts", () => {
+    for (const patch of [
+      { paneId: "" },
+      { title: " " },
+      { title: "x".repeat(501) },
+      { anchor: "line" },
+      { quote: " " },
+      { quote: "x".repeat(MAX_QUOTE_LENGTH + 1) },
+    ]) {
+      expect(parseReviewAnnotation({ ...terminal, ...patch })).toBeNull();
+    }
+    expect(parseReviewAnnotation(diffAnnotation())).toEqual(diffAnnotation());
+    expect(compileReviewFeedback([{ ...terminal, stale: true }])).toContain(
+      "selected passage; anchor may be stale",
+    );
+  });
+  test("successful pre-fill clears only unchanged nonblank delivered snapshots", () => {
+    const blank = { ...terminal, id: "blank", comment: " " };
+    const added = { ...terminal, id: "added" };
+    const delivered = [diffAnnotation(), terminal, blank];
+    const edited = { ...terminal, comment: "Keep my newer edit" };
+    expect(
+      removeDeliveredReviewAnnotations(
+        [added, blank, edited, diffAnnotation()],
+        delivered,
+      ),
+    ).toEqual([added, blank, edited]);
+    expect(
+      removeDeliveredReviewAnnotations([terminal, blank], delivered),
+    ).toEqual([blank]);
+    expect(
+      removeDeliveredReviewAnnotations(
+        [{ ...terminal, quote: "new quote" }],
+        delivered,
+      ),
+    ).toHaveLength(1);
   });
 });

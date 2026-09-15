@@ -1,3 +1,4 @@
+import type { TerminalReviewAnnotation } from "./annotations";
 import { getShortcutSnapshot } from "./shortcutPreferences";
 import { matchesShortcut, type ShortcutBindings } from "./shortcutBindings";
 import type { Workspace } from "./types";
@@ -23,6 +24,7 @@ export interface WorkspaceInspectorRequest {
   generation: number;
   workspaceId: string;
   view: InspectorView;
+  annotation?: TerminalReviewAnnotation;
 }
 export type InspectorDock = "right" | "bottom";
 
@@ -76,6 +78,7 @@ export interface WorkspaceInspectorState {
   returnTabId?: string;
   originPaneId?: string;
   initialDirectory?: string;
+  pendingAnnotations?: TerminalReviewAnnotation[];
 }
 
 export interface InspectorPreferences {

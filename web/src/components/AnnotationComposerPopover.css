@@ -1,5 +1,5 @@
 .annotation-composer-popover blockquote {
-  max-height: 82px;
+  max-height: 140px;
   margin: 0;
   overflow: auto;
   padding: 6px 8px;
@@ -8,6 +8,7 @@
   color: var(--text-code);
   font: 10px / 1.45 var(--mono-font);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .annotation-composer-popover textarea {
@@ -33,6 +34,8 @@
   position: fixed;
   z-index: 1200;
   width: min(340px, calc(100vw - 16px));
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
   display: grid;
   gap: 8px;
   padding: 10px;

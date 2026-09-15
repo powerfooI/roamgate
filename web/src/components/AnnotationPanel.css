@@ -130,8 +130,7 @@
   overflow: hidden;
   color: var(--text-strong);
   font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .annotation-card-head span {
@@ -145,7 +144,7 @@
 }
 
 .annotation-card blockquote {
-  max-height: 82px;
+  max-height: 140px;
   margin: 0;
   overflow: auto;
   padding: 6px 8px;
@@ -154,6 +153,7 @@
   color: var(--text-code);
   font: 10px / 1.45 var(--mono-font);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .annotation-card textarea {

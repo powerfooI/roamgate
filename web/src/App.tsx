@@ -1,3 +1,10 @@
+import {
+  annotationDraftStorageKey,
+  parseReviewAnnotation,
+  readReviewAnnotations,
+  writeReviewAnnotations,
+  type TerminalReviewAnnotation,
+} from "./annotations";
 import { roamgateLocalStorage } from "./browserStorage";
 import { useLayoutPreferences } from "./layoutPreferences";
 import {
@@ -1152,6 +1159,9 @@ export default function App() {
   const [inspectorState, setInspectorState] =
     useState<WorkspaceInspectorState | null>(null);
   const inspectorStateRef = useRef<WorkspaceInspectorState | null>(null);
+  const pendingAnnotationsRef = useRef(
+    new Map<string, TerminalReviewAnnotation[]>(),
+  );
   const inspectorFocusRequestRef = useRef<{
     state: WorkspaceInspectorState;
     source: Element | null;
@@ -1468,6 +1478,9 @@ export default function App() {
         returnTabId,
         originPaneId: options.originPaneId,
         initialDirectory: options.initialDirectory,
+        pendingAnnotations: pendingAnnotationsRef.current.get(
+          annotationDraftStorageKey(scope),
+        ),
       };
 
       if (!workspace.focused) void store.focusWorkspace(workspace.workspace_id);
@@ -1873,17 +1886,66 @@ export default function App() {
       ) {
         return;
       }
-      const workspaceOpen = store
+      const annotation = detail.annotation
+        ? parseReviewAnnotation(detail.annotation)
+        : null;
+      if (
+        detail.annotation &&
+        (annotation?.source !== "terminal" ||
+          !store
+            .get()
+            .panes.some(
+              (pane) =>
+                pane.pane_id === annotation.paneId &&
+                pane.workspace_id === detail.workspaceId,
+            ))
+      )
+        return;
+      const workspace = store
         .get()
-        .workspaces.some(
+        .workspaces.find(
           (workspace) => workspace.workspace_id === detail.workspaceId,
         );
-      if (!workspaceOpen) {
+      if (!workspace) {
+        if (detail.annotation) return;
         pendingInspectorRequestRef.current = detail;
         return;
       }
+      if (annotation?.source === "terminal") {
+        const key = annotationDraftStorageKey(
+          resourceScopeForWorkspace(connectionClient.connectionId, workspace),
+        );
+        const pending = pendingAnnotationsRef.current.get(key) ?? [];
+        if (!pending.some((item) => item.id === annotation.id)) {
+          pendingAnnotationsRef.current.set(key, [...pending, annotation]);
+        }
+        const saved = readReviewAnnotations(roamgateLocalStorage, key);
+        const merged = [
+          ...saved,
+          ...(pendingAnnotationsRef.current.get(key) ?? []).filter(
+            (item) => !saved.some((existing) => existing.id === item.id),
+          ),
+        ];
+        if (!writeReviewAnnotations(roamgateLocalStorage, key, merged)) {
+          store.notify({
+            kind: "error",
+            message: "Review draft could not be saved",
+            detail:
+              "Keep this page open. Pending comments are retained in memory until their Inspector opens.",
+          });
+        }
+      }
       pendingInspectorRequestRef.current = null;
-      openInspector(detail.view, detail.workspaceId);
+      openInspector(
+        detail.view,
+        detail.workspaceId,
+        annotation?.source === "terminal"
+          ? {
+              originPaneId: annotation.paneId,
+              focusInspector: false,
+            }
+          : {},
+      );
     };
     window.addEventListener(
       WORKSPACE_INSPECTOR_REQUEST_EVENT,
@@ -3092,6 +3154,39 @@ export default function App() {
                     key={`${resourceUiKey}:${resourceOwnerKey(inspectorState.scope)}`}
                     state={inspectorState}
                     onReady={finishInspectorFocus}
+                    onAnnotationsReceived={(ids) => {
+                      const key = annotationDraftStorageKey(
+                        inspectorState.scope,
+                      );
+                      const remaining = pendingAnnotationsRef.current
+                        .get(key)
+                        ?.filter((item) => !ids.includes(item.id));
+                      if (remaining?.length)
+                        pendingAnnotationsRef.current.set(key, remaining);
+                      else pendingAnnotationsRef.current.delete(key);
+                      updateInspectorState((current) =>
+                        current &&
+                        annotationDraftStorageKey(current.scope) === key
+                          ? { ...current, pendingAnnotations: remaining }
+                          : current,
+                      );
+                    }}
+                    onGoToAgent={(paneId) => {
+                      if (
+                        !connectionClient.isCurrent() ||
+                        !store
+                          .get()
+                          .panes.some(
+                            (pane) =>
+                              pane.pane_id === paneId &&
+                              pane.workspace_id ===
+                                inspectorWorkspace?.workspace_id,
+                          )
+                      )
+                        return;
+                      activateTerminalSurface();
+                      void store.focusPane(paneId);
+                    }}
                     visible={!mobile || mobileView !== "workspaces"}
                     workspace={inspectorWorkspace}
                     historyPane={inspectorHistoryPane}

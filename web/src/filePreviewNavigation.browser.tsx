@@ -1,3 +1,4 @@
+import { checkAnnotationUX } from "./annotations.browser";
 import { roamgateLocalStorage } from "./browserStorage";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -473,10 +474,20 @@ async function run() {
     "retired workspace request rendered",
   );
   root.unmount();
+  element.remove();
+  await checkAnnotationUX(check);
 }
 
-void run()
-  .catch((error) => failures.push(String(error)))
+void (
+  new URLSearchParams(location.search).has("annotations-only")
+    ? checkAnnotationUX(check)
+    : run()
+)
+  .catch((error) =>
+    failures.push(
+      error instanceof Error ? (error.stack ?? error.message) : String(error),
+    ),
+  )
   .finally(async () => {
     await fetch("/result", { method: "POST", body: JSON.stringify(failures) });
   });
