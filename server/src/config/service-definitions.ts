@@ -22,6 +22,10 @@ PORT=8787
 # Optional fixed password. By default, service install creates a generated token.
 # ROAMGATE_PASSWORD=replace-with-a-strong-password
 
+# Optional native HTTPS. Set both to absolute PEM file paths.
+# ROAMGATE_TLS_CERT=/path/to/cert-chain.pem
+# ROAMGATE_TLS_KEY=/path/to/private-key.pem
+
 # Operational logs default to info. Use debug only while diagnosing an issue.
 # ROAMGATE_LOG_LEVEL=info
 

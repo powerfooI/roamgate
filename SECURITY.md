@@ -25,13 +25,15 @@ Use an independently authenticated proxy if that boundary is insufficient.
 
 - Set a strong `ROAMGATE_PASSWORD`; prefer it to `--password`, which exposes
   secrets in process arguments.
-- Use HTTPS or a trusted VPN; restrict access with a firewall/reverse proxy.
+- Use [native HTTPS](docs/DEPLOYMENT.md#native-https), an HTTPS proxy, or a trusted
+  VPN; restrict access with a firewall/reverse proxy.
 - Treat worktree hooks as executable code.
 
 The bridge checks neither browser Origin nor request Host. Any request reaching
 it and passing required authentication has full authority. Secure the outer
-access path: built-in authentication supplies no TLS, rate limiting, multi-user
-authorization, or sandboxing.
+access path: native TLS encrypts transport but supplies no rate limiting,
+multi-user authorization, or sandboxing. Without TLS configuration, the listener
+uses unencrypted HTTP.
 
 Updates trust the configured HTTPS release origin (or explicit loopback test
 mirror) and its manifest/checksums. Checksums detect corruption and bind the

@@ -1,6 +1,7 @@
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createSecureContext } from "node:tls";
 import { parseArgs } from "node:util";
 import { createHash } from "node:crypto";
 import { validateSshDestination } from "../bridge/ssh-command";
@@ -13,6 +14,8 @@ type CliArgs = Partial<{
   host: string;
   port: string;
   password: string;
+  "tls-cert": string;
+  "tls-key": string;
   "socket-path": string;
   "client-socket-path": string;
   "ssh-host": string;
@@ -30,6 +33,7 @@ export type ServerConfig = {
   port: number;
   password: string;
   authRequired: boolean;
+  tls?: { cert: Buffer; key: Buffer };
   generatedAuthToken?: string;
   generatedAuthTokenPath?: string;
   socketPath: string;
@@ -47,6 +51,8 @@ const cliOptions = {
   host: { type: "string" },
   port: { type: "string" },
   password: { type: "string" },
+  "tls-cert": { type: "string" },
+  "tls-key": { type: "string" },
   "socket-path": { type: "string" },
   "client-socket-path": { type: "string" },
   "ssh-host": { type: "string" },
@@ -63,6 +69,27 @@ export function resolveServerLogLevel(
   envValue: string | undefined,
 ): LogLevel {
   return parseLogLevel(cliValue ?? envValue ?? "info");
+}
+
+export function loadServerTls(
+  certPath: string | undefined,
+  keyPath: string | undefined,
+): ServerConfig["tls"] {
+  if (!certPath && !keyPath) return undefined;
+  if (!certPath || !keyPath) {
+    throw new Error(
+      "TLS requires both --tls-cert and --tls-key (or ROAMGATE_TLS_CERT and ROAMGATE_TLS_KEY).",
+    );
+  }
+  try {
+    const tls = { cert: readFileSync(certPath), key: readFileSync(keyPath) };
+    createSecureContext(tls);
+    return tls;
+  } catch (error) {
+    throw new Error(`Invalid TLS configuration: ${(error as Error).message}`, {
+      cause: error,
+    });
+  }
 }
 
 export function loadServerConfig(appVersion: string): ServerConfig {
@@ -98,6 +125,8 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
   --host <addr>              listen address        (env HOST,            default 127.0.0.1)
   --port <n>                 listen port           (env PORT,            default 8787)
   --password <pw>            fixed login password  (env ROAMGATE_PASSWORD; otherwise a token is generated)
+  --tls-cert <path>          PEM certificate chain (env ROAMGATE_TLS_CERT; requires --tls-key)
+  --tls-key <path>           PEM private key       (env ROAMGATE_TLS_KEY; requires --tls-cert)
   --socket-path <path>       control socket        (env HERDR_SOCKET_PATH)
   --client-socket-path <p>   render socket         (env HERDR_CLIENT_SOCKET_PATH)
   --ssh-host <user@host>     remote Herdr over SSH (env HERDR_SSH_HOST)
@@ -129,6 +158,16 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
 
   const host = String(args.host ?? process.env.HOST ?? "127.0.0.1");
   const port = Number(args.port ?? process.env.PORT ?? 8787);
+  let tls: ServerConfig["tls"];
+  try {
+    tls = loadServerTls(
+      args["tls-cert"] ?? roamgateEnv("TLS_CERT"),
+      args["tls-key"] ?? roamgateEnv("TLS_KEY"),
+    );
+  } catch (error) {
+    console.error(`[bridge] ${(error as Error).message}`);
+    process.exit(2);
+  }
   const configuredPassword = String(
     args.password ?? roamgateEnv("PASSWORD") ?? "",
   );
@@ -179,6 +218,7 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
     port,
     password,
     authRequired,
+    tls,
     generatedAuthToken,
     generatedAuthTokenPath,
     socketPath,
@@ -300,9 +340,9 @@ function formatUrlHost(host: string): string {
   return host;
 }
 
-export function browserUrlFor(host: string, port: number): string {
+export function browserUrlFor(host: string, port: number, tls = false): string {
   const browserHost = isAnyHost(host) ? "localhost" : formatUrlHost(host);
-  return `http://${browserHost}:${port}`;
+  return `${tls ? "https" : "http"}://${browserHost}:${port}`;
 }
 
 export function withLoginToken(url: string, token?: string): string {

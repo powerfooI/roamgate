@@ -121,6 +121,7 @@ const { isAuthed, handleTokenLogin, handleLogin, loginPage } =
     authRequired: config.authRequired,
     password: config.password,
     urlLoginToken: config.generatedAuthToken,
+    secureCookies: Boolean(config.tls),
   });
 
 type RpcRequest = ConnectionRpcRequest;
@@ -1221,6 +1222,7 @@ function main() {
       Bun.serve({
         port: config.port,
         hostname: config.host,
+        tls: config.tls,
         async fetch(req, server) {
           const requestPathname = rawRequestPathname(req.url);
           let url: URL;
@@ -1422,7 +1424,11 @@ function main() {
     },
   });
   const listeningPort = server.port ?? config.port;
-  const publicBrowserUrl = browserUrlFor(config.host, listeningPort);
+  const publicBrowserUrl = browserUrlFor(
+    config.host,
+    listeningPort,
+    Boolean(config.tls),
+  );
   logger.info("listening", {
     url: publicBrowserUrl,
     websocket: "/ws",
@@ -1450,7 +1456,9 @@ function main() {
     config.generatedAuthToken,
   );
   if (isAnyHost(config.host)) {
-    const lanUrls = getLanIPs().map((ip) => `http://${ip}:${listeningPort}`);
+    const lanUrls = getLanIPs().map((ip) =>
+      browserUrlFor(ip, listeningPort, Boolean(config.tls)),
+    );
     if (lanUrls.length > 0) {
       for (const url of lanUrls) logger.info("LAN URL", { url });
     } else {

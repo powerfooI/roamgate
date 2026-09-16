@@ -1,3 +1,4 @@
+import { listenForTaskNotificationActivation } from "./taskNotifications";
 import { useReviewAnnotationDraft } from "./useReviewAnnotationDraft";
 import {
   annotationDraftStorageKey,
@@ -126,6 +127,7 @@ import {
   TASK_NOTIFICATION_ACTIVATE_EVENT,
   type TaskNotificationTarget,
   taskNotificationTargetFromNotice,
+  taskNotificationTargetIsCurrent,
   useStoreSelector,
   WORKTREE_REMOVED_EVENT,
   type WorktreeRemovedTarget,
@@ -2164,10 +2166,19 @@ export default function App() {
     },
     [openNotificationTarget],
   );
+  const pendingNotificationRef = useRef<TaskNotificationTarget | null>(null);
   useEffect(() => {
-    const handleSystemNotification = (event: Event) => {
-      const target = (event as CustomEvent<unknown>).detail;
-      if (!isTaskNotificationTarget(target)) return;
+    const activatePending = () => {
+      const target = pendingNotificationRef.current;
+      const snapshot = store.get();
+      if (
+        !target ||
+        snapshot.status !== "connected" ||
+        !snapshot.connections.length
+      )
+        return;
+      pendingNotificationRef.current = null;
+      if (!taskNotificationTargetIsCurrent(snapshot, target)) return;
       openNotificationTarget(target);
       const notice = store.get().notice;
       if (
@@ -2178,15 +2189,30 @@ export default function App() {
         store.clearNotice();
       }
     };
+    const receive = (target: TaskNotificationTarget) => {
+      pendingNotificationRef.current = target;
+      activatePending();
+    };
+    const handleSystemNotification = (event: Event) => {
+      const target = (event as CustomEvent<unknown>).detail;
+      if (isTaskNotificationTarget(target)) receive(target);
+    };
+    const unsubscribe = store.subscribe(activatePending);
+    const stopWorkerNotifications =
+      listenForTaskNotificationActivation(receive);
+    activatePending();
     window.addEventListener(
       TASK_NOTIFICATION_ACTIVATE_EVENT,
       handleSystemNotification,
     );
-    return () =>
+    return () => {
+      unsubscribe();
+      stopWorkerNotifications();
       window.removeEventListener(
         TASK_NOTIFICATION_ACTIVATE_EVENT,
         handleSystemNotification,
       );
+    };
   }, [openNotificationTarget]);
   useEffect(() => {
     const handleInspectorRequest = (event: Event) => {

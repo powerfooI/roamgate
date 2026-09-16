@@ -55,6 +55,7 @@ export function createAuthHandlers(args: {
   authRequired: boolean;
   password: string;
   urlLoginToken?: string;
+  secureCookies?: boolean;
 }) {
   if (args.authRequired && !args.password) {
     throw new Error("authentication requires a non-empty signing secret");
@@ -91,7 +92,7 @@ export function createAuthHandlers(args: {
   }
 
   function authCookie(): string {
-    return `${AUTH_COOKIE}=${signedToken()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${AUTH_TOKEN_TTL_SECONDS}`;
+    return `${AUTH_COOKIE}=${signedToken()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${AUTH_TOKEN_TTL_SECONDS}${args.secureCookies ? "; Secure" : ""}`;
   }
 
   function secretsEqual(actual: string, expected: string): boolean {

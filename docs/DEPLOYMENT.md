@@ -379,6 +379,8 @@ connection registry path remains authoritative, including an empty value.
 | `--host <addr>` | `HOST` | `127.0.0.1` |
 | `--port <n>` | `PORT` | `8787` |
 | `--password <pw>` | `ROAMGATE_PASSWORD` | Generated token for non-loopback binds |
+| `--tls-cert <path>` | `ROAMGATE_TLS_CERT` | Disabled; PEM certificate chain, requires key |
+| `--tls-key <path>` | `ROAMGATE_TLS_KEY` | Disabled; PEM private key, requires certificate |
 | `--socket-path <path>` | `HERDR_SOCKET_PATH` | Default Herdr control socket or named pipe |
 | `--client-socket-path <path>` | `HERDR_CLIENT_SOCKET_PATH` | Default Herdr render socket or named pipe |
 | `--ssh-host <user@host>` | `HERDR_SSH_HOST` | Disabled; supported on Linux and macOS |
@@ -418,6 +420,49 @@ roamgate --host 0.0.0.0 --port 8787 --password 's3cr3t'
 ```
 
 Read [SECURITY.md](../SECURITY.md) before using a non-loopback bind.
+
+### Native HTTPS
+
+Supply a PEM certificate chain (leaf first) and its matching, unencrypted private
+key to serve HTTPS and WSS directly through Bun:
+
+```bash
+roamgate --host 0.0.0.0 --port 8443 \
+  --tls-cert /path/to/cert-chain.pem \
+  --tls-key /path/to/private-key.pem
+```
+
+Both settings are required. Missing, unreadable, malformed, or mismatched files
+stop startup rather than falling back to HTTP. Without TLS settings, Roamgate
+uses HTTP. Native HTTPS adds `Secure` to authentication cookies; startup and
+browser-launch links use `https://`. TLS does not change authentication:
+loopback binds still bypass login, and non-loopback binds still require a token
+or password. Do not expose the server directly to the public internet.
+
+For a private LAN, use your existing certificate issuer or a local CA tool such
+as [mkcert](https://github.com/FiloSottile/mkcert). For example, replace the
+reserved example address below with the host's actual LAN address:
+
+```bash
+mkcert -install
+mkcert -cert-file cert.pem -key-file key.pem localhost 127.0.0.1 ::1 192.0.2.10
+roamgate --host 0.0.0.0 --port 8443 \
+  --tls-cert "$PWD/cert.pem" --tls-key "$PWD/key.pem"
+```
+
+- The certificate's Subject Alternative Names must match every hostname or IP
+  used by clients. A certificate for `localhost` does not cover a LAN address.
+- Each client device must trust the certificate or its issuing CA. With mkcert,
+  transfer only `rootCA.pem` from `mkcert -CAROOT`, never `rootCA-key.pem`.
+  On iOS/iPadOS, install the CA profile and enable full trust under
+  **Settings > General > About > Certificate Trust Settings**.
+- Bypassing a certificate warning is not sufficient for Service Workers or other
+  secure-context APIs. Open a warning-free HTTPS URL before adding the app to
+  the Home Screen. Remove temporary CA profiles after testing.
+- Keep private keys out of repositories and restrict their filesystem access.
+  Issuance and renewal are external; restart Roamgate after replacing the files.
+  For a managed service, set both environment variables to absolute paths in its
+  environment file and run `roamgate service restart`.
 
 ## Logging
 

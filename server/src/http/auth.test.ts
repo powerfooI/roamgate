@@ -43,6 +43,40 @@ describe("request authentication boundaries", () => {
     expect(handlers.isAuthed(proxiedRequest)).toBe(true);
   });
 
+  test.each([false, true])(
+    "sets Secure for both login paths only with native TLS (%s)",
+    async (secureCookies) => {
+      const handlers = createAuthHandlers({
+        authRequired: true,
+        password: "test-secret",
+        urlLoginToken: "test-secret",
+        secureCookies,
+      });
+      const login = await handlers.handleLogin(
+        new Request("https://example.test/api/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: "test-secret" }),
+        }),
+      );
+      const token = handlers.handleTokenLogin(
+        new Request("https://example.test/?token=test-secret"),
+      )!;
+      for (const response of [login, token]) {
+        const cookie = response.headers.get("set-cookie")!;
+        expect(cookie.includes("; Secure")).toBe(secureCookies);
+        expect(cookie).toContain("HttpOnly; SameSite=Lax");
+        expect(
+          handlers.isAuthed(
+            new Request("https://example.test/", {
+              headers: { cookie: cookieHeader(response) },
+            }),
+          ),
+        ).toBe(true);
+      }
+    },
+  );
+
   test("redirects unauthenticated HTML requests with a relative location", () => {
     const response = unauthenticatedLoginRedirect();
 

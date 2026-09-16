@@ -1,4 +1,16 @@
 import { roamgateLocalStorage, roamgateSessionStorage } from "./browserStorage";
+import {
+  isTaskNotificationTarget,
+  prepareTaskNotifications,
+  showTaskNotification,
+  type TaskNotificationTarget,
+} from "./taskNotifications";
+export {
+  bindTaskNotificationActivation,
+  isTaskNotificationTarget,
+  TASK_NOTIFICATION_ACTIVATE_EVENT,
+  type TaskNotificationTarget,
+} from "./taskNotifications";
 import { withAgentActivity } from "./agentOrder";
 import {
   type EndpointAvailability,
@@ -180,8 +192,6 @@ export function emptyServerSessionState(
   };
 }
 
-export const TASK_NOTIFICATION_ACTIVATE_EVENT =
-  "roamgate:task-notification-activate";
 export const WORKTREE_REMOVED_EVENT = "roamgate:worktree-removed";
 
 export interface WorktreeRemovedTarget {
@@ -195,64 +205,6 @@ export function noticeAutoDismissDelay(notice: Notice): number | null {
   return notice.autoDismissMs ?? DEFAULT_NOTICE_AUTO_DISMISS_MS;
 }
 
-export interface TaskNotificationTarget {
-  connectionId: string;
-  runtimeGeneration: number;
-  workspaceId: string;
-  paneId: string;
-}
-
-type ClickableNotification = Pick<Notification, "close" | "onclick">;
-
-export function isTaskNotificationTarget(
-  value: unknown,
-): value is TaskNotificationTarget {
-  if (!value || typeof value !== "object") return false;
-  const target = value as Partial<TaskNotificationTarget>;
-  return (
-    typeof target.connectionId === "string" &&
-    target.connectionId.length > 0 &&
-    typeof target.runtimeGeneration === "number" &&
-    Number.isSafeInteger(target.runtimeGeneration) &&
-    target.runtimeGeneration >= 0 &&
-    typeof target.workspaceId === "string" &&
-    target.workspaceId.length > 0 &&
-    typeof target.paneId === "string" &&
-    target.paneId.length > 0
-  );
-}
-
-/** Connect a system notification click to the in-app pane navigation path. */
-export function bindTaskNotificationActivation(
-  notification: ClickableNotification,
-  target: TaskNotificationTarget,
-  activate: (target: TaskNotificationTarget) => void = (nextTarget) => {
-    window.dispatchEvent(
-      new CustomEvent<TaskNotificationTarget>(
-        TASK_NOTIFICATION_ACTIVATE_EVENT,
-        {
-          detail: nextTarget,
-        },
-      ),
-    );
-  },
-  focusWindow: () => void = () => window.focus(),
-) {
-  notification.onclick = () => {
-    try {
-      notification.close();
-    } catch {
-      // Notification cleanup must not block navigation.
-    }
-    try {
-      focusWindow();
-    } catch {
-      // Browsers may deny focus even for a notification click.
-    }
-    activate(target);
-  };
-}
-
 function notificationPermission(): NotificationPermission | "unsupported" {
   if (typeof window === "undefined" || !("Notification" in window)) {
     return "unsupported";
@@ -262,6 +214,7 @@ function notificationPermission(): NotificationPermission | "unsupported" {
 
 function storedTaskNotificationsEnabled() {
   return (
+    notificationPermission() === "granted" &&
     typeof localStorage !== "undefined" &&
     roamgateLocalStorage.getItem(TASK_NOTIFICATIONS_KEY) === "true"
   );
@@ -835,6 +788,27 @@ function taskNotificationBody(
   return parts.join(" · ");
 }
 
+let taskNotificationPreferenceVersion = 0;
+
+function reportTaskNotificationFailure(error: unknown, version: number) {
+  if (version !== taskNotificationPreferenceVersion) return;
+  taskNotificationPreferenceVersion++;
+  set({
+    taskNotificationsEnabled: false,
+    taskNotificationPermission: notificationPermission(),
+    notice: {
+      kind: "error",
+      message: "Task notifications are unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+    },
+  });
+  try {
+    roamgateLocalStorage.setItem(TASK_NOTIFICATIONS_KEY, "false");
+  } catch {
+    // The runtime preference still reflects the failed notification transport.
+  }
+}
+
 function maybeShowBrowserTaskNotification(
   title: string,
   body: string,
@@ -842,16 +816,25 @@ function maybeShowBrowserTaskNotification(
   target: TaskNotificationTarget,
 ) {
   if (!state.taskNotificationsEnabled) return;
-  if (notificationPermission() !== "granted") return;
-  try {
-    const notification = new Notification(title, {
-      body,
-      tag,
-    });
-    bindTaskNotificationActivation(notification, target);
-  } catch {
-    // Browser notification support varies by browser and deployment context.
+  const version = taskNotificationPreferenceVersion;
+  if (notificationPermission() !== "granted") {
+    reportTaskNotificationFailure(
+      new Error(
+        "Enable notifications for this site in the browser settings, then try again.",
+      ),
+      version,
+    );
+    return;
   }
+  void showTaskNotification(
+    title,
+    { body, tag },
+    target,
+    () =>
+      state.taskNotificationsEnabled &&
+      version === taskNotificationPreferenceVersion &&
+      taskNotificationTargetIsCurrent(state, target),
+  ).catch((error) => reportTaskNotificationFailure(error, version));
 }
 
 export function taskNotificationTarget(
@@ -916,12 +899,6 @@ function notifyTaskCompleted(pane: Pane, workspaces: Workspace[], tabs: Tab[]) {
     runtimeGeneration,
     pane,
   );
-  maybeShowBrowserTaskNotification(
-    title,
-    body,
-    taskNotificationTag(target),
-    target,
-  );
   set({
     notice: {
       kind: "success",
@@ -935,6 +912,12 @@ function notifyTaskCompleted(pane: Pane, workspaces: Workspace[], tabs: Tab[]) {
       autoDismissMs: TASK_COMPLETED_TOAST_DISMISS_MS,
     },
   });
+  maybeShowBrowserTaskNotification(
+    title,
+    body,
+    taskNotificationTag(target),
+    target,
+  );
 }
 
 function activePaneIdForTaskNotifications(snapshot: State) {
@@ -2049,6 +2032,12 @@ export const store = {
   init() {
     if (initialized) return;
     initialized = true;
+    if (state.taskNotificationsEnabled) {
+      const version = taskNotificationPreferenceVersion;
+      void prepareTaskNotifications().catch((error) =>
+        reportTaskNotificationFailure(error, version),
+      );
+    }
     bridge.onHello((hello) => {
       const defaultConnectionId = hello.default_connection_id;
       set({ defaultConnectionId });
@@ -2934,6 +2923,7 @@ export const store = {
   },
 
   async setTaskNotificationsEnabled(enabled: boolean) {
+    const version = ++taskNotificationPreferenceVersion;
     if (!enabled) {
       roamgateLocalStorage.setItem(TASK_NOTIFICATIONS_KEY, "false");
       set({
@@ -2957,7 +2947,7 @@ export const store = {
           kind: "error",
           message: "Browser notifications are not supported",
           detail:
-            "This browser or deployment context does not expose the Notification API.",
+            "Use a browser with notification support over HTTPS. On iPhone or iPad, open Roamgate from the Home Screen (iOS/iPadOS 16.4 or later).",
         },
       });
       return;
@@ -2968,7 +2958,9 @@ export const store = {
       if (permission === "default") {
         permission = await Notification.requestPermission();
       }
+      if (version !== taskNotificationPreferenceVersion) return;
     } catch (e) {
+      if (version !== taskNotificationPreferenceVersion) return;
       roamgateLocalStorage.setItem(TASK_NOTIFICATIONS_KEY, "false");
       set({
         taskNotificationsEnabled: false,
@@ -2983,6 +2975,15 @@ export const store = {
     }
 
     const granted = permission === "granted";
+    if (granted) {
+      try {
+        await prepareTaskNotifications();
+      } catch (error) {
+        reportTaskNotificationFailure(error, version);
+        return;
+      }
+    }
+    if (version !== taskNotificationPreferenceVersion) return;
     roamgateLocalStorage.setItem(
       TASK_NOTIFICATIONS_KEY,
       granted ? "true" : "false",
@@ -2994,7 +2995,8 @@ export const store = {
         ? {
             kind: "success",
             message: "Task notifications enabled",
-            detail: "Roamgate will notify you when an agent task completes.",
+            detail:
+              "Roamgate will notify you when an agent task completes while this page is running. Suspended or closed apps do not receive new task events.",
             autoDismissMs: 5000,
           }
         : {

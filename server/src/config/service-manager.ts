@@ -34,6 +34,7 @@ import {
   browserUrlFor,
   getLanIPs,
   isAnyHost,
+  loadServerTls,
   withLoginToken,
 } from "./server-config";
 
@@ -356,6 +357,7 @@ function loadServiceEnvironmentFile(path: string) {
 interface ServiceAccess {
   host: string;
   port: number;
+  tls: boolean;
   token?: string;
   tokenPath?: string;
   usesFixedPassword: boolean;
@@ -370,6 +372,14 @@ function prepareServiceAccess(configPath: string): ServiceAccess {
     throw new Error(`invalid PORT in ${configPath}: ${configuredPort}`);
   }
 
+  const tls = Boolean(
+    loadServerTls(
+      readEnvironmentValue(contents, "ROAMGATE_TLS_CERT") ??
+        readEnvironmentValue(contents, "HERDR_GUI_TLS_CERT"),
+      readEnvironmentValue(contents, "ROAMGATE_TLS_KEY") ??
+        readEnvironmentValue(contents, "HERDR_GUI_TLS_KEY"),
+    ),
+  );
   const password =
     readEnvironmentValue(contents, "ROAMGATE_PASSWORD") ??
     readEnvironmentValue(contents, "HERDR_GUI_PASSWORD") ??
@@ -381,13 +391,14 @@ function prepareServiceAccess(configPath: string): ServiceAccess {
     host === "localhost" ||
     host === "::1"
   ) {
-    return { host, port, usesFixedPassword };
+    return { host, port, tls, usesFixedPassword };
   }
 
   const tokenPath = join(dirname(configPath), "auth-token");
   return {
     host,
     port,
+    tls,
     token: loadOrCreateAuthToken(tokenPath),
     tokenPath,
     usesFixedPassword,
@@ -401,11 +412,13 @@ function printServiceAccess(
 ) {
   if (access.usesFixedPassword) {
     log("Authentication: fixed password from the service config");
-    log(`Open: ${browserUrlFor(access.host, access.port)}`);
+    log(`Open: ${browserUrlFor(access.host, access.port, access.tls)}`);
     return;
   }
   if (!access.token) {
-    log(`Open: ${browserUrlFor(access.host, access.port)} (local access)`);
+    log(
+      `Open: ${browserUrlFor(access.host, access.port, access.tls)} (local access)`,
+    );
     return;
   }
 
@@ -413,14 +426,14 @@ function printServiceAccess(
   log(`Token file: ${access.tokenPath}`);
   log(
     `Open: ${withLoginToken(
-      browserUrlFor(access.host, access.port),
+      browserUrlFor(access.host, access.port, access.tls),
       access.token,
     )}`,
   );
   if (isAnyHost(access.host)) {
     for (const ip of resolveLanIPs()) {
       log(
-        `LAN: ${withLoginToken(`http://${ip}:${access.port}`, access.token)}`,
+        `LAN: ${withLoginToken(browserUrlFor(ip, access.port, access.tls), access.token)}`,
       );
     }
   }
