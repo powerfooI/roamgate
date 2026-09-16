@@ -118,7 +118,10 @@ async function defaultDownload(
   url: string,
   destinationPath: string,
 ): Promise<void> {
-  const response = await fetch(url, { redirect: "follow" });
+  const response = await fetch(url, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(120_000),
+  });
   if (!response.ok) {
     throw new Error(`Herdr download failed: HTTP ${response.status}`);
   }

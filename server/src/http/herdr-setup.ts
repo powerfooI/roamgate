@@ -1,9 +1,13 @@
 import type { ServerConfig } from "../config/server-config";
 import type { ConnectionProfile } from "../connections/profiles";
-import { VERIFIED_HERDR_VERSION } from "../herdr/release";
+import {
+  resolveHerdrReleaseTarget,
+  VERIFIED_HERDR_VERSION,
+} from "../herdr/release";
 import {
   assertManagedSetupAllowed,
   detectHerdrSetup,
+  type HerdrBootstrapDeps,
   type HerdrSetupGuard,
   type HerdrSetupResult,
   type HerdrSetupState,
@@ -74,9 +78,11 @@ function resultPayload(result: HerdrSetupResult): Record<string, unknown> {
 export function createHerdrSetupHandlers({
   ping,
   guard,
+  bootstrap = {},
 }: {
   ping: () => Promise<{ version: string; protocol: number }>;
   guard: () => HerdrSetupGuard;
+  bootstrap?: Omit<HerdrBootstrapDeps, "guard" | "ping">;
 }) {
   let setupInProgress = false;
 
@@ -89,10 +95,19 @@ export function createHerdrSetupHandlers({
       } catch {
         canSetup = false;
       }
-      const state = await detectHerdrSetup({ guard: target, ping });
+      const state = await detectHerdrSetup({
+        ...bootstrap,
+        guard: target,
+        ping,
+      });
+      const hasRelease =
+        resolveHerdrReleaseTarget(
+          bootstrap.platform ?? process.platform,
+          bootstrap.arch ?? process.arch,
+        ) !== null;
       return herdrJson({
         ...statePayload(state),
-        can_setup: canSetup,
+        can_setup: canSetup && (state.state !== "missing" || hasRelease),
         verified_version: VERIFIED_HERDR_VERSION,
       });
     } catch (error) {
@@ -115,7 +130,7 @@ export function createHerdrSetupHandlers({
     }
     setupInProgress = true;
     try {
-      const result = await setupHerdr({ guard: guard(), ping });
+      const result = await setupHerdr({ ...bootstrap, guard: guard(), ping });
       return herdrJson(resultPayload(result));
     } catch (error) {
       return herdrJson({ error: (error as Error).message }, { status: 500 });
