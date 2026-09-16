@@ -36,6 +36,7 @@ export function useReviewAnnotationDraft(runtimeKey: string) {
     const changed =
       !owner ||
       !scopeRef.current ||
+      scopeRef.current.workspaceId !== owner.workspaceId ||
       !sameResourceOwner(scopeRef.current, owner);
     if (!owner) sessionRef.current = null;
     else if (changed || !sessionRef.current) sessionRef.current = {};

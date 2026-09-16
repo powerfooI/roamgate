@@ -81,6 +81,14 @@ export async function checkAnnotationUX(
     tab_count: 2,
     agent_status: "idle",
     active_tab_id: "review-tab",
+    worktree: {
+      repo_key: "review-repo",
+      repo_name: "Review",
+      repo_root: "/repo",
+      checkout_path: "/repo",
+      gui_settings_key: "review-repo",
+      is_linked_worktree: false,
+    },
   };
   const pane: Pane = {
     pane_id: "review-pane",
@@ -323,7 +331,7 @@ export async function checkAnnotationUX(
       new CustomEvent(WORKSPACE_INSPECTOR_REQUEST_EVENT, {
         detail: {
           connectionId: client.connectionId,
-          generation: 1,
+          generation: client.generation,
           workspaceId: pane.workspace_id,
           view: "files",
         },
@@ -855,6 +863,11 @@ export async function checkAnnotationUX(
       label: "Second review",
       focused: false,
       active_tab_id: "second-tab",
+      worktree: {
+        ...workspace.worktree!,
+        checkout_path: "/repo/second",
+        is_linked_worktree: true,
+      },
     };
     const secondPane: Pane = {
       ...pane,
@@ -1049,6 +1062,115 @@ export async function checkAnnotationUX(
         ".annotation-delivery-actions button:last-child",
       )!.disabled,
       "restored workspace retained stale delivery busy state",
+    );
+    const sharedWorkspace: Workspace = {
+      ...workspace,
+      workspace_id: "shared-checkout",
+      active_tab_id: "shared-tab",
+    };
+    const sharedPane: Pane = {
+      ...pane,
+      pane_id: "shared-pane",
+      terminal_id: "shared-terminal",
+      workspace_id: sharedWorkspace.workspace_id,
+      tab_id: "shared-tab",
+      agent: "Shared checkout agent",
+    };
+    const beforeShared = store.get();
+    check(
+      annotationDraftStorageKey(
+        resourceScopeForWorkspace(client.connectionId, sharedWorkspace),
+      ) === key,
+      "shared checkout fixture does not share its draft key",
+    );
+    const focusShared = async (shared: boolean) => {
+      flushSync(() => {
+        __storeTesting.replaceState({
+          ...beforeShared,
+          workspaces: [
+            { ...workspace, focused: !shared },
+            { ...sharedWorkspace, focused: shared },
+          ],
+          panes: [
+            ...beforeShared.panes.map((item) => ({
+              ...item,
+              focused: !shared && item.pane_id === pane.pane_id,
+            })),
+            { ...sharedPane, focused: shared },
+          ],
+          tabs: [
+            ...beforeShared.tabs.map((item) => ({
+              ...item,
+              focused: !shared && item.tab_id === pane.tab_id,
+            })),
+            {
+              ...beforeShared.tabs[0],
+              workspace_id: sharedWorkspace.workspace_id,
+              tab_id: sharedPane.tab_id,
+              focused: shared,
+            },
+          ],
+          selectedPaneId: shared ? sharedPane.pane_id : pane.pane_id,
+          layout: null,
+        });
+        store.clearNotice();
+      });
+      await settle();
+    };
+    flushSync(() => openInspector());
+    await settle();
+    showAnnotations();
+    click(".annotation-delivery-actions button:last-child");
+    await until(() => delivery, "shared checkout original delivery missing");
+    const sharedOldDelivery = delivery!;
+    delivery = null;
+    await focusShared(true);
+    check(
+      document.querySelectorAll(".annotation-card").length === 2,
+      "shared checkout route switch lost or closed shared draft",
+    );
+    check(
+      document
+        .querySelector(".annotation-target-summary")
+        ?.textContent?.includes("Shared checkout agent") === true,
+      "shared checkout switch still targets previous workspace agents",
+    );
+    check(
+      !draft().some((item) => item.stale),
+      "shared checkout switch marked available source panes stale",
+    );
+    check(
+      !document.querySelector<HTMLButtonElement>(
+        ".annotation-delivery-actions button:last-child",
+      )!.disabled,
+      "shared checkout route switch kept old delivery busy",
+    );
+    click(".annotation-delivery-actions button:last-child");
+    await until(() => delivery, "shared checkout destination delivery missing");
+    check(
+      sent[sent.length - 1]?.pane_id === sharedPane.pane_id,
+      "shared checkout feedback was sent to previous workspace",
+    );
+    sharedOldDelivery.resolve({});
+    await settle();
+    check(
+      draft().length === 2 &&
+        document.querySelector<HTMLButtonElement>(
+          ".annotation-delivery-actions button:last-child",
+        )!.disabled,
+      "old workspace delivery cleared shared draft or newer delivery state",
+    );
+    delivery!.reject(new Error("Retain shared checkout draft"));
+    delivery = null;
+    await settle();
+    click('button[aria-label="Close Workspace Inspector"]');
+    await focusShared(false);
+    check(
+      document.querySelectorAll(".annotation-card").length === 2 &&
+        document
+          .querySelector('button[aria-label="Agent pane"]')
+          ?.textContent?.includes("Shared checkout agent") !== true,
+      "closed Inspector prevented annotation route from returning to original workspace",
     );
     __storeTesting.replaceState({ ...store.get(), panes: [], layout: null });
     flushSync(() => store.clearNotice());

@@ -1507,6 +1507,7 @@ export default function App() {
       );
       if (
         !annotationScopeRef.current ||
+        annotationScopeRef.current.workspaceId !== scope.workspaceId ||
         !sameResourceOwner(annotationScopeRef.current, scope)
       ) {
         setAnnotationDraftScope(scope, annotationsOpen);
@@ -2400,15 +2401,18 @@ export default function App() {
     const pending = annotationAwaitingFocusRef.current;
     if (
       pending &&
-      !sameResourceOwner(pending, scope) &&
+      (pending.workspaceId !== scope.workspaceId ||
+        !sameResourceOwner(pending, scope)) &&
       s.pendingFocusWorkspaceId === pending.workspaceId
     )
       return;
     annotationAwaitingFocusRef.current = null;
     const current = annotationScopeRef.current;
-    if (current && sameResourceOwner(current, scope)) return;
-    setAnnotationDraftScope(scope);
+    const sameOwner = current && sameResourceOwner(current, scope);
+    if (sameOwner && current.workspaceId === scope.workspaceId) return;
+    setAnnotationDraftScope(scope, !!sameOwner && annotationsOpen);
   }, [
+    annotationsOpen,
     annotationScopeRef,
     connectionClient.connectionId,
     focusedWorkspace,
@@ -2422,9 +2426,7 @@ export default function App() {
       current.map((annotation) => {
         if (annotation.source !== "terminal") return annotation;
         const stale = !s.panes.some(
-          (pane) =>
-            pane.pane_id === annotation.paneId &&
-            pane.workspace_id === annotationWorkspace.workspace_id,
+          (pane) => pane.pane_id === annotation.paneId,
         );
         return stale === !!annotation.stale
           ? annotation
