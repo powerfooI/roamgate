@@ -298,6 +298,17 @@ newer work.
 - Choose **Agents on top** or **Workspaces on top** independently for each layout
   under Layout Preferences. This affects the separate Agents panel; mobile defaults
   to agents first, desktop to workspaces first.
+- Touch taps and swipes read terminal output without opening the device keyboard.
+  Use the bottom-right **Open device keyboard** button to type directly; a light
+  touch tap on the terminal dismisses it without sending input. Scrolling keeps
+  input active. Mouse selection and physical-keyboard input work in either layout.
+- Long-press a word directly in the terminal, drag either selection handle, then
+  **Copy** or **Add comment**. Copy keeps the selection; **Done** or Escape returns
+  to reading without opening the keyboard. Scroll before selecting older output:
+  touch handles cover the displayed viewport. Output stays connected and the
+  displayed frame freezes until selection ends, then shows pending output.
+  Legacy incremental streams resume automatically at a 1 MiB buffered UTF-16
+  payload limit without discarding output or a captured comment.
 - Configure the floating terminal panel's `2×8` shortcut grid and up to four
   side buttons. Empty editor slots keep their positions but compact at runtime.
   Actions include Ctrl, arrows, Enter variants, full/half-page scrolling, and

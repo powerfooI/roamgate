@@ -20,7 +20,7 @@ export function terminalMouseUsesSelection(
 /**
  * Endpoint frames are self-contained repaints, not an incremental PTY stream.
  * Retain just the newest while selecting so copied text stays the visible text.
- * Legacy streams never pass through this helper.
+ * Legacy chunks use a separate ordered buffer and never replace one another.
  */
 export class TerminalEndpointPresentation {
   mouseReporting: boolean | undefined;
@@ -29,6 +29,7 @@ export class TerminalEndpointPresentation {
   private pendingFrame: TerminalPresentationFrame | null = null;
   displayedFrame: TerminalPresentationFrame | null = null;
   private writing = false;
+  private incremental = "";
   private disposed = false;
   private generation = 0;
   private deferredSelection: (() => void) | null = null;
@@ -50,6 +51,19 @@ export class TerminalEndpointPresentation {
 
   get writePending(): boolean {
     return this.writing;
+  }
+
+  /** Legacy chunks are ordered, never coalesced as endpoint repaints. */
+  updateIncremental(text: string, overflow: () => void): void {
+    if (this.disposed || !text) return;
+    // ponytail: 1 MiB UTF-16 payload budget; release selection instead of dropping output.
+    if (
+      (this.selectionDrag || this.hasSelection()) &&
+      (this.incremental.length + text.length) * 2 > 1024 * 1024
+    )
+      overflow();
+    this.incremental += text;
+    this.flush();
   }
 
   /** Reserve selection immediately; replay native initiation only after parsing. */
@@ -89,8 +103,8 @@ export class TerminalEndpointPresentation {
         ))
     )
       return;
-    const frame = this.pendingFrame;
-    this.pendingFrame = null;
+    const frame = this.incremental ? null : this.pendingFrame;
+    if (frame) this.pendingFrame = null;
     const viewport = this.viewportSize?.();
     // A resize can overtake a frame on the wire or while selection holds it.
     // The bridge clips subsequent frames to the new viewer size.
@@ -113,10 +127,12 @@ export class TerminalEndpointPresentation {
         : "\x1b[?1002l\x1b[?1006l";
       this.appliedMouseReporting = this.mouseReporting;
     }
-    if (prefix || frame !== null) {
+    const incremental = this.incremental;
+    this.incremental = "";
+    if (prefix || frame !== null || incremental) {
       this.writing = true;
       const generation = this.generation;
-      this.write(prefix + (frame?.text ?? ""), () => {
+      this.write(prefix + (frame?.text ?? "") + incremental, () => {
         // reset() cannot cancel the physical xterm write. Its completion must
         // still release the gate for current intent, never restore old state.
         if (frame && !this.disposed && generation === this.generation) {
@@ -133,20 +149,21 @@ export class TerminalEndpointPresentation {
     }
   }
 
-  reset(): void {
+  reset(discardIncremental = false): void {
     // Invalidate presentation/replay, not the outstanding parser operation.
     this.generation++;
     this.deferredSelection = null;
     this.mouseReporting = undefined;
     this.appliedMouseReporting = undefined;
     this.pendingFrame = null;
+    if (discardIncremental) this.incremental = "";
     this.displayedFrame = null;
     this.selectionHistory?.reset();
     this.selectionDrag = false;
   }
 
   dispose(): void {
-    this.reset();
+    this.reset(true);
     this.disposed = true;
   }
 }

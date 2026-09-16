@@ -27,6 +27,13 @@ function copyWithDocument(text: string): boolean {
   if (typeof document === "undefined" || !document.body) return false;
 
   const previousFocus = document.activeElement;
+  const selection = document.getSelection();
+  const range = selection?.rangeCount
+    ? selection.getRangeAt(0).cloneRange()
+    : null;
+  const backwards =
+    selection?.anchorNode === range?.endContainer &&
+    selection?.anchorOffset === range?.endOffset;
   const textarea = document.createElement("textarea");
   textarea.value = text;
   textarea.readOnly = true;
@@ -48,6 +55,14 @@ function copyWithDocument(text: string): boolean {
     textarea.remove();
     if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
       previousFocus.focus({ preventScroll: true });
+    }
+    if (range?.startContainer.isConnected && range.endContainer.isConnected) {
+      selection?.setBaseAndExtent(
+        backwards ? range.endContainer : range.startContainer,
+        backwards ? range.endOffset : range.startOffset,
+        backwards ? range.startContainer : range.endContainer,
+        backwards ? range.startOffset : range.endOffset,
+      );
     }
   }
   return copied;

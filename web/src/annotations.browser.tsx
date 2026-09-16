@@ -1,3 +1,4 @@
+import { TERMINAL_LONG_PRESS_MS } from "./terminalTouchSelection";
 import { StrictMode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -329,6 +330,7 @@ export async function checkAnnotationUX(
         height: rows,
       }),
     );
+  let touchSelectionCount = 0;
   const select = async () => {
     // Let the layout's resize RPC settle before emitting its matching frame.
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -336,28 +338,82 @@ export async function checkAnnotationUX(
     await settle();
     const screen = document.querySelector<HTMLElement>(".xterm-screen")!;
     const rect = screen.getBoundingClientRect();
-    for (const [target, type, column, buttons] of [
-      [screen, "mousedown", 0.1, 1],
-      [document, "mousemove", 8.1, 1],
-      [document, "mouseup", 8.1, 0],
-    ] as const) {
-      target.dispatchEvent(
-        new MouseEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          button: 0,
-          detail: 1,
-          buttons,
-          clientX: rect.left + (column * rect.width) / cols,
+    if (mobile() && touchSelectionCount < 2) {
+      touchSelectionCount++;
+      const timeout = window.setTimeout;
+      let activate: (() => void) | undefined;
+      window.setTimeout = ((
+        handler: TimerHandler,
+        ms?: number,
+        ...args: unknown[]
+      ) => {
+        if (ms === TERMINAL_LONG_PRESS_MS && typeof handler === "function") {
+          activate = () => handler();
+          return 0;
+        }
+        return timeout(handler, ms, ...args);
+      }) as typeof window.setTimeout;
+      try {
+        const touch = new Touch({
+          identifier: 1,
+          target: screen,
+          clientX: rect.left + (rect.width / cols) * 3,
           clientY: rect.top + rect.height / rows / 2,
+        });
+        screen.dispatchEvent(
+          new TouchEvent("touchstart", {
+            bubbles: true,
+            touches: [touch],
+            changedTouches: [touch],
+          }),
+        );
+        flushSync(() => activate?.());
+        screen.dispatchEvent(
+          new TouchEvent("touchend", {
+            bubbles: true,
+            cancelable: true,
+            touches: [],
+            changedTouches: [touch],
+          }),
+        );
+      } finally {
+        window.setTimeout = timeout;
+      }
+      await until(
+        () => document.querySelector(".terminal-touch-selection-actions"),
+        "direct touch selection action missing",
+      );
+      click(".terminal-touch-selection-actions button:nth-child(2)");
+    } else {
+      screen.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          pointerType: "mouse",
         }),
       );
+      for (const [target, type, column, buttons] of [
+        [screen, "mousedown", 0.1, 1],
+        [document, "mousemove", 8.1, 1],
+        [document, "mouseup", 8.1, 0],
+      ] as const) {
+        target.dispatchEvent(
+          new MouseEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+            detail: 1,
+            buttons,
+            clientX: rect.left + (column * rect.width) / cols,
+            clientY: rect.top + rect.height / rows / 2,
+          }),
+        );
+      }
+      await until(
+        () => document.querySelector(".terminal-annotation-action"),
+        "selection action missing",
+      );
+      click(".terminal-annotation-action");
     }
-    await until(
-      () => document.querySelector(".terminal-annotation-action"),
-      "selection action missing",
-    );
-    click(".terminal-annotation-action");
     await until(
       () =>
         document.activeElement?.getAttribute("aria-label") === "Review comment",
@@ -807,8 +863,10 @@ export async function checkAnnotationUX(
       "selection or composer typing leaked terminal input",
     );
     check(
-      !!document.activeElement?.closest(".xterm"),
-      "cancel did not restore terminal focus",
+      mobile()
+        ? !document.activeElement?.closest(".xterm")
+        : !!document.activeElement?.closest(".xterm"),
+      "cancel restores mouse focus but keeps touch reading unfocused",
     );
     await select();
     type(".annotation-composer-popover textarea", "Explain output");
@@ -908,6 +966,20 @@ export async function checkAnnotationUX(
     click('button[aria-label="Delete comment 3"]');
     for (const theme of ["light", "dark"]) {
       document.documentElement.dataset.theme = theme;
+      const capsuleSelectors = [
+        '.mobile-nav[aria-label="Workspace view switcher"]',
+        ".mobile-terminal-controls",
+        ".mobile-workspace-shortcut",
+      ];
+      if (mobile()) {
+        click('button[aria-label="Show terminal session"]');
+        await settle();
+      }
+      const capsulePositions = mobile()
+        ? capsuleSelectors.map((selector) =>
+            document.querySelector(selector)!.getBoundingClientRect(),
+          )
+        : [];
       showAnnotations();
       await settle();
       const panel = document
@@ -932,18 +1004,28 @@ export async function checkAnnotationUX(
           !visible(".workspace-stage") && visible(".annotation-panel"),
           `${theme}: mobile surfaces overlap`,
         );
-        const nav = document
-          .querySelector('.mobile-nav[aria-label="Workspace view switcher"]')!
-          .getBoundingClientRect();
+        capsuleSelectors.forEach((selector, index) => {
+          const rect = document
+            .querySelector(selector)!
+            .getBoundingClientRect();
+          const before = capsulePositions[index];
+          check(
+            visible(selector) &&
+              Math.abs(rect.right - before.right) <= 1 &&
+              Math.abs(rect.bottom - before.bottom) <= 1,
+            `${theme}: Annotations must preserve the floating capsule position: ${selector}`,
+          );
+        });
         check(
-          nav.top >= panel.bottom - 1 && !visible(".mobile-terminal-controls"),
-          `${theme}: terminal controls or navigation cover draft`,
-        );
-        check(
-          document
-            .querySelector('button[aria-label="Show review annotations"]')!
-            .getBoundingClientRect().height >= 44,
-          `${theme}: Annotations navigation touch target too small`,
+          Array.from(
+            document.querySelectorAll(
+              '.mobile-nav[aria-label="Workspace view switcher"] button',
+            ),
+          ).every((button) => {
+            const rect = button.getBoundingClientRect();
+            return rect.width === 32 && rect.height === 32;
+          }),
+          `${theme}: view-switcher buttons must retain the compact capsule size`,
         );
         check(
           document

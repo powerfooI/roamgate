@@ -13,20 +13,12 @@ const RADIX_POPPER_CONTENT_WRAPPER = "[data-radix-popper-content-wrapper]";
 type FocusableLike = Pick<Element, "closest">;
 type DocumentLike = Pick<Document, "querySelector">;
 
-export function terminalPointerShouldFocusInput(
-  coarsePointer: boolean,
-  button: number,
-  composerOpen: boolean,
-): boolean {
-  return coarsePointer && button === 0 && !composerOpen;
-}
-
-export function terminalTouchShouldFocusInput(
+export function terminalTouchShouldDismissInput(
   started: boolean,
   moved: boolean,
-  composerOpen: boolean,
+  inputActive: boolean,
 ): boolean {
-  return started && !moved && !composerOpen;
+  return started && !moved && inputActive;
 }
 
 export function terminalPointerShouldBlurInput(

@@ -395,3 +395,115 @@
   min-height: 36px;
   box-shadow: var(--shadow-lg);
 }
+
+.terminal-mobile-input-actions {
+  display: none;
+  position: absolute;
+  right: calc(8px + env(safe-area-inset-right, 0px));
+  bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  z-index: 6;
+  gap: 8px;
+}
+
+.terminal-mobile-input-actions button,
+.terminal-touch-selection-actions button {
+  min-width: max(44px, calc(44px / var(--ui-scale, 1)));
+  min-height: max(44px, calc(44px / var(--ui-scale, 1)));
+  color: var(--text-strong);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  touch-action: manipulation;
+}
+
+.terminal-mobile-input-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  box-shadow: var(--shadow-lg);
+}
+
+.terminal-mobile-input-actions button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+:where(html[data-layout="mobile"]) .terminal-mobile-input-actions {
+  display: flex;
+}
+
+@media (any-pointer: coarse) {
+  .terminal-mobile-input-actions {
+    display: flex;
+  }
+}
+
+.terminal-touch-selection-ui {
+  zoom: calc(1 / var(--ui-scale, 1));
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.terminal-touch-selection-actions {
+  position: fixed;
+  z-index: 1190;
+  top: max(8px, env(safe-area-inset-top, 0px));
+  left: max(8px, env(safe-area-inset-left, 0px));
+  right: max(8px, env(safe-area-inset-right, 0px));
+  bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  display: flex;
+  align-items: flex-start;
+  align-content: flex-start;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.terminal-touch-selection-actions button {
+  font-size: calc(13px * var(--ui-scale, 1));
+  pointer-events: auto;
+  box-shadow: var(--shadow-lg);
+}
+
+.terminal-selection-handle {
+  position: fixed;
+  z-index: 1189;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  touch-action: none;
+}
+
+.terminal-selection-handle::after {
+  content: "";
+  display: block;
+  width: 12px;
+  height: 12px;
+  margin: auto;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.terminal-selection-handle:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.terminal-selection-handle svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  stroke: var(--accent);
+  stroke-width: 2px;
+}

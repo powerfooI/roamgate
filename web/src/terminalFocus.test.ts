@@ -2,8 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   terminalFocusBlockedByOverlay,
   terminalPointerShouldBlurInput,
-  terminalPointerShouldFocusInput,
-  terminalTouchShouldFocusInput,
+  terminalTouchShouldDismissInput,
 } from "./terminalFocus";
 
 function docWithOpenPopper(open: boolean) {
@@ -61,13 +60,6 @@ describe("terminalFocusBlockedByOverlay", () => {
 });
 
 describe("terminal pointer focus", () => {
-  test("focuses coarse-pointer primary taps unless the composer is open", () => {
-    expect(terminalPointerShouldFocusInput(true, 0, false)).toBe(true);
-    expect(terminalPointerShouldFocusInput(true, 0, true)).toBe(false);
-    expect(terminalPointerShouldFocusInput(true, 1, false)).toBe(false);
-    expect(terminalPointerShouldFocusInput(false, 0, false)).toBe(false);
-  });
-
   test("blurs coarse-pointer taps only outside terminal and editable input", () => {
     expect(terminalPointerShouldBlurInput(true, false, false)).toBe(true);
     expect(terminalPointerShouldBlurInput(true, true, false)).toBe(false);
@@ -75,10 +67,10 @@ describe("terminal pointer focus", () => {
     expect(terminalPointerShouldBlurInput(false, false, false)).toBe(false);
   });
 
-  test("focuses completed touch taps without treating scroll gestures as input", () => {
-    expect(terminalTouchShouldFocusInput(true, false, false)).toBe(true);
-    expect(terminalTouchShouldFocusInput(true, true, false)).toBe(false);
-    expect(terminalTouchShouldFocusInput(true, false, true)).toBe(false);
-    expect(terminalTouchShouldFocusInput(false, false, false)).toBe(false);
+  test("only a completed light tap dismisses active input", () => {
+    expect(terminalTouchShouldDismissInput(true, false, true)).toBe(true);
+    expect(terminalTouchShouldDismissInput(true, true, true)).toBe(false);
+    expect(terminalTouchShouldDismissInput(true, false, false)).toBe(false);
+    expect(terminalTouchShouldDismissInput(false, false, true)).toBe(false);
   });
 });
