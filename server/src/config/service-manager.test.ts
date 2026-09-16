@@ -15,6 +15,7 @@ import legacyDefinitions from "./service-legacy-definitions.test.json";
 import { tmpdir } from "node:os";
 import {
   runServiceCommand as runServiceCommandWithLegacyCheck,
+  queryWindowsTask,
   SERVICE_COMMAND_CONTINUE,
 } from "./service-manager";
 import {
@@ -95,7 +96,7 @@ function isWindowsTaskQuery(argv: string[]): boolean {
     argv[0] === "powershell.exe" &&
     argv.includes("-Command") &&
     script.includes("CmdletizationQuery_NotFound_TaskName") &&
-    script.includes("Out-Null")
+    script.includes("$taskInfo.State -eq 'Running'")
   );
 }
 
@@ -112,6 +113,26 @@ function isWindowsTaskWait(argv: string[]): boolean {
 afterEach(() => {
   for (const path of tempDirs.splice(0)) {
     rmSync(path, { recursive: true, force: true });
+  }
+});
+
+test("Windows task queries distinguish registration from running state", () => {
+  for (const [code, expected] of [
+    [0, { status: "exists", active: true }],
+    [4, { status: "exists", active: false }],
+    [3, { status: "missing" }],
+    [5, { status: "error", code: 5 }],
+  ] as const) {
+    expect(
+      queryWindowsTask("Herdr's task", (argv) => {
+        const script = argv.at(-1)!;
+        expect(script).toContain("-TaskName 'Herdr''s task'");
+        expect(script).toContain(
+          "if ($taskInfo.State -eq 'Running') { exit 0 }; exit 4",
+        );
+        return code;
+      }),
+    ).toEqual(expected);
   }
 });
 
@@ -723,7 +744,7 @@ describe("service commands", () => {
     expect(existsSync(configPath)).toBeTrue();
   });
 
-  test("uninstalls a Windows task when its helper script is missing", () => {
+  test("uninstalls an inactive Windows task when its helper script is missing", () => {
     const homeDir = tempHome();
     const appDataDir = join(homeDir, "AppData", "Roaming");
     const paths = resolveServicePaths("windows-task", homeDir, appDataDir);
@@ -741,7 +762,7 @@ describe("service commands", () => {
       },
       runCommand: (argv) => {
         commands.push(argv);
-        if (isWindowsTaskQuery(argv)) return taskExists ? 0 : 3;
+        if (isWindowsTaskQuery(argv)) return taskExists ? 4 : 3;
         if (argv[1] === "/Delete") {
           taskExists = false;
           return 1;

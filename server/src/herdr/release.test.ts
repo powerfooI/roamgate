@@ -3,12 +3,13 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   herdrManagedBinaryPath,
@@ -152,6 +153,9 @@ describe("installVerifiedHerdr", () => {
     const appDataDir = scratch();
     const content = "fake-zip";
     const expectedSha256 = createHash("sha256").update(content).digest("hex");
+    const installDir = dirname(
+      herdrManagedBinaryPath(homeDir, appDataDir, "win32"),
+    );
     const commands: string[][] = [];
     const result = await installVerifiedHerdr({
       platform: "win32",
@@ -164,6 +168,7 @@ describe("installVerifiedHerdr", () => {
       },
       runCommand: (argv) => {
         commands.push(argv);
+        expect(existsSync(installDir)).toBe(false);
         // Emulate Expand-Archive by materializing the zip layout.
         const command = argv[argv.length - 1];
         const destination = /-DestinationPath '([^']+)'/.exec(command)?.[1];
@@ -171,6 +176,11 @@ describe("installVerifiedHerdr", () => {
         mkdirSync(join(destination, "conpty"), { recursive: true });
         writeFileSync(join(destination, "herdr.exe"), "exe");
         writeFileSync(join(destination, "conpty", "conpty.dll"), "dll");
+        mkdirSync(join(destination, "THIRD-PARTY-NOTICES"));
+        writeFileSync(
+          join(destination, "THIRD-PARTY-NOTICES", "notice.txt"),
+          "notice",
+        );
         return 0;
       },
     });
@@ -181,5 +191,68 @@ describe("installVerifiedHerdr", () => {
       existsSync(join(result.binaryPath, "..", "conpty", "conpty.dll")),
     ).toBe(true);
     expect(await Bun.file(result.binaryPath).text()).toBe("exe");
+    expect(
+      await Bun.file(
+        join(installDir, "THIRD-PARTY-NOTICES", "notice.txt"),
+      ).text(),
+    ).toBe("notice");
   });
+
+  for (const failure of ["extraction", "missing-executable", "publication"]) {
+    test(`Windows ${failure} failure leaves no partial installation and can retry`, async () => {
+      const homeDir = scratch();
+      const appDataDir = scratch();
+      const binaryPath = herdrManagedBinaryPath(homeDir, appDataDir, "win32");
+      const installDir = dirname(binaryPath);
+      if (failure === "publication") {
+        mkdirSync(installDir, { recursive: true });
+        writeFileSync(join(installDir, "keep.txt"), "existing contents");
+      }
+      let fail = true;
+      const content = "fake-zip";
+      const deps = {
+        platform: "win32",
+        arch: "x64",
+        homeDir,
+        appDataDir,
+        expectedSha256: createHash("sha256").update(content).digest("hex"),
+        download: async (_url: string, path: string) => {
+          writeFileSync(path, content);
+        },
+        runCommand: (argv: string[]) => {
+          const destination = /-DestinationPath '([^']+)'/.exec(
+            argv.at(-1)!,
+          )![1];
+          mkdirSync(join(destination, "conpty"), { recursive: true });
+          writeFileSync(join(destination, "conpty", "conpty.dll"), "dll");
+          if (!fail || failure !== "missing-executable") {
+            writeFileSync(join(destination, "herdr.exe"), "exe");
+          }
+          return fail && failure === "extraction" ? 1 : 0;
+        },
+      };
+      await expect(installVerifiedHerdr(deps)).rejects.toThrow();
+      expect(existsSync(binaryPath)).toBe(false);
+      expect(
+        readdirSync(dirname(installDir)).filter((name) =>
+          name.startsWith(".staging-"),
+        ),
+      ).toEqual([]);
+      if (failure === "publication") {
+        expect(readdirSync(installDir)).toEqual(["keep.txt"]);
+        expect(await Bun.file(join(installDir, "keep.txt")).text()).toBe(
+          "existing contents",
+        );
+        rmSync(installDir, { recursive: true });
+      } else {
+        expect(existsSync(installDir)).toBe(false);
+      }
+      fail = false;
+      expect((await installVerifiedHerdr(deps)).installed).toBe(true);
+      expect(await Bun.file(binaryPath).text()).toBe("exe");
+      expect(
+        await Bun.file(join(installDir, "conpty", "conpty.dll")).text(),
+      ).toBe("dll");
+    });
+  }
 });

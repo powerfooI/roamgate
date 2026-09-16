@@ -1,12 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -155,19 +148,14 @@ export async function installVerifiedHerdr(
   }
 
   const download = deps.download ?? defaultDownload;
+  const installRoot = herdrInstallRoot(homeDir, appDataDir, platform);
   const installDir =
     platform === "win32"
-      ? join(
-          herdrInstallRoot(homeDir, appDataDir, platform),
-          VERIFIED_HERDR_VERSION,
-        )
-      : herdrInstallRoot(homeDir, appDataDir, platform);
-  mkdirSync(installDir, { recursive: true });
+      ? join(installRoot, VERIFIED_HERDR_VERSION)
+      : installRoot;
+  mkdirSync(installRoot, { recursive: true });
   // Stage inside the install root so final renames stay on one filesystem.
-  const staging = join(
-    herdrInstallRoot(homeDir, appDataDir, platform),
-    `.staging-${process.pid}`,
-  );
+  const staging = join(installRoot, `.staging-${process.pid}`);
   mkdirSync(staging, { recursive: true });
   try {
     const assetName = herdrReleaseAssetName(target);
@@ -198,13 +186,11 @@ export async function installVerifiedHerdr(
       if (code !== 0) {
         throw new Error("could not extract the downloaded Herdr archive");
       }
-      // The zip ships herdr.exe plus conpty/ and notices; keep the layout.
-      for (const entry of readdirSync(extractDir)) {
-        renameSync(join(extractDir, entry), join(installDir, entry));
-      }
-      if (!existsSync(binaryPath)) {
+      if (!existsSync(join(extractDir, "herdr.exe"))) {
         throw new Error("downloaded Herdr archive does not contain herdr.exe");
       }
+      // Publish the complete layout (herdr.exe, conpty/ and notices) at once.
+      renameSync(extractDir, installDir);
     } else {
       chmodSync(archivePath, 0o755);
       renameSync(archivePath, binaryPath);

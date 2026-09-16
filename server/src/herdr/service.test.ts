@@ -166,6 +166,24 @@ describe("installHerdrService", () => {
 });
 
 describe("herdrServiceStatus", () => {
+  test("only running Windows tasks are active", () => {
+    const homeDir = scratch();
+    const appDataDir = scratch();
+    const paths = resolveHerdrServicePaths("windows-task", homeDir, appDataDir);
+    mkdirSync(dirname(paths.definition), { recursive: true });
+    writeFileSync(paths.definition, HERDR_SERVICE_MARKER);
+    for (const code of [0, 4, 3, 5]) {
+      expect(
+        herdrServiceStatus({
+          platform: "windows-task",
+          homeDir,
+          appDataDir,
+          runCommand: () => code,
+        }),
+      ).toEqual({ installed: true, active: code === 0 });
+    }
+  });
+
   test("reports systemd installation and activity", () => {
     const homeDir = scratch();
     const paths = resolveHerdrServicePaths("systemd", homeDir);

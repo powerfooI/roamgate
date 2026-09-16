@@ -317,5 +317,5 @@ export function herdrServiceStatus(deps: HerdrServiceDeps = {}): {
   }
   if (!paths.taskName) return { installed, active: false };
   const query = queryWindowsTask(paths.taskName, runCommand);
-  return { installed, active: query.status === "exists" };
+  return { installed, active: query.status === "exists" && query.active };
 }
