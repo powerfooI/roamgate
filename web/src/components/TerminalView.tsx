@@ -1803,6 +1803,7 @@ export function TerminalView({
       }
       // A physical mouse on a hybrid desktop retains normal xterm input.
       inputActiveRef.current = true;
+      setInputActive(true);
       term.options.disableStdin =
         composerOpenRef.current || touchSelectionRef.current?.active === true;
       if (term.textarea)
@@ -2270,6 +2271,7 @@ export function TerminalView({
           lastPointerType !== "touch")
       ) {
         inputActiveRef.current = true;
+        setInputActive(true);
         term.options.disableStdin =
           composerOpenRef.current || touchSelectionRef.current?.active === true;
         if (term.textarea)

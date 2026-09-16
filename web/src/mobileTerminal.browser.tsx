@@ -1026,6 +1026,28 @@ const api = {
       "hybrid fine-mouse physical keyboard input works",
     );
     check(
+      document.querySelector(keyboard)?.getAttribute("aria-pressed") === "true",
+      "mouse input authorization activates the keyboard indicator",
+    );
+    textarea().blur();
+    await settle();
+    check(
+      document.querySelector(keyboard)?.getAttribute("aria-pressed") ===
+        "false" && textarea().readOnly,
+      "blur clears the input indicator and authorization",
+    );
+    textarea().focus();
+    calls.length = 0;
+    key();
+    await settle();
+    check(
+      document.activeElement === textarea() &&
+        inputCalls().length > 0 &&
+        document.querySelector(keyboard)?.getAttribute("aria-pressed") ===
+          "true",
+      "restored fine-mouse focus synchronizes input and its indicator",
+    );
+    check(
       document.querySelector(".xterm") === original,
       "hybrid modality changes retain xterm instance",
     );
