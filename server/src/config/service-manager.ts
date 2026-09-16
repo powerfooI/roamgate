@@ -50,7 +50,10 @@ interface ServiceRuntime {
   uid?: number;
 }
 
-type RunCommand = (argv: string[], options?: { quiet?: boolean }) => number;
+export type RunCommand = (
+  argv: string[],
+  options?: { quiet?: boolean },
+) => number;
 
 interface ServiceCommandDependencies {
   runtime?: ServiceRuntime;
@@ -125,7 +128,7 @@ roamgate. Uninstall preserves the environment file.
 `;
 }
 
-function defaultRunCommand(
+export function defaultRunCommand(
   argv: string[],
   options: { quiet?: boolean } = {},
 ): number {
@@ -169,7 +172,7 @@ function powershellLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-function queryWindowsTask(
+export function queryWindowsTask(
   taskName: string,
   runCommand: RunCommand,
 ): WindowsTaskQuery {
@@ -189,7 +192,7 @@ function queryWindowsTask(
   return { status: "error", code };
 }
 
-function registerWindowsTask(
+export function registerWindowsTask(
   definitionPath: string,
   runCommand: RunCommand,
 ): number {
@@ -219,7 +222,10 @@ function waitForWindowsTaskStop(
   ]);
 }
 
-function restartWindowsTask(taskName: string, runCommand: RunCommand): number {
+export function restartWindowsTask(
+  taskName: string,
+  runCommand: RunCommand,
+): number {
   runCommand(["schtasks.exe", "/End", "/TN", taskName], { quiet: true });
   const waitCode = waitForWindowsTaskStop(taskName, runCommand);
   if (waitCode !== 0) return waitCode;

@@ -58,6 +58,7 @@ import {
   mobileTerminalShortcutOption,
 } from "../mobileTerminalShortcuts";
 import { activePaneIdForSnapshot, paneCanClose } from "../paneJump";
+import { HerdrSetupCard } from "./HerdrSetupCard";
 import {
   shallowEqual,
   store,
@@ -347,6 +348,7 @@ export function TerminalView({
   const s = useStoreSelector(
     (state) => ({
       activeConnectionId: state.activeConnectionId,
+      defaultConnectionId: state.defaultConnectionId,
       connectionGeneration: state.connectionGeneration,
       connectionPaused: state.connectionPaused,
       connections: state.connections,
@@ -2428,16 +2430,22 @@ export function TerminalView({
   if (!pane) {
     return (
       <>
-        {s.error ? (
-          <div className="terminal-empty" role="alert">
-            <span>{s.error}</span>
-            <button type="button" onClick={() => void store.refresh()}>
-              Retry
-            </button>
-          </div>
-        ) : s.navigationLoading ? (
-          <div className="terminal-shell">
-            <div className="terminal-main">
+        <div className="terminal-empty">
+          <HerdrSetupCard
+            key={connectionScopeKey}
+            enabled={
+              !s.connectionPaused &&
+              s.activeConnectionId === s.defaultConnectionId
+            }
+          >
+            {s.error ? (
+              <div className="terminal-empty-stack" role="alert">
+                <span>{s.error}</span>
+                <button type="button" onClick={() => void store.refresh()}>
+                  Retry
+                </button>
+              </div>
+            ) : s.navigationLoading ? (
               <div
                 className="terminal-loading"
                 role="status"
@@ -2446,13 +2454,13 @@ export function TerminalView({
                 <span className="terminal-loading-dot" />
                 <span>Loading terminal</span>
               </div>
-            </div>
-          </div>
-        ) : (
-          <div className="terminal-empty muted">
-            Select a workspace or agent to open its terminal.
-          </div>
-        )}
+            ) : (
+              <span className="muted">
+                Select a workspace or agent to open its terminal.
+              </span>
+            )}
+          </HerdrSetupCard>
+        </div>
         <MessageDialog
           open={!!uploadError}
           title="Upload Failed"

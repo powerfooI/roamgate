@@ -106,7 +106,7 @@ export function escapeSystemdExecPath(value: string): string {
   return escaped;
 }
 
-function xmlEscape(value: string): string {
+export function xmlEscape(value: string): string {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")

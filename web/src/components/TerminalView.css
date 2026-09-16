@@ -119,6 +119,16 @@
   justify-content: center;
   text-align: center;
   padding: 24px;
+  min-height: 0;
+  overflow-y: auto;
+  align-items: safe center;
+}
+
+.terminal-empty-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
 }
 
 .terminal-mobile-keys,

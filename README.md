@@ -77,7 +77,8 @@ Click any screenshot to open the full-resolution image.
 
 ## Quick start
 
-1. Install and start [Herdr](https://herdr.dev).
+1. Install and start [Herdr](https://herdr.dev), or let Roamgate install and
+   start it later with `roamgate herdr setup`.
 2. On Linux or macOS, install Roamgate:
 
    ```bash

@@ -1,0 +1,181 @@
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, test } from "bun:test";
+import {
+  HERDR_SERVICE_LABEL,
+  HERDR_SERVICE_MARKER,
+  herdrServiceStatus,
+  installHerdrService,
+  renderHerdrLaunchdService,
+  renderHerdrSystemdService,
+  renderHerdrWindowsTask,
+  resolveHerdrServicePaths,
+} from "./service";
+
+const trash: string[] = [];
+function scratch(): string {
+  const dir = mkdtempSync(join(tmpdir(), "roamgate-herdr-service-"));
+  trash.push(dir);
+  return dir;
+}
+afterEach(() => {
+  while (trash.length) {
+    const dir = trash.pop();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe("resolveHerdrServicePaths", () => {
+  test("uses per-platform user service locations", () => {
+    const homeDir = scratch();
+    expect(resolveHerdrServicePaths("systemd", homeDir).definition).toBe(
+      join(homeDir, ".config", "systemd", "user", "roamgate-herdr.service"),
+    );
+    const launchd = resolveHerdrServicePaths("launchd", homeDir);
+    expect(launchd.definition).toBe(
+      join(homeDir, "Library", "LaunchAgents", `${HERDR_SERVICE_LABEL}.plist`),
+    );
+    expect(launchd.stdoutLog).toContain("roamgate-herdr.stdout.log");
+    const windows = resolveHerdrServicePaths(
+      "windows-task",
+      "C:\\test-home",
+      "C:\\test-home\\AppData\\Roaming",
+    );
+    expect(windows.definition).toContain("herdr-task.ps1");
+    expect(windows.taskName).toStartWith(`${HERDR_SERVICE_LABEL}-`);
+  });
+});
+
+describe("service definition renderers", () => {
+  test("systemd runs `herdr server` with restart supervision", () => {
+    const unit = renderHerdrSystemdService("/opt/herdr bin/herdr");
+    expect(unit).toContain(HERDR_SERVICE_MARKER);
+    expect(unit).toContain("ExecStart=/opt/herdr\\x20bin/herdr server");
+    expect(unit).toContain("Restart=always");
+    expect(unit).toContain("WantedBy=default.target");
+  });
+
+  test("launchd keeps the server alive with log files", () => {
+    const plist = renderHerdrLaunchdService(
+      "/usr/local/bin/herdr",
+      resolveHerdrServicePaths("launchd", scratch()),
+    );
+    expect(plist).toContain(HERDR_SERVICE_MARKER);
+    expect(plist).toContain(`<string>${HERDR_SERVICE_LABEL}</string>`);
+    expect(plist).toContain("<string>/usr/local/bin/herdr</string>");
+    expect(plist).toContain("<string>server</string>");
+    expect(plist).toContain("<key>KeepAlive</key>");
+  });
+
+  test("windows task starts herdr server at logon from its install directory", () => {
+    const script = renderHerdrWindowsTask("C:\\herdr\\herdr.exe", {
+      definition: "C:\\cfg\\herdr-task.ps1",
+      taskName: "dev.roamgate.herdr-abc123",
+    });
+    expect(script).toContain(HERDR_SERVICE_MARKER);
+    expect(script).toContain("$taskName = 'dev.roamgate.herdr-abc123'");
+    expect(script).toContain("-Execute 'C:\\herdr\\herdr.exe'");
+    expect(script).toContain("-Argument 'server'");
+    expect(script).toContain("-WorkingDirectory 'C:\\herdr'");
+  });
+});
+
+describe("installHerdrService", () => {
+  test("writes the unit and runs the systemd activation sequence", () => {
+    const homeDir = scratch();
+    const commands: string[][] = [];
+    const paths = installHerdrService("/opt/herdr/herdr", {
+      platform: "systemd",
+      homeDir,
+      runCommand: (argv) => {
+        commands.push(argv);
+        return 0;
+      },
+    });
+    expect(readFileSync(paths.definition, "utf8")).toContain(
+      "ExecStart=/opt/herdr/herdr server",
+    );
+    expect(commands).toEqual([
+      ["systemctl", "--user", "daemon-reload"],
+      ["systemctl", "--user", "enable", "roamgate-herdr.service"],
+      ["systemctl", "--user", "restart", "roamgate-herdr.service"],
+    ]);
+  });
+
+  test("replaces a loaded launchd service before bootstrapping", () => {
+    const homeDir = scratch();
+    const commands: string[][] = [];
+    installHerdrService("/usr/local/bin/herdr", {
+      platform: "launchd",
+      homeDir,
+      uid: 501,
+      runCommand: (argv) => {
+        commands.push(argv);
+        // launchctl print succeeds: a service is already loaded.
+        return 0;
+      },
+    });
+    expect(commands[0]).toEqual([
+      "launchctl",
+      "print",
+      `gui/501/${HERDR_SERVICE_LABEL}`,
+    ]);
+    expect(commands[1]).toEqual([
+      "launchctl",
+      "bootout",
+      `gui/501/${HERDR_SERVICE_LABEL}`,
+    ]);
+    expect(commands[2][0]).toBe("launchctl");
+    expect(commands[2][1]).toBe("bootstrap");
+  });
+
+  test("fails when an activation command fails", () => {
+    const homeDir = scratch();
+    expect(() =>
+      installHerdrService("/opt/herdr/herdr", {
+        platform: "systemd",
+        homeDir,
+        runCommand: () => 1,
+      }),
+    ).toThrow("systemd daemon-reload failed (exit 1)");
+  });
+
+  test("refuses to replace a definition not generated by roamgate", () => {
+    const homeDir = scratch();
+    const paths = resolveHerdrServicePaths("systemd", homeDir);
+    mkdirSync(dirname(paths.definition), { recursive: true });
+    writeFileSync(
+      paths.definition,
+      "[Service]\nExecStart=/custom/herdr server\n",
+    );
+    expect(() =>
+      installHerdrService("/opt/herdr/herdr", {
+        platform: "systemd",
+        homeDir,
+        runCommand: () => 0,
+      }),
+    ).toThrow("was not generated by roamgate");
+  });
+});
+
+describe("herdrServiceStatus", () => {
+  test("reports systemd installation and activity", () => {
+    const homeDir = scratch();
+    const paths = resolveHerdrServicePaths("systemd", homeDir);
+    expect(
+      herdrServiceStatus({ platform: "systemd", homeDir, runCommand: () => 1 }),
+    ).toEqual({ installed: false, active: false });
+    mkdirSync(dirname(paths.definition), { recursive: true });
+    writeFileSync(paths.definition, HERDR_SERVICE_MARKER);
+    expect(
+      herdrServiceStatus({ platform: "systemd", homeDir, runCommand: () => 0 }),
+    ).toEqual({ installed: true, active: true });
+  });
+});

@@ -18,6 +18,12 @@ import {
   runServiceCommand,
   SERVICE_COMMAND_CONTINUE,
 } from "./config/service-manager";
+import { runHerdrCommand } from "./herdr/cli";
+import {
+  createHerdrSetupHandlers,
+  herdrSetupGuardForProfile,
+} from "./http/herdr-setup";
+import { HerdrClient } from "./bridge/herdr-client";
 import {
   connectionRoutingErrorResponse,
   type ParsedConnectionHttpRoute,
@@ -91,6 +97,13 @@ if (serviceCommandResult === SERVICE_COMMAND_CONTINUE) {
   process.argv.splice(2);
 } else if (serviceCommandResult !== null) {
   process.exit(serviceCommandResult);
+}
+const herdrCommandResult = await runHerdrCommand(
+  process.argv.slice(2),
+  APP_VERSION,
+);
+if (herdrCommandResult !== null) {
+  process.exit(herdrCommandResult);
 }
 const config = loadServerConfig(APP_VERSION);
 configureServerLogger(config.logLevel);
@@ -356,6 +369,22 @@ const connectionManager = new ConnectionManager<LegacyConnectionRuntime>(
   },
   logger.child("connections"),
 );
+
+const { handleHerdrStatus, handleHerdrSetup } = createHerdrSetupHandlers({
+  ping: () => {
+    const runtime = connectionManager.defaultReadyRuntime();
+    return runtime
+      ? runtime.herdr.ping()
+      : new HerdrClient(config.socketPath).ping();
+  },
+  guard: () =>
+    herdrSetupGuardForProfile(
+      config,
+      connectionProfiles
+        .list()
+        .find((profile) => profile.id === connectionManager.defaultId()),
+    ),
+});
 
 function runtimeFactoryForProfile(
   profile: ConnectionProfile | SyntheticLocalProfile,
@@ -1249,6 +1278,14 @@ function main() {
             server.timeout(req, UPDATE_HTTP_IDLE_TIMEOUT_SECONDS);
             return handleUpdateInstall(req);
           }
+          if (url.pathname === "/api/herdr/status" && req.method === "GET") {
+            return handleHerdrStatus();
+          }
+          if (url.pathname === "/api/herdr/setup" && req.method === "POST") {
+            // Herdr download plus service start shares the update budget.
+            server.timeout(req, UPDATE_HTTP_IDLE_TIMEOUT_SECONDS);
+            return handleHerdrSetup(req);
+          }
           const connectionRoute = parseConnectionHttpRoute(
             requestPathname,
             req.method,
@@ -1374,7 +1411,7 @@ function main() {
           logger.warn("Herdr not reachable yet", {
             connection: runtime.identity.id,
             error: sanitizeConnectionError(error),
-            action: "start `herdr server`; RPCs retry per request",
+            action: "run `roamgate herdr setup`; RPCs retry per request",
           }),
         );
     },

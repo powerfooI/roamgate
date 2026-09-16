@@ -50,6 +50,7 @@ import {
   type TerminalThemeSelection,
 } from "../terminalThemes";
 import { AutoSyncRepositoriesDialog } from "./AutoSyncRepositoriesDialog";
+import { HerdrSetupCard } from "./HerdrSetupCard";
 import { MobileTerminalShortcutsDialog } from "./MobileTerminalShortcutsDialog";
 import "./ConfigMenu.css";
 
@@ -131,6 +132,8 @@ export function ConfigMenu({
   const s = useStoreSelector(
     (state) => ({
       bridgeStatus: state.bridgeStatus,
+      activeConnectionId: state.activeConnectionId,
+      defaultConnectionId: state.defaultConnectionId,
       connectionPaused: state.connectionPaused,
       status: state.status,
       taskNotificationPermission: state.taskNotificationPermission,
@@ -164,6 +167,7 @@ export function ConfigMenu({
   const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(false);
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [herdrInfo, setHerdrInfo] = useState<HerdrInfo | null>(null);
+  const [herdrUnavailable, setHerdrUnavailable] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -172,6 +176,7 @@ export function ConfigMenu({
     let cancelled = false;
     setHealth(null);
     setHerdrInfo(null);
+    setHerdrUnavailable(false);
 
     fetch("/api/health", { credentials: "same-origin" })
       .then((r) => (r.ok ? r.json() : null))
@@ -197,7 +202,13 @@ export function ConfigMenu({
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null)
           .then((info) => {
-            if (!cancelled && connectionClient.isCurrent()) setHerdrInfo(info);
+            if (cancelled || !connectionClient.isCurrent()) return;
+            if (info) {
+              setHerdrInfo(info);
+              return;
+            }
+            // The Herdr server is unreachable; offer managed setup.
+            setHerdrUnavailable(true);
           });
       }
     }
@@ -621,7 +632,9 @@ export function ConfigMenu({
                   <span>
                     {herdrInfo?.version
                       ? `Version ${herdrInfo.version}`
-                      : "Loading server information"}
+                      : herdrUnavailable
+                        ? "Unavailable"
+                        : "Loading server information"}
                   </span>
                 </div>
                 <code>
@@ -630,6 +643,16 @@ export function ConfigMenu({
                     : "-"}
                 </code>
               </div>
+              {herdrUnavailable ? (
+                <HerdrSetupCard
+                  key={connectionClient.connectionId}
+                  enabled={
+                    !s.connectionPaused &&
+                    s.activeConnectionId === s.defaultConnectionId
+                  }
+                  compact
+                />
+              ) : null}
               <button
                 type="button"
                 className="config-details-toggle"
