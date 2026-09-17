@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { runInNewContext } from "node:vm";
 import { createAuthHandlers, unauthenticatedLoginRedirect } from "./auth";
 import { browserUrlFor, withLoginToken } from "../config/server-config";
 
@@ -19,6 +20,27 @@ describe("request authentication boundaries", () => {
     expect(html).toContain("<title>Roamgate login</title>");
     expect(html).toContain("<h2>▦ Roamgate</h2>");
     expect(html).not.toContain("herdr-gui");
+  });
+
+  test("login preserves same-origin notification launch fragments", async () => {
+    const handlers = createAuthHandlers({
+      authRequired: true,
+      password: "test-secret",
+    });
+    const html = await handlers.loginPage().text();
+    const elements: Record<string, any> = {
+      pw: { value: "test-secret" },
+      btn: {},
+      err: {},
+    };
+    const location = { href: "/login", hash: "#roamgate-task=example-target" };
+    runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)![1]!, {
+      document: { getElementById: (id: string) => elements[id] },
+      location,
+      fetch: async () => ({ ok: true }),
+    });
+    await elements.btn.onclick();
+    expect(location.href).toBe("/#roamgate-task=example-target");
   });
 
   test("does not derive authorization from reverse-proxy authorities", async () => {

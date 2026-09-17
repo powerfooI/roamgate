@@ -46,3 +46,11 @@ see [migration and rotation](./docs/DEPLOYMENT.md#transition-from-herdr-studio--
 Update requests require normal listener authentication plus `x-roamgate-update: 1`.
 Legacy `x-herdr-gui-update: 1` is accepted; the new header wins if both appear.
 Neither header replaces login.
+
+Web Push subscription mutations require listener authentication, JSON, and
+`x-roamgate-push: 1`; cross-site browser requests are rejected. Push endpoints
+are restricted to supported browser-provider HTTPS hosts and are never followed
+through redirects. Treat the private push registry as credentials. Revoking a
+login password does not revoke device subscriptions: disable Web Push or remove
+subscriptions separately. Notification payloads can expose agent names and
+routing IDs on lock screens. See [Web Push configuration](docs/DEPLOYMENT.md#web-push-notifications).

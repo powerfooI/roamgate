@@ -27,7 +27,7 @@ const LOGIN_HTML = `<!doctype html>
   async function go(){
     err.textContent='';
     const r=await fetch('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:pw.value})});
-    if(r.ok){location.href='/';}else{err.textContent='Wrong password or token';pw.value='';pw.focus();}
+    if(r.ok){location.href='/'+location.hash;}else{err.textContent='Wrong password or token';pw.value='';pw.focus();}
   }
   btn.onclick=go; pw.onkeydown=e=>{if(e.key==='Enter')go()};
 </script></body></html>`;

@@ -4,6 +4,45 @@ self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
 });
 
+self.addEventListener("push", (event) => {
+  event.waitUntil(
+    (async () => {
+      let message;
+      try {
+        message = event.data?.json();
+      } catch {
+        /* Show a visible fallback for invalid payloads. */
+      }
+      const target = message?.target;
+      const valid =
+        target &&
+        typeof target.connectionId === "string" &&
+        target.connectionId &&
+        Number.isSafeInteger(target.runtimeGeneration) &&
+        target.runtimeGeneration >= 0 &&
+        typeof target.workspaceId === "string" &&
+        target.workspaceId &&
+        typeof target.paneId === "string" &&
+        target.paneId;
+      await self.registration.showNotification(
+        typeof message?.title === "string"
+          ? message.title
+          : "Roamgate agent update",
+        {
+          body:
+            typeof message?.body === "string"
+              ? message.body
+              : "Open Roamgate to check your agents.",
+          tag: typeof message?.tag === "string" ? message.tag : "roamgate-task",
+          data: valid
+            ? { type: "roamgate:task-notification-activate", target }
+            : null,
+        },
+      );
+    })(),
+  );
+});
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const data = event.notification.data;

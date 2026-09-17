@@ -212,79 +212,103 @@ describe("task notification transport", () => {
     );
   });
 
-  test("a completed task reports delivery failure instead of silently staying enabled", async () => {
-    const active = {
-      ...registration(),
-      showNotification: async () => {
-        throw new Error("Delivery denied");
-      },
-    };
-    await withBrowser(
-      { navigator: { serviceWorker: { getRegistration: async () => active } } },
-      async () => {
-        const previousConnection = bridge.connection;
-        const pane = {
-          pane_id: "p1",
-          workspace_id: "w1",
-          terminal_id: "t1",
-          tab_id: "tab1",
-          focused: false,
-          agent: "Agent",
-          agent_status: "working",
-          revision: 1,
-        };
-        bridge.connection = (() =>
-          ({
-            connectionId: "alpha",
-            generation: 10,
-            isCurrent: () => true,
-            call: async (method: string) =>
-              method === "pane.list" ? { panes: [{ ...pane }] } : {},
-          }) as ConnectionClient) as typeof bridge.connection;
-        __storeTesting.replaceState({
-          ...store.get(),
-          ...emptyServerSessionState(1),
-          status: "connected",
-          connectionPaused: false,
-          activeConnectionId: "alpha",
-          connectionGeneration: 10,
-          connections: [
-            {
-              id: "alpha",
-              label: "Alpha",
-              source: "test",
-              is_default: true,
-              state: "ready",
-              generation: 1,
+  test.each([
+    ["done", "local", true, true],
+    ["blocked", "local", true, true],
+    ["done", "push", true, false],
+    ["blocked", "push", true, false],
+    ["done", "local", false, false],
+    ["blocked", "local", false, false],
+  ] as const)(
+    "task %s via %s respects preference %s and reports local failure %s",
+    async (status, transport, enabled, fails) => {
+      const active = {
+        ...registration(),
+        showNotification: async () => {
+          throw new Error("Delivery denied");
+        },
+      };
+      await withBrowser(
+        {
+          navigator: { serviceWorker: { getRegistration: async () => active } },
+        },
+        async () => {
+          const previousConnection = bridge.connection;
+          const pane = {
+            pane_id: "p1",
+            workspace_id: "w1",
+            terminal_id: "t1",
+            tab_id: "tab1",
+            focused: false,
+            agent: "Agent",
+            agent_status: "working",
+            revision: 1,
+          };
+          bridge.connection = (() =>
+            ({
+              connectionId: "alpha",
+              generation: 10,
+              isCurrent: () => true,
+              call: async (method: string) =>
+                method === "pane.list" ? { panes: [{ ...pane }] } : {},
+            }) as ConnectionClient) as typeof bridge.connection;
+          __storeTesting.replaceState({
+            ...store.get(),
+            ...emptyServerSessionState(1),
+            status: "connected",
+            connectionPaused: false,
+            activeConnectionId: "alpha",
+            connectionGeneration: 10,
+            connections: [
+              {
+                id: "alpha",
+                label: "Alpha",
+                source: "test",
+                is_default: true,
+                state: "ready",
+                generation: 1,
+              },
+            ],
+            taskNotificationsEnabled: true,
+            taskNotificationTransport: transport,
+            taskNotificationPreferences: {
+              completed: status === "done" ? enabled : true,
+              blocked: status === "blocked" ? enabled : true,
             },
-          ],
-          taskNotificationsEnabled: true,
-          taskNotificationPermission: "granted",
-        });
-        const failed = Promise.withResolvers<void>();
-        const unsubscribe = store.subscribe(() => {
-          if (
-            store.get().notice?.message === "Task notifications are unavailable"
-          )
-            failed.resolve();
-        });
-        try {
-          await store.refresh();
-          pane.agent_status = "done";
-          await store.refresh();
-          await failed.promise;
-          expect(store.get().taskNotificationsEnabled).toBe(false);
-          expect(store.get().notice).toMatchObject({
-            kind: "error",
-            detail: "Delivery denied",
+            taskNotificationPermission: "granted",
           });
-        } finally {
-          unsubscribe();
-          bridge.connection = previousConnection;
-        }
-      },
-    );
-  });
+          const failed = Promise.withResolvers<void>();
+          const unsubscribe = store.subscribe(() => {
+            if (
+              store.get().notice?.message ===
+              "Task notifications are unavailable"
+            )
+              failed.resolve();
+          });
+          try {
+            await store.refresh();
+            pane.agent_status = status;
+            await store.refresh();
+            if (fails) {
+              await failed.promise;
+              expect(store.get().taskNotificationsEnabled).toBe(false);
+              expect(store.get().notice).toMatchObject({
+                kind: "error",
+                detail: "Delivery denied",
+              });
+            } else {
+              for (let index = 0; index < 10; index++) await Promise.resolve();
+              expect(store.get().taskNotificationsEnabled).toBe(true);
+              expect(store.get().notice?.kind).not.toBe("error");
+            }
+          } finally {
+            unsubscribe();
+            bridge.connection = previousConnection;
+          }
+        },
+      );
+    },
+  );
 
   test("requests permission in the gesture and cannot re-enable after a later disable", async () => {
     const permission = Promise.withResolvers<NotificationPermission>();
@@ -340,7 +364,60 @@ describe("task notification transport", () => {
 });
 
 describe("notification service worker clicks", () => {
-  test("focuses an app window or opens a same-origin pane link, without caching or push handlers", async () => {
+  test("push displays a visible notification with no open page, including malformed payloads", async () => {
+    const listeners: Record<string, (event: any) => void> = {};
+    const showNotification = mock(async () => {});
+    runInNewContext(
+      await readFile(
+        new URL("../public/task-notifications-sw.js", import.meta.url),
+        "utf8",
+      ),
+      {
+        URL,
+        self: {
+          addEventListener: (name: string, handler: (event: any) => void) => {
+            listeners[name] = handler;
+          },
+          registration: { showNotification },
+        },
+      },
+    );
+    let pending: Promise<void> | undefined;
+    const message = {
+      title: "Roamgate agent needs input",
+      body: "Example agent",
+      tag: "task",
+      target,
+    };
+    listeners.push({
+      data: { json: () => message },
+      waitUntil: (value: Promise<void>) => {
+        pending = value;
+      },
+    });
+    await pending;
+    expect(showNotification).toHaveBeenCalledWith(message.title, {
+      body: message.body,
+      tag: message.tag,
+      data: { type: TASK_NOTIFICATION_ACTIVATE_EVENT, target },
+    });
+    listeners.push({
+      data: {
+        json: () => {
+          throw new Error("Invalid JSON");
+        },
+      },
+      waitUntil: (value: Promise<void>) => {
+        pending = value;
+      },
+    });
+    await pending;
+    expect(showNotification.mock.calls.slice(-1)[0]).toMatchObject([
+      "Roamgate agent update",
+      { data: null },
+    ]);
+  });
+  test("focuses an app window or opens a same-origin pane link without caching", async () => {
     const listeners: Record<string, (event: any) => void> = {};
     const postMessage = mock();
     const focus = mock(async () => {
@@ -370,6 +447,7 @@ describe("notification service worker clicks", () => {
     expect(Object.keys(listeners).sort()).toEqual([
       "install",
       "notificationclick",
+      "push",
     ]);
     const close = mock();
     let pending: Promise<void> | undefined;

@@ -107,6 +107,14 @@
   text-align: left;
 }
 
+.config-preference-row > .config-item-copy {
+  grid-column: 2;
+}
+
+.config-item-copy .config-notification-status {
+  display: block;
+}
+
 .config-item-copy strong {
   overflow: hidden;
   color: var(--text);

@@ -1,4 +1,5 @@
 import { roamgateLocalStorage, roamgateSessionStorage } from "./browserStorage";
+import { syncTaskPush, type TaskNotificationPreferences } from "./taskPush";
 import {
   isTaskNotificationTarget,
   prepareTaskNotifications,
@@ -88,6 +89,9 @@ export interface State extends ServerSessionState {
   sessionsByConnectionId: Record<string, ServerSessionState>;
   notice: Notice | null;
   taskNotificationsEnabled: boolean;
+  taskNotificationPreferences: TaskNotificationPreferences;
+  taskNotificationTransport: "local" | "push";
+  taskNotificationBusy: boolean;
   taskNotificationPermission: NotificationPermission | "unsupported";
   automaticUpdateChecksEnabled: boolean;
   updateInfo: UpdateInfo | null;
@@ -155,6 +159,7 @@ type WorktreeRemovalCleanup = {
 };
 
 const TASK_NOTIFICATIONS_KEY = "taskNotificationsEnabled";
+const TASK_NOTIFICATION_PREFERENCES_KEY = "taskNotificationPreferences";
 const AUTOMATIC_UPDATE_CHECKS_KEY = "automaticUpdateChecksEnabled";
 const PENDING_UPDATE_RELOAD_KEY = "pendingUpdateReloadVersion";
 export const DEFAULT_NOTICE_AUTO_DISMISS_MS = 15 * 1000;
@@ -210,6 +215,20 @@ function notificationPermission(): NotificationPermission | "unsupported" {
     return "unsupported";
   }
   return Notification.permission;
+}
+
+function storedTaskNotificationPreferences(): TaskNotificationPreferences {
+  try {
+    const stored = JSON.parse(
+      roamgateLocalStorage.getItem(TASK_NOTIFICATION_PREFERENCES_KEY) ?? "{}",
+    );
+    return {
+      completed: stored.completed !== false,
+      blocked: stored.blocked !== false,
+    };
+  } catch {
+    return { completed: true, blocked: true };
+  }
 }
 
 function storedTaskNotificationsEnabled() {
@@ -287,6 +306,12 @@ const initial: State = {
   ...initialSession,
   notice: null,
   taskNotificationsEnabled: storedTaskNotificationsEnabled(),
+  taskNotificationPreferences: storedTaskNotificationPreferences(),
+  taskNotificationTransport:
+    roamgateLocalStorage.getItem("taskNotificationTransport") === "push"
+      ? "push"
+      : "local",
+  taskNotificationBusy: false,
   taskNotificationPermission: notificationPermission(),
   automaticUpdateChecksEnabled: storedAutomaticUpdateChecksEnabled(),
   updateInfo: null,
@@ -755,7 +780,9 @@ export class TaskCompletionTracker {
       if (
         tracker.ready &&
         previousStatus === "working" &&
-        (nextStatus === "done" || nextStatus === "idle")
+        (nextStatus === "done" ||
+          nextStatus === "idle" ||
+          nextStatus === "blocked")
       ) {
         completed.push(pane);
       }
@@ -795,6 +822,7 @@ function reportTaskNotificationFailure(error: unknown, version: number) {
   taskNotificationPreferenceVersion++;
   set({
     taskNotificationsEnabled: false,
+    taskNotificationBusy: false,
     taskNotificationPermission: notificationPermission(),
     notice: {
       kind: "error",
@@ -815,7 +843,12 @@ function maybeShowBrowserTaskNotification(
   tag: string,
   target: TaskNotificationTarget,
 ) {
-  if (!state.taskNotificationsEnabled) return;
+  if (
+    !state.taskNotificationsEnabled ||
+    state.taskNotificationBusy ||
+    state.taskNotificationTransport === "push"
+  )
+    return;
   const version = taskNotificationPreferenceVersion;
   if (notificationPermission() !== "granted") {
     reportTaskNotificationFailure(
@@ -889,11 +922,18 @@ export function taskNotificationTargetFromNotice(
 }
 
 function notifyTaskCompleted(pane: Pane, workspaces: Workspace[], tabs: Tab[]) {
-  if (!state.taskNotificationsEnabled) return;
+  const blocked = pane.agent_status === "blocked";
+  if (
+    !state.taskNotificationsEnabled ||
+    !state.taskNotificationPreferences[blocked ? "blocked" : "completed"]
+  )
+    return;
   const runtimeGeneration = state.serverRuntimeGeneration;
   if (runtimeGeneration === null) return;
   const body = taskNotificationBody(pane, workspaces, tabs);
-  const title = "Roamgate task completed";
+  const title = blocked
+    ? "Roamgate agent needs input"
+    : "Roamgate task completed";
   const target = taskNotificationTarget(
     state.activeConnectionId,
     runtimeGeneration,
@@ -901,8 +941,8 @@ function notifyTaskCompleted(pane: Pane, workspaces: Workspace[], tabs: Tab[]) {
   );
   set({
     notice: {
-      kind: "success",
-      message: "Task completed",
+      kind: blocked ? "info" : "success",
+      message: blocked ? "Agent needs input" : "Task completed",
       detail: body,
       actionLabel: pane.agent ? "Open agent" : "Open workspace",
       actionConnectionId: state.activeConnectionId,
@@ -2032,12 +2072,21 @@ export const store = {
   init() {
     if (initialized) return;
     initialized = true;
-    if (state.taskNotificationsEnabled) {
-      const version = taskNotificationPreferenceVersion;
-      void prepareTaskNotifications().catch((error) =>
-        reportTaskNotificationFailure(error, version),
-      );
-    }
+    void store.restoreTaskNotifications();
+    window.addEventListener("storage", (event) => {
+      const key = event.key?.replace(/^roamgate:/, "");
+      if (
+        key === TASK_NOTIFICATIONS_KEY ||
+        key === TASK_NOTIFICATION_PREFERENCES_KEY ||
+        event.key === null
+      ) {
+        set({
+          taskNotificationsEnabled: storedTaskNotificationsEnabled(),
+          taskNotificationPreferences: storedTaskNotificationPreferences(),
+        });
+        void store.restoreTaskNotifications();
+      }
+    });
     bridge.onHello((hello) => {
       const defaultConnectionId = hello.default_connection_id;
       set({ defaultConnectionId });
@@ -2922,16 +2971,103 @@ export const store = {
     set({ notice });
   },
 
+  async restoreTaskNotifications() {
+    const version = ++taskNotificationPreferenceVersion;
+    set({ taskNotificationBusy: true });
+    try {
+      if (state.taskNotificationsEnabled) await prepareTaskNotifications();
+      if (version !== taskNotificationPreferenceVersion) return;
+      const transport = await syncTaskPush(
+        state.taskNotificationsEnabled,
+        state.taskNotificationPreferences,
+      );
+      if (version === taskNotificationPreferenceVersion) {
+        roamgateLocalStorage.setItem("taskNotificationTransport", transport);
+        set({ taskNotificationTransport: transport });
+      }
+    } catch (error) {
+      if (version === taskNotificationPreferenceVersion)
+        set({
+          notice: {
+            kind: "error",
+            message: "Background notification sync failed",
+            detail: (error as Error).message,
+          },
+        });
+    } finally {
+      if (version === taskNotificationPreferenceVersion)
+        set({ taskNotificationBusy: false });
+    }
+  },
+
+  async setTaskNotificationPreference(
+    kind: keyof TaskNotificationPreferences,
+    enabled: boolean,
+  ) {
+    const version = ++taskNotificationPreferenceVersion;
+    const preferences = {
+      ...state.taskNotificationPreferences,
+      [kind]: enabled,
+    };
+    set({ taskNotificationBusy: true });
+    try {
+      const transport = await syncTaskPush(
+        state.taskNotificationsEnabled,
+        preferences,
+      );
+      if (version !== taskNotificationPreferenceVersion) return;
+      roamgateLocalStorage.setItem("taskNotificationTransport", transport);
+      roamgateLocalStorage.setItem(
+        TASK_NOTIFICATION_PREFERENCES_KEY,
+        JSON.stringify(preferences),
+      );
+      set({
+        taskNotificationPreferences: preferences,
+        taskNotificationTransport: transport,
+      });
+    } catch (error) {
+      if (version === taskNotificationPreferenceVersion)
+        set({
+          notice: {
+            kind: "error",
+            message: "Notification preference was not saved",
+            detail: (error as Error).message,
+          },
+        });
+    } finally {
+      if (version === taskNotificationPreferenceVersion)
+        set({ taskNotificationBusy: false });
+    }
+  },
+
   async setTaskNotificationsEnabled(enabled: boolean) {
     const version = ++taskNotificationPreferenceVersion;
+    set({ taskNotificationBusy: true });
     if (!enabled) {
+      try {
+        await syncTaskPush(false, state.taskNotificationPreferences);
+      } catch (error) {
+        if (version === taskNotificationPreferenceVersion)
+          set({
+            taskNotificationBusy: false,
+            notice: {
+              kind: "error",
+              message: "Notification revocation failed",
+              detail: (error as Error).message,
+            },
+          });
+        return;
+      }
+      if (version !== taskNotificationPreferenceVersion) return;
       roamgateLocalStorage.setItem(TASK_NOTIFICATIONS_KEY, "false");
       set({
         taskNotificationsEnabled: false,
+        taskNotificationBusy: false,
+        taskNotificationTransport: "local",
         taskNotificationPermission: notificationPermission(),
         notice: {
           kind: "info",
-          message: "Task notifications disabled",
+          message: "Task notifications disabled on this device",
           autoDismissMs: 5000,
         },
       });
@@ -2943,6 +3079,7 @@ export const store = {
       set({
         taskNotificationsEnabled: false,
         taskNotificationPermission: "unsupported",
+        taskNotificationBusy: false,
         notice: {
           kind: "error",
           message: "Browser notifications are not supported",
@@ -2964,6 +3101,7 @@ export const store = {
       roamgateLocalStorage.setItem(TASK_NOTIFICATIONS_KEY, "false");
       set({
         taskNotificationsEnabled: false,
+        taskNotificationBusy: false,
         taskNotificationPermission: notificationPermission(),
         notice: {
           kind: "error",
@@ -2975,28 +3113,44 @@ export const store = {
     }
 
     const granted = permission === "granted";
+    let transport: "local" | "push" = "local";
     if (granted) {
+      set({ taskNotificationBusy: true });
       try {
         await prepareTaskNotifications();
+        if (version !== taskNotificationPreferenceVersion) return;
+        transport = await syncTaskPush(
+          true,
+          state.taskNotificationPreferences,
+          true,
+        );
       } catch (error) {
         reportTaskNotificationFailure(error, version);
         return;
+      } finally {
+        if (version === taskNotificationPreferenceVersion)
+          set({ taskNotificationBusy: false });
       }
     }
     if (version !== taskNotificationPreferenceVersion) return;
+    roamgateLocalStorage.setItem("taskNotificationTransport", transport);
     roamgateLocalStorage.setItem(
       TASK_NOTIFICATIONS_KEY,
       granted ? "true" : "false",
     );
     set({
       taskNotificationsEnabled: granted,
+      taskNotificationTransport: transport,
+      taskNotificationBusy: false,
       taskNotificationPermission: permission,
       notice: granted
         ? {
             kind: "success",
             message: "Task notifications enabled",
             detail:
-              "Roamgate will notify you when an agent task completes while this page is running. Suspended or closed apps do not receive new task events.",
+              transport === "push"
+                ? "This device receives completion and input-required notifications even when Roamgate is closed, subject to your platform settings."
+                : "Local notifications work while this page is running. Background delivery requires Web Push support and server configuration.",
             autoDismissMs: 5000,
           }
         : {

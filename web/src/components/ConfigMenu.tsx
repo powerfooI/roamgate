@@ -138,6 +138,9 @@ export function ConfigMenu({
       status: state.status,
       taskNotificationPermission: state.taskNotificationPermission,
       taskNotificationsEnabled: state.taskNotificationsEnabled,
+      taskNotificationPreferences: state.taskNotificationPreferences,
+      taskNotificationTransport: state.taskNotificationTransport,
+      taskNotificationBusy: state.taskNotificationBusy,
       automaticUpdateChecksEnabled: state.automaticUpdateChecksEnabled,
       updateInfo: state.updateInfo,
       updateInstalling: state.updateInstalling,
@@ -522,18 +525,29 @@ export function ConfigMenu({
                 </span>
                 <div className="config-item-copy">
                   <strong>Task notifications</strong>
-                  <span>{taskNotificationValue}</span>
+                  <span className="config-notification-status">
+                    {s.taskNotificationBusy
+                      ? "Saving..."
+                      : taskNotificationValue +
+                        (s.taskNotificationsEnabled
+                          ? s.taskNotificationTransport === "push"
+                            ? " · Background push"
+                            : " · Active page only"
+                          : "")}
+                  </span>
                 </div>
                 <button
                   type="button"
                   role="switch"
                   aria-label="Task notifications"
+                  aria-disabled={s.taskNotificationBusy}
                   aria-checked={s.taskNotificationsEnabled}
                   className={
                     "settings-switch" +
                     (s.taskNotificationsEnabled ? " is-on" : "")
                   }
                   onClick={() => {
+                    if (s.taskNotificationBusy) return;
                     void store.setTaskNotificationsEnabled(
                       !s.taskNotificationsEnabled,
                     );
@@ -542,6 +556,39 @@ export function ConfigMenu({
                   <span />
                 </button>
               </div>
+              {s.taskNotificationsEnabled &&
+                (
+                  [
+                    ["blocked", "Agent needs input"],
+                    ["completed", "Task completed"],
+                  ] as const
+                ).map(([kind, label]) => (
+                  <div className="config-preference-row" key={kind}>
+                    <div className="config-item-copy">
+                      <strong>{label}</strong>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-label={label}
+                      aria-checked={s.taskNotificationPreferences[kind]}
+                      aria-disabled={s.taskNotificationBusy}
+                      className={
+                        "settings-switch" +
+                        (s.taskNotificationPreferences[kind] ? " is-on" : "")
+                      }
+                      onClick={() => {
+                        if (s.taskNotificationBusy) return;
+                        void store.setTaskNotificationPreference(
+                          kind,
+                          !s.taskNotificationPreferences[kind],
+                        );
+                      }}
+                    >
+                      <span />
+                    </button>
+                  </div>
+                ))}
               <ConfigMenuItem
                 icon={<Keyboard size={15} />}
                 label="Keyboard shortcuts"

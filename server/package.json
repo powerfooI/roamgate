@@ -29,5 +29,8 @@
     "clean": "rm -rf public src/public-files.gen.ts roamgate roamgate.exe roamgate-* herdr-gui herdr-gui-* && bun run clean:bun-build",
     "pretypecheck": "bun run --filter roamgate-web build && bun run embed:public",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
   }
 }

@@ -1,4 +1,5 @@
 import type { ServerWebSocket } from "bun";
+import { createWebPushService } from "./notifications/web-push";
 import { rmSync } from "node:fs";
 import packageJson from "../../package.json";
 import type { SshTunnelConfig } from "./bridge/ssh-tunnel";
@@ -108,6 +109,9 @@ if (herdrCommandResult !== null) {
 const config = loadServerConfig(APP_VERSION);
 configureServerLogger(config.logLevel);
 const logger = serverLogger;
+const webPush = createWebPushService({
+  warn: (message) => logger.warn(message),
+});
 const downstreamConnectionConfig = {
   socketPath: config.socketPath,
   clientSocketPath: config.clientSocketPath,
@@ -416,6 +420,15 @@ function runtimeFactoryForProfile(
         safeSend,
         clientLabel,
         markRpcError,
+        onTaskEvent: (event) =>
+          webPush.notify(
+            {
+              ...event,
+              connectionId: identity.id,
+              runtimeGeneration: context.generation,
+            },
+            context.isCurrent,
+          ),
         onEvent: (event, eventIdentity) => {
           if (!context.isCurrent()) return;
           logger.debug("Herdr event", {
@@ -1263,6 +1276,9 @@ function main() {
             if (server.upgrade(req)) return undefined;
             return new Response("websocket upgrade failed", { status: 400 });
           }
+          if (url.pathname === "/api/notifications/push") {
+            return webPush.handle(req);
+          }
           if (url.pathname === "/api/health") {
             return Response.json({
               ok: true,
@@ -1470,6 +1486,7 @@ function main() {
 
 let managerStopTask: Promise<void> | null = null;
 function stopManagerOnce(): Promise<void> {
+  webPush.stop();
   connectionProfiles.stopSupervision();
   managerStopTask ??= connectionManager.stopAll();
   return managerStopTask;

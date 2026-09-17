@@ -464,6 +464,54 @@ roamgate --host 0.0.0.0 --port 8443 \
   For a managed service, set both environment variables to absolute paths in its
   environment file and run `roamgate service restart`.
 
+## Web Push notifications
+
+1. Serve Roamgate over trusted HTTPS (native TLS or a reverse proxy). On
+   iOS/iPadOS 16.4 or later, install and open the Home Screen app.
+2. Set `ROAMGATE_WEB_PUSH_SUBJECT` to an operator contact, such as
+   `mailto:operator@example.com` or an HTTPS contact URL, and restart Roamgate.
+   For managed services, put this in the service environment file.
+3. Enable **Task notifications** in each device's menu and grant permission.
+   **Background push** confirms enrollment. Choose **Agent needs input** and
+   **Task completed** independently. Existing local-only users should toggle
+   notifications off and on once to enroll.
+
+The server generates a VAPID key pair and saves it with device subscriptions in
+`~/.config/roamgate/web-push.json` (`%APPDATA%\\roamgate\\web-push.json` on Windows).
+`ROAMGATE_WEB_PUSH_PATH` overrides this private file's location. Back it up
+securely, restrict access, and run only one Roamgate process per file. Do not
+commit or share it: it contains a private key and capability URLs. Corrupt data
+is preserved and disables Web Push instead of silently rotating keys. After
+intentional key replacement, reopen the app and toggle notifications to enroll
+again. Browser profile data and subscriptions are device-specific.
+
+Delivery uses outbound HTTPS to the browser's push service; Roamgate does not
+need a public inbound endpoint. Apple (`*.push.apple.com`), Google
+(`fcm.googleapis.com`), Mozilla (`*.push.services.mozilla.com`), and Windows
+(`*.notify.windows.com`) endpoints are accepted. Other providers are rejected,
+not used as arbitrary outbound URLs. Devices must be able to reach their push
+provider and reach Roamgate when opening a notification.
+
+The bridge must remain running with the relevant Herdr connections connected.
+It observes `working -> blocked` and `working -> done/idle` transitions across
+those connections without browser clients. Startup snapshots do not generate
+notifications. Delivery is best-effort: OS permissions, Focus modes, expired
+subscriptions, network outages, or stopped/disconnected runtimes can prevent
+it. Messages expire after five minutes; missed events are not durably replayed.
+Expired subscriptions are removed on push-service HTTP 404/410 responses.
+
+Turning **Task notifications** off removes this device from the server before
+unsubscribing the browser. If revocation fails, reconnect and retry; browser/OS
+notification permission can also be revoked immediately. Already accepted
+messages may still arrive. Removing the subject disables server delivery for
+all devices; keep the private registry if you intend to re-enable it.
+
+Without server configuration or browser Web Push support, **Active page only**
+uses local Service Worker notifications (or a page-notification fallback).
+Do not rely on this fallback while the app is suspended or closed. Push payloads
+are encrypted in transit to the device and contain the agent name and routing
+IDs, not terminal output. They can be displayed on the device's lock screen.
+
 ## Logging
 
 Logs contain one event per line: ISO timestamp, severity, scope, and bounded

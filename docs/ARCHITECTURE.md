@@ -37,6 +37,24 @@ that require local directory searches are left unresolved rather than matched
 to this host's sessions. The browser uses timestamps for idle-agent recency,
 with Herdr's state-change sequence as a fallback, and stores no activity history.
 
+## Task notifications
+
+Each connection runtime observes agent transitions through its existing per-pane
+status subscription and periodic pane reconciliation, even with no browser
+clients. A runtime-local tracker seeds initial state silently, ignores snapshots
+that raced newer events, and emits completion/input-required transitions once.
+Runtime disposal stops observation; queued deliveries check the owning lease.
+
+Web Push uses a private persistent VAPID key pair and per-device subscriptions
+with independent completion/blocked preferences. Authenticated same-origin HTTP
+manages enrollment and revocation. Sends use encrypted payloads, an outbound
+provider allowlist, a ten-second deadline, four concurrent requests, and a bounded
+256-delivery in-memory queue. Queue overflow and provider failures are logged;
+there is no durable event replay. The Service Worker shows notifications without
+an active page and routes clicks through the connection-generation-checked pane
+navigation path. Enrolled pages suppress duplicate local system notifications.
+See [deployment and delivery limits](DEPLOYMENT.md#web-push-notifications).
+
 ## Terminal endpoints
 
 Interface text size uses root CSS zoom. Terminal surfaces cancel that zoom and

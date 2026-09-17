@@ -65,6 +65,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.9",
     "@eslint/js": "^10.0.1",
+    "@types/web-push": "^3.6.4",
     "bun-types": "^1.4.1",
     "eslint": "^10.6.0",
     "eslint-plugin-react-hooks": "^7.1.1",

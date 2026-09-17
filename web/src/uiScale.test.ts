@@ -12,11 +12,13 @@ const chrome =
     : Bun.which("google-chrome") || Bun.which("chromium"));
 
 test.skipIf(!chrome).each([
-  [1300, 1],
-  [500, 1.25],
+  [1300, 1, "uiScale"],
+  [500, 1.25, "uiScale"],
+  [1300, 1, "taskPush"],
+  [390, 1, "taskPush"],
 ])(
-  "text size preserves menu placement, selection, and terminal mouse coordinates (width %d, DPR %d)",
-  async (width, deviceScale) => {
+  "browser interactions preserve layout and input (width %d, DPR %d, %s)",
+  async (width, deviceScale, fixture) => {
     const dir = await mkdtemp(join(tmpdir(), "ui-scale-test-"));
     const { promise, resolve } = Promise.withResolvers<unknown>();
     const assets = new Map<string, Blob>();
@@ -33,7 +35,7 @@ test.skipIf(!chrome).each([
         if (asset) return new Response(asset);
         if (path === "/") {
           return new Response(
-            '<head><link rel="stylesheet" href="/uiScale.browser.css"></head><body><script src="/uiScale.browser.js"></script></body>',
+            `<head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/${fixture}.browser.css"></head><body><script src="/${fixture}.browser.js"></script></body>`,
             { headers: { "Content-Type": "text/html" } },
           );
         }
@@ -44,7 +46,7 @@ test.skipIf(!chrome).each([
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const build = await Bun.build({
-        entrypoints: [join(import.meta.dir, "uiScale.browser.tsx")],
+        entrypoints: [join(import.meta.dir, `${fixture}.browser.tsx`)],
         outdir: dir,
         target: "browser",
       });
