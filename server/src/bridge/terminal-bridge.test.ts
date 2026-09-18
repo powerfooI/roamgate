@@ -64,13 +64,13 @@ afterEach(async () => {
   );
 });
 
-function terminalFrame(width = 100, height = 30, protocol = 17) {
+function terminalFrame(width = 100, height = 30, protocol = 17, full = true) {
   const writer = new BinWriter();
   writer.variant(protocol === 22 ? 1 : 2);
   writer.varint(1);
   writer.varint(width);
   writer.varint(height);
-  writer.bool(true);
+  writer.bool(full);
   writer.bytes(Buffer.from("frame"));
   return encodeFrame(writer.toBuffer());
 }
@@ -94,6 +94,7 @@ async function startThinServer(
     skipDirectFrame?: boolean;
     onDirectAttach?: (socket: net.Socket) => void;
     onScroll?: (reader: BinReader) => void;
+    frameFull?: boolean;
     tracker?: {
       appConnects: number;
       appCloses: number;
@@ -167,7 +168,12 @@ async function startThinServer(
             socket.write(encodeFrame(writer.toBuffer()));
             if (launchMode === 0) {
               socket.write(
-                terminalFrame(socketCols, socketRows, options.protocol),
+                terminalFrame(
+                  socketCols,
+                  socketRows,
+                  options.protocol,
+                  options.frameFull ?? true,
+                ),
               );
             }
           };
@@ -200,7 +206,12 @@ async function startThinServer(
           const sendTerminalFrame = () => {
             if (!socket.destroyed) {
               socket.write(
-                terminalFrame(socketCols, socketRows, options.protocol),
+                terminalFrame(
+                  socketCols,
+                  socketRows,
+                  options.protocol,
+                  options.frameFull ?? true,
+                ),
               );
             }
           };
@@ -1240,5 +1251,72 @@ test("navigation mode uses exactly the terminal backend decision", async () => {
   } finally {
     if (disabled === undefined) delete process.env.HERDR_GUI_DISABLE_ENDPOINT;
     else process.env.HERDR_GUI_DISABLE_ENDPOINT = disabled;
+  }
+});
+
+// A legacy ThinClient stream carries `full` on the wire, and it is false for an
+// incremental frame. Coalescing drops held frames, so a dropped incremental
+// frame loses output that no later frame repeats: the terminal renders corrupt.
+// Only a self-contained repaint may carry a coalesce key.
+test("does not coalesce an incremental legacy frame", async () => {
+  const socketPath = await startThinServer({ protocol: 17, frameFull: false });
+  const browser = {} as ServerWebSocket<unknown>;
+  const sends: { payload: string; coalesceKey?: string }[] = [];
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 17,
+    safeSend: (_ws, payload, _context, coalesceKey) => {
+      sends.push({ payload, coalesceKey });
+      return true;
+    },
+    clientLabel: () => "test",
+    markRpcError: () => undefined,
+  });
+  try {
+    await bridge.handleTerminalRpc(browser, "attach", "terminal.attach", {
+      terminal_id: "term_1",
+      cols: 100,
+      rows: 30,
+    });
+    await waitForTerminalFrame(sends.map((s) => s.payload));
+    const frames = sends.filter((s) => s.payload.includes('"terminal"'));
+    expect(frames.length).toBeGreaterThan(0);
+    for (const frame of frames) {
+      expect(JSON.parse(frame.payload).terminal.full).toBe(false);
+      expect(frame.coalesceKey).toBeUndefined();
+    }
+  } finally {
+    bridge.dispose();
+  }
+});
+
+test("still coalesces a full legacy repaint", async () => {
+  const socketPath = await startThinServer({ protocol: 17, frameFull: true });
+  const browser = {} as ServerWebSocket<unknown>;
+  const sends: { payload: string; coalesceKey?: string }[] = [];
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 17,
+    safeSend: (_ws, payload, _context, coalesceKey) => {
+      sends.push({ payload, coalesceKey });
+      return true;
+    },
+    clientLabel: () => "test",
+    markRpcError: () => undefined,
+  });
+  try {
+    await bridge.handleTerminalRpc(browser, "attach", "terminal.attach", {
+      terminal_id: "term_1",
+      cols: 100,
+      rows: 30,
+    });
+    await waitForTerminalFrame(sends.map((s) => s.payload));
+    const frames = sends.filter((s) => s.payload.includes('"terminal"'));
+    expect(frames.length).toBeGreaterThan(0);
+    for (const frame of frames) {
+      expect(frame.coalesceKey).toBe("terminal:term_1");
+    }
+  } finally {
+    bridge.dispose();
   }
 });

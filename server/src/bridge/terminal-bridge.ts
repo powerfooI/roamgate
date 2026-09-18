@@ -616,13 +616,16 @@ export function createTerminalBridge(args: {
           });
           payloads.set(key, payload);
         }
-        // Each frame is a complete repaint, so a viewer that is behind only
-        // needs the newest one for this terminal.
+        // A full frame is a complete repaint, so a viewer that is behind only
+        // needs the newest one for this terminal. An incremental frame is NOT
+        // safe to coalesce: a legacy ThinClient stream carries `full` on the
+        // wire and sends false for a partial update, which no later frame
+        // repeats. Dropping one of those loses output and corrupts the render.
         args.safeSend(
           viewer,
           payload,
           "terminal-frame",
-          `terminal:${terminalId}`,
+          t.full ? `terminal:${terminalId}` : undefined,
         );
       }
     });
