@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  dropCoalescedMessage,
   flushCoalescedMessages,
   sendWebSocketMessage,
   WS_BACKPRESSURE_LIMIT_BYTES,
@@ -235,5 +236,61 @@ describe("terminal frame coalescing under backpressure", () => {
     // An RPC reply is not a repaint; dropping it would lose the answer.
     expect(result).toBe(true);
     expect(sent).toEqual(["rpc-reply"]);
+  });
+});
+
+describe("dropping a held frame when it goes stale", () => {
+  function backloggedSocket() {
+    const sent: string[] = [];
+    return {
+      sent,
+      ws: {
+        close: () => {},
+        getBufferedAmount: () => WS_COALESCE_LIMIT_BYTES + 1,
+        send: (payload: string) => {
+          sent.push(payload);
+          return payload.length;
+        },
+      },
+    };
+  }
+
+  test("a dropped payload is never sent on drain", () => {
+    const { ws, sent } = backloggedSocket();
+    const opts = { cleanup: () => {}, warn: () => {} };
+    sendWebSocketMessage(ws, "stale-100x30", {
+      ...opts,
+      coalesceKey: "terminal:t1",
+    });
+    dropCoalescedMessage(ws, "terminal:t1");
+    flushCoalescedMessages(ws, opts);
+    expect(sent).toEqual([]);
+  });
+
+  test("dropping one terminal leaves another terminal's held frame alone", () => {
+    const sent: string[] = [];
+    let buffered = WS_COALESCE_LIMIT_BYTES + 1;
+    const ws = {
+      close: () => {},
+      getBufferedAmount: () => buffered,
+      send: (payload: string) => {
+        sent.push(payload);
+        return payload.length;
+      },
+    };
+    const opts = { cleanup: () => {}, warn: () => {} };
+    sendWebSocketMessage(ws, "t1-frame", {
+      ...opts,
+      coalesceKey: "terminal:t1",
+    });
+    sendWebSocketMessage(ws, "t2-frame", {
+      ...opts,
+      coalesceKey: "terminal:t2",
+    });
+    dropCoalescedMessage(ws, "terminal:t1");
+    // The socket caught up, which is when the drain handler flushes.
+    buffered = 0;
+    flushCoalescedMessages(ws, opts);
+    expect(sent).toEqual(["t2-frame"]);
   });
 });

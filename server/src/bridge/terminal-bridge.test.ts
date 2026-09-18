@@ -1320,3 +1320,81 @@ test("still coalesces a full legacy repaint", async () => {
     bridge.dispose();
   }
 });
+
+// A held frame is sized for the surface it was rendered against. If the surface
+// resizes while that frame is held, flushing it paints the OLD size into the new
+// pane, clipping the bottom and right. The bridge must drop the held frame
+// whenever the size it was rendered for stops being current.
+test("drops a held frame when the viewer resizes the terminal", async () => {
+  const socketPath = await startThinServer();
+  const browser = {} as ServerWebSocket<unknown>;
+  const messages: string[] = [];
+  const drops: { ws: ServerWebSocket<unknown>; coalesceKey: string }[] = [];
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 17,
+    safeSend: (_ws, payload) => {
+      messages.push(payload);
+      return true;
+    },
+    dropCoalesced: (ws, coalesceKey) => drops.push({ ws, coalesceKey }),
+    clientLabel: () => "test",
+    markRpcError: () => undefined,
+  });
+  try {
+    await bridge.handleTerminalRpc(browser, "attach", "terminal.attach", {
+      terminal_id: "term_1",
+      cols: 100,
+      rows: 30,
+    });
+    await waitForTerminalFrame(messages);
+    drops.length = 0;
+    await bridge.handleTerminalRpc(browser, "resize", "terminal.resize", {
+      terminal_id: "term_1",
+      cols: 120,
+      rows: 40,
+    });
+    expect(drops).toEqual([{ ws: browser, coalesceKey: "terminal:term_1" }]);
+  } finally {
+    bridge.dispose();
+  }
+});
+
+test("drops held frames for every viewer when an attach resizes the shared terminal", async () => {
+  const socketPath = await startThinServer();
+  const first = {} as ServerWebSocket<unknown>;
+  const second = {} as ServerWebSocket<unknown>;
+  const messages: string[] = [];
+  const drops: { ws: ServerWebSocket<unknown>; coalesceKey: string }[] = [];
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 17,
+    safeSend: (_ws, payload) => {
+      messages.push(payload);
+      return true;
+    },
+    dropCoalesced: (ws, coalesceKey) => drops.push({ ws, coalesceKey }),
+    clientLabel: () => "test",
+    markRpcError: () => undefined,
+  });
+  try {
+    await bridge.handleTerminalRpc(first, "a1", "terminal.attach", {
+      terminal_id: "term_1",
+      cols: 100,
+      rows: 30,
+    });
+    await waitForTerminalFrame(messages);
+    drops.length = 0;
+    // A different size resizes the shared terminal, so the frame the FIRST
+    // viewer is holding is now the wrong size for it too.
+    await bridge.handleTerminalRpc(second, "a2", "terminal.attach", {
+      terminal_id: "term_1",
+      cols: 140,
+      rows: 50,
+    });
+    expect(drops.map((d) => d.ws)).toContain(first);
+    expect(drops.every((d) => d.coalesceKey === "terminal:term_1")).toBe(true);
+  } finally {
+    bridge.dispose();
+  }
+});

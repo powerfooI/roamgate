@@ -21,6 +21,7 @@ import {
   type SshTunnelConfig,
   type SshTunnelError,
 } from "../bridge/ssh-tunnel";
+import { dropCoalescedMessage } from "../bridge/websocket-send";
 import { createTerminalBridge } from "../bridge/terminal-bridge";
 import { createHerdrInfoHandler } from "../http/herdr-info";
 import { createImageUploadHandler } from "../http/image-upload";
@@ -258,6 +259,7 @@ export function createLegacyConnectionRuntime(args: {
       }
     },
     safeSend: args.safeSend,
+    dropCoalesced: dropCoalescedMessage,
     clientLabel: args.clientLabel,
     markRpcError: args.markRpcError,
     confirmRelayResize: async ({ cols, rows, paneId }) => {

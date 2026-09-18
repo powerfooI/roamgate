@@ -145,6 +145,18 @@ export function sendWebSocketMessage(
   }
 }
 
+// Drop a held payload that has gone stale. A frame is sized for the surface it
+// was rendered against, so once that surface resizes the held frame paints a
+// partial screen: short by the rows and columns the surface gained. A resize
+// makes the terminal emit a fresh frame anyway, so dropping the held one loses
+// nothing and is the only way to avoid painting the stale size.
+export function dropCoalescedMessage(
+  ws: WebSocketSendTarget,
+  coalesceKey: string,
+): void {
+  heldPayloads.get(ws)?.delete(coalesceKey);
+}
+
 // Send the frames held back while the socket was behind. Call this when the
 // socket drains. Each held payload is the newest repaint for its terminal, so
 // one send per key restores the viewer to the current surface.
