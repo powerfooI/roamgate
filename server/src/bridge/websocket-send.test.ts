@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  flushCoalescedMessages,
   sendWebSocketMessage,
   WS_BACKPRESSURE_LIMIT_BYTES,
+  WS_COALESCE_LIMIT_BYTES,
   WebSocketCleanupTracker,
 } from "./websocket-send";
 
@@ -157,5 +159,81 @@ describe("browser WebSocket sending", () => {
     });
     expect(sent).toEqual(["payload"]);
     expect(closes).toEqual([[undefined, undefined]]);
+  });
+});
+
+describe("terminal frame coalescing under backpressure", () => {
+  function sendFrame(
+    ws: ReturnType<typeof createWebSocket>["ws"],
+    payload: string,
+    coalesceKey: string,
+  ) {
+    return sendWebSocketMessage(ws, payload, {
+      cleanup: () => {},
+      coalesceKey,
+      context: "terminal-frame",
+      warn: () => {},
+    });
+  }
+
+  test("holds a frame back instead of queueing it once the socket is behind", () => {
+    const { closes, sent, ws } = createWebSocket({
+      bufferedAmount: WS_COALESCE_LIMIT_BYTES + 1,
+    });
+    expect(sendFrame(ws, "frame-1", "terminal:t1")).toBe(true);
+    // Nothing is queued on the socket, and the viewer is not disconnected.
+    expect(sent).toEqual([]);
+    expect(closes).toEqual([]);
+  });
+
+  test("keeps only the newest held frame per key", () => {
+    const { sent, ws } = createWebSocket({
+      bufferedAmounts: [
+        WS_COALESCE_LIMIT_BYTES + 1,
+        WS_COALESCE_LIMIT_BYTES + 1,
+        0,
+      ],
+    });
+    sendFrame(ws, "frame-1", "terminal:t1");
+    sendFrame(ws, "frame-2", "terminal:t1");
+    flushCoalescedMessages(ws, { cleanup: () => {}, warn: () => {} });
+    // frame-1 is worthless: frame-2 is a complete repaint of the same surface.
+    expect(sent).toEqual(["frame-2"]);
+  });
+
+  test("keeps held frames for different terminals apart", () => {
+    const { sent, ws } = createWebSocket({
+      bufferedAmounts: [
+        WS_COALESCE_LIMIT_BYTES + 1,
+        WS_COALESCE_LIMIT_BYTES + 1,
+        0,
+        0,
+      ],
+    });
+    sendFrame(ws, "frame-a", "terminal:t1");
+    sendFrame(ws, "frame-b", "terminal:t2");
+    flushCoalescedMessages(ws, { cleanup: () => {}, warn: () => {} });
+    expect(sent.sort()).toEqual(["frame-a", "frame-b"]);
+  });
+
+  test("sends immediately while the socket keeps up", () => {
+    const { closes, sent, ws } = createWebSocket({ bufferedAmount: 0 });
+    expect(sendFrame(ws, "frame-1", "terminal:t1")).toBe(true);
+    expect(sent).toEqual(["frame-1"]);
+    expect(closes).toEqual([]);
+  });
+
+  test("leaves messages without a coalesce key alone", () => {
+    const { sent, ws } = createWebSocket({
+      bufferedAmount: WS_COALESCE_LIMIT_BYTES + 1,
+    });
+    const result = sendWebSocketMessage(ws, "rpc-reply", {
+      cleanup: () => {},
+      context: "file-list",
+      warn: () => {},
+    });
+    // An RPC reply is not a repaint; dropping it would lose the answer.
+    expect(result).toBe(true);
+    expect(sent).toEqual(["rpc-reply"]);
   });
 });

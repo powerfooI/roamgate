@@ -73,6 +73,7 @@ export function createTerminalBridge(args: {
     ws: ServerWebSocket<unknown>,
     payload: string,
     context?: string,
+    coalesceKey?: string,
   ) => boolean;
   clientLabel: (ws: ServerWebSocket<unknown>) => string;
   markRpcError: (
@@ -615,7 +616,14 @@ export function createTerminalBridge(args: {
           });
           payloads.set(key, payload);
         }
-        args.safeSend(viewer, payload, "terminal-frame");
+        // Each frame is a complete repaint, so a viewer that is behind only
+        // needs the newest one for this terminal.
+        args.safeSend(
+          viewer,
+          payload,
+          "terminal-frame",
+          `terminal:${terminalId}`,
+        );
       }
     });
     // Bind to the receiving session, NOT the producing PTY: Herdr 0.9.0 sends

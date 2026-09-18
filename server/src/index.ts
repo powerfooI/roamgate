@@ -4,6 +4,7 @@ import { rmSync } from "node:fs";
 import packageJson from "../../package.json";
 import type { SshTunnelConfig } from "./bridge/ssh-tunnel";
 import {
+  flushCoalescedMessages,
   sendWebSocketMessage,
   WebSocketCleanupTracker,
 } from "./bridge/websocket-send";
@@ -518,11 +519,13 @@ function safeSend(
   ws: ServerWebSocket<unknown>,
   payload: string,
   context = "message",
+  coalesceKey?: string,
 ): boolean {
   return sendWebSocketMessage(ws, payload, {
     cleanup: () => {
       webSocketCleanup.cleanup(ws);
     },
+    coalesceKey,
     context,
     warn: (message) =>
       logger.warn("websocket send failed", {
@@ -1338,6 +1341,18 @@ function main() {
               }),
               "hello",
             );
+          },
+          drain(ws) {
+            // The viewer caught up: send the newest repaint we held back.
+            flushCoalescedMessages(ws, {
+              cleanup: () => {
+                webSocketCleanup.cleanup(ws);
+              },
+              warn: (detail) =>
+                logger.warn("websocket send failed", {
+                  detail: detail.replace(/^\[bridge\] /, ""),
+                }),
+            });
           },
           message(ws, message) {
             const text =
