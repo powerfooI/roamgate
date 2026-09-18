@@ -3,7 +3,11 @@ import { existsSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { waitForChromePort } from "./browserChrome";
+import {
+  stopChrome,
+  waitForChromePort,
+  withBrowserDeadline,
+} from "./browserChrome";
 
 const chrome =
   Bun.env.CHROME_BIN ||
@@ -63,21 +67,33 @@ test.skipIf(!chrome).each([390, 320])(
         join(dir, "profile"),
         join(dir, "browser.log"),
       );
-      const targets = (await (
-        await fetch(`http://127.0.0.1:${port}/json/list`)
-      ).json()) as { type: string; webSocketDebuggerUrl: string }[];
+      const targets = (await withBrowserDeadline(
+        fetch(`http://127.0.0.1:${port}/json/list`, {
+          signal: AbortSignal.timeout(10_000),
+        }).then((response) => response.json()),
+        "Chrome debugger discovery",
+      )) as { type: string; webSocketDebuggerUrl: string }[];
       socket = new WebSocket(
         targets.find((target) => target.type === "page")!.webSocketDebuggerUrl,
       );
-      await new Promise<void>((resolve, reject) => {
-        socket!.onopen = () => resolve();
-        socket!.onerror = () => reject(new Error("CDP connection failed"));
-      });
+      await withBrowserDeadline(
+        new Promise<void>((resolve, reject) => {
+          socket!.onopen = () => resolve();
+          socket!.onerror = () => reject(new Error("CDP connection failed"));
+          socket!.onclose = () => reject(new Error("CDP connection closed"));
+        }),
+        "CDP connection",
+      );
       let id = 0;
       const pending = new Map<
         number,
         { resolve: (value: any) => void; reject: (error: Error) => void }
       >();
+      socket.onclose = socket.onerror = () => {
+        for (const request of pending.values())
+          request.reject(new Error("CDP connection closed"));
+        pending.clear();
+      };
       socket.onmessage = (event) => {
         const response = JSON.parse(String(event.data));
         if (
@@ -97,11 +113,16 @@ test.skipIf(!chrome).each([390, 320])(
       const cdp = (
         method: string,
         params: Record<string, unknown> = {},
-      ): Promise<any> =>
-        new Promise((resolve, reject) => {
-          pending.set(++id, { resolve, reject });
-          socket!.send(JSON.stringify({ id, method, params }));
-        });
+      ): Promise<any> => {
+        const requestId = ++id;
+        return withBrowserDeadline(
+          new Promise((resolve, reject) => {
+            pending.set(requestId, { resolve, reject });
+            socket!.send(JSON.stringify({ id: requestId, method, params }));
+          }),
+          `CDP ${method}`,
+        ).finally(() => pending.delete(requestId));
+      };
       const evaluate = async (expression: string) => {
         const result = await cdp("Runtime.evaluate", {
           expression,
@@ -257,11 +278,8 @@ test.skipIf(!chrome).each([390, 320])(
       expect(await run("desktop")).toEqual([]);
     } finally {
       socket?.close();
-      if (child) {
-        child.kill();
-        await child.exited;
-      }
       server.stop(true);
+      await stopChrome(child);
       console.log(`Mobile terminal browser artifacts: ${dir}`);
     }
   },

@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { stopChrome } from "./browserChrome";
 
 const chrome =
   Bun.env.CHROME_BIN ||
@@ -143,22 +144,8 @@ for (const narrow of [false, true])
         throw error;
       } finally {
         clearTimeout(timer);
-        if (child) {
-          child.kill("SIGKILL");
-          await Promise.race([
-            child.exited,
-            new Promise<never>((_, reject) =>
-              setTimeout(
-                () =>
-                  reject(
-                    new Error("Fixture browser did not exit after SIGKILL"),
-                  ),
-                2_000,
-              ),
-            ),
-          ]);
-        }
         server.stop(true);
+        await stopChrome(child);
         await writeFile(join(dir, "events.log"), events.join("\n"));
         console.info(`Browser fixture evidence: ${dir}`);
       }

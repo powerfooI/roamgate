@@ -3307,7 +3307,7 @@ export default function App() {
         >
           <MessageSquareText size={16} />
           <span className="mobile-nav-label">
-            Annotations {annotations.length}
+            Annotations{annotations.length > 0 ? ` ${annotations.length}` : ""}
           </span>
         </button>
         <button

@@ -31,8 +31,9 @@ the root manifest. Keep runtime dependencies in their owning workspace.
 - `bun run package:linux-arm64`, `package:darwin-x64`,
   `package:darwin-arm64`, `package:windows-x64`, and
   `package:windows-arm64`: package the other supported release targets.
-- `bun run format`: format supported files with the pinned root Biome config.
-- `bun run format:check`: verify that all supported files are formatted.
+- `bun run format [paths...]`: format the given paths with the pinned root
+  Biome config, or all supported files when no paths are given.
+- `bun run format:check [paths...]`: check formatting with the same path scope.
 - `bun run lint`: lint all TypeScript and React code with a local content cache.
 - `bun run test`: run the full Bun suite, including integration and browser tests.
 - `bun run test:quick`: run the suite without the Chrome-based browser test
@@ -75,6 +76,9 @@ tests require Chrome/Chromium (or `CHROME_BIN`) and skip when it is unavailable.
 Use Bun's fake timers for timer deadlines and events for socket readiness rather
 than waiting out production timeouts; restore real timers in `finally`.
 Run `bun run precommit` before committing; the quick suite does not replace it.
+The installed pre-commit hook runs this gate, so do not also run it manually
+immediately before committing an unchanged revision. See the iteration workflow
+in [local validation](CONTRIBUTING.md#validation).
 For frontend-facing work, also run `bun run build:web`. Release work must package
 and inspect every supported platform archive and checksum.
 

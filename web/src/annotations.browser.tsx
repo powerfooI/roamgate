@@ -91,8 +91,12 @@ export async function checkAnnotationUX(
         : ".tabbar-utilities button:last-child .tabbar-change-count",
     );
     check(
-      label?.textContent?.trim() ===
-        (mobile() ? `Annotations ${count}` : String(count)),
+      mobile()
+        ? label?.textContent?.trim() ===
+            (count > 0 ? `Annotations ${count}` : "Annotations")
+        : count > 0
+          ? label?.textContent === String(count)
+          : label === null,
       "Annotations tab count is stale",
     );
   };

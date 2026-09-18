@@ -1145,6 +1145,39 @@ const api = {
     await settle();
     frame("\x1b[2J\x1b[Hdesktop selection text", false);
     await settle();
+    const returnToApp = async () => {
+      // Window deactivation blurs the input but retains document.activeElement.
+      document.activeElement?.dispatchEvent(new FocusEvent("blur"));
+      window.dispatchEvent(new Event("blur"));
+      window.dispatchEvent(new Event("focus"));
+      await settle();
+    };
+    textarea().focus();
+    calls.length = 0;
+    await returnToApp();
+    check(
+      document.activeElement === textarea(),
+      "idle desktop terminal retains focus across app switches without output",
+    );
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "a",
+        code: "KeyA",
+        keyCode: 65,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    check(inputCalls().length > 0, "restored terminal receives keyboard input");
+    const otherInput = document.createElement("input");
+    document.body.append(otherInput);
+    otherInput.focus();
+    await returnToApp();
+    check(
+      document.activeElement === otherInput,
+      "app switches preserve other input focus",
+    );
+    otherInput.remove();
     const screen = document.querySelector(".xterm-screen")!;
     const rect = screen.getBoundingClientRect();
     const mouse = (

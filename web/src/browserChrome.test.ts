@@ -1,8 +1,62 @@
-import { expect, jest, test } from "bun:test";
+import { expect, jest, mock, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { waitForChromePort } from "./browserChrome";
+import {
+  stopChrome,
+  waitForChromePort,
+  withBrowserDeadline,
+} from "./browserChrome";
+
+test("browser deadlines preserve results and errors and clear their timers", async () => {
+  jest.useFakeTimers();
+  try {
+    expect(await withBrowserDeadline(Promise.resolve(42), "CDP reply")).toBe(
+      42,
+    );
+    const error = new Error("CDP disconnected");
+    await expect(
+      withBrowserDeadline(Promise.reject(error), "CDP reply"),
+    ).rejects.toBe(error);
+    expect(jest.getTimerCount()).toBe(0);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("a missing CDP reply fails within its deadline", async () => {
+  jest.useFakeTimers();
+  try {
+    const result = withBrowserDeadline(
+      new Promise(() => {}),
+      "CDP Runtime.evaluate",
+    );
+    jest.advanceTimersByTime(10_000);
+    await expect(result).rejects.toThrow(
+      "CDP Runtime.evaluate timed out after 10000ms",
+    );
+    expect(jest.getTimerCount()).toBe(0);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("Chrome teardown force-stops its disposable process and bounds exit waits", async () => {
+  jest.useFakeTimers();
+  const kill = mock(() => {});
+  try {
+    await stopChrome(undefined);
+    await stopChrome({ kill, exited: Promise.resolve(0) });
+    expect(kill).toHaveBeenCalledWith("SIGKILL");
+    expect(jest.getTimerCount()).toBe(0);
+    const result = stopChrome({ kill, exited: new Promise(() => {}) });
+    jest.advanceTimersByTime(2_000);
+    await expect(result).rejects.toThrow("Chrome exit timed out after 2000ms");
+    expect(jest.getTimerCount()).toBe(0);
+  } finally {
+    jest.useRealTimers();
+  }
+});
 
 test("Chrome readiness tolerates slow startup and an incomplete port file", async () => {
   const profile = mkdtempSync(join(tmpdir(), "chrome-startup-test-"));

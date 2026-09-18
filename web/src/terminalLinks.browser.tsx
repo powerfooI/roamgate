@@ -19,9 +19,14 @@ const check = (value: unknown, expected: unknown, label: string) => {
   if (JSON.stringify(value) !== JSON.stringify(expected))
     failures.push(`${label}: ${JSON.stringify(value)}`);
 };
-const settle = () => new Promise((resolve) => setTimeout(resolve, 100));
+// Let React effects and xterm's queued render complete before observing the UI.
+const settle = () =>
+  new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+  );
 const until = async (ready: () => boolean, label = "startup") => {
-  for (let i = 0; i < 60; i++) {
+  const deadline = performance.now() + 6_000;
+  while (performance.now() < deadline) {
     if (ready()) return;
     await settle();
   }
@@ -29,11 +34,14 @@ const until = async (ready: () => boolean, label = "startup") => {
     `Terminal links fixture did not settle: ${label}; ${JSON.stringify(calls.slice(-6))}; menu=${document.querySelector("[role=menu]")?.textContent}`,
   );
 };
-const input = (method: string, params: Record<string, unknown>) =>
-  fetch("/input", {
+const input = async (method: string, params: Record<string, unknown>) => {
+  const response = await fetch("/input", {
     method: "POST",
     body: JSON.stringify({ method, params }),
   });
+  if (!response.ok)
+    throw new Error(`CDP ${method} failed (${response.status})`);
+};
 let term!: Terminal;
 const terminals: Terminal[] = [];
 let provider!: ILinkProvider;
@@ -651,8 +659,8 @@ async function run() {
         (c) => c.method === "terminal.link.resolve",
       ).length;
       await hover(1, 2);
-      await settle();
-      await settle();
+      // Observe a full repaint-storm window, not just the first resolved frame.
+      await new Promise((resolve) => setTimeout(resolve, 200));
       check(
         calls.filter((c) => c.method === "terminal.link.resolve").length -
           probes <=

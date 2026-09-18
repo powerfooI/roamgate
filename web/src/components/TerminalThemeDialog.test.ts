@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { stopChrome } from "../browserChrome";
 
 const chrome =
   Bun.env.CHROME_BIN ||
@@ -78,11 +79,8 @@ test.skipIf(!chrome)(
       expect(failures).toEqual([]);
     } finally {
       clearTimeout(timer);
-      if (child) {
-        child.kill();
-        await child.exited;
-      }
       server.stop(true);
+      await stopChrome(child);
       await rm(dir, { recursive: true, force: true });
     }
   },

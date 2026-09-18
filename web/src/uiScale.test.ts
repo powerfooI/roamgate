@@ -3,7 +3,11 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { waitForChromePort } from "./browserChrome";
+import {
+  stopChrome,
+  waitForChromePort,
+  withBrowserDeadline,
+} from "./browserChrome";
 
 const chrome =
   Bun.env.CHROME_BIN ||
@@ -113,48 +117,52 @@ test.skipIf(!chrome).each([
         join(dir, "profile"),
         errorOutput,
       );
-      const targets = (await (
-        await fetch(`http://127.0.0.1:${port}/json/list`)
-      ).json()) as { type: string; webSocketDebuggerUrl: string }[];
+      const targets = (await withBrowserDeadline(
+        fetch(`http://127.0.0.1:${port}/json/list`, {
+          signal: AbortSignal.timeout(10_000),
+        }).then((response) => response.json()),
+        "Chrome debugger discovery",
+      )) as { type: string; webSocketDebuggerUrl: string }[];
       socket = new WebSocket(
         targets.find((target) => target.type === "page")!.webSocketDebuggerUrl,
       );
-      await new Promise<void>((resolve, reject) => {
-        socket!.onopen = () => resolve();
-        socket!.onerror = () => reject(new Error("CDP connection failed"));
-      });
+      await withBrowserDeadline(
+        new Promise<void>((resolve, reject) => {
+          socket!.onopen = () => resolve();
+          socket!.onerror = () => reject(new Error("CDP connection failed"));
+          socket!.onclose = () => reject(new Error("CDP connection closed"));
+        }),
+        "CDP connection",
+      );
       let id = 0;
       const pending = new Map<
         number,
-        {
-          resolve: (value: any) => void;
-          reject: (error: Error) => void;
-          timer: ReturnType<typeof setTimeout>;
-        }
+        { resolve: (value: any) => void; reject: (error: Error) => void }
       >();
+      socket.onclose = socket.onerror = () => {
+        for (const request of pending.values())
+          request.reject(new Error("CDP connection closed"));
+        pending.clear();
+      };
       socket.onmessage = (event) => {
         const response = JSON.parse(String(event.data));
         const request = pending.get(response.id);
         if (!request) return;
-        clearTimeout(request.timer);
-        timers.delete(request.timer);
         pending.delete(response.id);
         if (response.error)
           request.reject(new Error(JSON.stringify(response.error)));
         else request.resolve(response.result);
       };
-      cdp = (method, params = {}) =>
-        new Promise((resolve, reject) => {
-          const requestId = ++id;
-          const timer = setTimeout(() => {
-            pending.delete(requestId);
-            timers.delete(timer);
-            reject(new Error(`CDP ${method} timed out`));
-          }, 10000);
-          timers.add(timer);
-          pending.set(requestId, { resolve, reject, timer });
-          socket!.send(JSON.stringify({ id: requestId, method, params }));
-        });
+      cdp = (method, params = {}) => {
+        const requestId = ++id;
+        return withBrowserDeadline(
+          new Promise((resolve, reject) => {
+            pending.set(requestId, { resolve, reject });
+            socket!.send(JSON.stringify({ id: requestId, method, params }));
+          }),
+          `CDP ${method}`,
+        ).finally(() => pending.delete(requestId));
+      };
       const evaluate = async (expression: string) => {
         const result = await cdp("Runtime.evaluate", {
           expression,
@@ -273,11 +281,8 @@ test.skipIf(!chrome).each([
       for (const timer of timers) clearTimeout(timer);
       for (const gate of heldChunks.values()) gate.resolve();
       socket?.close();
-      if (child) {
-        child.kill();
-        await child.exited;
-      }
       server.stop(true);
+      await stopChrome(child);
       await rm(dir, { recursive: true, force: true });
     }
   },

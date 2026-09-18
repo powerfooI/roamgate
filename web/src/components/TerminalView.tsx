@@ -487,7 +487,7 @@ export function TerminalView({
   const composerOpen = controlledComposerOpen ?? localComposerOpen;
   const composerOpenRef = useRef(composerOpen);
   composerOpenRef.current = composerOpen;
-  const closeTerminalInput = useCallback(() => {
+  const closeTerminalInput = useCallback((blurInput = true) => {
     inputActiveRef.current = false;
     inputSessionRef.current++;
     setInputActive(false);
@@ -499,7 +499,7 @@ export function TerminalView({
       touchSelectionRef.current?.active === true;
     if (term.textarea)
       term.textarea.readOnly = term.options.disableStdin === true;
-    term.blur();
+    if (blurInput) term.blur();
   }, []);
   useLayoutEffect(() => {
     linkRevisionRef.current++;
@@ -1589,7 +1589,9 @@ export function TerminalView({
       }, 0);
     };
     const onTerminalBlur = () => {
-      closeTerminalInput();
+      // Desktop window blur retains activeElement for native focus restoration.
+      // Explicitly blurring it would discard that target when switching apps.
+      closeTerminalInput(shouldAvoidVirtualKeyboard());
       imeCommitGuard.beginIndependentInput();
       imeKeyEvent.end();
       cancelCompositionSettle();

@@ -23,14 +23,36 @@ assets required by server typechecks and process tests.
 
 | During iteration | Command / limits |
 | --- | --- |
+| Formatting | `bun run format <paths...>` formats only those files or directories; `bun run format:check <paths...>` checks them without writing. Omit paths to process the whole repository. |
 | Types | `bun run typecheck:quick` checks root scripts, web, and server without rebuilding assets or validating production bundles. |
 | Lint | `bun run lint` caches unchanged content in `node_modules/.cache/eslint/`. Use `bun run lint --no-cache` for fresh checks after tooling/dependency updates. |
-| Related tests | `bun test <path>` or `bun run test:quick` (includes integration tests, excludes three Chrome-based files). |
+| Related tests | `bun test <path>` or `bun run test:quick` (includes integration tests, excludes Chrome-based browser regressions). |
 | Browser regressions | `bun run test:browser`; requires Chrome/Chromium or `CHROME_BIN`, otherwise tests skip. |
 | Submission | `bun run precommit` runs formatting, lint, full typechecks, and the full test suite. Quick checks do not replace it. |
 
 Run `bun run install-hooks` once per clone to point Git at the tracked
 `.githooks/` directory; its `pre-commit` hook runs `bun run precommit`.
+
+1. During edits, format the touched paths and run related tests with
+   `bun test <path>`. Use `typecheck:quick` or `test:quick` for broader feedback.
+2. Before submission, validate the final revision with the full `precommit`
+   gate. When committing with the installed hook, let the hook run it rather
+   than manually running the same gate immediately before `git commit`.
+3. Without the hook, run `bun run precommit` before committing. Rerun checks
+   after further edits; do not bypass the gate or treat quick checks as a pass.
+
+For a specific browser fixture, filter the existing tests instead of running
+all browser regressions, for example:
+
+```bash
+bun test web/src/uiScale.test.ts --test-name-pattern terminalLinks
+```
+
+Browser harnesses share bounded waits and process teardown in
+`web/src/browserChrome.ts`. Wait for a ready condition or render boundary instead
+of a fixed settling delay; retain timed observation windows when testing long
+presses, cancellation, or repeated events. Focused runs do not replace the full
+gate.
 
 Workspace checks: `bun run --filter roamgate-web typecheck` and
 `bun run --filter roamgate-server typecheck` (builds/embeds web assets first).

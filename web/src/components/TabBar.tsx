@@ -331,7 +331,9 @@ export function TabBar({
             >
               <MessageSquareText size={14} />
               <span>Annotations</span>
-              <span className="tabbar-change-count">{annotationCount}</span>
+              {annotationCount > 0 ? (
+                <span className="tabbar-change-count">{annotationCount}</span>
+              ) : null}
             </button>
           </div>
         </div>
