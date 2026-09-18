@@ -28,6 +28,16 @@ export async function runBinaryProcessWithTimeout(
   return Promise.race([output, timeout]);
 }
 
+// A child may exit before it reads stdin: `git check-ignore --stdin` outside a
+// repository exits 128 immediately. Writing a payload larger than the pipe
+// buffer then breaks the pipe, and Bun reports that EPIPE on the FileSink
+// promise rather than by throwing. Nothing awaits that promise, so leaving it
+// unhandled terminates the whole server. The child's exit code and stderr still
+// describe the failure, so the broken pipe itself is safe to drop here.
+function ignoreBrokenStdin(result: number | Promise<number>) {
+  if (typeof result !== "number") void result.catch(() => {});
+}
+
 export async function runProcessWithInputTimeout(
   argv: string[],
   input: Buffer | string,
@@ -39,8 +49,8 @@ export async function runProcessWithInputTimeout(
     stdout: "pipe",
     stderr: "pipe",
   });
-  proc.stdin.write(input);
-  proc.stdin.end();
+  ignoreBrokenStdin(proc.stdin.write(input));
+  ignoreBrokenStdin(proc.stdin.end());
   let timer: ReturnType<typeof setTimeout> | null = null;
   const output = Promise.all([
     proc.exited,
