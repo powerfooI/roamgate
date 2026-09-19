@@ -12,6 +12,7 @@ import {
 import { useStoreSelector } from "../store";
 import type { Pane } from "../types";
 import { UI_LOCALE } from "../uiLocale";
+import { copyTextWithFeedback } from "../copyText";
 import { useConnectionClient } from "../useConnectionClient";
 import { shortId } from "../utils";
 import { AgentIcon } from "./AgentIcon";
@@ -215,9 +216,7 @@ export function AgentSessionPreviewDialog({
               <button
                 type="button"
                 className="agent-history-icon"
-                onClick={() =>
-                  void navigator.clipboard?.writeText(summary.path)
-                }
+                onClick={() => void copyTextWithFeedback(summary.path)}
                 aria-label="Copy session file path"
                 title="Copy path"
               >

@@ -225,6 +225,9 @@ export function FilePreviewContent({
   const theme = useDocumentTheme();
   const previewText = preview?.text ?? null;
   const previewPath = preview?.path ?? "";
+  const markdownDocumentPath = preview
+    ? workspaceMarkdownDocumentPath(previewPath, preview.root)
+    : previewPath;
   const hasPreviewText = previewText !== null;
   const hasMarkdownPreview = hasPreviewText && isMarkdownPath(previewPath);
   const hasMermaidPreview = hasPreviewText && isMermaidPath(previewPath);
@@ -252,7 +255,7 @@ export function FilePreviewContent({
     return (source: string) =>
       resolveWorkspaceMarkdownImageUrl(
         source,
-        previewPath,
+        markdownDocumentPath,
         connectionClient,
         preview.workspace_id,
         preview.resource_revision,
@@ -262,6 +265,7 @@ export function FilePreviewContent({
     preview?.resource_revision,
     preview?.workspace_id,
     previewPath,
+    markdownDocumentPath,
   ]);
   const markdownLinkUrlResolver = useMemo(() => {
     if (!preview?.workspace_id) return undefined;
@@ -629,11 +633,7 @@ export function FilePreviewContent({
             <MarkdownPreview
               text={previewText}
               imageUrlResolver={markdownImageUrlResolver}
-              documentPath={
-                onOpenFile && preview
-                  ? workspaceMarkdownDocumentPath(previewPath, preview.root)
-                  : undefined
-              }
+              documentPath={onOpenFile ? markdownDocumentPath : undefined}
               linkUrlResolver={markdownLinkUrlResolver}
               fragment={fragment}
               onOpenDocument={onOpenFile}

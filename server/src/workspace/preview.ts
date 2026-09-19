@@ -1,4 +1,7 @@
+import { imageMimeForPath } from "../../../shared/filePreview";
 import { PREVIEW_IMAGE_MAX_BYTES, PREVIEW_MAX_BYTES } from "./file-constants";
+
+export { imageMimeForPath } from "../../../shared/filePreview";
 
 export function trimIncompleteUtf8Tail(buffer: Buffer) {
   if (!buffer.length) return buffer;
@@ -19,35 +22,6 @@ export function trimIncompleteUtf8Tail(buffer: Buffer) {
   return buffer.length - leadIndex < expected
     ? buffer.subarray(0, leadIndex)
     : buffer;
-}
-
-export function imageMimeForPath(path: string) {
-  const ext = path.toLowerCase().split(".").pop() ?? "";
-  switch (ext) {
-    case "svg":
-      return "image/svg+xml";
-    case "apng":
-      return "image/apng";
-    case "png":
-      return "image/png";
-    case "jpg":
-    case "jpeg":
-    case "jpe":
-    case "jfif":
-      return "image/jpeg";
-    case "gif":
-      return "image/gif";
-    case "webp":
-      return "image/webp";
-    case "bmp":
-      return "image/bmp";
-    case "ico":
-      return "image/x-icon";
-    case "avif":
-      return "image/avif";
-    default:
-      return null;
-  }
 }
 
 export function inlinePreviewMimeForPath(path: string) {

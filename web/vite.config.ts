@@ -23,6 +23,55 @@ export default defineConfig({
     // Build straight into the server's static dir so the backend can serve it.
     outDir: "../server/public",
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Group small grammars into lazy chunks to keep expanded highlighting
+        // within the embedded server's asset-count budget.
+        manualChunks(id) {
+          const language = id.match(
+            /@shikijs\/langs\/dist\/([^/]+)\.mjs$/,
+          )?.[1];
+          if (!language) return;
+          if (
+            [
+              "awk",
+              "diff",
+              "docker",
+              "ini",
+              "json5",
+              "jsonl",
+              "make",
+              "nginx",
+              "proto",
+              "toml",
+              "xml",
+              "yaml",
+            ].includes(language)
+          ) {
+            return "syntax-config";
+          }
+          if (
+            [
+              "clojure",
+              "crystal",
+              "elixir",
+              "elm",
+              "erlang",
+              "fsharp",
+              "groovy",
+              "haskell",
+              "kotlin",
+              "common-lisp",
+              "lua",
+              "r",
+              "scala",
+            ].includes(language)
+          ) {
+            return "syntax-extra";
+          }
+        },
+      },
+    },
   },
   server: {
     port: 5173,

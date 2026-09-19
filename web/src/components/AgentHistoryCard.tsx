@@ -3,6 +3,7 @@ import { Copy } from "lucide-react";
 import { historyEntryLabel, type HistoryEntry } from "./agentHistory";
 import { formatBytes } from "./agentSession";
 import { UI_LOCALE } from "../uiLocale";
+import { copyTextWithFeedback } from "../copyText";
 import "./AgentHistoryCard.css";
 
 export const HISTORY_PREVIEW_CHARS = 4000;
@@ -68,7 +69,7 @@ export const AgentHistoryCard = memo(function AgentHistoryCard({
           <button
             type="button"
             className="agent-history-copy"
-            onClick={() => void navigator.clipboard?.writeText(entry.text)}
+            onClick={() => void copyTextWithFeedback(entry.text)}
             aria-label={`Copy entry ${index}`}
             title="Copy"
           >

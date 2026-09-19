@@ -1,5 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { bridge } from "../api";
+import { store } from "../store";
+import { copyTextWithFeedback } from "../copyText";
 import { AgentHistoryDrawer } from "./AgentHistoryDrawer";
 import "../styles/tokens.css";
 import "../styles/base.css";
@@ -153,6 +155,96 @@ async function run() {
           "Toolbar actions must be keyboard focusable",
         );
       }
+    }
+    // Exercise the real copy buttons with the Clipboard API absent (HTTP).
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(
+      navigator,
+      "clipboard",
+    );
+    const originalExecCommand = document.execCommand;
+    const copied: string[] = [];
+    try {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: undefined,
+      });
+      document.execCommand = (command) => {
+        if (command !== "copy") return false;
+        copied.push((document.activeElement as HTMLTextAreaElement).value);
+        return true;
+      };
+      for (const selector of [
+        ".agent-history-copy",
+        '[aria-label="Copy message"]',
+      ]) {
+        const button = container.querySelector<HTMLButtonElement>(selector);
+        check(!!button, `Missing copy button: ${selector}`);
+        button?.click();
+      }
+      check(
+        copied.length === 2 &&
+          copied.every((text) => text.startsWith("# Example")),
+        "History and message copies must use the HTTP fallback",
+      );
+      await Promise.resolve();
+      check(
+        store.get().notice?.kind === "success",
+        "Successful copies must provide feedback",
+      );
+      document.execCommand = () => false;
+      await copyTextWithFeedback("unavailable");
+      check(
+        store.get().notice?.kind === "error",
+        "Missing clipboard support must report failure",
+      );
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: async () => {
+            throw new Error("Clipboard denied");
+          },
+        },
+      });
+      await copyTextWithFeedback("denied");
+      check(
+        store.get().notice?.detail === "Clipboard denied",
+        "Clipboard denial must not be an unhandled rejection",
+      );
+      for (const olderFails of [true, false]) {
+        const olderWrite = Promise.withResolvers<void>();
+        let writes = 0;
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: {
+            writeText: () => {
+              if (++writes === 1) return olderWrite.promise;
+              return olderFails
+                ? Promise.resolve()
+                : Promise.reject(new Error("latest copy denied"));
+            },
+          },
+        });
+        const olderCopy = copyTextWithFeedback("older");
+        await copyTextWithFeedback("latest");
+        const latestNotice = store.get().notice;
+        check(
+          latestNotice?.kind === (olderFails ? "success" : "error"),
+          "Latest copy must report its outcome",
+        );
+        if (olderFails) olderWrite.reject(new Error("older copy denied"));
+        else olderWrite.resolve();
+        await olderCopy;
+        check(
+          store.get().notice === latestNotice,
+          "Superseded copy must not overwrite the latest feedback",
+        );
+      }
+    } finally {
+      document.execCommand = originalExecCommand;
+      if (clipboardDescriptor)
+        Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      else Reflect.deleteProperty(navigator, "clipboard");
+      store.clearNotice();
     }
     container.style.width = "380px";
     render(false);

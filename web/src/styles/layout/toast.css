@@ -1,6 +1,7 @@
 .toast-viewport {
   position: fixed;
-  z-index: 1500;
+  /* Body-level notifications must stay visible above modal backdrops. */
+  z-index: 6001;
   top: 62px;
   right: 16px;
   width: min(440px, calc(100vw - 32px));

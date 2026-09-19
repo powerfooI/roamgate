@@ -3,6 +3,8 @@ import { roamgateLocalStorage } from "./browserStorage";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { AgentMessageDialog } from "./components/AgentMessageDialog";
+import { AgentSessionPreviewDialog } from "./components/AgentSessionPreviewDialog";
 import { bridge, type ConnectionClient } from "./api";
 import { __storeTesting, store } from "./store";
 import type { FilePreview, Workspace } from "./types";
@@ -54,7 +56,7 @@ function response(path: string, workspaceId = "one"): FilePreview {
     checkout_path: "/repo",
     path: path === "alias.md" ? "real.md" : path,
     text: path.endsWith("A.md")
-      ? "# A\n[B](B.md#section)\n[alias](alias.md#section)\n[root](/alias.md#section)\n[escape](../etc/passwd)"
+      ? "# A\n[B](B.md#section)\n[alias](alias.md#section)\n[root](/alias.md#section)\n[escape](../etc/passwd)\n![logo](/assets/logo.png)"
       : `# ${path}\n${"paragraph\n\n".repeat(80)}\n## Section\nTarget`,
     binary: false,
     size: 100,
@@ -97,8 +99,18 @@ const client: ConnectionClient = {
       return {
         workspace_id: workspaceId,
         root: "/repo",
-        entries: [],
+        entries: [{ path: "A.md", kind: "unstaged", status: "M" }],
         counts: {},
+      };
+    }
+    if (method === "git.diff_file") {
+      return {
+        workspace_id: workspaceId,
+        root: "/repo",
+        path,
+        kind: params.kind,
+        diff: "",
+        truncated: false,
       };
     }
     return {};
@@ -161,6 +173,18 @@ async function showA(path = "A.md") {
       ),
     "A rendered",
   );
+  const image = document.querySelector<HTMLImageElement>(
+    '.file-preview-markdown img[alt="logo"]',
+  );
+  const imageUrl = new URL(image?.src ?? location.href);
+  check(
+    imageUrl.searchParams.get("path") === "assets/logo.png",
+    `${path}: image lost workspace-root base`,
+  );
+  check(
+    !imageUrl.searchParams.has("scope"),
+    `${path}: image incorrectly uses filesystem scope`,
+  );
   // A cached render can precede completion of its background read.
   await settle();
 }
@@ -212,11 +236,139 @@ async function quickOpen(path: string) {
   await until(() => pending.has(`one:${path}`), "quick-open request");
 }
 
+async function checkModalCopyFeedback() {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const clipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const execCommand = document.execCommand;
+  const layout = document.documentElement.dataset.layout;
+  try {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    for (const mode of ["desktop", "mobile"]) {
+      document.documentElement.dataset.layout = mode;
+      for (const session of [false, true]) {
+        flushSync(() =>
+          root.render(
+            session ? (
+              <AgentSessionPreviewDialog
+                pane={{
+                  pane_id: "p",
+                  terminal_id: "t",
+                  workspace_id: "one",
+                  tab_id: "tab",
+                  focused: true,
+                  agent: "pi",
+                  agent_status: "Idle",
+                  revision: 1,
+                }}
+                summary={{
+                  status: "ok",
+                  agent: "pi",
+                  pane_id: "p",
+                  path: "/session.jsonl",
+                  updated_at: "2026-01-01T00:00:00Z",
+                  file: { size: 10 },
+                  stats: { turns: 1, records: 1, token_usage: null },
+                }}
+                loading={false}
+                error=""
+                onClose={() => {}}
+              />
+            ) : (
+              <AgentMessageDialog
+                message={{
+                  id: "copy-test",
+                  role: "assistant",
+                  text: "Copy fixture",
+                  sent_at: "2026-01-01T00:00:00Z",
+                }}
+                onClose={() => {}}
+              />
+            ),
+          ),
+        );
+        const label = session ? "Copy session file path" : "Copy message";
+        for (const succeeds of [false, true]) {
+          document.execCommand = () => succeeds;
+          const button = document.querySelector<HTMLButtonElement>(
+            `[aria-label="${label}"]`,
+          )!;
+          flushSync(() => button.click());
+          await until(
+            () =>
+              document.querySelector(
+                succeeds ? ".toast-success" : ".toast-error",
+              ),
+            "modal copy feedback rendered",
+          );
+          const toast = document.querySelector<HTMLElement>(
+            succeeds ? ".toast-success" : ".toast-error",
+          )!;
+          check(
+            mode !== "mobile" ||
+              getComputedStyle(document.querySelector(".app")!).transform !==
+                "none",
+            "Mobile feedback must be tested with a transformed app stacking context",
+          );
+          check(
+            toast.parentElement?.parentElement === document.body,
+            `${mode}: toast must escape the app stacking context`,
+          );
+          const bounds = toast.getBoundingClientRect();
+          check(
+            toast.contains(
+              document.elementFromPoint(
+                bounds.left + bounds.width / 2,
+                bounds.top + bounds.height / 2,
+              ),
+            ),
+            `${mode} ${label}: feedback is hidden behind the modal`,
+          );
+          const dismiss = toast.querySelector<HTMLButtonElement>(
+            '[aria-label="Dismiss notification"]',
+          )!;
+          const dismissBounds = dismiss.getBoundingClientRect();
+          check(
+            dismiss.contains(
+              document.elementFromPoint(
+                dismissBounds.left + dismissBounds.width / 2,
+                dismissBounds.top + dismissBounds.height / 2,
+              ),
+            ),
+            `${mode}: notification dismiss is blocked by the modal`,
+          );
+          flushSync(() => dismiss.click());
+          check(
+            document.querySelector(".modal-backdrop") !== null,
+            "Dismissing feedback must not close the dialog",
+          );
+        }
+      }
+    }
+  } finally {
+    root.unmount();
+    host.remove();
+    document.execCommand = execCommand;
+    if (clipboard) Object.defineProperty(navigator, "clipboard", clipboard);
+    else Reflect.deleteProperty(navigator, "clipboard");
+    if (layout === undefined) delete document.documentElement.dataset.layout;
+    else document.documentElement.dataset.layout = layout;
+    flushSync(() => store.clearNotice());
+  }
+}
+
 async function run() {
   void fetch("/event", { method: "POST", body: "fixture started" });
   // Only this disposable loopback page's storage and transport are used.
   store.init = () => {};
   bridge.connection = () => client;
+  roamgateLocalStorage.setItem("diffViewMode", "split");
+  roamgateLocalStorage.setItem("desktopDiffWrap", "false");
+  roamgateLocalStorage.setItem("mobileDiffWrap", "true");
   __storeTesting.replaceState({
     ...store.get(),
     status: "connected",
@@ -241,6 +393,7 @@ async function run() {
   const root = createRoot(element);
   flushSync(() => root.render(<App />));
   await settle();
+  await checkModalCopyFeedback();
   flushSync(() =>
     window.dispatchEvent(
       new CustomEvent(WORKSPACE_INSPECTOR_REQUEST_EVENT, {
@@ -254,6 +407,51 @@ async function run() {
     ),
   );
   await until(() => document.querySelector(".file-row"), "file tree");
+
+  await showA();
+  await until(
+    () => document.querySelector(".file-preview-changes-toggle"),
+    "file changes available",
+  );
+  const inspector = document.querySelector<HTMLElement>(
+    ".workspace-inspector",
+  )!;
+  const previousStyle = inspector.style.cssText;
+  flushSync(() => previewButton("Changes").click());
+  for (const width of [380, 900]) {
+    inspector.style.cssText = `width:${width}px;min-width:${width}px;max-width:${width}px;flex-basis:${width}px`;
+    await until(
+      () => inspector.classList.contains("is-compact") === width < 640,
+      "inspector width changed",
+    );
+    await until(
+      () =>
+        !!inspector.querySelector(".file-preview-changes .diff-content-view"),
+      "embedded diff mounted",
+    );
+    const diff = inspector.querySelector<HTMLElement>(
+      ".file-preview-changes .diff-content-view",
+    )!;
+    check(
+      diff.classList.contains("is-mobile") === width < 640,
+      "embedded Changes lost compact mode",
+    );
+    check(
+      !!diff.querySelector(".diff-view-toggle") === width >= 640,
+      "embedded Changes uses wrong view controls",
+    );
+    check(
+      diff.querySelector(".diff-wrap-toggle")?.getAttribute("aria-pressed") ===
+        String(width < 640),
+      "embedded Changes uses the wrong wrap preference",
+    );
+  }
+  inspector.style.cssText = previousStyle;
+  flushSync(() => previewButton("Changes").click());
+  await until(
+    () => document.querySelector(".file-preview-markdown"),
+    "return to preview",
+  );
 
   // The reviewed bug: B starts from a link, then C starts in the tree. Check
   // both completion orders; B must not publish even while C is still loading.

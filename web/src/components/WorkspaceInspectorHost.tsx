@@ -677,6 +677,7 @@ export function WorkspaceInspectorHost({
                             : {}
                         }
                         resourceKey={`${contentResourceKey}:file:${fileChangesKey}`}
+                        mobile={compact}
                         connectionClient={connectionClient}
                         annotations={annotations}
                         onCreateAnnotation={onCreateAnnotation}

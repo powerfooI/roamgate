@@ -11,6 +11,7 @@ import {
 } from "react";
 import { Copy, Download, Eye, RefreshCw, X } from "lucide-react";
 import { useStoreSelector } from "../store";
+import { copyTextWithFeedback } from "../copyText";
 import { useConnectionClient } from "../useConnectionClient";
 import type { Pane } from "../types";
 import {
@@ -1222,9 +1223,7 @@ export function AgentHistoryDrawer({
                 <button
                   type="button"
                   className="agent-history-icon"
-                  onClick={() =>
-                    void navigator.clipboard?.writeText(unavailableCommand)
-                  }
+                  onClick={() => void copyTextWithFeedback(unavailableCommand)}
                   aria-label="Copy integration command"
                   title="Copy command"
                 >
@@ -1396,7 +1395,7 @@ function DetailRow({
         <button
           type="button"
           className="agent-history-icon"
-          onClick={() => void navigator.clipboard?.writeText(value)}
+          onClick={() => void copyTextWithFeedback(value)}
           aria-label={`Copy ${label.toLowerCase()}`}
           title={`Copy ${label.toLowerCase()}`}
         >

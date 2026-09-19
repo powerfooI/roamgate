@@ -1,8 +1,13 @@
+import { imageMimeForPath } from "../../../shared/filePreview";
 import { roamgateLocalStorage } from "../browserStorage";
 import { shortcutMatches } from "../shortcutPreferences";
-import { DEFAULT_THEMES, type SelectedLineRange } from "@pierre/diffs";
 import {
-  PatchDiff,
+  DEFAULT_THEMES,
+  getSingularPatch,
+  type SelectedLineRange,
+} from "@pierre/diffs";
+import {
+  FileDiff,
   Virtualizer,
   WorkerPoolContextProvider,
   type WorkerInitializationRenderOptions,
@@ -60,12 +65,13 @@ import {
   writeDiffCollapseState,
   expandDiffEntryOnActivate,
 } from "./diffContentState";
+import { diffSyntaxLanguageForPath } from "./diffSyntaxHighlighting";
 import "./DiffContentView.css";
 
 type DiffViewMode = "split" | "unified";
 type AppTheme = "dark" | "light";
 type PierreDiffOptions = NonNullable<
-  ComponentProps<typeof PatchDiff<DiffReviewAnnotation>>["options"]
+  ComponentProps<typeof FileDiff<DiffReviewAnnotation>>["options"]
 >;
 
 const DIFF_VIEW_MODE_KEY = "diffViewMode";
@@ -115,17 +121,6 @@ const DIFF_SELECTION_CSS = `
     border-block: 1px solid var(--diffs-selection-base);
   }
 `;
-
-const PREVIEWABLE_IMAGE_EXTENSIONS = new Set([
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
-  "bmp",
-  "ico",
-  "avif",
-]);
 
 type ImagePreviewState = {
   preview: FilePreview | null;
@@ -299,9 +294,8 @@ export function diffContentEntries(
   return entries.length ? entries : entry ? [entry] : [];
 }
 
-function isPreviewableImagePath(path: string) {
-  const ext = path.toLowerCase().split(".").pop() ?? "";
-  return PREVIEWABLE_IMAGE_EXTENSIONS.has(ext);
+export function isImageDiff(path: string, diff: string) {
+  return imageMimeForPath(path) !== null && (!diff || isBinaryDiffText(diff));
 }
 
 function isBinaryDiffText(diff: string) {
@@ -414,6 +408,24 @@ class DiffRenderBoundary extends Component<
   render() {
     return this.state.failed ? this.props.fallback : this.props.children;
   }
+}
+
+function HighlightedPatch({
+  patch,
+  path,
+  ...props
+}: Omit<ComponentProps<typeof FileDiff<DiffReviewAnnotation>>, "fileDiff"> & {
+  patch: string;
+  path: string;
+}) {
+  const fileDiff = useMemo(
+    () => ({
+      ...getSingularPatch(patch),
+      lang: diffSyntaxLanguageForPath(path),
+    }),
+    [patch, path],
+  );
+  return <FileDiff<DiffReviewAnnotation> {...props} fileDiff={fileDiff} />;
 }
 
 function RawPatch({ patch }: { patch: string }) {
@@ -671,12 +683,13 @@ const DiffFileSection = memo(function DiffFileSection({
                 fallback={<RawPatch patch={section.file.diff} />}
                 resetKey={section.file.diff}
               >
-                <PatchDiff<DiffReviewAnnotation>
+                <HighlightedPatch
                   // Remount on patch change: the renderer's line cache
                   // realigns against edited documents and can index out of
                   // range when a reloaded diff replaces the whole patch.
                   key={section.file.diff}
                   patch={section.file.diff}
+                  path={section.entry.path}
                   options={sectionOptions}
                   lineAnnotations={pierreAnnotations}
                   selectedLines={
@@ -849,9 +862,7 @@ export function DiffContentView({
         const key = diffEntryKey(visibleEntry);
         const diffFile = filesByKey[key] ?? null;
         const imagePreview =
-          !!diffFile &&
-          isPreviewableImagePath(visibleEntry.path) &&
-          (!diffFile.diff || isBinaryDiffText(diffFile.diff));
+          !!diffFile && isImageDiff(visibleEntry.path, diffFile.diff);
         const autoCollapse = diffAutoCollapseInfo(visibleEntry, diffFile);
         const defaultCollapsed = autoCollapse !== null;
         const active = key === activeEntryKey;

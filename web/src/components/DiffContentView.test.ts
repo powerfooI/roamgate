@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { GitDiffEntry, GitDiffFile } from "../types";
+import { IMAGE_MIME_TYPES } from "../../../shared/filePreview";
 import { expandDiffEntryOnActivate } from "./diffContentState";
 import {
   diffContentEntries,
   diffHunkTargets,
   diffSearchGroups,
   nextDiffHunkIndex,
+  isImageDiff,
 } from "./DiffContentView";
 
 const entries: GitDiffEntry[] = [
@@ -43,6 +45,24 @@ describe("expandDiffEntryOnActivate", () => {
     expect(next.get("unstaged:b.ts")).toBe(true);
     expect(expandDiffEntryOnActivate(undefined, "unstaged:a.ts").size).toBe(1);
   });
+});
+
+test("Changes previews every supported binary image without replacing text diffs", () => {
+  for (const extension of IMAGE_MIME_TYPES.keys()) {
+    const path = `image.${extension.toUpperCase()}`;
+    expect(isImageDiff(path, "Binary files a/image and b/image differ")).toBe(
+      true,
+    );
+    expect(isImageDiff(path, "GIT binary patch\nliteral 3")).toBe(true);
+    expect(isImageDiff(path, "")).toBe(true);
+    expect(isImageDiff(path, "@@ -1 +1 @@\n-<svg/>\n+<svg>...</svg>")).toBe(
+      false,
+    );
+  }
+  expect(isImageDiff("document.pdf", "Binary files a and b differ")).toBe(
+    false,
+  );
+  expect(isImageDiff("README.md", "")).toBe(false);
 });
 
 describe("diffContentEntries", () => {

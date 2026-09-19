@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { listenForTaskNotificationActivation } from "./taskNotifications";
 import { useReviewAnnotationDraft } from "./useReviewAnnotationDraft";
 import {
@@ -3449,92 +3450,97 @@ export default function App() {
         </button>
       </div>
 
-      {s.updateInfo?.update_available || s.notice ? (
-        <div className="toast-viewport" aria-live="polite">
-          {s.updateInfo?.update_available ? (
-            <div
-              className={`toast toast-info ${
-                s.updateInstalling ? "toast-loading" : ""
-              }`}
-              role="status"
-            >
-              <ToastMark kind="info" loading={s.updateInstalling} />
-              <div className="toast-content">
-                <strong>
-                  Roamgate {s.updateInfo.latest_version} is available
-                </strong>
-                <p>
-                  Current {s.updateInfo.current_version}
-                  {s.updateInfo.can_auto_update
-                    ? " · ready to update and restart"
-                    : s.updateInfo.reason
-                      ? ` · ${s.updateInfo.reason}`
-                      : ""}
-                </p>
-                <div className="toast-actions">
-                  {s.updateInfo.can_auto_update ? (
-                    <button
-                      type="button"
-                      className="toast-action primary"
-                      onClick={() => store.installUpdate()}
-                      disabled={s.updateInstalling}
-                    >
-                      {s.updateInstalling ? "Updating..." : "Update & restart"}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="toast-action"
+      {s.updateInfo?.update_available || s.notice
+        ? createPortal(
+            <div className="toast-viewport" aria-live="polite">
+              {s.updateInfo?.update_available ? (
+                <div
+                  className={`toast toast-info ${
+                    s.updateInstalling ? "toast-loading" : ""
+                  }`}
+                  role="status"
+                >
+                  <ToastMark kind="info" loading={s.updateInstalling} />
+                  <div className="toast-content">
+                    <strong>
+                      Roamgate {s.updateInfo.latest_version} is available
+                    </strong>
+                    <p>
+                      Current {s.updateInfo.current_version}
+                      {s.updateInfo.can_auto_update
+                        ? " · ready to update and restart"
+                        : s.updateInfo.reason
+                          ? ` · ${s.updateInfo.reason}`
+                          : ""}
+                    </p>
+                    <div className="toast-actions">
+                      {s.updateInfo.can_auto_update ? (
+                        <button
+                          type="button"
+                          className="toast-action primary"
+                          onClick={() => store.installUpdate()}
+                          disabled={s.updateInstalling}
+                        >
+                          {s.updateInstalling
+                            ? "Updating..."
+                            : "Update & restart"}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="toast-action"
+                        onClick={() => store.dismissUpdate()}
+                        disabled={s.updateInstalling}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                  <CloseButton
+                    variant="toast"
+                    label="Dismiss update notification"
                     onClick={() => store.dismissUpdate()}
                     disabled={s.updateInstalling}
-                  >
-                    Dismiss
-                  </button>
+                  />
                 </div>
-              </div>
-              <CloseButton
-                variant="toast"
-                label="Dismiss update notification"
-                onClick={() => store.dismissUpdate()}
-                disabled={s.updateInstalling}
-              />
-            </div>
-          ) : null}
-          {s.notice ? (
-            <div
-              className={`toast toast-${s.notice.kind} ${
-                s.notice.loading ? "toast-loading" : ""
-              }`}
-              role={s.notice.kind === "error" ? "alert" : "status"}
-            >
-              <ToastMark kind={s.notice.kind} loading={s.notice.loading} />
-              <div className="toast-content">
-                <strong>{s.notice.message}</strong>
-                <NoticeDetail notice={s.notice} />
-                {s.notice.actionLabel &&
-                (s.notice.actionPaneId ||
-                  s.notice.actionWorkspaceId ||
-                  s.notice.actionClipboardText !== undefined) ? (
-                  <div className="toast-actions">
-                    <button
-                      type="button"
-                      className="toast-action primary"
-                      onClick={() => handleNoticeAction(s.notice!)}
-                    >
-                      {s.notice.actionLabel}
-                    </button>
+              ) : null}
+              {s.notice ? (
+                <div
+                  className={`toast toast-${s.notice.kind} ${
+                    s.notice.loading ? "toast-loading" : ""
+                  }`}
+                  role={s.notice.kind === "error" ? "alert" : "status"}
+                >
+                  <ToastMark kind={s.notice.kind} loading={s.notice.loading} />
+                  <div className="toast-content">
+                    <strong>{s.notice.message}</strong>
+                    <NoticeDetail notice={s.notice} />
+                    {s.notice.actionLabel &&
+                    (s.notice.actionPaneId ||
+                      s.notice.actionWorkspaceId ||
+                      s.notice.actionClipboardText !== undefined) ? (
+                      <div className="toast-actions">
+                        <button
+                          type="button"
+                          className="toast-action primary"
+                          onClick={() => handleNoticeAction(s.notice!)}
+                        >
+                          {s.notice.actionLabel}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
-              <CloseButton
-                variant="toast"
-                label="Dismiss notification"
-                onClick={() => store.clearNotice()}
-              />
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+                  <CloseButton
+                    variant="toast"
+                    label="Dismiss notification"
+                    onClick={() => store.clearNotice()}
+                  />
+                </div>
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
 
       <div
         className={`body mobile-view-${mobileView}`}

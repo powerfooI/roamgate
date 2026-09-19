@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Copy, X } from "lucide-react";
 import { UI_LOCALE } from "../uiLocale";
+import { copyTextWithFeedback } from "../copyText";
 import { CloseButton } from "./CloseButton";
 import { MarkdownPreview } from "./markdown";
 import "./AgentMessageContent.css";
@@ -96,7 +97,7 @@ export function AgentMessageContent({
             <button
               type="button"
               className="agent-history-icon"
-              onClick={() => void navigator.clipboard?.writeText(message.text)}
+              onClick={() => void copyTextWithFeedback(message.text)}
               aria-label="Copy message"
               title="Copy"
             >
