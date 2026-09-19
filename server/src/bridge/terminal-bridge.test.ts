@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ServerWebSocket } from "bun";
 import * as net from "node:net";
+import { EventEmitter, once } from "node:events";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
 import { BinReader, BinWriter, encodeFrame } from "./bincode";
 import { createTerminalBridge } from "./terminal-bridge";
 import { silentLogger } from "../utils/logger";
+import {
+  flushCoalescedMessages,
+  sendWebSocketMessage,
+  WS_COALESCE_LIMIT_BYTES,
+} from "./websocket-send";
 
 test("explicit half-page history retains legacy Wheel source and line count", async () => {
   const sources: number[] = [];
@@ -1290,32 +1296,60 @@ test("does not coalesce an incremental legacy frame", async () => {
   }
 });
 
-test("still coalesces a full legacy repaint", async () => {
-  const socketPath = await startThinServer({ protocol: 17, frameFull: true });
-  const browser = {} as ServerWebSocket<unknown>;
-  const sends: { payload: string; coalesceKey?: string }[] = [];
+test("keeps full and incremental legacy frames in order under backpressure", async () => {
+  let source!: net.Socket;
+  const socketPath = await startThinServer({
+    onDirectAttach: (socket) => {
+      source = socket;
+    },
+  });
+  let buffered = WS_COALESCE_LIMIT_BYTES + 1;
+  const sent: string[] = [];
+  const received = new EventEmitter();
+  const browser = {
+    close: () => {},
+    getBufferedAmount: () => buffered,
+    send: (payload: string) => {
+      sent.push(payload);
+      return payload.length;
+    },
+  } as unknown as ServerWebSocket<unknown>;
+  const cleanup = () => {};
   const bridge = createTerminalBridge({
     clientSocketPath: socketPath,
     herdrProtocol: async () => 17,
-    safeSend: (_ws, payload, _context, coalesceKey) => {
-      sends.push({ payload, coalesceKey });
-      return true;
+    safeSend: (ws, payload, context, coalesceKey) => {
+      const result = sendWebSocketMessage(ws, payload, {
+        cleanup,
+        context,
+        coalesceKey,
+      });
+      if (JSON.parse(payload).terminal) received.emit("frame");
+      return result;
     },
     clientLabel: () => "test",
     markRpcError: () => undefined,
   });
   try {
+    const fullFrame = once(received, "frame");
     await bridge.handleTerminalRpc(browser, "attach", "terminal.attach", {
       terminal_id: "term_1",
       cols: 100,
       rows: 30,
+      relay_active: false,
     });
-    await waitForTerminalFrame(sends.map((s) => s.payload));
-    const frames = sends.filter((s) => s.payload.includes('"terminal"'));
-    expect(frames.length).toBeGreaterThan(0);
-    for (const frame of frames) {
-      expect(frame.coalesceKey).toBe("terminal:term_1");
-    }
+    await fullFrame;
+    const incrementalFrame = once(received, "frame");
+    source.write(terminalFrame(100, 30, 17, false));
+    await incrementalFrame;
+    buffered = 0;
+    flushCoalescedMessages(browser, { cleanup });
+    expect(
+      sent
+        .map((payload) => JSON.parse(payload))
+        .filter((message) => message.terminal)
+        .map((message) => message.terminal.full),
+    ).toEqual([true, false]);
   } finally {
     bridge.dispose();
   }
@@ -1354,7 +1388,9 @@ test("drops a held frame when the viewer resizes the terminal", async () => {
       cols: 120,
       rows: 40,
     });
-    expect(drops).toEqual([{ ws: browser, coalesceKey: "terminal:term_1" }]);
+    expect(drops).toEqual([
+      { ws: browser, coalesceKey: 'terminal:[null,null,"term_1"]' },
+    ]);
   } finally {
     bridge.dispose();
   }
@@ -1393,7 +1429,9 @@ test("drops held frames for every viewer when an attach resizes the shared termi
       rows: 50,
     });
     expect(drops.map((d) => d.ws)).toContain(first);
-    expect(drops.every((d) => d.coalesceKey === "terminal:term_1")).toBe(true);
+    expect(
+      drops.every((d) => d.coalesceKey === 'terminal:[null,null,"term_1"]'),
+    ).toBe(true);
   } finally {
     bridge.dispose();
   }

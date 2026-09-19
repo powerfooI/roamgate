@@ -136,6 +136,13 @@ export function createTerminalBridge(args: {
       : "shared";
   }
 
+  const terminalCoalesceKey = (terminalId: string) =>
+    `terminal:${JSON.stringify([
+      args.connectionId ?? null,
+      args.connectionGeneration ?? null,
+      terminalId,
+    ])}`;
+
   const serialize = (message: Record<string, unknown>) =>
     args.connectionId
       ? serializeConnectionEnvelope(
@@ -620,16 +627,15 @@ export function createTerminalBridge(args: {
           });
           payloads.set(key, payload);
         }
-        // A full frame is a complete repaint, so a viewer that is behind only
-        // needs the newest one for this terminal. An incremental frame is NOT
-        // safe to coalesce: a legacy ThinClient stream carries `full` on the
-        // wire and sends false for a partial update, which no later frame
-        // repeats. Dropping one of those loses output and corrupts the render.
+        // Only endpoint streams always repaint the full surface. Holding even
+        // a full legacy frame lets later incremental frames overtake their base.
         args.safeSend(
           viewer,
           payload,
           "terminal-frame",
-          t.full ? `terminal:${terminalId}` : undefined,
+          thin instanceof EndpointTerminalSession && t.full
+            ? terminalCoalesceKey(terminalId)
+            : undefined,
         );
       }
     });
@@ -962,7 +968,7 @@ export function createTerminalBridge(args: {
             // This resize changes the surface for EVERY viewer, so any frame
             // held under backpressure is now the wrong size for all of them.
             for (const viewer of shared.viewers)
-              args.dropCoalesced?.(viewer, `terminal:${terminalId}`);
+              args.dropCoalesced?.(viewer, terminalCoalesceKey(terminalId));
             logger.debug(
               refreshReusedTerminal ? "terminal refreshed" : "terminal resized",
               {
@@ -1170,7 +1176,7 @@ export function createTerminalBridge(args: {
         shared.cols = cols;
         shared.rows = rows;
         // Anything held for this terminal was rendered for the previous size.
-        args.dropCoalesced?.(ws, `terminal:${requestedTerminalId}`);
+        args.dropCoalesced?.(ws, terminalCoalesceKey(requestedTerminalId!));
         if (relaySize) {
           clipboardRelayRevision += 1;
           syncClipboardRelaySize(relaySize.cols, relaySize.rows);
