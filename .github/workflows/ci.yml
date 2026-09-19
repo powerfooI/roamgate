@@ -2,8 +2,6 @@ name: CI
 
 on:
     pull_request:
-    # Prepare Release uses this explicit dispatch because events created with its
-    # GITHUB_TOKEN do not start other workflows automatically.
     workflow_dispatch:
 
 permissions:

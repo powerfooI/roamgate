@@ -11,7 +11,6 @@ on:
         type: string
 
 permissions:
-  actions: write
   contents: write
   pull-requests: write
 
@@ -62,5 +61,4 @@ jobs:
             --base main \
             --head "$branch" \
             --title "Release $VERSION" \
-            --body "Prepare $TAG by updating package versions. Release notes are generated from merged PRs when the release is published. Review and merge this PR after its explicitly dispatched CI check passes, then run the Publish Release workflow for $VERSION."
-          gh workflow run "CI" --ref "$branch"
+            --body "Prepare $TAG by updating package versions. Release notes are generated from merged PRs when the release is published. Review this PR, select **Approve workflows to run**, and wait for CI to pass before merging. Then run the Publish Release workflow for $VERSION."

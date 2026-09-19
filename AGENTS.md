@@ -107,8 +107,9 @@ Stable releases use separate prepare and publish phases:
 1. Run the **Prepare Release** workflow with `X.Y.Z` or
    `patch`/`minor`/`major`. It updates the three `package.json` versions plus
    `herdr-plugin.toml` and opens a normal release PR.
-   Review and merge that PR after its checks pass; the workflow never merges or
-   tags on its own.
+   Review that PR and select **Approve workflows to run** to start CI for the
+   bot-created PR. Wait for its checks to pass before merging; the workflow
+   never merges or tags on its own.
 2. Run the **Publish Release** workflow with the merged `X.Y.Z` version. It
    finds and verifies the matching release commit on `main`, creates the
    annotated `vX.Y.Z` tag there, and starts `.github/workflows/release.yml` on
