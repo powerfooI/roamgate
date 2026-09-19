@@ -171,7 +171,14 @@ async function run() {
     "preferences still live in Menu",
   );
   click("Configuration");
-  await waitFor(() => !!document.querySelector(".configuration-modal"));
+  // Lazy mounting exposes the DOM before the dialog's focus effect runs.
+  // Wait for focus before dispatching keys, or that effect can steal it back.
+  await waitFor(
+    () =>
+      !!document
+        .querySelector(".configuration-modal")
+        ?.contains(document.activeElement),
+  );
   const dialog = document.querySelector<HTMLElement>(".configuration-modal")!;
   check(
     dialog.contains(document.activeElement),
