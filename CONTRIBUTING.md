@@ -11,6 +11,11 @@
    bun run dev:web
    ```
 
+The development bridge binds to `127.0.0.1:8788`; Vite proxies `/api`, `/ws`,
+and `/login` there. Installed services and `bun run start:server` retain port
+8787 by default. Keep reverse proxies pointed at the production service, not
+the development bridge or Vite.
+
 Keep `bun.lock` (the only lockfile) and shared tools (TypeScript, Bun types,
 formatting/linting) at root; browser/Vite dependencies in `web/package.json`;
 server runtime dependencies in `server/package.json`. After dependency changes,

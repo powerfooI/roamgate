@@ -37,6 +37,23 @@ test("workspaces share one lockfile and root development tooling", () => {
   }
 });
 
+test("development bridge and Vite proxies stay off the production port", async () => {
+  const requireRoot = createRequire(new URL("package.json", root));
+  const { scripts } = requireRoot("./server/package.json");
+  expect(scripts.dev).toBe(
+    "HOST=127.0.0.1 PORT=8788 bun run --hot src/index.ts",
+  );
+  expect(scripts.start).toBe("bun run src/index.ts");
+
+  const { default: config } = await import("../web/vite.config");
+  for (const path of ["/api", "/ws", "/login"]) {
+    expect(config.server?.proxy?.[path]).toMatchObject({
+      target: "http://127.0.0.1:8788",
+    });
+  }
+  expect(config.server?.proxy?.["/ws"]).toMatchObject({ ws: true });
+});
+
 test("CI and release jobs install once from the workspace root", () => {
   for (const file of ["ci.yml", "prepare-release.yml", "release.yml"]) {
     const workflow = Bun.YAML.parse(
