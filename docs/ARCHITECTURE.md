@@ -1,418 +1,293 @@
 # Architecture
 
-This document describes Roamgate's current system contracts. See
-[FEATURES.md](../FEATURES.md) for behavior and shortcuts and
-[DEPLOYMENT.md](./DEPLOYMENT.md) for supported configurations.
+Roamgate's system contracts. See [Features](../FEATURES.md) for UI behavior,
+[Deployment](./DEPLOYMENT.md) for configuration, and [Security](../SECURITY.md)
+for the trust model.
 
 ## System overview
 
-Browsers cannot open Unix domain sockets or Windows named pipes directly. A
-Bun bridge serves the frontend, authenticates browsers, and connects to Herdr:
-
 ```text
 Browser (React + Vite)
-   |  same-origin HTTP / WebSocket
+   | same-origin HTTP / WebSocket
    v
 Bridge (Bun + TypeScript) -- node:net --> Herdr sockets
 ```
 
-`herdr.sock` carries NDJSON control requests; `herdr-client.sock` carries binary
-terminal traffic. Browser RPC uses `{ id, method, params }` and returns either
-`{ id, result }` or `{ id, error }`, with connection identity attached to scoped
-traffic. Subscribed Herdr events are pushed as `{ event: ... }`.
+Browsers cannot open Unix sockets or Windows named pipes. The bridge connects
+`herdr.sock` (NDJSON control) and `herdr-client.sock` (binary terminal traffic),
+serves the frontend, and owns authentication, local/SSH runtimes, host operations,
+notifications, health, and updates. React owns presentation and browser-local
+preferences; xterm displays Herdr-rendered output, not a bridge-owned PTY.
 
-The bridge owns socket access, local/SSH runtimes, file/Git/worktree/hook/session
-operations, terminal and clipboard relay, authentication, health, and updates.
-React owns presentation and browser-local preferences. xterm displays Herdr's
-server-rendered output rather than reconstructing a PTY in the bridge.
-
-## Agent activity
-
-The bridge enriches `agent.list` with optional `last_activity_at` epoch
-milliseconds from the session file's modification time. Resolution uses the
-reported session identity and the connection's file access, without parsing
-transcripts. File checks have bounded concurrency and a 1.5-second response
-budget; unavailable metadata never removes agents from the list. Remote IDs
-that require local directory searches are left unresolved rather than matched
-to this host's sessions. The browser uses timestamps for idle-agent recency,
-with Herdr's state-change sequence as a fallback, and stores no activity history.
-
-## Task notifications
-
-Each connection runtime observes agent transitions through its existing per-pane
-status subscription and periodic pane reconciliation, even with no browser
-clients. A runtime-local tracker seeds initial state silently, ignores snapshots
-that raced newer events, and emits completion/input-required transitions once.
-Runtime disposal stops observation; queued deliveries check the owning lease.
-
-Web Push uses a private persistent VAPID key pair and per-device subscriptions
-with independent completion/blocked preferences. Authenticated same-origin HTTP
-manages enrollment and revocation. Sends use encrypted payloads, an outbound
-provider allowlist, a ten-second deadline, four concurrent requests, and a bounded
-256-delivery in-memory queue. Queue overflow and provider failures are logged;
-there is no durable event replay. The Service Worker shows notifications without
-an active page and routes clicks through the connection-generation-checked pane
-navigation path. Enrolled pages suppress duplicate local system notifications.
-See [deployment and delivery limits](DEPLOYMENT.md#web-push-notifications).
-
-## Terminal endpoints
-
-Interface text size uses root CSS zoom. Terminal surfaces cancel that zoom and
-scale xterm's font size directly, so cell measurements, selection, mouse input,
-and IME positioning stay in viewport CSS pixels. Radix popovers also cancel zoom
-around their positioning wrapper and reapply it to the content; their viewport
-limits convert back to content units.
-
-Backend selection uses the verified protocol allowlist, not browser version
-inference. See [Herdr compatibility](./DEPLOYMENT.md#herdr-compatibility) for
-versions, fallback configuration, and clipboard limitations.
-
-Herdr 0.9.0 endpoints require generation 1 and the exact codecs
-`shell.snapshot.v1`, `shell.surface.v1`, `shell.input.semantic.v1`, and
-`shell.blob.v1`. Unknown generations/codecs are rejected regardless of advertised
-capabilities. Attachment waits for the initial snapshot. Each terminal crops its
-pane from the server-rendered tab surface and sends semantic input to that pane;
-panes retain their shared layout dimensions.
-
-Endpoint hellos opt into `surface_delta` and `surface_reuse` by default; each
-socket accepts these named controls only when enabled and its welcome advertises
-the matching capability.
-Herdr 0.9.0 and peers without these capabilities retain the generation-1 full-frame
-and patch path. Delta controls carry unpadded Base64 bincode; reuse controls carry
-JSON metadata. Both compose against the same connection-local baseline as full
-surfaces and legacy patches, before pane cropping or presentation filtering.
-
-**Configuration → Connection → Terminal incremental transport** controls both
-codecs together. `settings.terminal_transport.get/update` reads and persists the
-boolean `surface_codecs` under the routed connection ID in `settings.json`.
-Authenticated bridge clients share this preference; it is not a browser-local
-setting or a separate authorization boundary. Successful changes close only that
-runtime's endpoint display sessions and broadcast
-`settings.terminal_transport.updated`. Viewers reattach with fresh baselines; the
-`terminal_configuration_changed` close reason does not count toward takeover
-retry limits. Terminal tasks, legacy thin sessions, and other connection runtimes
-are unaffected. Queued attachments re-read settings if a change overtakes them.
-
-Legacy patches update only named panes and replace the complete cursor state,
-including `null` to clear it. Delta/reuse metadata replaces the pane list, cursor,
-hyperlinks, and scroll state, allowing same-size tab/topology changes. Geometry
-changes require a full surface. Decoders bound collections and validate boot,
-projection, surface revisions, spans, and hyperlink indices before publishing.
-A malformed or mismatched update closes the stream and clears its baseline;
-viewers receive the existing terminal-closed signal and reattach with a fresh
-hello and full frame rather than silently retaining a stale screen.
-
-These codecs reduce Herdr-to-bridge traffic. The bridge still composes complete
-frames and sends its existing cropped ANSI repaints to browsers; upstream byte
-savings do not imply smaller bridge-to-browser messages. Popup grids are retained
-for delta validation, but popup and Kitty graphics rendering remain outside the
-pane terminal presentation.
-
-Independently of those upstream codecs, bridge-to-browser terminal messages of
-at least 1 KiB use WebSocket compression when the browser negotiates it. Each
-connection owns its compressor and retains its compression context for WebKit
-compatibility, at the cost of per-connection compression memory. Inbound
-decompression remains shared with client context takeover disabled. Smaller terminal messages,
-clipboard payloads, and ordinary RPC replies remain uncompressed; clients without
-compression support receive the same protocol unchanged. Backpressure limits and
-runtime-generation checks still apply.
-
-`terminal.attach` carries pane content dimensions in `cols`/`rows`. When layout
-is available, the browser also supplies `surface_cols`/`surface_rows` for the
-complete tab, including pane borders but excluding app sidebar/tab-bar insets.
-The bridge validates this optional pair as integers in 1..65535 and uses it in
-new endpoint handshakes. Surface feedback corrects stale or missing hints;
-legacy direct attachments continue to use the pane content dimensions.
-Endpoint repaints are clipped to each viewer's requested viewport, including
-wide-character and cursor boundaries. Browsers discard oversized frames that
-arrive after a local shrink or were held during text selection.
-
-Terminal links retain cell coordinates while scanning soft-wrapped text. Endpoint
-cell repaints do not contain soft-wrap metadata, so file detection also considers
-adjacent path fragments with application-inserted indentation and padding. These
-inferred paths must pass workspace-scoped file resolution before activation;
-ordinary rows remain independent when no combined file exists. Scanning is bounded,
-blank lines separate contexts, and local HTTP detection uses only explicit soft
-wraps. File and directory links open the shared action menu; preview uses the
-pane's workspace, and directories can prefill the existing workspace-creation
-dialog. Web links still open directly in the browser with the configured modified
-click, never through a server-host browser or plugin.
-
-Each endpoint repaint also carries an opaque `link_frame` content identity, stable across identical, cursor-only,
-and focus-only surfaces (including those emitted by link resolution itself).
-Cropped cells, hyperlink targets, content revision, viewport/scroll changes, and
-input/resize intent invalidate it. Identical payloads do not rewrite xterm;
-cursor-only updates preserve its native link IDs and an in-progress click.
-`terminal.link.resolve` verifies the requesting
-viewer's attachment and this identity. OSC 8 targets are read from the owned
-cropped frame's cell hyperlink ID/table; this needs no `pane.link.resolve`
-advertisement. Plain-text lookups call the optional resolver on that exact
-terminal socket. Coordinates are zero-based display cells within the already
-cropped pane: do not add the split's surface origin, scrollback offset, CSS pixels,
-or interface scale. Requests include the emitted pane's content revision and
-scroll offset. Hover probes are bounded to URL starts and one continuation cell
-per row, not a per-cell scan; optional reads time out independently of terminal
-input, focus, and scrolling.
-
-Herdr 0.9.1's `pane.link.resolve` returns inclusive visible cell regions, **not a
-URL**. `pane.link.activate` returns a URL but also invokes configured plugin link
-handlers; Roamgate never calls it. Complete HTTP(S) targets can be reconstructed
-from the matching rendered regions, including wrapped URLs and wide/combining
-cells. A plain URL clipped by the Herdr viewport cannot be safely recovered;
-ambiguous viewport-edge regions are conservatively not clickable. xterm's native
-OSC 8 links retain their explicit full destinations, including when only part of
-the label is visible. OSC 8 `file://` targets use the same file action menu after
-percent-decoding an absolute path on the connected Herdr filesystem, not the
-browser's machine. Only empty or `localhost` authorities are accepted; network
-hosts/UNC paths, credentials, queries/fragments, malformed encoding, and control
-characters are rejected. Other URI schemes are not opened.
-
-Older servers, missing methods, and lookup failures keep local HTTP and
-workspace-file detection, including wrapped/indented file continuations; local
-URL detection does not guess a missing wrapped tail. Asynchronous replies and
-activation callbacks recheck presentation, buffer, text/cells, dimensions,
-scrolling, navigation, and connection identity. New output invalidates old link
-actions even while selection holds the previous repaint. Once an explicit click
-captures a file path, its menu and keyboard focus survive ordinary program output;
-connection, workspace, and navigation changes still dismiss it. Hover never
-activates links.
-
-Touch uses the existing 450 ms long-press selection toolbar. A separate lookup
-uses the original touched display cell, not the selected word, without changing
-the desktop hover request generation. It probes at most that one cell upstream,
-retaining bounded local file resolution. **Open link** opens synchronously from
-an explicit user gesture; **File actions** uses the same file/directory menu.
-Copy, Add comment, Done, selection handles, and presentation freeze are unchanged.
-Normal finger release lets a pending lookup finish; handle edits, cancellation,
-multitouch, scrolling, frame changes, resize, navigation, and reconnect retire it.
-OSC 8 targets take precedence over their labels; unsafe/malformed explicit targets
-and failed endpoint touch reads never fall back to a URL-looking label. Legacy
-incremental streams have no public OSC 8 cell metadata: their touch detection is
-limited to plain-text URLs and paths, not explicit OSC 8 destinations.
-
-Method/capability advertisements belong to each terminal socket, never another
-terminal or runtime. Reattachment negotiates again; browser reconnect and
-connection changes clear cached availability until refreshed. The bridge returns
-availability in attach replies and scoped workspace metadata, then checks every
-method again at dispatch:
-
-- `pane.focus` is required for safe attachment; absence fails without legacy
-  takeover.
-- `pane.scroll` gates history scrolling; `tab.create` and `workspace.create`
-  gate creation on the existing source endpoint. UI controls explain missing
-  methods or pending negotiation. Unrelated control-API operations are unaffected.
-- Input and resize are core codec operations, not optional methods. Only
-  `health_check` enables endpoint ping/pong. `surface_interest` and
-  `presentation_effects_fence` do not enable surface-setting or fencing controls.
-
-Full page-key requests use semantic PageUp/PageDown input on endpoints. Herdr
-routes them to the application or host scrollback using the PTY's current modes;
-they do not require `pane.scroll`. Explicit half-page history requests continue
-to use `pane.scroll`, including in mouse-aware applications. Legacy attachments
-retain their PageKey/Wheel routing. Both keyboard shortcuts and mobile buttons
-use this contract.
-
-Mouse input uses zero-based pane-local cells, bounded to the crop. Only a press
-inside the pane acquires drag/release ownership; later positions clamp to its
-edge. Reporting changes and session closure cancel ownership. Mouse-aware apps
-receive semantic mouse events; ordinary wheels and explicit history shortcuts
-use history scrolling. History requests coalesce wheel intent while one dispatch
-awaits both its RPC reply and viewport feedback; other terminal commands remain
-usable. A confirmed no-op reply needs no repaint. Completed movement is not
-rebased by later history growth. Surfaces have no request identity: a changed
-viewport can also be an external replacement, which becomes authoritative when
-no newer wheel intent is queued. Input, missing panes or scroll metrics, and
-session closure cancel queued history movement. During browser selection,
-presentation retains only the latest full repaint and resumes when selection clears. Pane/session changes
-retire pending presentation; selection replay cannot send application input.
-Endpoint frames include content revision and absolute viewport rows when the
-viewer receives the complete pane crop. Edge-drag selection requests overlapping
-history viewports one at a time, admitting only matching-revision repaints while
-retaining immutable copies of visited cells. Copy uses the complete absolute
-range, not just its visible highlight. Release, lost mouse-up, blur, resize, and
-attachment reset stop drag scrolling. Changed content or geometry stops further
-history requests and preserves the already captured selection.
-
-Input waits for attachment readiness and revalidates the attachment, session,
-and routing lease. It is never replayed into a detached or replaced terminal.
-Disconnect rejects pending endpoint requests and invalidates clipboard ownership.
-
-Mermaid file previews and Markdown fences share a lazy renderer and independent
-zoomable viewports. Source wrappers and leading metadata/comments are removed
-before diagram-type detection; source views retain the original file. Layout and
-theme remain controlled by Studio. Image previews use inert image elements;
-workspace SVG endpoints also send a sandbox CSP for direct navigation, blocking
-scripts and external resources. SVG source is never inserted into Studio's DOM.
-
-## Browser navigation and creation
-
-On endpoint connections, `browserNavigation.ts` projects browser-local
-workspace/tab/pane choices into the shared UI selection fields. Snapshots supply
-topology, not subsequent navigation. Stale layouts and delayed action results
-cannot replace newer browser selections. This is independent workspace/tab
-navigation, not independent native same-tab pane focus. Legacy navigation,
-topology mutations, and terminal dimensions remain shared.
-
-Active terminal selection and terminal clicks send `terminal.focus` through the
-attached shell's `pane.focus` endpoint so the tab surface supplies that pane's
-cursor. The browser restores its selection after split attachments become ready,
-but does not refocus on streaming frames or routine snapshots. Focus requests are
-serialized per browser across endpoint lanes, superseded queued selections are
-discarded, and attachment ownership and connection leases are rechecked before
-dispatch. Same-tab cursor ownership remains shared with other Herdr clients.
-
-Creation uses explicit context and `focus: false`, adopting returned IDs only
-while the initiating selection and connection lease remain current. Roamgate-only
-`browser_source` identifies the source terminal, pane, tab, and workspace. The
-bridge validates attachment ownership and live topology, strips that field, and
-calls the advertised create method on the existing endpoint's serialized
-focus/scroll lane. It creates no extra endpoint or focus call. Omitting a
-synthesized cwd preserves Herdr's `terminal.new_cwd` policy; explicit cwd wins.
-Same-tab pane focus, including the `follow` cwd source, remains shared.
-
-Missing source attachments fail explicitly. The only exception is first-workspace
-bootstrap: each runtime serializes an empty `workspace.list` check and control
-creation, rechecking lease and deadline before dispatch. Competing creations must
-retry once topology becomes nonempty. The 20-second admission deadline covers
-readiness, validation, and queue residence, below the browser RPC timeout.
-Expired undispatched mutations never execute; dispatched timeouts report uncertain
-completion so callers check Herdr before retrying.
-
-Subscription acknowledgements, including reconnects, trigger fresh snapshots;
+Browser RPC sends `{ id, method, params }` and receives `{ id, result }` or
+`{ id, error }`. Subscribed events use `{ event: ... }`; downstream traffic also
+carries connection identity. Subscription acknowledgements trigger snapshots;
 events during refresh queue another refresh. This reconciles missed changes,
 not an atomic or replayable event log.
 
 ## Connection isolation
 
 A bridge-global `ConnectionManager` owns shared profiles and independent
-`ConnectionRuntime` instances. Each runtime owns its transport, clients, viewers,
-clipboard relay, subscriptions, services, caches, and reconnect lifecycle.
-Browser selection does not start or stop other runtimes; render streams open
-only while viewed. Disconnect/removal disposes the bridge runtime and SSH tunnel,
-not Herdr or its workspaces.
+`ConnectionRuntime` instances. Each runtime owns its transport, viewers,
+subscriptions, clipboard relay, services, caches, and reconnect lifecycle.
+Render streams open only while viewed. Disconnect/removal stops the runtime and
+SSH tunnel, not Herdr or its workspaces.
 
-Downstream RPC/HTTP requires an immutable connection ID, runtime generation, and
-request-local ready-runtime lease. Replies, errors, events, terminal frames, and
-clipboard pushes carry that identity. HTTP streams recheck the lease per chunk
-and cancel their source on replacement. Dispatched effects may finish on the
-original runtime, but retired replies, chunks, and metadata cannot publish.
-Explicit malformed, unknown, stale, or not-ready identities fail without fallback.
-Omitted identities and legacy HTTP aliases remain a bounded, logged compatibility
-path for older single-connection clients only.
+- Downstream RPC/HTTP requires an immutable connection ID, runtime generation,
+  and request-local ready-runtime lease. Replies, events, frames, and clipboard
+  pushes carry that identity; HTTP streams recheck it per chunk.
+- Replacement retires leases before publishing status. Already-dispatched effects
+  may finish on the original host, but retired results cannot publish. Explicit
+  malformed, unknown, stale, or unready identities fail without fallback.
+  Omitted identities and legacy HTTP aliases are a bounded, logged compatibility
+  path for older single-connection clients only.
+- Authentication, health, updates, client accounting, and profile management are
+  bridge-global and independent of downstream readiness. Global RPC rejects
+  misleading connection fields. Starts/stops serialize; shutdown is bounded;
+  one failed runtime does not block healthy connections or management.
+- Browser caches, storage, mount keys, notifications, and async actions are
+  connection-scoped. Switching connections retires the browser lease; same-ID
+  runtime replacement clears active and inactive sessions before IDs can recur.
 
-Bridge-global authentication, health, updates, client accounting, and profile
-management remain independent of downstream readiness. Global RPC rejects
-misleading connection fields. Only ready runtimes route requests; start, stop,
-replacement, and post-ready transport exit invalidate leases before publishing
-status. Starts/stops are serialized, shutdown is bounded, and one failed runtime
-does not block management or healthy connections.
+## Terminal endpoints
 
-Browser mount keys, caches, local storage, notification targets, and asynchronous
-actions are connection-scoped. Switching connections retires the browser lease;
-same-ID runtime replacement clears active and inactive cached sessions before
-resource IDs can be reused.
+### Negotiation and transport
+
+Backend selection uses a verified protocol allowlist, not browser inference.
+[Compatibility](./DEPLOYMENT.md#herdr-compatibility) defines supported versions,
+legacy fallback, and clipboard limitations.
+
+Herdr 0.9.0 endpoints require generation 1 and exact codecs
+`shell.snapshot.v1`, `shell.surface.v1`, `shell.input.semantic.v1`, and
+`shell.blob.v1`. Unknown generations/codecs fail closed. Attachment waits for the
+initial snapshot; each viewer crops its pane from the shared tab surface.
+
+Capabilities belong to **each terminal socket**, are renegotiated on reattach,
+and are checked again at dispatch:
+
+| Capability | Contract |
+| --- | --- |
+| `pane.focus` | Required for attachment; absence fails without legacy takeover. |
+| `pane.scroll` | Gates explicit history scrolling, not semantic page keys. |
+| `tab.create`, `workspace.create` | Gate creation on the existing source endpoint. |
+| `health_check` | Enables ping/pong; input and resize are core codec operations. |
+| `surface_interest`, `presentation_effects_fence` | Do not authorize surface-setting or fencing controls. |
+
+Endpoint hellos opt into `surface_delta` and `surface_reuse` by default, unless
+disabled; each requires a matching welcome capability. Full surfaces, legacy patches,
+Base64-bincode deltas, and JSON reuse controls share a connection-local baseline
+before cropping. Legacy patches update named panes and replace the cursor
+(including `null`); delta/reuse replaces pane, cursor, hyperlink, and scroll
+metadata. Geometry changes require a full surface.
+
+Decoders bound collections and validate boot/projection/surface revisions, spans,
+and hyperlink indices. Invalid updates close the stream and clear its baseline;
+viewers reattach for a fresh full frame rather than keep stale output. Popup
+grids are validated, but popup and Kitty graphics rendering are not presented.
+
+`settings.terminal_transport.get/update` persists `surface_codecs` per connection
+in `settings.json`. Changes close that runtime's endpoint displays and broadcast
+`settings.terminal_transport.updated`; viewers reattach with fresh baselines.
+Queued attachments reread settings. Configuration closes do not consume takeover
+retries; tasks, legacy sessions, and other runtimes are unaffected. This is a
+shared preference, not an authorization boundary.
+
+These codecs reduce **Herdr-to-bridge** traffic; browsers still receive cropped
+ANSI repaints. Independently, terminal messages of at least 1 KiB use negotiated
+WebSocket compression with per-connection context for WebKit compatibility.
+Inbound decompression is shared with client context takeover disabled. Smaller
+messages, clipboard payloads, and RPC replies stay uncompressed; backpressure
+and generation checks still apply.
+
+### Geometry, input, and selection
+
+`terminal.attach` supplies pane `cols`/`rows` and optionally tab
+`surface_cols`/`surface_rows` (both integers in 1..65535). Tab dimensions include
+pane borders, not app chrome; surface feedback corrects stale hints. Legacy
+attachments use pane dimensions. Repaints clip wide characters and cursors to
+the viewer's viewport; browsers reject oversized frames after shrinking.
+
+Root CSS zoom scales the UI. Terminals cancel it and scale xterm fonts directly,
+keeping cell measurements, IME, selection, and mouse input in viewport CSS pixels.
+Popover positioning likewise cancels zoom and reapplies it to content.
+
+Input waits for readiness and revalidates attachment/session/runtime leases;
+it is never replayed into a replacement terminal. Disconnect rejects pending
+requests and invalidates clipboard ownership.
+
+- Full PageUp/PageDown sends semantic input for Herdr to route by PTY mode;
+  explicit half-page history uses `pane.scroll`, even in mouse-aware apps.
+  Legacy attachments retain PageKey/Wheel routing.
+- Mouse cells are zero-based and pane-local. Only an in-pane press owns a drag;
+  subsequent positions clamp to edges. Reporting changes/closure cancel ownership.
+- History scrolling coalesces wheel intent while awaiting RPC and viewport
+  feedback, without blocking other commands. No-op replies need no repaint.
+  Completed movement is not rebased by history growth; external viewport changes
+  become authoritative when no newer intent is queued. Input, missing metrics or
+  panes, and closure cancel queued movement.
+- Browser selection holds the latest repaint until cleared. Session changes
+  retire pending presentation; replay never sends input. Edge-drag history reads
+  one overlapping viewport at a time, accepting matching content revisions and
+  retaining immutable cells for the complete copied range. Release, blur, lost
+  mouse-up, resize, or reset stops scrolling. Content/geometry changes preserve
+  captured text but stop further history requests.
+
+### Links
+
+Local detection scans soft-wrapped text with cell coordinates. File detection
+also considers bounded, indented continuations because endpoint cell repaints
+lack soft-wrap metadata; inferred paths must resolve within the pane's workspace.
+Blank lines separate contexts. Local URL detection never guesses missing tails.
+
+Endpoint repaints carry an opaque `link_frame` identity, stable across identical,
+cursor-only, and focus-only surfaces. Content, hyperlink, viewport/scroll, input,
+or resize changes invalidate it. Identical repaints do not rewrite xterm, keeping
+native link IDs and in-progress clicks intact.
+
+`terminal.link.resolve` verifies attachment ownership and frame identity. OSC 8
+uses the cropped frame's hyperlink table; optional plain-text resolution runs on
+that exact socket with its content revision and scroll offset. Coordinates are
+zero-based **cropped-pane display cells**, never surface origins or CSS pixels.
+Hover probes are bounded and independently timed out; hover never activates.
+
+Herdr 0.9.1's `pane.link.resolve` returns inclusive visible regions, not URLs.
+Roamgate reconstructs complete HTTP(S) targets, including wrapped/wide cells,
+but rejects ambiguous viewport-clipped URLs. It never calls `pane.link.activate`,
+which can invoke host plugin handlers. OSC 8 retains explicit destinations even
+for partial labels. Local `file://` targets require decoded absolute host paths
+and empty/`localhost` authorities; network hosts, UNC paths, credentials,
+queries/fragments, malformed encoding, and control characters are rejected.
+Other URI schemes are not opened.
+
+Async lookups recheck frame, buffer, geometry, navigation, and connection state,
+even while selection freezes presentation. Once clicked, a file menu survives
+ordinary output but closes on connection/workspace/navigation changes. Web links
+open in the browser; files use the pane's workspace, not later global focus.
+
+Touch long-press resolves the original touched cell, with at most one upstream
+probe, then requires an explicit **Open link** or **File actions** gesture.
+Selection edits, cancellation, multitouch, scrolling, frame changes, resize, and
+reconnect retire lookups. Unsafe explicit OSC 8 targets and failed endpoint touch
+reads never fall back to URL-looking labels. Legacy touch supports plain-text
+URLs/paths only, without explicit OSC 8 cell metadata.
+
+## Browser navigation and creation
+
+`browserNavigation.ts` projects endpoint browser-local selections into shared UI
+fields. Snapshots supply topology, not subsequent navigation; stale layouts and
+results cannot overwrite newer selections. Legacy navigation, topology changes,
+terminal dimensions, and native same-tab pane focus remain shared.
+
+Active selection/clicks send `terminal.focus` through the attached `pane.focus`
+endpoint. Focus restores after split attachment, not on routine frames/snapshots.
+Requests serialize per browser across endpoint lanes; superseded selections are
+discarded and ownership/leases rechecked. Same-tab cursor ownership remains shared.
+
+Creation uses explicit context and `focus: false`; returned IDs are adopted only
+while the initiating selection and lease remain current. The bridge validates
+and strips Roamgate-only `browser_source`, then uses the existing endpoint's
+serialized focus/scroll lane without another endpoint or focus call. Omitting
+synthetic cwd preserves Herdr's `terminal.new_cwd`; explicit cwd wins. Shared
+same-tab focus still controls the `follow` source.
+
+Missing source attachments fail. Only first-workspace bootstrap uses control
+creation, serializing an empty-topology check per runtime. Competing requests
+retry when topology becomes nonempty. A 20-second admission deadline covers
+readiness, validation, and queuing: expired undispatched mutations never execute;
+dispatched timeouts report uncertain completion, requiring inspection before retry.
 
 ## Workspace resource ownership
 
-A checkout owns Files/Changes data; a workspace supplies its runtime route; a tab
-is a return location; a pane supplies optional path/session context. Repository
-groups do not represent a combined working tree. Changes describe checkout edits,
-not proof that one agent produced them. Last step uses recorded activity snapshots,
-not attribution of arbitrary working-tree edits.
+A **checkout** owns Files/Changes; a workspace supplies routing, a tab a return
+location, and a pane optional path/session context. Repository groups are not
+merged working trees. Changes and Last step snapshots do not prove agent ownership.
 
-Git resource keys encode the endpoint-qualified repository identity
-(`worktree.gui_settings_key`) and normalized checkout path as a pair. The path
-separates linked checkouts; the repository identity separates SSH destinations
-when a saved connection is repointed. Missing or blank settings keys fall back
-to the trimmed repository key, which cannot distinguish endpoints on its own.
-Newly enriched identities do not inherit this fallback's stored state. Runtime
-generations are not part of persistent keys. Non-Git resources use workspace
-identity. All are connection-scoped.
-Workspaces sharing a checkout may share caches, but requests retain
-workspace/runtime leases and resource revisions: refresh/removal retires
-older prefetches. Tab/pane IDs do not own resource caches.
+Git resource keys pair endpoint-qualified `worktree.gui_settings_key` with the
+normalized checkout path, scoped by connection. Blank keys fall back to the
+trimmed repository key, which cannot distinguish endpoints; enriched identities
+do not inherit fallback state. Persistent keys exclude runtime generations.
+Non-Git resources use workspace identity.
 
-Older repository-wide Inspector storage is not automatically migrated: its file
-selections, layout preferences, and review drafts do not identify their original
-checkout. The original browser storage is retained, while checkout-specific
-state starts fresh. Switching checkouts restores that checkout's saved selection
-or shows its file list when nothing has been selected.
+Shared-checkout workspaces may share caches, but requests retain workspace/runtime
+leases and resource revisions. Refresh/removal retires old prefetches. Tab/pane
+IDs never own caches. Legacy repository-wide Inspector state is retained but not
+automatically migrated because it lacks checkout identity.
 
-Inspector actions capture the originating workspace instead of consulting global
-focus when results arrive. A vanished workspace can rebind only to the same
-checkout; a missing path must not fall back to a sibling worktree. Agent cwd is
-used only inside the checkout, otherwise browsing starts at its root. Successful
-worktree removal clears that checkout's state and retargets/closes the Inspector
-without affecting siblings. Closing one workspace does not erase resources still
-used by another workspace for that checkout.
-
-The terminal stays mounted across Inspector views and geometry changes. Resource
-layout/preferences are separate from content caches. See
-[Workspace Inspector](../FEATURES.md#workspace-inspector) for controls and
-[History synchronization](./HISTORY.md) for session projection contracts.
+Actions capture the originating workspace. A vanished workspace can rebind only
+to the same checkout; missing paths never fall back to siblings. Agent cwd is
+used only inside the checkout. Removal clears only that checkout's state; closing
+one workspace retains resources another workspace still uses. Terminals stay
+mounted across Inspector changes; layout preferences and content caches are separate.
 
 ## Filesystem browsing
 
-`file.list` stays checkout-relative by default, including realpath checks for
-symlink escapes. Each filesystem listing explicitly sends `scope: "filesystem"`
-and an absolute host directory; returned entries use absolute paths and the reply
-confirms its scope. This mode is local to the open explorer and is never persisted
-as a browser-wide permission or shared with another checkout/connection. Directory
-responses from a retired view cannot replace its successor. Search filters only
-loaded entries and never recursively scans the filesystem.
+`file.list` is checkout-relative with realpath/symlink escape checks. Each
+filesystem listing explicitly sends `scope: "filesystem"` and an absolute host
+directory; replies confirm scope and return absolute entries. The mode is
+view-local, not a persisted permission; retired responses cannot replace a new
+view. Search filters loaded entries only.
 
-Absolute preview resources use `scope=filesystem` on download URLs. Relative
-Markdown links and images resolve beside their absolute source document. Upload
-and delete remain checkout-scoped; filesystem mode exposes browsing, previews,
-copying paths, and downloads. Explorer resource caches stay separate from the lazy
-UI so opening a terminal does not load the file-search matcher or browser controls.
+Absolute previews use `scope=filesystem` download URLs; relative Markdown links
+and images resolve beside their source. Upload/delete remain checkout-scoped.
+Explorer caches are separate from lazy UI code. Mermaid previews share a lazy
+renderer, strip wrappers/metadata only for detection, and retain original source.
+Images are inert elements; SVG is never inserted into the app DOM, and direct
+SVG responses carry a sandbox CSP blocking scripts and external resources.
+
+## Agent activity
+
+`agent.list` adds optional `last_activity_at` from session-file mtime without
+parsing transcripts. Checks have bounded concurrency and a 1.5-second budget;
+missing metadata never removes agents. Remote IDs needing local directory search
+stay unresolved. Idle ordering uses mtime, then Herdr state-change sequence,
+without browser activity history. [History synchronization](./HISTORY.md) owns
+projection, caching, and incremental transcript contracts.
+
+## Task notifications
+
+Each runtime tracks agent transitions through per-pane subscriptions and periodic
+reconciliation, even without browsers. Initial state is silent; snapshots cannot
+overwrite newer events. Transitions emit once; disposal stops observation and
+queued sends recheck the owning lease.
+
+Web Push persists private VAPID keys and device subscriptions. Authenticated
+same-origin HTTP manages enrollment/revocation; encrypted sends use a provider
+allowlist, ten-second deadline, four concurrent requests, and a bounded
+256-delivery memory queue. Failures/overflow are logged, not durably replayed.
+The Service Worker checks connection generation when routing clicks; enrolled
+pages suppress duplicate local notifications. See [delivery limits](./DEPLOYMENT.md#web-push-notifications).
 
 ## SSH transport
 
-Each SSH runtime supervises one OpenSSH process forwarding both sockets into a
-private temporary directory. Readiness requires control `ping` and a render
-handshake. Transient failures use cancellable backoff capped at 30 seconds and
-six attempts, resetting after 30 seconds stable-ready; authentication, host-key,
-and permanent protocol failures do not retry. Post-ready exit retires the runtime
-generation before retry. CLI SSH uses the same validation/probes but does not
-persist or automatically retry.
+Each runtime supervises one OpenSSH process forwarding both sockets into a private
+temporary directory. Readiness requires control `ping` and render handshake.
+Transient failures retry six times with cancellable backoff capped at 30 seconds,
+reset after 30 seconds stable-ready. Authentication, host-key, and permanent
+protocol failures do not retry. Post-ready exit retires the generation first.
+CLI SSH uses the same probes without persistence or automatic retry.
 
-Only an OpenSSH alias or `user@host` is accepted, passed after `--` with fixed
-options. Host-key checking stays enabled; service authentication is noninteractive.
-Credentials/options remain in the service user's OpenSSH configuration. Stderr is
-bounded and sanitized, not relayed as raw banners. Cleanup removes owned paths
-only after confirmed child exit; unconfirmed termination preserves paths and
-reports failure. Remote file, Git, hook, and supported session operations use the
-same runtime host boundary. See [connection setup](./DEPLOYMENT.md#multiple-and-remote-herdr-connections).
+Only OpenSSH aliases or `user@host` are accepted, after `--` with fixed options.
+Host-key checks remain enabled; service authentication is noninteractive. OpenSSH
+configuration owns credentials/options. Stderr is bounded/sanitized. Cleanup
+removes owned paths only after confirmed child exit; otherwise it preserves them
+and reports failure. Host operations share this boundary; see [connection setup](./DEPLOYMENT.md#multiple-and-remote-herdr-connections).
 
 ## Distribution model
 
-Production builds embed the frontend directory with Bun's native asset loader and
-the Bun runtime into one platform executable; users need neither Bun nor Node.js. Source builds use Bun and Vite. See
-[standalone builds](./DEPLOYMENT.md#build-a-standalone-executable).
-
-Roamgate has a separate release namespace: executable and package members,
-archive/checksum filenames, and manifest identity all use `roamgate`. Every
-release provides a manifest; missing or legacy metadata fails closed without
-an archive-discovery fallback. Publication checks require exactly the six
-platforms' Roamgate assets and prohibit legacy update aliases. Historical
-clients cannot discover Roamgate from their old Latest URLs; see the
-[manual transition contract](./DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui).
+Production embeds frontend assets and Bun into one executable; targets need no
+Bun/Node.js. Builds use the `roamgate` release identity across binaries, archives,
+checksums, and manifests. Missing/legacy manifests fail closed without archive
+discovery. Publication requires all six platform asset sets and no legacy update
+aliases. Old clients require [manual migration](./DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui).
 
 ## Trust boundary
 
-Roamgate is a trusted single-user administration tool, not a sandbox or multi-user
-permission system. Authenticated browsers can control terminals, change files,
-manage shared profiles, and execute trusted repository hooks. It provides neither
-TLS termination nor rate limiting; see [SECURITY.md](../SECURITY.md).
+Roamgate is trusted single-user administration, not a sandbox or multi-user
+permission system. Listener access and required authentication grant authority;
+see [Security](../SECURITY.md#trust-model) for loopback, TLS, and outer access controls.
 
-The bridge performs no browser-Origin or request-Host checks; listener access and
-any required authentication determine authority. Secure the outer access path as
-described in [SECURITY.md](../SECURITY.md#trust-model), including for forwarded
-loopback listeners. The browser accepts one valid unscoped bridge hello before
-other messages. Replies/events have validated, exclusive message kinds; downstream
-events cannot inject reserved bridge fields. NDJSON lines and subscription
-acknowledgements are bounded, and malformed terminal frames are dropped.
-Observable HTTP traversal forms are rejected, but Bun can normalize dot segments
-before routing; legacy aliases prevent distinguishing every such pre-handler
-normalization.
+The browser accepts one unscoped bridge hello before other messages. Message kinds
+are exclusive and validated; downstream events cannot inject reserved bridge
+fields. NDJSON lines/acknowledgements are bounded; malformed terminal frames are
+dropped. Observable HTTP traversal is rejected, but Bun may normalize dot segments
+before routing; legacy aliases prevent distinguishing every such normalization.

@@ -1,420 +1,236 @@
 # Roamgate Features
 
 A Web/PWA client for a running [Herdr](https://herdr.dev) server.
-[Install it](./docs/DEPLOYMENT.md) or follow the [tutorial](./docs/TUTORIAL.md).
+[Install](./docs/DEPLOYMENT.md) · [Tutorial](./docs/TUTORIAL.md) ·
+[Keyboard shortcuts](#keyboard-shortcuts)
 
 ## Workspace, Tab, and Pane Navigation
 
-- Browse workspaces and recognized agents; create, rename, focus, pin, or close
-  workspaces and create, rename, switch, or close tabs.
-- Group linked Git worktrees under their repository. Pin workspaces/worktrees
-  to the top and collapse groups; preferences stay in this browser.
-- Split panes right/down, resize boundaries, focus neighbors, zoom, or close.
-- Search workspace, worktree, file, tab, pane, and agent actions in the command
-  menu (`Cmd+K` on macOS, `Ctrl+Alt+K` elsewhere). A workspace-relative or
-  absolute path opens the file.
-- Toggle **Zen mode** (`Cmd+Shift+Z` on macOS, `Ctrl+Alt+Z` elsewhere) to hide
-  the topbar, tab strip, and sidebar and run the terminal flush to the window.
-  A small **Exit Zen** tab hangs from the top edge center; hovering it (or
-  the top edge) slides the topbar back, and it stays while one of its menus
-  is open. The sidebar still toggles inside Zen and returns to its prior state on
-  exit; split layouts keep pane borders. Desktop only, stored in this browser;
-  mobile keeps its floating control collapse.
+- Create, rename, pin, switch, and close workspaces/tabs. Linked Git worktrees
+  group under their repository; pins and collapsed groups stay in this browser.
+- Split right/down, resize, focus neighbors, zoom, or close panes.
+- Search workspaces, worktrees, files, tabs, panes, and agents in the command
+  menu. Enter a relative/absolute path to open a file.
+- Desktop **Zen mode** hides app chrome. Hover the top edge to reveal controls
+  or use **Exit Zen**; the sidebar restores its previous state on exit.
 
-Herdr 0.9.0 uses **Local navigation** per browser/connection; legacy connections
-use **Shared navigation**. Reconnect preserves live selections; reload starts
-from Herdr's selection. Closing/moving a selected pane selects a remaining pane
-in its tab, then a remaining tab/workspace. Topology changes, terminal sizes,
-and same-tab pane focus (including `follow` cwd) remain shared.
-
-Creation preserves Herdr's cwd policy and needs an open, connected source
-terminal tab; unavailable sources show an error. An empty session can create its
-first workspace directly. See [compatibility](docs/DEPLOYMENT.md#herdr-compatibility).
+Endpoint connections use **Local navigation** per browser/connection; legacy
+connections use **Shared navigation**. Reconnect preserves selections; reload
+starts from Herdr's selection. Same-tab pane focus, topology, and terminal sizes
+remain shared. Creation preserves Herdr's cwd policy and requires a connected
+source terminal, except for the first workspace in an empty session.
+See [compatibility](docs/DEPLOYMENT.md#herdr-compatibility).
 
 ### Recent Pane Switcher
 
-The switcher includes the 12 most recently focused live panes plus the current
-layout, across tabs/workspaces. Entries show workspace, tab or cwd, and agent
-icon/status. Closed panes leave history automatically. The keys below use the
-macOS preset; see [other platform bindings](#keyboard-shortcuts).
-
-| Key | Action |
-| --- | --- |
-| `Ctrl+Tab` | Open at the previous pane; hold Ctrl and repeat Tab to advance |
-| `Ctrl+Shift+Tab` | Move backward |
-| `Up` / `Down` | Move through entries |
-| Release `Ctrl` or press `Enter` | Switch |
-| `Esc` | Cancel |
+Switch across tabs/workspaces using the 12 most recently focused live panes plus
+the current layout. Use Up/Down; release the opening modifier or press Enter to
+switch, Esc to cancel. On macOS, hold Ctrl and repeat Tab (Shift reverses).
+Entries show workspace, tab/cwd, and agent status; closed panes leave history.
 
 ## Full Browser Terminal
 
-- Display Herdr's server-rendered terminal at browser rows/columns, with splits.
-- Send normal input, modified Enter, macOS line-editing shortcuts, multiline
-  paste, IME composition, and rapid CJK punctuation.
-- Scroll history by wheel, trackpad, touch, or half-page
-  `Alt/Option+Page Up`/`Page Down`. Full page keys go to terminal apps (such as
-  nano) or Herdr history when the shell owns them; mobile buttons route the same
-  way. Endpoint history needs advertised support; disabled controls explain why.
-  Explicit half-page shortcuts remain history actions in mouse-aware apps.
-- On Herdr 0.9.0, clicks/drags/wheels use pane-local cells in mouse-aware apps.
-  Select browser text with Option-drag (macOS) or Shift-drag (elsewhere);
-  ordinary output needs no modifier. Selection pauses visible endpoint output
-  until cleared, then catches up. Drag past pane edges to scroll and copy
-  offscreen rows. Release or blur stops scrolling; if output changes, finish
-  the selection before scrolling further. Pixel mouse is unsupported.
-- Paste clipboard images to upload to the Herdr host and insert their paths,
-  including through `--ssh-host`.
-- Relay terminal OSC 52 clipboard writes. Herdr 0.9.0 follows the foreground
-  recipient, not proven originating-pane ownership; see
-  [clipboard compatibility](docs/DEPLOYMENT.md#herdr-compatibility).
-- `Cmd/Ctrl`-click HTTP(S) links to open directly in a new browser tab. On Herdr
-  0.9.1, read-only link resolution also recognizes wrapped URLs; OSC 8 links keep
-  their full destinations even when their labels are partially visible. Hover
-  underlines the complete detected link across wrapped rows while preserving
-  terminal colors. Plain URLs clipped by the Herdr viewport cannot be recovered
-  safely; see
-  [terminal link limits](docs/ARCHITECTURE.md#terminal-endpoints).
-- `Cmd/Ctrl`-click workspace-relative/absolute paths or local OSC 8 `file://` links
-  for an accessible action menu: preview files/directories, or open a directory
-  as a workspace. The menu stays open while terminal output continues. Wrapped
-  paths remain one link, including indented continuations in agent output, with
-  local detection retained for older servers.
-- On touch devices, long-press terminal output, then tap **Open link** for a web
-  link or **File actions** for a file/directory. Copy, Add comment, Done, and
-  selection handles remain available. Nothing opens until you tap an action.
-  Explicit OSC 8 destinations require endpoint frame metadata; legacy terminal
-  streams support plain-text URLs and paths.
+- Server-rendered terminals support normal input, modified Enter, macOS editing
+  keys, multiline paste, IME, and CJK punctuation.
+- Scroll by wheel, trackpad, touch, or explicit half-page history shortcuts.
+  Full page keys route to terminal apps or Herdr history; unavailable endpoint
+  history controls explain missing support.
+- Mouse-aware apps receive pane-local clicks/drags/wheels. Select browser text
+  with Option-drag (macOS) or Shift-drag (elsewhere); ordinary output needs no
+  modifier. Selection freezes presentation until cleared. Desktop edge-drag
+  captures offscreen rows; release, blur, or changed content stops scrolling.
+- Paste images to upload them to the connected host and insert their paths.
+  OSC 52 clipboard writes follow Herdr's foreground recipient, not proven source
+  pane ownership; see [clipboard limits](docs/DEPLOYMENT.md#herdr-compatibility).
+- `Cmd/Ctrl`-click HTTP(S) links to open a browser tab; file/directory paths open
+  preview/workspace actions. Touch uses long-press, then **Open link** or
+  **File actions**. Nothing opens on hover or ordinary touch.
+
+Herdr 0.9.1 supports read-only wrapped-link resolution; OSC 8 keeps explicit
+full destinations. Viewport-clipped plain URLs cannot be recovered safely.
+Older servers retain local URL/path detection; legacy touch lacks explicit OSC 8
+metadata. See [link contracts](docs/ARCHITECTURE.md#links).
 
 ## Workspace Inspector
 
-Open Files, Changes, or Agent History with the TabBar Inspector button,
-`Cmd+Shift+B` on macOS, or workspace/agent context menus. The header identifies repository,
-branch/worktree, and checkout path. Inspector and Annotations leave the primary
-sidebar's visibility unchanged.
+Open **Files**, **Changes**, or **Agent History** from the Inspector button,
+keyboard shortcuts, or workspace/agent menus.
 
-- Dock right/bottom, resize, or expand without unmounting the terminal. Header
-  controls restore/close; Esc dismisses transient UI, not the Inspector.
-- Tab switches keep it open. Workspace switches restore the target checkout's
-  view, selection, and layout. Closing returns to the originating tab if it
-  exists, otherwise the active tab.
-- Wide layouts show navigation beside content; narrow layouts drill into files
-  with overlay/full-screen views. Resize the separator by dragging or
-  Left/Right/Home/End; double-click resets it. Files and Changes save separate
-  checkout-scoped widths.
+- Dock right/bottom, resize, or expand without unmounting terminals. Narrow
+  layouts use drill-down/overlay views; Esc dismisses transient UI, not Inspector.
+- Tab switches keep Inspector open; workspace switches restore checkout-scoped
+  selection/layout. Files and Changes save separate widths. Closing returns to
+  the originating tab if it still exists.
 - Agent browsing starts at its cwd only inside the checkout. Terminal links use
-  their pane's workspace, not later focus. Changes cover the checkout, not
-  proven agent ownership.
-- Open closed worktrees before browsing. Missing/prunable worktrees offer cleanup,
-  never sibling files. Removal clears only that checkout's resource state.
-- Directory targets opened from terminal links offer a New workspace action that
-  prefills the name (last directory component) and CWD, unless the directory
-  already backs an open workspace.
+  their pane's workspace. Changes describe the checkout, not agent ownership.
+- Closed worktrees must open before browsing; missing ones offer cleanup, never
+  sibling files. Directory previews can prefill **New workspace**.
 
-Preview is read-only: no synthetic terminal tabs or cross-worktree merged changes.
-See [resource ownership](docs/ARCHITECTURE.md#workspace-resource-ownership).
+Inspector and Annotations leave the sidebar unchanged. Preview is read-only;
+[resource ownership](docs/ARCHITECTURE.md#workspace-resource-ownership) prevents
+cross-worktree state mixing.
 
 ## Agent Awareness and Session Inspection
 
-- See Herdr-recognized identity and working/blocked/done/idle status in the tree,
-  pane switcher, command menu, and Agent panel. Focus panes there or through
-  browser completion notifications.
-- Open Agent History with independent User/Agent/Tool filters (User/Agent enabled,
-  Tool hidden initially), a message minimap, and on-demand tool details. The recent window
-  counts 200 conversation entries, not associated tools; exports remain complete.
-  See [History synchronization](docs/HISTORY.md).
-- Choose **Agents: Separate** at the bottom of Workspaces for a dedicated panel,
-  keep agents nested, or pick **Agents: Compact** to hide agent rows and always
-  show each workspace/worktree tab count instead. Separate defaults to
-  **Attention first**: blocked,
-  done, working, idle, unknown. Sort/Group icons offer workspace/manual order
-  and status/workspace/type groups with collapse controls. Ungrouped manual
-  order supports dragging. Sort/group preferences are browser-local; manual
-  order is per connection. Idle agents sort by newest session-file activity
-  reported by the bridge, with Herdr state-change sequence as a fallback.
-  Recency survives refreshes and completion acknowledgements without browser
-  activity tracking; manual and workspace order stay unchanged.
-- Rows show tab names before pane IDs; blank or numbered defaults (`2`, `Tab 2`)
-  are omitted in both views.
-- Open **Menu > Configuration > Integrations** to view Herdr's supported agent
-  integrations and install, update, or uninstall them with confirmation. Changes
-  affect the selected connection's Herdr server user, including over SSH, and
-  are shared across that user's sessions. This does not install agent applications;
-  start a new agent session after installation if reporting has not started.
-  Updates appear first; undetected, uninstalled agents are collapsed. Installed
-  and available integration-script versions are shown only when the selected
-  Herdr server reports them. Missing version information stays unknown; Herdr
-  0.9.0 does not report version numbers. Versions are not inferred from a local
-  or SSH CLI environment. Available means bundled with that server, not the
-  latest agent application or an online update.
-- Inspect turns, tokens, update time, session ID/file, and other metadata. Session
-  Inspector offers Timeline, searchable ATIF/raw transcripts, and original-file
-  or normalized ATIF export.
+- See recognized agents and working/blocked/done/idle status; focus their panes
+  from the tree, switcher, command menu, Agent panel, or notifications.
+- Choose nested agents, **Agents: Separate**, or **Agents: Compact**. Separate
+  supports attention-first, workspace/manual ordering, grouping, and dragging
+  in ungrouped manual mode. Idle recency uses session-file activity, falling
+  back to Herdr state changes. Preferences are browser-local; manual order is
+  per connection.
+- **Agent History** has User/Agent/Tool filters, loaded-text search, a minimap,
+  and on-demand tool details. Its recent window is 200 conversation entries plus associated tools;
+  exports stay complete. **Session Inspector** adds metadata, Timeline,
+  searchable ATIF/raw transcripts, and original/normalized export.
+- **Menu > Configuration > Integrations** installs, updates, or uninstalls
+  Herdr's bundled integrations with confirmation, not agent applications.
+  Changes affect the connected server user across sessions, including SSH.
+  Restart agent sessions if reporting has not started. Versions appear only
+  when Herdr reports them; “available” means bundled, not an online release.
 
-Supported providers: **Codex, Claude, Kimi, Grok Build, Pi, Antigravity CLI**, with a readable
-session record. Missing Herdr integration metadata shows the integration command.
-With `--ssh-host`, Herdr-reported paths and Pi ID lookup read remotely. Other
-ID/directory fallbacks (including Grok Build and Antigravity CLI discovery) remain local and need
-locally accessible transcripts.
+Session inspection supports **Codex, Claude, Kimi, Grok Build, Pi, and Antigravity
+CLI** with readable records. Missing metadata shows integration guidance. SSH
+reads Herdr-reported paths and Pi ID lookups remotely; other ID/directory
+fallbacks remain local and require accessible transcripts.
+See [History synchronization](docs/HISTORY.md).
 
 ## Git Worktree Lifecycle
 
-- Create a linked worktree from freshly fetched `origin/main` without changing
-  the source branch or dirty files; discover/open existing worktrees.
-- See checkout paths, open/closed state, branch status, and uncommitted counts.
-- Focus open worktrees, run `git pull`, or enable per-checkout branch updates.
-- Remove linked worktrees with confirmation, hooks, process cleanup, and recovery
-  that preserves residual files when safe removal fails.
+Open **Worktree Lifecycle** from a workspace menu or the command menu to:
 
-Open **Worktree Lifecycle** from a workspace context menu or search
-`worktree lifecycle` in the command menu.
+- Create a linked worktree from freshly fetched `origin/main`, without changing
+  the source branch or dirty files; discover/open existing worktrees.
+- Inspect paths, open/closed state, branch status, and uncommitted counts.
+- Focus, pull, configure branch updates, or remove with confirmation, hooks,
+  process cleanup, and preservation of residual files when safe removal fails.
 
 ### Paseo Worktree Hooks
 
-Define [Paseo hooks](https://paseo.sh/docs/worktrees) under `worktree` in the
-repository's `paseo.json`:
-
-```json
-{
-  "worktree": {
-    "setup": "bun install",
-    "opened": "./scripts/worktree-opened.sh",
-    "teardown": "./scripts/worktree-teardown.sh",
-    "removed": "./scripts/worktree-removed.sh"
-  }
-}
-```
-
-| Paseo hook | When Roamgate runs it | Working directory |
-| --- | --- | --- |
-| `setup` | After a new linked worktree has been created and opened | New worktree |
-| `opened` | After an existing linked worktree has been opened | Opened worktree |
-| `teardown` | Before a linked worktree is removed | Worktree being removed |
-| `removed` | After removal finishes | Source checkout |
-
-For `setup`, `opened`, and `teardown`, the target checkout's `paseo.json` wins;
-only an absent file falls back to the source checkout. After removal, `removed`
-normally uses the source configuration because the target no longer exists.
-
-Commands run through `sh -c`. The following variables are available:
-
-| Variable | Value |
-| --- | --- |
-| `PASEO_HOOK` | `setup`, `opened`, `teardown`, or `removed` |
-| `PASEO_CHECKOUT_PATH` | Target worktree path, including the former path for `removed` |
-| `PASEO_SOURCE_CHECKOUT_PATH` | Parent/source checkout path when known |
-| `ROAMGATE_HOOK_EVENT` | `worktree.created`, `worktree.opened`, `worktree.before_remove`, or `worktree.removed` |
-| `ROAMGATE_HOOK_CHECKOUT_PATH` | Same target path exposed under a `ROAMGATE_`-prefixed alias |
-| `ROAMGATE_HOOK_SOURCE_CHECKOUT_PATH` | Same source path exposed under a `ROAMGATE_`-prefixed alias |
-
-Legacy `HERDR_GUI_HOOK_*` aliases remain available with the same values.
-
-Notices show hook outcomes and bounded diagnostics (exit code, stderr, or error).
-Failed `teardown` stops removal: fix/disable the hook before retrying. Other hooks
-are not transactional: failed `setup`/`opened` does not undo creation/opening;
-failed `removed` cannot restore a worktree.
-
-Hooks default to enabled. Disable them per repository in **Worktree hooks** or
-**Worktree Lifecycle**, which also show detected configuration and commands.
-With `--ssh-host`, configuration and execution are remote. **Hooks are trusted,
-unsandboxed code:** review `paseo.json` before creating, opening, or removing.
+`paseo.json` supports `setup`, `opened`, `teardown`, and `removed` hooks.
+**Hooks are enabled by default and execute trusted, unsandboxed repository code**
+on the connected host. Review them or disable them under **Worktree hooks** /
+**Worktree Lifecycle** before acting. Failed teardown stops removal; other hook
+failures do not undo completed operations.
+See [configuration and variables](docs/DEPLOYMENT.md#worktree-hooks).
 
 ### Automatic Branch Updates
 
-Fetch `origin/main` and merge into enabled checkouts' current branches every
-10 minutes by default. The UI shows interval and last result. Manage saved
-per-checkout settings in **Menu → Configuration → Connection → Automatic branch
-updates**, workspace context menus, or Worktree Lifecycle.
-
-Runs skip dirty or detached checkouts, verify branch/HEAD/worktree stayed unchanged
-during fetch, and abort conflicting merges. Updates run only while the workspace
-is open in the current connection.
+Opt in per checkout through workspace menus, Worktree Lifecycle, or
+**Configuration > Connection > Automatic branch updates**. Updates fetch and
+merge `origin/main` every 10 minutes by default, only while the workspace is
+open in that connection. They skip dirty/detached checkouts, recheck branch/HEAD
+and worktree after fetch, and abort conflicts. They never push.
 
 ## File Explorer and Preview
 
-- Browse a cached, expandable tree, optionally including hidden files. Search
-  loaded names/paths by substring or glob: `r*md`, `?.txt`, `[abc]*`, `{md,mmd}`,
-  and `**` are supported. Patterns with `/` match loaded paths; matching is
-  case-insensitive. Git badges mark changed files/directories; ignored files
-  are dimmed.
-- Choose **Browse filesystem** in the toolbar to opt into read-only browsing
-  outside the workspace on the connected host. Use **Parent directory** or enter
-  an absolute directory to preview references, copy paths, or download files.
-  **Workspace only** restores the tree. This mode is off by default and resets
-  on browser refresh or checkout/connection changes.
-- Preview text with line numbers, syntax highlighting, and `Cmd/Ctrl+F` search.
-  Use **Refresh preview** beside Copy to reload the current file from disk
-  without reopening it; the selected Raw/Rendered mode is preserved.
-  Markdown offers Raw/Rendered views with Mermaid diagrams in code fences.
-  `.mmd`/`.mermaid` files offer Diagram/Source views and accept leading comments,
-  document headers, and Mermaid fences. Diagrams have independent zoom, Fit, and
-  100% controls; scroll to pan or use Ctrl/Cmd + wheel to zoom.
-- Follow Markdown file links within the Inspector: relative to the document,
-  leading `/` from workspace root, and heading fragments within the destination.
-  For absolute reference files, links resolve from the file directory and
-  leading `/` resolves from the filesystem root.
-  External links open a new browser tab.
-- Preview SVG, PNG/APNG, JPEG, GIF, WebP, BMP, ICO, and AVIF images with zoom and
-  Fit controls, plus PDFs and workspace-local Markdown images. Unsupported
-  binaries remain download-only; image decoding depends on the browser.
-- Drag uploads onto the root/directory. Download files or workspace-scoped
-  `.tar.gz` directories; copy absolute paths; delete with confirmation.
-  Open actions by right-click or touch long-press.
-
-File operations and previews work locally and over SSH.
+- Browse cached trees, toggle hidden files, and filter **loaded** names/paths
+  with case-insensitive substrings or globs (`*`, `?`, `[]`, `{}`, `**`).
+  Git badges mark changes; ignored files are dimmed.
+- **Browse filesystem** opts into read-only host browsing outside the checkout.
+  Parent/absolute-path navigation allows preview, copy path, and download.
+  **Workspace only** restores the tree; refresh or checkout/connection changes
+  reset this mode.
+- Text previews provide highlighting, line numbers, search, and refresh.
+  Markdown has Raw/Rendered views; Mermaid fences and `.mmd`/`.mermaid` files
+  have zoomable diagrams and source views. Markdown links navigate within
+  Inspector; external links open a browser tab.
+- Preview images (including SVG), PDFs, and local Markdown images with zoom/Fit.
+  Unsupported binaries are download-only; decoding depends on the browser.
+- Upload by dragging onto a checkout directory; download files or workspace
+  `.tar.gz` directories; copy paths or delete with confirmation via right-click
+  or long-press. Upload/delete stay checkout-scoped. Operations work over SSH.
 
 ## Review Annotations
 
-- Open **Annotations** independently next to **Inspector** in the workspace bar (or
-  the narrow-screen view switcher). The panel stays available when Inspector is
-  closed and opening it does not change Inspector's view. The tab shows the
-  current checkout's comment count, including saved drafts. Use the tab or
-  Annotations shortcut to toggle the panel, or its close button to dismiss it.
-- Desktop annotations float over the workspace by default.
-  **Pin annotations** switches to a fixed layout beside or below the workspace;
-  **Float annotations** restores the overlay. The choice stays in this browser.
-  Mobile uses an explicit Annotations surface with touch controls.
-- Click/drag diff line numbers or source annotation gutters to comment on lines;
-  release opens the editor with file, range, and content snapshot.
-- Select rendered Markdown passages to capture their text and nearest heading.
-- Select terminal text with the mouse, then choose **Add comment** to capture
-  the passage and pane label, even with the Inspector closed. Terminal quotes
-  have no buffer coordinates and are not re-anchored; missing panes are marked
-  unavailable.
-- Edit, delete, or reorder mixed checkout-scoped comments. Copy compiled feedback or
-  pre-fill a selected Agent pane; **delivery never submits**. Review and press
-  Enter manually. After pre-fill, **Go to agent** opens the destination pane/tab.
-- With focus inside Annotations, use the configurable shortcuts shown on **Copy**
-  and **Pre-fill agent**. Copy confirms success with a brief notification.
-- Copy retains the browser-local draft. Successful pre-fill removes only unchanged,
-  delivered comments; edits made during delivery and failed deliveries retain work.
-  Leaving the draft's workspace or connection during pre-fill retains the original draft,
-  even after returning. Closing Inspector or Annotations does not discard drafts.
-  Blank comments cannot be delivered.
-- Refresh re-anchors matching file/diff content and marks unresolved anchors stale
-  without losing captured quotes.
+Open **Annotations** independently of Inspector. Desktop supports floating or
+pinned layouts; mobile has a dedicated touch surface.
+
+1. Comment on diff line numbers, source gutters, rendered Markdown selections,
+   or selected terminal text using **Add comment**.
+2. Edit/reorder checkout-scoped comments, then copy feedback or pre-fill a chosen
+   agent pane. **Delivery never submits**: review and press Enter manually.
+3. Use **Go to agent** after pre-fill. Copy retains drafts; successful pre-fill
+   removes only unchanged delivered comments. Failed delivery, concurrent edits,
+   or leaving the workspace/connection preserves the original draft.
+
+With focus inside Annotations, use the configurable shortcuts shown on **Copy**
+and **Pre-fill agent**. Copy confirms success with a brief notification.
+Drafts stay in this browser and survive panel closure. Blank comments cannot be
+sent. Refresh re-anchors matching file/diff content and marks unresolved anchors
+stale without losing quotes. Terminal quotes are not re-anchored; missing panes
+are marked unavailable.
 
 ## Diff Viewer
 
-- Browse a directory tree with staged, unstaged, untracked, conflicted, and
-  branch-diff badges plus added/deleted counts.
-- Choose **Working tree**, **Against main**, or **Last step** (latest completed
-  agent-activity snapshot, including commits/untracked files; not proof of ownership).
-- Read files in repository order. Large, truncated, and `linguist-generated=true`
-  diffs start collapsed and render on expansion.
-- Choose desktop side-by-side/unified views; mobile is unified. Wrapping saves
-  independently for desktop/mobile. Search with `Cmd/Ctrl+F`, Enter/Shift+Enter,
-  or previous/next controls. Text is syntax-highlighted; images have previews.
-- Jump to File Explorer from a diff. Working-tree context menus (right-click,
-  long-press, or keyboard menu key) on files and folders offer open, copy
-  relative/absolute path, and status-matched stage, unstage, mark resolved,
-  discard unstaged, or delete untracked actions, with destructive-action
-  confirmation. Folder menus apply those actions to every matching file under
-  the folder. The same menus carry repository-wide Stage All, Unstage All,
-  Discard All Unstaged, and Delete All Untracked with affected-file counts.
+- Review **Working tree**, **Against main**, or **Last step** (the latest completed
+  activity snapshot, not proof of agent ownership). See staged, unstaged,
+  untracked, conflict, and branch-diff badges with added/deleted counts.
+- Use side-by-side/unified desktop views; mobile is unified. Search and syntax
+  highlighting work across diffs; images have previews. Large, truncated, and
+  generated diffs start collapsed.
+- File/folder context menus offer open, copy path, stage, unstage, mark resolved,
+  discard unstaged, and delete untracked, plus repository-wide bulk actions.
+  Destructive actions require confirmation. Status/content is rechecked to reject
+  stale menus instead of destroying newer work.
 
-Scope, view mode, wrapping, and recent selection persist per checkout/browser.
-Git actions recheck status/content and reject stale menus instead of destroying
-newer work.
+Scope, view, wrapping, and selection persist per checkout/browser; wrapping is
+separate for desktop/mobile. Jump from a diff to its file preview.
 
 ## Mobile and PWA
 
-- Responsive terminals, Inspector, and viewport/keyboard handling. **Menu →
-  Configuration → Appearance → Layout → Display mode** offers Automatic/Mobile/Desktop.
-  Automatic uses **Mobile up to (px)**: 768 by default, adjustable 320–2560 CSS
-  pixels. Mobile stays mobile at any width, including after reload.
-- URL overrides `?layout=mobile`, `?layout=desktop`, or `?layout=auto` beat saved
-  mode. Choosing a menu mode clears that override, preserving other parameters.
-- Choose **Agents on top** or **Workspaces on top** independently for each layout
-  under Layout Preferences. This affects the separate Agents panel; mobile defaults
-  to agents first, desktop to workspaces first.
-- Touch taps and swipes read terminal output without opening the device keyboard.
-  Use the bottom-right **Open device keyboard** button to type directly; a light
-  touch tap on the terminal dismisses it without sending input. Scrolling keeps
-  input active. Mouse selection and physical-keyboard input work in either layout.
-- Long-press a word directly in the terminal, drag either selection handle, then
-  **Copy** or **Add comment**. Copy keeps the selection; **Done** or Escape returns
-  to reading without opening the keyboard. Scroll before selecting older output:
-  touch handles cover the displayed viewport. Output stays connected and the
-  displayed frame freezes until selection ends, then shows pending output.
-  Legacy incremental streams resume automatically at a 1 MiB buffered UTF-16
-  payload limit without discarding output or a captured comment.
-- Configure the floating terminal panel's `2×8` shortcut grid and up to four
-  side buttons in **Menu → Configuration → Behavior → Mobile terminal shortcuts**. Empty editor slots keep their positions but compact at runtime.
-  Actions include Ctrl, arrows, Enter variants, full/half-page scrolling, and
-  Paste (text or uploaded clipboard-image paths).
-- Switch split panes or use the Tabs sheet to create/switch/close tabs when the
-  strip is hidden. The composer supports native IME, dictation, multiline text,
-  and images: **Insert** does not execute; **Send** adds exactly one Enter.
-  Drafts stay in memory per connection/pane; closing their pane/tab/workspace
-  asks before discarding them.
-- A bundled glyph-only Nerd Font supplies common terminal icons. Install as a
-  PWA in iOS/iPadOS Safari, macOS Safari, Chrome, or Edge to remove browser chrome.
-  It still needs a reachable Roamgate process, not offline access. Use **Menu →
-  Reload page** in the browser or PWA.
-
-Mobile shortcuts and appearance stay in this browser, not Herdr configuration.
+- **Configuration > Appearance > Layout** selects Automatic/Mobile/Desktop.
+  Automatic defaults to 768 CSS px (adjustable 320–2560); `?layout=mobile`,
+  `desktop`, or `auto` overrides saved mode until a menu choice clears it.
+  Agent/workspace panel order is saved separately for each layout.
+- Touch reads output without opening the keyboard. Use **Open device keyboard**
+  to type; a light terminal tap dismisses it without input. Long-press selects
+  text for **Copy**, **Add comment**, or link actions; **Done**/Esc exits.
+  Scroll first to select older output. Selection freezes the displayed frame,
+  not the connection; legacy streams resume at a 1 MiB buffered UTF-16 limit.
+- Customize the floating `2×8` grid and up to four side buttons under
+  **Configuration > Behavior > Mobile terminal shortcuts**. The Tabs sheet and
+  pane controls work when the tab strip is hidden.
+- The composer supports IME, dictation, multiline text, and images. **Insert**
+  does not execute; **Send** adds one Enter. Drafts are in-memory per
+  connection/pane; closing their pane/tab/workspace asks before discarding.
+- Install as a PWA for an app window; a bundled Nerd Font supplies terminal
+  icons. **PWA is not offline access**: Roamgate must remain reachable.
+  See [installation steps](README.md#install-as-a-pwa).
 
 ## Remote, Multi-Client, and Operations
 
-- Manage shared local/SSH profiles with independent browser selection. Disconnect
-  does not stop Herdr/workspaces. Linux/macOS `--ssh-host` forwards control and
-  render sockets; Windows supports native local profiles, not SSH forwarding.
-  See [connection setup](docs/DEPLOYMENT.md#multiple-and-remote-herdr-connections).
-- Remote file/image-paste/Git/hook operations run on the same host; session
-  inspection has the metadata limits described above.
-- Multiple browsers receive pushed events. Pause/resume yours, see client counts,
-  or pause others. **Menu → Configuration → Behavior → Task notifications**
-  offers independent **Agent needs input**
-  and **Task completed** switches. [Web Push](docs/DEPLOYMENT.md#web-push-notifications)
-  is enabled on the server by default; each subscribed device receives events
-  from connected Herdr runtimes even when its page is suspended or closed,
-  subject to platform delivery settings.
-  Turning notifications off revokes that device's subscription. Clicking a
-  notification focuses or opens Roamgate and returns to the relevant pane when
-  its connection runtime is still current.
-  On iPhone/iPad, use the HTTPS Home Screen app on iOS/iPadOS 16.4 or later and
-  grant notification permission. Unsupported browsers or unavailable server-side
-  Web Push use **Active page only** notifications; background delivery is labeled
-  **Background push**. Subscription or revocation failures show a retryable error.
-- Choose light/dark/system appearance, persistent accents, and terminal themes
-  per appearance mode in **Menu → Configuration → Appearance → Terminal theme**. Built-ins
-  include Solarized, Dracula, One Dark, Nord, Tokyo Night, Catppuccin, and GitHub;
-  custom themes set base/ANSI colors. Themes apply live to all terminals and save
-  per browser. **Text size** scales the UI from 80% to 150%, including mobile.
-- **Menu → Configuration → Connection → Terminal incremental transport** enables
-  Herdr delta/reuse frames by default when supported. This reduces Herdr-to-Roamgate
-  traffic, not browser repaint traffic. The preference is saved on the Roamgate
-  server per connection and shared by its viewers. Changing it briefly reconnects
-  their terminal displays without stopping tasks; older Herdr servers retain
-  their existing transport.
-- Manage a user service from the CLI; check releases and run checksum-verified
-  one-click standalone updates under a supported supervisor. Probe `/health` or
-  `/healthz`. See [services](docs/DEPLOYMENT.md#run-as-a-user-service).
+- Shared local/SSH profiles have independent browser selection. Disconnecting
+  does not stop Herdr. SSH forwarding requires Linux/macOS; Windows supports
+  native local profiles. [Connection setup](docs/DEPLOYMENT.md#multiple-and-remote-herdr-connections).
+- Browsers receive pushed events; inspect client counts or pause/resume clients.
+  **Configuration > Behavior > Task notifications** independently enables
+  input-required/completed alerts. **Background push** works without an active
+  page; **Active page only** does not. Delivery is best-effort.
+  [Web Push setup and revocation](docs/DEPLOYMENT.md#web-push-notifications).
+- Choose light/dark/system appearance, accents, built-in/custom terminal themes,
+  and UI text size (80%–150%). Preferences stay in this browser.
+- **Configuration > Connection > Terminal incremental transport** saves a shared
+  per-connection setting on the server. It reduces Herdr-to-Roamgate traffic,
+  briefly reconnecting displays without stopping tasks; older servers retain
+  their transport.
+- Manage [user services](docs/DEPLOYMENT.md#run-as-a-user-service), use
+  checksum-verified standalone updates under a supported supervisor, and probe
+  `/health` or `/healthz`.
 
-**Loopback bypasses login even with a password.** Non-loopback generates a token
-unless a fixed password is set. Authentication provides no TLS, rate limiting,
-multi-user authorization, or sandboxing; read [SECURITY.md](./SECURITY.md).
+**Loopback bypasses login even with a password.** Non-loopback requires a token
+or password. UI access grants terminal/file authority, not a read-only role;
+read [Security](./SECURITY.md) before sharing access.
 
 ## Keyboard Shortcuts
 
-Open **Menu → Configuration → Behavior → Keyboard shortcuts** for the searchable
-list and preset editor on desktop/mobile. Lists and hints show active bindings.
-See the [desktop](docs/screenshots/keyboard-shortcuts-desktop.png) and
-[mobile](docs/screenshots/keyboard-shortcuts-mobile.png) editors.
+Open **Menu > Configuration > Behavior > Keyboard shortcuts** for the searchable
+reference/editor. Automatic detects your platform; explicit/custom presets
+support up to three bindings per action, unassignment, reset, and JSON
+export/import. Editing built-ins creates a custom copy. Changes save immediately
+and sync to same-origin tabs; conflicts are rejected.
 
-- **Automatic** detects macOS/iOS, Windows, or Linux/Android; explicit presets
-  override detection.
-- **Edit** records/types up to three alternatives, restores defaults, or unassigns
-  an action. Editing built-ins creates a custom copy. Overlapping conflicts are
-  rejected while ordinary typing, IME, and dialog dismissal stay available.
-- **Save as** creates named presets; **Active preset** switches them. Edits save
-  immediately and sync to same-origin tabs. **Export/Import** transfers JSON
-  between browsers; deleting a custom preset returns to Automatic.
-- Letter/number bindings use physical keys, unaffected by modifier-produced
-  characters. Recording captures only keys the page receives; choose alternatives
-  for browser/OS-reserved shortcuts, including macOS tab shortcuts.
-
-Common defaults (Linux/Android overrides follow the table):
+Common defaults (Linux/Android exceptions follow):
 
 | Action | macOS / iOS | Windows / Linux / Android |
 | --- | --- | --- |
@@ -443,17 +259,13 @@ Common defaults (Linux/Android overrides follow the table):
 | Terminal paste | `Cmd+V` | `Ctrl+V` (also `Ctrl+Shift+V` on Linux) |
 | Open terminal links / file paths | `Cmd+Click` | `Ctrl+Click` |
 
-Linux/Android uses `Ctrl+Alt+Shift+T` to create tabs, `Ctrl+Alt+Shift+D` to
-split right, and `Ctrl+Alt+Shift+S` to split down, avoiding common Linux desktop
-shortcuts for launching a terminal or showing the desktop.
+Linux/Android uses `Ctrl+Alt+Shift+T` for new tabs, `Ctrl+Alt+Shift+D` to split
+right, and `Ctrl+Alt+Shift+S` to split down, avoiding desktop-reserved bindings.
+Letter/number bindings use physical keys. Browsers/OSes can intercept shortcuts;
+choose alternatives in the editor or use menus.
 
-Terminal copy, page/half-page navigation, and modified Enter are configurable
-here. Copy needs a selection; plain `Ctrl+C` remains terminal input. Native text
-editing, editor search, and shell/agent keys follow those apps. Native clipboard
-gestures remain; remapped paste needs the browser Clipboard API. Touch controls
-use the separate **Mobile terminal shortcuts** editor.
-
-Esc dismisses dialogs, menus, notifications, and update banners. Tab/arrows
-navigate controls. The pane switcher accepts Up/Down, Enter, or release of its
-opening modifier. Diff search uses Enter/Shift+Enter for next/previous. Select in
-mouse-aware apps with Option-drag (macOS) or Shift-drag (elsewhere).
+Copy needs a selection; plain `Ctrl+C` remains terminal input. Page/half-page
+navigation and modified Enter are configurable. Native editing/IME/app keys
+remain available; remapped paste requires the Clipboard API. Touch shortcuts
+have a separate editor. Esc dismisses transient UI; Tab/arrows navigate controls;
+Enter/Shift+Enter advances/reverses diff search.

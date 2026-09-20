@@ -1,88 +1,72 @@
 # History synchronization
 
-`createAgentSessionHandlers` owns a per-connection projection cache shared by
-History, summary, transcript preview, and ATIF export. It retains at most 16
-sessions and a conservative 32 MiB retained-value estimate, including four
-recent History revisions per session. Admission counts UTF-16 string lengths and
-structural overhead without serializing the projection; it stops when the budget
-is exceeded. Oversized or deeply nested projections are served but not retained.
-Concurrent requests share in-flight reads and projection; raw preview prefix
-reads and raw downloads remain separate.
+`createAgentSessionHandlers` shares a per-connection projection cache across
+History, summary, transcript preview, and ATIF export. Concurrent requests share
+in-flight reads/projection; raw preview prefix reads/downloads stay separate.
 
-Each refresh resolves the session and stats its file. Path, provider, session,
-size, modification time, file identity, change metadata, and provider descriptor
-metadata invalidate cached projections. Reads are followed by another stat and
-retried up to three times if the file changed. Errors invalidate retained data;
-incomplete JSONL records are skipped until a later change. This is metadata-based
-consistency, not a filesystem transaction: changes after the final stat appear
-on the next refresh, and filesystems with coarse metadata can miss same-size
-in-place rewrites within their timestamp resolution.
+## Cache and consistency
+
+The cache retains at most 16 sessions, four recent History revisions per session,
+and an estimated 32 MiB of values. Admission counts UTF-16 strings and structural
+overhead without serialization, conservatively recounting shared values.
+Oversized/deep projections are served but not retained; transient parsing memory
+is not included in the estimate.
+
+Refresh resolves/stats the session. Path, provider, session, file identity,
+size/mtime, change metadata, and provider descriptors invalidate projections.
+A post-read stat triggers up to three retries on change. Errors invalidate data;
+incomplete JSONL records wait for later changes. This is not a filesystem
+transaction: later writes appear on the next refresh, and coarse metadata may
+miss same-size in-place rewrites.
 
 ## Version 2 protocol
 
-Send `history_version: 2` to `agent_history.get`, with an optional
-`cursor: { epoch, revision }` from the last accepted response. Legacy callers
-still receive their conversation-only `messages` response.
+Send `history_version: 2` to `agent_history.get`, optionally with the last accepted
+`cursor: { epoch, revision }`. Legacy callers receive conversation-only `messages`.
 
-- `mode: "snapshot"` supplies `entries` and replaces the client window. Missing
-  files/sessions produce an empty snapshot. Invalid or expired cursors, connection
-  replacement, eviction, file replacement, and truncation reset via snapshots.
-- `mode: "delta"` supplies `base_revision`, `upserts`, `removed`, and, only when
-  membership/order changes, the complete ordered ID list `order`. It does not
-  also include `messages`, `entries`, or a trajectory. A no-change delta has empty
-  changes and the same revision.
-- The window counts the most recent 200 conversation entries (user/assistant
-  messages and errors). Tool calls and results stay with the retained
-  conversation entries without counting toward that limit. Window eviction is
-  represented by removals; ATIF and raw exports remain complete.
+| Mode | Response |
+| --- | --- |
+| `snapshot` | `entries` replaces the window. Missing files/sessions yield empty snapshots. Invalid/expired cursors, connection replacement, eviction, file replacement, or truncation reset this way. |
+| `delta` | `base_revision`, `upserts`, `removed`, plus complete ID `order` only when membership/order changes. No `messages`, `entries`, or trajectory. No-change replies keep revision with empty changes. |
 
-IDs identify projected content occurrences (or tool call IDs), **not durable
-source records or ATIF step numbers**. Diffs compare full projected windows, so
-provider changes such as Codex switching from event messages to response items
-can remove/update earlier entries safely. Synthetic fallback timestamps remain
-stable for a cached file generation. The client accepts responses only against
-the cursor used by that request and the current pane/connection lease.
+The window holds the latest **200 conversation entries**, including errors;
+associated tools do not count toward the limit. Eviction emits removals; raw/ATIF
+exports remain complete. IDs identify projected occurrences/tool calls, **not
+durable source records or ATIF step numbers**. Full-window comparisons handle
+provider representation changes; synthetic timestamps remain stable within a
+cached file generation. Clients accept replies only against the request cursor
+and current pane/connection lease.
 
-History refreshes every four seconds only while open and the document is
-visible, with no overlapping active refresh. Long card content is capped at
-4,000 characters in the default DOM; full tool details open as escaped plain
-text on demand. Tool names and source call IDs associate results without moving
-them away from their transcript position.
+History refreshes every four seconds only while open and visible, without
+overlapping requests. Cards cap default DOM content at 4,000 characters; full
+tool details open as escaped text. Names/call IDs associate results without
+moving them from their transcript positions.
 
 ## Message filters
 
-The Session header shows the History count and icon buttons for session details,
-transcript preview, raw export, and refresh. The info button toggles metadata
-and messages in both wide and compact layouts, preserving the message filters
-and selected entry. Session changes return to messages.
+The Session header offers counts, details, transcript preview, raw export, and
+refresh. Info toggles metadata/messages in wide and compact layouts, preserving
+filters/selection; session changes return to messages.
 
-The User, Agent, and Tool toggle buttons independently filter the loaded History
-window. User and Agent start enabled; Tool starts disabled. Agent includes
-assistant errors; Tool includes calls, outputs, and tool errors. Button counts
-describe the unfiltered window; the header count shows visible/total when
-filtered. The minimap and card numbering follow the visible list. Hidden entries still
-receive incremental updates, and exports are unaffected. Message type selections
-survive pane switches and close/reopen while the drawer stays mounted; they are not
-saved across page reloads. If no entries match, Show all types restores the view.
+User/Agent start enabled; Tool starts disabled. Agent includes assistant errors;
+Tool includes calls, outputs, and errors. Button counts reflect the unfiltered
+window; the header shows visible/total when filtered. Minimap/numbering follow
+visible entries, but hidden entries still update and exports remain complete.
+Type filters survive pane switches/reopening while mounted, not reloads;
+**Show all types** restores all message types.
 
-Text search matches a case-insensitive literal substring in the loaded window,
-combined with the message type filters. It searches full loaded text, including
-content beyond the card preview; redacted tool content becomes searchable only
-after explicitly loading it. Search does not fetch older messages or tool
-payloads. Reset filters clears the search and enables every message type.
-Search text resets when switching panes or connections.
+Search combines type filters with case-insensitive literal matching across full
+loaded text, not just card previews. Redacted tools become searchable only after
+explicit loading; search never fetches older messages or tool payloads. **Reset
+filters** clears search and enables all types. Search resets on pane/connection changes.
 
-Click a card's header, text, or background to open its details; Copy remains a
-separate action. Message timestamps use local time in `MM-DD HH:mm` format,
-with a `YYYY-` prefix for dates outside the current year.
+Click a card's header/text/background for details; Copy stays separate. Timestamps
+use local `MM-DD HH:mm`, prefixed with `YYYY-` outside the current year.
 
-![History filtered to tool calls and outputs using synthetic test data](screenshots/history-tool-filter.png)
+![History filtered to tool calls and outputs using synthetic data](screenshots/history-tool-filter.png)
 
 ## Consistency and resource limits
 
-Changed files still require a **full JSONL read and full provider projection**.
-There is no provider-specific incremental parser, byte-offset cursor, database,
-or new transport. Raw transcript preview and explicit full ATIF export can
-still transmit large payloads. Cache admission uses estimated retained-value
-sizes, not transient parsing allocations or exact JavaScript heap usage. Shared
-values are conservatively counted again when referenced by multiple revisions.
+Changed files still require **full JSONL reads and provider projection**: no
+incremental parser, byte cursor, database, or new transport. Raw previews/full
+ATIF exports can remain large; cache limits are not exact JavaScript heap bounds.
