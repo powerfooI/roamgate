@@ -52,8 +52,8 @@ export function parseAgentIntegrations(result: unknown): AgentIntegration[] {
 
 type IntegrationChangeOutcome = { messages: string[]; error: string | null };
 
-// A submitted RPC outlives its settings view. Reopened views await the same
-// connection lease's operation before loading status or allowing another write.
+// A submitted RPC outlives its settings view. Keep its outcome until a view
+// on the same connection lease displays it, even if it settles while unmounted.
 const pendingChanges = new Map<string, Promise<IntegrationChangeOutcome>>();
 
 const stateLabels = {
@@ -96,8 +96,10 @@ export function AgentIntegrationsSettings({
     const request = ++sequence.current;
     setLoading(true);
     setError(null);
+    const operation = pendingChanges.get(scope);
+    let outcome: IntegrationChangeOutcome | undefined;
     try {
-      const outcome = await pendingChanges.get(scope);
+      outcome = await operation;
       if (
         !mounted.current ||
         !client.isCurrent() ||
@@ -123,11 +125,28 @@ export function AgentIntegrationsSettings({
         request === sequence.current
       ) {
         setItems(null);
-        setError(`Could not load integrations: ${(e as Error).message}`);
+        setError(
+          [
+            outcome?.error,
+            `Could not load integrations: ${(e as Error).message}`,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
       }
     } finally {
-      if (mounted.current && client.isCurrent() && request === sequence.current)
+      if (
+        mounted.current &&
+        client.isCurrent() &&
+        request === sequence.current
+      ) {
+        if (outcome) {
+          setMessages(outcome.messages);
+          if (pendingChanges.get(scope) === operation)
+            pendingChanges.delete(scope);
+        }
         setLoading(false);
+      }
     }
   }, [client, scope]);
 
@@ -191,13 +210,17 @@ export function AgentIntegrationsSettings({
         error: `${verb} could not be confirmed: ${e.message} Refresh status before trying again.`,
       }));
     pendingChanges.set(scope, operation);
-    void operation.then(() => pendingChanges.delete(scope));
+    void operation.then(() => {
+      if (!client.isCurrent() && pendingChanges.get(scope) === operation)
+        pendingChanges.delete(scope);
+    });
     setBusy(item.target);
     setError(null);
     setMessages([]);
     try {
       const outcome = await operation;
       if (!mounted.current || !client.isCurrent()) return;
+      if (pendingChanges.get(scope) === operation) pendingChanges.delete(scope);
       if (outcome.error) {
         setItems(null);
         setError(outcome.error);

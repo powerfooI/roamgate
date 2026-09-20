@@ -28,6 +28,28 @@ afterEach(async () => {
   }
 });
 
+function trackSocket(socket: net.Socket) {
+  sockets.add(socket);
+  socket.on("close", () => sockets.delete(socket));
+  socket.on("error", (error: NodeJS.ErrnoException) => {
+    // The bridge can exit while a background RPC response is being written.
+    if (error.code !== "EPIPE" && error.code !== "ECONNRESET") throw error;
+  });
+}
+
+test("fixture sockets tolerate peer shutdown but surface unexpected errors", () => {
+  const socket = new net.Socket();
+  trackSocket(socket);
+  for (const code of ["EPIPE", "ECONNRESET"])
+    expect(() =>
+      socket.emit("error", Object.assign(new Error(code), { code })),
+    ).not.toThrow();
+  const unexpected = Object.assign(new Error("unexpected socket failure"), {
+    code: "EINVAL",
+  });
+  expect(() => socket.emit("error", unexpected)).toThrow(unexpected);
+});
+
 async function listen(server: net.Server, path: string): Promise<void> {
   servers.push(server);
   await new Promise<void>((resolve, reject) => {
@@ -50,8 +72,7 @@ async function fakeHerdr(
   const renderPath = join(root, `${id}-render.sock`);
   await listen(
     net.createServer((socket) => {
-      sockets.add(socket);
-      socket.on("close", () => sockets.delete(socket));
+      trackSocket(socket);
       let input = "";
       socket.on("data", async (chunk) => {
         input += chunk.toString();
@@ -83,8 +104,7 @@ async function fakeHerdr(
   );
   await listen(
     net.createServer((socket) => {
-      sockets.add(socket);
-      socket.on("close", () => sockets.delete(socket));
+      trackSocket(socket);
       let input = Buffer.alloc(0);
       socket.on("data", (chunk) => {
         input = Buffer.concat([input, Buffer.from(chunk)]);

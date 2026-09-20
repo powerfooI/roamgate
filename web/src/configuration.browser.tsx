@@ -786,7 +786,6 @@ async function run() {
       integrationLists() === listsBeforeTabRemount,
     "tab remount read stale status instead of awaiting its in-flight mutation",
   );
-  // On the unfixed view this button reappears and allows a duplicate write.
   flushSync(() =>
     document
       .querySelector<HTMLButtonElement>(
@@ -902,14 +901,57 @@ async function run() {
   check(
     !!document.querySelector(
       '[aria-label="Uninstall Antigravity CLI integration"]',
-    ),
-    "unmounted completion left the connection locked or status stale",
+    ) && dialog.textContent!.includes("Completed while unmounted"),
+    "unmounted completion lost its outcome or left status stale",
   );
   click("Uninstall Antigravity CLI integration");
   await waitFor(
     () =>
       button("Refresh integrations").getAttribute("aria-disabled") === "false",
   );
+
+  for (const closeDialog of [false, true]) {
+    const hiddenFailure = Promise.withResolvers<unknown>();
+    integrationChange = hiddenFailure.promise;
+    click("Install Antigravity CLI integration");
+    const writes = mutationCount();
+    click(closeDialog ? "Done" : "Appearance");
+    integrationChange = null;
+    hiddenFailure.reject(new Error("Mutation failed while unmounted"));
+    await settle();
+    if (closeDialog) {
+      click("Menu");
+      click("Configuration");
+      await waitFor(() => !!document.querySelector(".configuration-modal"));
+      dialog = document.querySelector<HTMLElement>(".configuration-modal")!;
+    }
+    // A failed status refresh must not discard the mutation failure either.
+    integrationLoadFailure = closeDialog;
+    click("Integrations");
+    await waitFor(
+      () =>
+        button("Refresh integrations").getAttribute("aria-disabled") ===
+        "false",
+    );
+    check(
+      !!document
+        .querySelector('[role="alert"]')
+        ?.textContent?.includes("Mutation failed while unmounted") &&
+        mutationCount() === writes,
+      "settled failure was lost when reopening integrations",
+    );
+    integrationLoadFailure = false;
+    click("Refresh integrations");
+    await waitFor(
+      () =>
+        button("Refresh integrations").getAttribute("aria-disabled") ===
+        "false",
+    );
+    check(
+      !document.querySelector('[role="alert"]') && mutationCount() === writes,
+      "consumed failure was replayed or refresh repeated the mutation",
+    );
+  }
 
   let resolveChange!: (value: unknown) => void;
   integrationChange = new Promise((resolve) => {
