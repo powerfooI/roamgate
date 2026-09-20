@@ -177,7 +177,7 @@ export function ConfigMenu({
               <ConfigMenuItem
                 icon={<Settings size={15} />}
                 label="Configuration"
-                description="Appearance, behavior, and connection preferences"
+                description="Appearance, behavior, connections, and agent integrations"
                 className="config-menu-item-row"
                 onClick={() => {
                   setOpen(false);

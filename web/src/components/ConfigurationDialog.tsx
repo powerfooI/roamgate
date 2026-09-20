@@ -41,6 +41,7 @@ import {
   connectionClientScopeKey,
   useConnectionClient,
 } from "../useConnectionClient";
+import { AgentIntegrationsSettings } from "./AgentIntegrationsSettings";
 import { AutoSyncRepositoriesDialog } from "./AutoSyncRepositoriesDialog";
 import { CloseButton } from "./CloseButton";
 import { MobileTerminalShortcutsDialog } from "./MobileTerminalShortcutsDialog";
@@ -83,7 +84,7 @@ export type ConfigurationProps = {
   onTerminalThemeSelectionChange: (selection: TerminalThemeSelection) => void;
   onCustomTerminalThemesChange: (themes: CustomTerminalTheme[]) => void;
 };
-const tabs = ["Appearance", "Behavior", "Connection"] as const;
+const tabs = ["Appearance", "Behavior", "Connection", "Integrations"] as const;
 type Detail = "terminal" | "layout" | "keyboard" | "mobile" | "sync";
 
 export function ConfigurationDialog({
@@ -102,6 +103,9 @@ export function ConfigurationDialog({
       connectionLabel:
         state.connections.find((c) => c.id === state.activeConnectionId)
           ?.label ?? "Current connection",
+      sshDestination: state.connections.find(
+        (c) => c.id === state.activeConnectionId,
+      )?.ssh_destination,
     }),
     shallowEqual,
   );
@@ -185,7 +189,7 @@ export function ConfigurationDialog({
           <div className="modal-head">
             <div>
               <h2>Configuration</h2>
-              <p>Appearance, behavior, and connection preferences</p>
+              <p>Appearance, behavior, connections, and agent integrations</p>
             </div>
             <CloseButton label="Close Configuration" onClick={onClose} />
           </div>
@@ -590,9 +594,30 @@ export function ConfigurationDialog({
                 <ChevronRight size={15} />
               </button>
             </section>
+            <section
+              role="tabpanel"
+              id="configuration-panel-Integrations"
+              aria-labelledby="configuration-tab-Integrations"
+              hidden={tab !== "Integrations"}
+            >
+              {tab === "Integrations" ? (
+                <AgentIntegrationsSettings
+                  key={connectionClientScopeKey(
+                    connectionClient,
+                    connectionClient.serverRuntimeGeneration,
+                  )}
+                  connectionLabel={s.connectionLabel}
+                  sshDestination={s.sshDestination}
+                />
+              ) : null}
+            </section>
           </div>
           <div className="modal-actions">
-            <span className="muted">Changes are saved automatically.</span>
+            <span className="muted">
+              {tab === "Integrations"
+                ? "Changes require confirmation."
+                : "Changes are saved automatically."}
+            </span>
             <button type="button" onClick={onClose}>
               Done
             </button>

@@ -83,6 +83,24 @@ test.skipIf(!chrome).each([
         outdir: dir,
         target: "browser",
         splitting: true,
+        plugins: [
+          {
+            name: "vite-raw-test-assets",
+            setup(build) {
+              build.onResolve({ filter: /\?raw$/ }, (args) => ({
+                path: Bun.resolveSync(args.path.slice(0, -4), args.resolveDir),
+                namespace: "raw-text",
+              }));
+              build.onLoad(
+                { filter: /.*/, namespace: "raw-text" },
+                async (args) => ({
+                  contents: await readFile(args.path, "utf8"),
+                  loader: "text",
+                }),
+              );
+            },
+          },
+        ],
       });
       expect(build.success).toBe(true);
       for (const asset of build.outputs) {

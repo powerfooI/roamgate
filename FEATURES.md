@@ -135,6 +135,17 @@ See [resource ownership](docs/ARCHITECTURE.md#workspace-resource-ownership).
   activity tracking; manual and workspace order stay unchanged.
 - Rows show tab names before pane IDs; blank or numbered defaults (`2`, `Tab 2`)
   are omitted in both views.
+- Open **Menu > Configuration > Integrations** to view Herdr's supported agent
+  integrations and install, update, or uninstall them with confirmation. Changes
+  affect the selected connection's Herdr server user, including over SSH, and
+  are shared across that user's sessions. This does not install agent applications;
+  start a new agent session after installation if reporting has not started.
+  Updates appear first; undetected, uninstalled agents are collapsed. Installed
+  and available integration-script versions are shown only when the selected
+  Herdr server reports them. Missing version information stays unknown; Herdr
+  0.9.0 does not report version numbers. Versions are not inferred from a local
+  or SSH CLI environment. Available means bundled with that server, not the
+  latest agent application or an online update.
 - Inspect turns, tokens, update time, session ID/file, and other metadata. Session
   Inspector offers Timeline, searchable ATIF/raw transcripts, and original-file
   or normalized ATIF export.

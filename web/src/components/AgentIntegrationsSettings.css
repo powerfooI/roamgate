@@ -1,0 +1,197 @@
+.agent-integrations-settings {
+  padding: 4px 0;
+}
+
+.agent-integrations-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px 12px;
+}
+
+.agent-integrations-heading {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 3px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.agent-integrations-heading span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.agent-integrations-status {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-integrations-status:not(:empty) {
+  padding: 0 4px 10px;
+}
+
+.agent-integrations-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.agent-integrations-list li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+}
+
+.agent-integrations-list .agent-icon[data-agent="cursor"] {
+  color: var(--text);
+}
+
+.agent-integrations-list li + li {
+  border-top: 1px solid var(--border-soft);
+}
+
+.agent-integrations-list li[data-state="outdated"] {
+  background: color-mix(in srgb, var(--accent-soft) 40%, transparent);
+}
+
+.agent-integrations-copy {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.agent-integrations-copy > strong {
+  color: var(--text-strong);
+}
+
+.agent-integrations-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.agent-integrations-version {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-integrations-version svg {
+  flex-shrink: 0;
+}
+
+.agent-integrations-badge,
+.agent-integrations-missing {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.agent-integrations-badge[data-state="current"] {
+  color: var(--success-text);
+}
+
+.agent-integrations-badge[data-state="outdated"] {
+  color: var(--accent);
+}
+
+.agent-integrations-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.agent-integrations-settings button {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.agent-integrations-settings .agent-integrations-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  padding: 4px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.agent-integrations-settings .agent-integrations-icon-button:hover {
+  background: var(--border-soft);
+  color: var(--text);
+}
+
+.agent-integrations-settings .agent-integrations-update {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.agent-integrations-settings .agent-integrations-uninstall:hover {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+.agent-integrations-settings button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.agent-integrations-unavailable {
+  margin-top: 12px;
+}
+
+.agent-integrations-unavailable summary {
+  padding: 8px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.agent-integrations-unavailable summary span {
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (pointer: coarse) {
+  .agent-integrations-settings button,
+  .agent-integrations-unavailable summary {
+    min-height: 44px;
+  }
+
+  .agent-integrations-settings .agent-integrations-icon-button {
+    width: 44px;
+  }
+}
+
+@media (max-width: 350px) {
+  .agent-integrations-list li {
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .agent-integrations-actions {
+    grid-column: 2;
+    justify-content: flex-end;
+  }
+}
