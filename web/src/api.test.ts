@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { Bridge, type ConnectionStatus, parseConnectionSummary } from "./api";
+import {
+  Bridge,
+  type ConnectionStatus,
+  logoutBrowserSession,
+  parseConnectionSummary,
+} from "./api";
 
 const originalWebSocket = globalThis.WebSocket;
+const originalFetch = globalThis.fetch;
 const originalLocation = Object.getOwnPropertyDescriptor(
   globalThis,
   "location",
@@ -19,7 +25,7 @@ class HangingWebSocket {
   onopen: (() => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event?: Pick<CloseEvent, "code">) => void) | null = null;
 
   close() {
     this.readyState = HangingWebSocket.CLOSED;
@@ -60,11 +66,83 @@ function sendHello(
 afterEach(() => {
   testBridges.splice(0).forEach((bridge) => bridge.disconnect());
   globalThis.WebSocket = originalWebSocket;
+  globalThis.fetch = originalFetch;
   if (originalLocation) {
     Object.defineProperty(globalThis, "location", originalLocation);
   } else {
     Reflect.deleteProperty(globalThis, "location");
   }
+});
+
+describe("browser logout", () => {
+  test.each([204, 500])(
+    "only redirects after cookie removal succeeds (%s)",
+    async (status) => {
+      let destination = "";
+      Object.defineProperty(globalThis, "location", {
+        configurable: true,
+        value: {
+          replace(value: string) {
+            destination = value;
+          },
+        },
+      });
+      const response = Promise.withResolvers<Response>();
+      Object.defineProperty(globalThis, "fetch", {
+        configurable: true,
+        value: (url: string, init: RequestInit) => {
+          expect(url).toBe("/api/logout");
+          expect(init).toMatchObject({
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "x-roamgate-logout": "1" },
+          });
+          return response.promise;
+        },
+      });
+      const logout = logoutBrowserSession();
+      expect(destination).toBe("");
+      response.resolve(new Response(null, { status }));
+      if (status === 204) {
+        await logout;
+        expect(destination).toBe("/login");
+      } else {
+        await expect(logout).rejects.toThrow("Could not log out");
+        expect(destination).toBe("");
+      }
+    },
+  );
+
+  test("a logout close stops reconnection and clears the cookie before leaving another tab", async () => {
+    class LogoutSocket extends HangingWebSocket {
+      static instance: LogoutSocket;
+      constructor() {
+        super();
+        LogoutSocket.instance = this;
+      }
+    }
+    installBrowserGlobals(LogoutSocket as unknown as typeof WebSocket);
+    const navigated = Promise.withResolvers<string>();
+    Object.assign(location, { replace: navigated.resolve });
+    const response = Promise.withResolvers<Response>();
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: () => response.promise,
+    });
+    const bridge = createTestBridge(1000);
+    bridge.connect();
+    const socket = LogoutSocket.instance;
+    socket.readyState = WebSocket.OPEN;
+    sendHello(socket);
+    socket.readyState = WebSocket.CLOSED;
+    socket.onclose?.({ code: 4001 });
+    expect(bridge.status).toBe("disconnected");
+    expect(
+      (bridge as unknown as { reconnectEnabled: boolean }).reconnectEnabled,
+    ).toBe(false);
+    response.resolve(new Response(null, { status: 204 }));
+    expect(await navigated.promise).toBe("/login");
+  });
 });
 
 describe("bridge connection lifecycle", () => {

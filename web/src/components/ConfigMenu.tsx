@@ -7,6 +7,7 @@ import {
   Download,
   ExternalLink,
   Focus,
+  LogOut,
   Palette,
   Plug,
   RefreshCw,
@@ -16,6 +17,7 @@ import {
   Wifi,
 } from "lucide-react";
 import packageJson from "../../package.json";
+import { logoutBrowserSession } from "../api";
 import { connectionHttpPath } from "../connectionHttp";
 import { useLayoutPreferences } from "../layoutPreferences";
 import { shortcutLabel, useShortcutPreferences } from "../shortcutPreferences";
@@ -82,7 +84,12 @@ export function ConfigMenu({
   const [configurationTab, setConfigurationTab] =
     useState<ConfigurationTab | null>(null);
   const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(false);
-  const [health, setHealth] = useState<{ socket?: string } | null>(null);
+  const [health, setHealth] = useState<{
+    socket?: string;
+    auth_required?: boolean;
+  } | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
   const [herdrInfo, setHerdrInfo] = useState<{
     version: string;
     protocol: number;
@@ -105,7 +112,7 @@ export function ConfigMenu({
     setHealth(null);
     setHerdrInfo(null);
     setHerdrUnavailable(false);
-    fetch("/api/health", { credentials: "same-origin" })
+    fetch("/api/health", { credentials: "same-origin", cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null)
       .then((info) => {
@@ -158,6 +165,7 @@ export function ConfigMenu({
           className={`topbar-button menu-button ${open ? "is-active" : ""}`}
           onClick={() => {
             setExpanded(false);
+            setLogoutError("");
             setOpen((value) => !value);
           }}
           aria-label={updateAvailable ? "Menu, update available" : "Menu"}
@@ -340,6 +348,34 @@ export function ConfigMenu({
                   </div>
                 ) : null}
               </div>
+              {health?.auth_required ? (
+                <div className="config-section">
+                  <ConfigMenuItem
+                    icon={<LogOut size={15} />}
+                    label={loggingOut ? "Logging out..." : "Log out"}
+                    description="End this browser session only"
+                    className="config-menu-item-row"
+                    disabled={loggingOut}
+                    onClick={async () => {
+                      setLoggingOut(true);
+                      setLogoutError("");
+                      try {
+                        await logoutBrowserSession();
+                      } catch {
+                        setLogoutError(
+                          "Could not log out. Check your connection and try again.",
+                        );
+                        setLoggingOut(false);
+                      }
+                    }}
+                  />
+                  {logoutError ? (
+                    <p className="config-logout-error" role="alert">
+                      {logoutError}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               {layout.mobile ? (
                 <div className="mobile-sheet-more" aria-hidden={!expanded}>
                   <div className="mobile-sheet-more-content">

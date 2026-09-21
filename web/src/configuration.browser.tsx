@@ -118,9 +118,27 @@ const key = async (element: Element, value: string, shiftKey = false) => {
     });
   await settle();
 };
+let authRequired = false;
+let logoutAttempts = 0;
+let pendingLogout: Promise<Response> | null = null;
 Object.defineProperty(window, "fetch", {
   configurable: true,
-  value: async () => Response.json({ version: "0.9.1", protocol: 22 }),
+  value: async (url: string, init?: RequestInit) => {
+    if (url === "/api/logout") {
+      logoutAttempts++;
+      check(init?.method === "POST", "logout must use POST");
+      check(
+        new Headers(init?.headers).get("x-roamgate-logout") === "1",
+        "logout omitted CSRF header",
+      );
+      return pendingLogout ?? new Response(null, { status: 500 });
+    }
+    return Response.json({
+      version: "0.9.1",
+      protocol: 22,
+      auth_required: authRequired,
+    });
+  },
 });
 let active = "alpha";
 let generation = 1;
@@ -328,6 +346,44 @@ async function run() {
     );
   flushSync(render);
   click("Menu");
+  await settle();
+  check(
+    !Array.from(document.querySelectorAll("button")).some((element) =>
+      element.textContent?.includes("Log out"),
+    ),
+    "auth-disabled server offers logout",
+  );
+  click("Menu");
+  authRequired = true;
+  click("Menu");
+  await waitFor(
+    () =>
+      !!Array.from(document.querySelectorAll("button")).find(
+        (element) => element.querySelector("strong")?.textContent === "Log out",
+      ),
+  );
+  const failedLogout = Promise.withResolvers<Response>();
+  pendingLogout = failedLogout.promise;
+  click("Log out");
+  check(
+    button("Logging out...").disabled,
+    "logout allows duplicate submissions",
+  );
+  failedLogout.resolve(new Response(null, { status: 500 }));
+  await waitFor(() => !!document.querySelector(".config-logout-error"));
+  check(
+    !button("Log out").disabled && logoutAttempts === 1,
+    "failed logout cannot be retried",
+  );
+  pendingLogout = null;
+  click("Menu");
+  click("Menu");
+  await waitFor(
+    () =>
+      !!Array.from(document.querySelectorAll("button")).find(
+        (element) => element.querySelector("strong")?.textContent === "Log out",
+      ),
+  );
   check(
     !document.querySelector(
       "#roamgate-config-menu [aria-label='Task notifications']",
@@ -352,6 +408,7 @@ async function run() {
         "Reload page",
         "Check for updates",
         "Connection details",
+        "Log out",
       ]) {
         const original = button(label);
         const rect = original.getBoundingClientRect();

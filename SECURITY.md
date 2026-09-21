@@ -35,6 +35,13 @@ access path: native TLS encrypts transport but supplies no rate limiting,
 multi-user authorization, or sandboxing. Without TLS configuration, the listener
 uses unencrypted HTTP.
 
+**Menu > Log out** removes this browser's authentication cookie, disconnects its
+active tabs, and returns to login. It does not stop terminals, change the server
+password/token, or log out other browsers. The action is hidden when the listener
+bypasses authentication. Cookies are stateless signed credentials: logout removes
+the browser's copy, but does not revoke a copied cookie before its expiry. Rotate
+the server credential if it or a session cookie has been compromised.
+
 Updates trust the configured HTTPS release origin (or explicit loopback test
 mirror) and its manifest/checksums. Checksums detect corruption and bind the
 archive, **not independently verify publisher identity**. Custom mirrors are
@@ -51,6 +58,6 @@ Web Push subscription mutations require listener authentication, JSON, and
 `x-roamgate-push: 1`; cross-site browser requests are rejected. Push endpoints
 are restricted to supported browser-provider HTTPS hosts and are never followed
 through redirects. Treat the private push registry as credentials. Revoking a
-login password does not revoke device subscriptions: disable Web Push or remove
+login password or logging out does not revoke device subscriptions: disable Web Push or remove
 subscriptions separately. Notification payloads can expose agent names and
 routing IDs on lock screens. See [Web Push configuration](docs/DEPLOYMENT.md#web-push-notifications).

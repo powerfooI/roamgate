@@ -122,13 +122,19 @@ const downstreamConnectionConfig = {
   hasExplicitSocketPath: config.hasExplicitSocketPath,
   hasExplicitClientSocketPath: config.hasExplicitClientSocketPath,
 };
-const { isAuthed, handleTokenLogin, handleLogin, loginPage } =
-  createAuthHandlers({
-    authRequired: config.authRequired,
-    password: config.password,
-    urlLoginToken: config.generatedAuthToken,
-    secureCookies: Boolean(config.tls),
-  });
+const {
+  isAuthed,
+  sessionToken,
+  handleTokenLogin,
+  handleLogin,
+  handleLogout,
+  loginPage,
+} = createAuthHandlers({
+  authRequired: config.authRequired,
+  password: config.password,
+  urlLoginToken: config.generatedAuthToken,
+  secureCookies: Boolean(config.tls),
+});
 
 type RpcRequest = ConnectionRpcRequest;
 
@@ -140,6 +146,7 @@ const { handleUpdateCheck, handleUpdateInstall } = createUpdateHandlers({
 });
 const clients = new Set<ServerWebSocket<unknown>>();
 const clientIds = new WeakMap<ServerWebSocket<unknown>, number>();
+const clientSessions = new WeakMap<ServerWebSocket<unknown>, string | null>();
 interface WebSocketCleanupSnapshot {
   client: string;
   viewedTerminals: string[];
@@ -1236,7 +1243,7 @@ async function handleConnectionHttpRequest(
 function main() {
   const server = bindListenerBeforeConnectionStart({
     bindListener: () =>
-      Bun.serve({
+      Bun.serve<{ sessionToken: string | null }>({
         port: config.port,
         hostname: config.host,
         tls: config.tls,
@@ -1266,6 +1273,22 @@ function main() {
           if (url.pathname === "/login") {
             return loginPage();
           }
+          // The login page's logo and favicon must also work before login.
+          if (url.pathname === "/roamgate-icon-192.png") {
+            return serveStatic(req, config.publicDir);
+          }
+          if (url.pathname === "/api/logout") {
+            const response = handleLogout(req);
+            const token = sessionToken(req);
+            if (response.ok && config.authRequired && token) {
+              for (const client of clients) {
+                if (clientSessions.get(client) !== token) continue;
+                webSocketCleanup.cleanup(client);
+                client.close(4001, "Logged out");
+              }
+            }
+            return response;
+          }
 
           // Everything else requires auth when bound to a non-localhost address.
           if (!isAuthed(req)) {
@@ -1277,7 +1300,10 @@ function main() {
           }
 
           if (url.pathname === "/ws") {
-            if (server.upgrade(req)) return undefined;
+            if (
+              server.upgrade(req, { data: { sessionToken: sessionToken(req) } })
+            )
+              return undefined;
             return new Response("websocket upgrade failed", { status: 400 });
           }
           if (url.pathname === "/api/notifications/push") {
@@ -1288,6 +1314,7 @@ function main() {
               ok: true,
               version: APP_VERSION,
               socket: config.socketPath,
+              auth_required: config.authRequired,
             });
           }
           if (url.pathname === "/api/update/check" && req.method === "GET") {
@@ -1322,6 +1349,7 @@ function main() {
           perMessageDeflate: WS_PER_MESSAGE_DEFLATE,
           open(ws) {
             clients.add(ws);
+            clientSessions.set(ws, ws.data.sessionToken);
             const label = assignClientId(ws);
             logger.debug("client connected", {
               client: label,
@@ -1357,6 +1385,7 @@ function main() {
             });
           },
           message(ws, message) {
+            if (!clients.has(ws)) return;
             const text =
               typeof message === "string" ? message : message.toString();
             const { id, method, connectionId, connectionGeneration } =

@@ -76,6 +76,13 @@
   padding-bottom: 0;
 }
 
+.config-logout-error {
+  grid-column: 1 / -1;
+  margin: 6px 8px;
+  color: var(--danger-text);
+  font-size: 12px;
+}
+
 .config-title {
   margin: 0 8px 4px;
   color: var(--muted);

@@ -18,7 +18,11 @@ describe("request authentication boundaries", () => {
     const html = await handlers.loginPage().text();
 
     expect(html).toContain("<title>Roamgate login</title>");
-    expect(html).toContain("<h2>▦ Roamgate</h2>");
+    expect(html).toContain('src="/roamgate-icon-192.png"');
+    expect(html).toContain('<label for="pw">Password or token</label>');
+    expect(html).toContain('autocomplete="current-password"');
+    expect(html).toContain('role="alert"');
+    expect(handlers.loginPage().headers.get("cache-control")).toBe("no-store");
     expect(html).not.toContain("herdr-gui");
   });
 
@@ -29,19 +33,96 @@ describe("request authentication boundaries", () => {
     });
     const html = await handlers.loginPage().text();
     const elements: Record<string, any> = {
-      pw: { value: "test-secret" },
+      login: {},
+      pw: { value: "test-secret", removeAttribute() {} },
       btn: {},
       err: {},
+      reveal: {},
     };
-    const location = { href: "/login", hash: "#roamgate-task=example-target" };
+    const location = {
+      href: "/login",
+      hash: "#roamgate-task=example-target",
+      replace(value: string) {
+        this.href = value;
+      },
+    };
     runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)![1]!, {
       document: { getElementById: (id: string) => elements[id] },
       location,
       fetch: async () => ({ ok: true }),
     });
-    await elements.btn.onclick();
+    await elements.login.onsubmit({ preventDefault() {} });
     expect(location.href).toBe("/#roamgate-task=example-target");
   });
+
+  test.each(["credentials", "server", "network"])(
+    "login recovers from %s failures and prevents duplicate submissions",
+    async (failure) => {
+      const handlers = createAuthHandlers({
+        authRequired: true,
+        password: "secret",
+      });
+      const html = await handlers.loginPage().text();
+      let focused = false;
+      const attributes: Record<string, string> = {};
+      const elements: Record<string, any> = {
+        login: {},
+        pw: {
+          value: "secret",
+          type: "password",
+          focus() {
+            focused = true;
+          },
+          removeAttribute(name: string) {
+            delete attributes[name];
+          },
+          setAttribute(name: string, value: string) {
+            attributes[name] = value;
+          },
+        },
+        btn: {},
+        err: {},
+        reveal: { setAttribute() {} },
+      };
+      let calls = 0;
+      const pending = Promise.withResolvers<Response>();
+      runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)![1]!, {
+        document: { getElementById: (id: string) => elements[id] },
+        fetch: () => {
+          calls++;
+          return pending.promise;
+        },
+      });
+      elements.reveal.onclick();
+      expect(elements.pw.type).toBe("text");
+      elements.reveal.onclick();
+      expect(elements.pw.type).toBe("password");
+      const submission = elements.login.onsubmit({ preventDefault() {} });
+      expect(elements.btn.disabled).toBe(true);
+      await elements.login.onsubmit({ preventDefault() {} });
+      expect(calls).toBe(1);
+      if (failure === "network") pending.reject(new Error("offline"));
+      else
+        pending.resolve(
+          new Response(null, { status: failure === "credentials" ? 401 : 500 }),
+        );
+      await submission;
+      expect(elements.btn.disabled).toBe(false);
+      expect(elements.btn.textContent).toBe("Log in");
+      expect(elements.err.textContent).toContain(
+        failure === "network"
+          ? "Cannot reach"
+          : failure === "server"
+            ? "Unable to log in"
+            : "Wrong password",
+      );
+      expect(elements.pw.value).toBe(failure === "credentials" ? "" : "secret");
+      expect(focused).toBe(failure === "credentials");
+      if (failure === "credentials")
+        expect(attributes["aria-invalid"]).toBe("true");
+      else expect(attributes["aria-invalid"]).toBeUndefined();
+    },
+  );
 
   test("does not derive authorization from reverse-proxy authorities", async () => {
     const handlers = createAuthHandlers({
@@ -104,6 +185,86 @@ describe("request authentication boundaries", () => {
 
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe("/login");
+  });
+});
+
+describe("browser logout", () => {
+  test.each([false, true])(
+    "expires the cookie with matching attributes (TLS %s)",
+    async (secureCookies) => {
+      const handlers = createAuthHandlers({
+        authRequired: true,
+        password: "secret",
+        secureCookies,
+      });
+      const login = () =>
+        handlers.handleLogin(
+          new Request("http://example.test/api/login", {
+            method: "POST",
+            body: JSON.stringify({ password: "secret" }),
+          }),
+        );
+      const first = cookieHeader(await login());
+      const second = cookieHeader(await login());
+      const logout = handlers.handleLogout(
+        new Request("http://example.test/api/logout", {
+          method: "POST",
+          headers: { cookie: first, "x-roamgate-logout": "1" },
+        }),
+      );
+      expect(logout.status).toBe(204);
+      expect(logout.headers.get("cache-control")).toBe("no-store");
+      expect(logout.headers.get("set-cookie")).toBe(
+        `herdr_auth=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureCookies ? "; Secure" : ""}`,
+      );
+      expect(
+        handlers.isAuthed(
+          new Request("http://example.test/", {
+            headers: { cookie: cookieHeader(logout) },
+          }),
+        ),
+      ).toBe(false);
+      expect(
+        handlers.isAuthed(
+          new Request("http://example.test/", { headers: { cookie: second } }),
+        ),
+      ).toBe(true);
+      expect((await login()).status).toBe(200);
+    },
+  );
+
+  test("rejects GET and cross-site logout, but allows retry without a cookie", () => {
+    const handlers = createAuthHandlers({
+      authRequired: true,
+      password: "secret",
+    });
+    for (const method of ["GET", "HEAD", "OPTIONS"]) {
+      const response = handlers.handleLogout(
+        new Request("http://example.test/api/logout", { method }),
+      );
+      expect(response.status).toBe(405);
+      expect(response.headers.get("allow")).toBe("POST");
+      expect(response.headers.has("set-cookie")).toBe(false);
+    }
+    for (const headers of [
+      new Headers(),
+      new Headers({ "x-roamgate-logout": "1", "sec-fetch-site": "cross-site" }),
+    ]) {
+      const response = handlers.handleLogout(
+        new Request("http://example.test/api/logout", {
+          method: "POST",
+          headers,
+        }),
+      );
+      expect(response.status).toBe(403);
+      expect(response.headers.has("set-cookie")).toBe(false);
+    }
+    const request = new Request("http://upstream.example/api/logout", {
+      method: "POST",
+      headers: { "x-roamgate-logout": "1", origin: "https://proxy.example" },
+    });
+    expect(handlers.handleLogout(request).status).toBe(204);
+    expect(handlers.handleLogout(request).status).toBe(204);
   });
 });
 
