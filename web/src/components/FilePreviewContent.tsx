@@ -1,5 +1,9 @@
 import { shortcutMatches } from "../shortcutPreferences";
 import {
+  HTML_PREVIEW_MAX_BYTES,
+  isHtmlPath,
+} from "../../../shared/filePreview";
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -45,6 +49,7 @@ import {
 } from "./previewSelection";
 import { highlightCodeTokens } from "./syntaxHighlighting";
 import { store, useStoreSelector } from "../store";
+import { relativePathWithinCheckout } from "../workspaceResource";
 import {
   directoryPreviewName,
   directoryPreviewPath,
@@ -234,7 +239,19 @@ export function FilePreviewContent({
   const hasPdfPreview = Boolean(preview && isPdfPath(previewPath));
   const pdfTooLarge =
     hasPdfPreview && (preview?.size ?? 0) > PDF_INLINE_PREVIEW_MAX_BYTES;
-  const hasRichPreview = hasMarkdownPreview || hasMermaidPreview;
+  const hasHtmlPreview =
+    hasPreviewText &&
+    !preview?.binary &&
+    preview?.type !== "directory" &&
+    isHtmlPath(previewPath) &&
+    (!/^(?:\/|[a-z]:[\\/])/i.test(previewPath) ||
+      relativePathWithinCheckout(preview?.root ?? "", previewPath) !==
+        undefined);
+  const htmlTooLarge =
+    hasHtmlPreview &&
+    ((preview?.size ?? 0) > HTML_PREVIEW_MAX_BYTES || !!preview?.truncated);
+  const hasRichPreview =
+    hasMarkdownPreview || hasMermaidPreview || hasHtmlPreview;
   const renderRichPreview = hasRichPreview && previewMode === "rendered";
   const inlinePreviewUrl = useMemo(() => {
     if (!preview?.workspace_id || !previewPath) return null;
@@ -503,41 +520,31 @@ export function FilePreviewContent({
                 Copy
               </button>
             ) : null}
-            {!showingChanges && hasMermaidPreview ? (
-              <div
-                className="file-preview-mode-options"
-                role="group"
-                aria-label="Mermaid preview mode"
-              >
-                <button
-                  type="button"
-                  className="file-preview-mode-toggle"
-                  aria-pressed={previewMode === "rendered"}
-                  onClick={() => setPreviewMode("rendered")}
-                >
-                  Diagram
-                </button>
-                <button
-                  type="button"
-                  className="file-preview-mode-toggle"
-                  aria-pressed={previewMode === "raw"}
-                  onClick={() => setPreviewMode("raw")}
-                >
-                  Source
-                </button>
-              </div>
-            ) : null}
-            {!showingChanges && hasMarkdownPreview ? (
+            {!showingChanges && hasRichPreview ? (
               <button
                 type="button"
                 className="file-preview-mode-toggle"
+                role="switch"
+                aria-label="Source mode"
+                aria-checked={previewMode === "raw"}
                 onClick={() =>
                   setPreviewMode((mode) =>
                     mode === "rendered" ? "raw" : "rendered",
                   )
                 }
               >
-                {previewMode === "rendered" ? "Raw" : "Rendered"}
+                <span className="file-preview-mode-label">
+                  {hasMermaidPreview ? "Diagram" : "Preview"}
+                </span>
+                <span
+                  className={
+                    "settings-switch" + (previewMode === "raw" ? " is-on" : "")
+                  }
+                  aria-hidden="true"
+                >
+                  <span />
+                </span>
+                <span className="file-preview-mode-label">Source</span>
               </button>
             ) : null}
             {changesAvailable ? (
@@ -624,7 +631,34 @@ export function FilePreviewContent({
               Binary file cannot be previewed.
             </div>
           ) : null}
-          {!loading && !error && preview?.truncated && !hasPdfPreview ? (
+          {!loading && !error && hasHtmlPreview && renderRichPreview ? (
+            htmlTooLarge ? (
+              <div className="file-preview-state">
+                HTML is too large to render. Use Source or Download from the
+                file menu.
+              </div>
+            ) : inlinePreviewUrl ? (
+              <>
+                <div className="file-preview-banner">
+                  Static HTML preview. Scripts are blocked; HTTPS stylesheets
+                  can access the network.
+                </div>
+                <iframe
+                  key={inlinePreviewUrl}
+                  className="file-preview-html"
+                  sandbox=""
+                  referrerPolicy="no-referrer"
+                  src={inlinePreviewUrl}
+                  aria-label={`HTML preview: ${entry?.name ?? previewPath}`}
+                />
+              </>
+            ) : null
+          ) : null}
+          {!loading &&
+          !error &&
+          preview?.truncated &&
+          !hasPdfPreview &&
+          !(hasHtmlPreview && renderRichPreview) ? (
             <div className="file-preview-banner">
               Preview truncated at 512 KB.
             </div>

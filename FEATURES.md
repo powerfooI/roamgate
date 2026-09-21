@@ -141,9 +141,15 @@ and worktree after fetch, and abort conflicts. They never push.
   **Workspace only** restores the tree; refresh or checkout/connection changes
   reset this mode.
 - Text previews provide highlighting, line numbers, search, and refresh.
-  Markdown has Raw/Rendered views; Mermaid fences and `.mmd`/`.mermaid` files
+  Markdown has a Preview/Source switch with the active mode highlighted;
+  Mermaid fences and `.mmd`/`.mermaid` files
   have zoomable diagrams and source views. Markdown links navigate within
   Inspector; external links open a browser tab.
+- Workspace `.html`/`.htm` files open in Preview mode with a Preview/Source switch.
+  Static previews support workspace CSS, images, and fonts, including relative
+  CSS imports, plus HTTPS CDN stylesheets. Scripts, external images and external
+  fonts are blocked; HTML source is limited to 512 KiB. Files outside the workspace
+  remain available as source or downloads.
 - Preview images (including SVG), PDFs, and local Markdown images with zoom/Fit.
   Unsupported binaries are download-only; decoding depends on the browser.
 - Upload by dragging onto a checkout directory; download files or workspace

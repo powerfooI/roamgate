@@ -1,4 +1,6 @@
 import type { ServerWebSocket } from "bun";
+import { isHtmlPath } from "../../shared/filePreview";
+import { DOWNLOAD_TIMEOUT_MS } from "./workspace/file-constants";
 import { createWebPushService } from "./notifications/web-push";
 import { rmSync } from "node:fs";
 import packageJson from "../../package.json";
@@ -1347,6 +1349,15 @@ function main() {
             req.method,
           );
           if (connectionRoute) {
+            if (
+              connectionRoute.kind === "connection" &&
+              connectionRoute.endpoint === "file-download" &&
+              url.searchParams.get("inline") === "1" &&
+              isHtmlPath(url.searchParams.get("path") ?? "")
+            ) {
+              // HTML preparation can require several bounded SSH resource reads.
+              server.timeout(req, DOWNLOAD_TIMEOUT_MS / 1000);
+            }
             return handleConnectionHttpRequest(connectionRoute, url, req);
           }
           // Everything else: serve the built frontend (embedded or on-disk).

@@ -1,7 +1,7 @@
 export const LIST_TIMEOUT_MS = 10000;
 export const LIST_LIMIT = 1000;
 export const PREVIEW_TIMEOUT_MS = 10000;
-export const PREVIEW_MAX_BYTES = 512 * 1024;
+export { HTML_PREVIEW_MAX_BYTES as PREVIEW_MAX_BYTES } from "../../../shared/filePreview";
 export const PREVIEW_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const DOWNLOAD_TIMEOUT_MS = 120000;
 export const UPLOAD_TIMEOUT_MS = 120000;

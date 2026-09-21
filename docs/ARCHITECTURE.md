@@ -234,6 +234,29 @@ renderer, strip wrappers/metadata only for detection, and retain original source
 Images are inert elements; SVG is never inserted into the app DOM, and direct
 SVG responses carry a sandbox CSP blocking scripts and external resources.
 
+HTML previews use a separate empty-sandbox iframe and an enforcing response CSP,
+including on direct navigation. The server embeds workspace CSS, images and fonts
+as data URLs; Bun's CSS bundler resolves imports and asset URLs. Relative paths
+resolve beside their document or stylesheet; root-relative paths resolve within
+its workspace. Realpath checks reject resources outside that workspace. HTTPS
+stylesheets and their CSS imports are loaded directly by the browser, not fetched
+by the bridge; protocol-relative stylesheet URLs use HTTPS. Stylesheet links use
+`no-referrer`, and document-supplied referrer metadata is removed. CDN requests
+expose the viewer's IP address and are not covered by workspace read limits.
+Scripts, forms, embedded documents, external images/fonts and HTTP stylesheets
+are blocked. Missing or unsupported workspace resources are omitted. Ordinary
+downloads retain original bytes.
+
+HTML and each workspace stylesheet are limited to 512 KiB, each workspace
+image/font to 5 MiB, and a preview to 64 resource paths and 10 MiB of resource
+bytes. Resource-bearing style processing is limited to 256 blocks/attributes,
+with a 20 MiB embedding/output budget. Local and SSH readers check size and read
+at most the limit plus one byte to detect growth; oversized previews return
+HTTP 413. HTML requests have a 120-second HTTP idle timeout for preparation over
+SSH. The source view and downloads remain available.
+These limits do not bound decoded image memory or browser rendering cost. User
+links and deliberate copy/drag into other controls remain untrusted user actions.
+
 ## Agent activity
 
 `agent.list` adds optional `last_activity_at` from session-file mtime without

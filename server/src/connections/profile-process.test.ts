@@ -197,7 +197,11 @@ test("production dispatcher isolates two local profiles and profile CRUD", async
   roots.push(root);
   mkdirSync(root, { recursive: true, mode: 0o700 });
   chmodSync(root, 0o700);
-  const alpha = await fakeHerdr(root, "alpha");
+  const alpha = await fakeHerdr(root, "alpha", 14, undefined, ({ method }) =>
+    method === "workspace.get"
+      ? { workspace: { worktree: { checkout_path: root } } }
+      : undefined,
+  );
   const beta = await fakeHerdr(root, "beta");
   const registryPath = join(root, "connections.json");
   writeFileSync(
@@ -330,6 +334,28 @@ test("production dispatcher isolates two local profiles and profile CRUD", async
     );
     expect(initialAlpha.connection_generation).toBe(oldAlphaGeneration);
     expect(initialAlpha.result.workspaces[0].name).toBe("from-alpha");
+    writeFileSync(
+      join(root, "page.html"),
+      "<h1>HTML marker</h1><script>throw 1</script>",
+    );
+    const htmlPreview = await fetch(
+      `http://127.0.0.1:${port}/api/connections/alpha/file/download?connection_generation=${oldAlphaGeneration}&workspace_id=shared-workspace&path=page.html&inline=1`,
+    );
+    expect(htmlPreview.status).toBe(200);
+    expect(htmlPreview.headers.get("content-type")).toBe(
+      "text/html; charset=utf-8",
+    );
+    expect(htmlPreview.headers.get("content-disposition")).toStartWith(
+      "inline;",
+    );
+    expect(htmlPreview.headers.get("content-security-policy")).toStartWith(
+      "sandbox;",
+    );
+    expect(htmlPreview.headers.get("X-Herdr-Connection-Id")).toBe("alpha");
+    expect(htmlPreview.headers.get("X-Herdr-Connection-Generation")).toBe(
+      String(oldAlphaGeneration),
+    );
+    expect(await htmlPreview.text()).toBe("<h1>HTML marker</h1>");
     expect((await rpc("connections.test", { id: "beta" })).version).toBe(
       "fake-beta",
     );

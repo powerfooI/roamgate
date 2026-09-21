@@ -565,7 +565,7 @@ async function run() {
     "refreshed content",
   );
   check(selected() === "A.md", "refresh changed the selected file");
-  flushSync(() => previewButton("Raw").click());
+  flushSync(() => previewButton("Source mode").click());
   await until(() => document.querySelector(".cm-content"), "raw content");
   refreshPreview();
   request("A.md").resolve({ ...response("A.md"), text: "# Updated source" });
@@ -576,7 +576,10 @@ async function run() {
         ?.textContent?.includes("Updated source"),
     "refreshed raw content",
   );
-  check(!!previewButton("Rendered"), "refresh lost raw mode");
+  check(
+    previewButton("Source mode").getAttribute("aria-checked") === "true",
+    "refresh lost source mode",
+  );
   refreshPreview();
   request("A.md").reject(new Error("file disappeared"));
   await until(
@@ -593,7 +596,7 @@ async function run() {
   refreshPreview();
   request("A.md").resolve(response("A.md"));
   await until(() => document.querySelector(".cm-content"), "retry content");
-  flushSync(() => previewButton("Rendered").click());
+  flushSync(() => previewButton("Source mode").click());
   await until(
     () => document.querySelector(".file-preview-markdown a"),
     "rendered after retry",

@@ -36,6 +36,12 @@ import { runGitFileAction, runGitRepoAction } from "./git-actions";
 import { collectIgnoredNames } from "./git-ignore";
 import { GIT_DIFF_TIMEOUT_MS } from "./file-constants";
 import { inlinePreviewMimeForPath } from "./preview";
+import {
+  HTML_PREVIEW_MAX_BYTES,
+  isHtmlPath,
+} from "../../../shared/filePreview";
+import { HtmlPreviewError, readHtmlPreviewFile } from "./html-preview-files";
+import { HTML_PREVIEW_CSP, renderHtmlPreview } from "./html-preview";
 
 const MAX_FILE_RESOLUTION_CANDIDATES = 32;
 const MAX_FILE_RESOLUTION_PATH_LENGTH = 4096;
@@ -261,6 +267,41 @@ export function createFileHandlers({
   async function downloadFile(params: Record<string, unknown>) {
     const { checkoutPath, path } = await downloadTarget(params);
     const host = sshHost();
+    if (params.inline === true && isHtmlPath(path)) {
+      const headers = {
+        "content-type": "text/html; charset=utf-8",
+        "content-disposition": inlineContentDisposition(path.split("/").pop()!),
+        "content-security-policy": HTML_PREVIEW_CSP,
+        "referrer-policy": "no-referrer",
+        "x-content-type-options": "nosniff",
+        "cache-control": "private, no-store",
+      };
+      try {
+        const readResource = (resourcePath: string, limit: number) =>
+          readHtmlPreviewFile({
+            rootPath: checkoutPath,
+            path: resourcePath,
+            limit,
+            host,
+            runProcessWithCodeTimeout,
+            shQuote,
+          });
+        const document = await readResource(path, HTML_PREVIEW_MAX_BYTES);
+        return new Response(await renderHtmlPreview(document, readResource), {
+          headers,
+        });
+      } catch (error) {
+        const status = error instanceof HtmlPreviewError ? error.status : 400;
+        const message =
+          status === 413
+            ? "HTML is too large to render, or its static resources exceed the preview limits. Use Source or Download."
+            : "Unable to render HTML. Preview requires a readable UTF-8 HTML file and static resources inside the workspace. Use Source or Download.";
+        return new Response(message, {
+          status,
+          headers: { ...headers, "content-type": "text/plain; charset=utf-8" },
+        });
+      }
+    }
     const download = host
       ? await downloadRemoteFile({
           host,

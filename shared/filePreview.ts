@@ -14,6 +14,12 @@ export const IMAGE_MIME_TYPES: ReadonlyMap<string, string> = new Map([
   ["avif", "image/avif"],
 ]);
 
+export const HTML_PREVIEW_MAX_BYTES = 512 * 1024;
+
+export function isHtmlPath(path: string) {
+  return /\.html?$/i.test(path);
+}
+
 export function imageMimeForPath(path: string) {
   return (
     IMAGE_MIME_TYPES.get(path.toLowerCase().split(".").pop() ?? "") ?? null
