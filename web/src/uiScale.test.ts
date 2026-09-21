@@ -21,6 +21,8 @@ test.skipIf(!chrome).each([
   [500, 1.25, "uiScale", 800, 100],
   [1300, 1, "taskPush", 800, 100],
   [390, 1, "taskPush", 800, 100],
+  [1300, 1, "connectionProfiles", 800, 100],
+  [390, 1, "connectionProfiles", 800, 100],
   [1300, 1, "configuration", 800, 100],
   [390, 1.25, "configuration", 800, 100],
   [320, 1.5, "configuration", 800, 100],

@@ -335,7 +335,7 @@ export class ConnectionProfileService<
           }
         : {
             version: CONNECTION_PROFILE_FILE_VERSION,
-            default_connection_id: profile.id,
+            default_connection_id: migrationSeed?.id ?? profile.id,
             profiles: migrationSeed ? [migrationSeed, profile] : [profile],
           };
       await this.args.store.save(nextRegistry);
@@ -376,7 +376,7 @@ export class ConnectionProfileService<
       this.profiles.set(profile.id, { profile, readOnly: false });
       this.registry = nextRegistry;
       if (migration) {
-        this.args.manager.setDefault(profile.id);
+        this.args.manager.setDefault(nextRegistry.default_connection_id);
         await this.args.manager.unregister(LEGACY_DEFAULT_CONNECTION_ID);
         this.profiles.delete(LEGACY_DEFAULT_CONNECTION_ID);
       }

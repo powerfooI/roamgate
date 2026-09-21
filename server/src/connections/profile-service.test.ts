@@ -460,15 +460,15 @@ describe("connection profile service", () => {
     const result = await service.create(local("alpha"));
     expect(result).toMatchObject({
       id: "alpha",
-      is_default: true,
+      is_default: false,
       state: "ready",
     });
-    expect(manager.defaultId()).toBe("alpha");
+    expect(manager.defaultId()).toBe("local");
     expect(manager.has("legacy-default")).toBeFalse();
     expect(retired?.stops).toBe(1);
     expect(store.load()).toEqual({
       version: 2,
-      default_connection_id: "alpha",
+      default_connection_id: "local",
       profiles: [
         {
           id: "local",
@@ -481,16 +481,89 @@ describe("connection profile service", () => {
         local("alpha"),
       ],
     });
-    // The seeded local profile keeps the previous default server connected
-    // as an ordinary writable profile.
+    // The seeded local profile preserves the default server and is writable.
     expect(service.list().map(({ id }) => id)).toEqual(["local", "alpha"]);
     expect(service.list()[0]).toMatchObject({
       id: "local",
       label: "Local",
+      is_default: true,
       state: "ready",
       read_only: false,
     });
   });
+
+  for (const retryable of [false, true]) {
+    test(`first failed SSH profile remains removable (retryable: ${retryable})`, async () => {
+      const store = new ConnectionProfileStore({ path: tempPath() });
+      const bootstrap = loadConnectionProfileBootstrap({
+        store,
+        legacyProfile: legacy,
+        explicitLegacyOverride: false,
+      });
+      const manager = new ConnectionManager<FakeRuntime>(
+        bootstrap.defaultConnectionId,
+      );
+      const baseFactory = runtimeFactory(new Map());
+      const timers: Array<{ cancelled: boolean }> = [];
+      const service = new ConnectionProfileService({
+        manager,
+        store,
+        bootstrap,
+        createRuntime: (profile) => (context) => {
+          const runtime = baseFactory(profile)(context);
+          if (profile.type === "ssh") {
+            runtime.startTransport = async () => {
+              throw new SshTunnelError(
+                "SSH connection failed",
+                retryable,
+                retryable ? "unreachable" : "authentication",
+                255,
+              );
+            };
+          }
+          return runtime;
+        },
+        retry: {
+          schedule: () => {
+            const timer = { cancelled: false };
+            timers.push(timer);
+            return { cancel: () => (timer.cancelled = true) };
+          },
+        },
+      });
+      await service.startConfigured();
+
+      try {
+        await expect(
+          service.create(ssh("remote", true)),
+        ).resolves.toMatchObject({
+          id: "remote",
+          is_default: false,
+          state: retryable ? "reconnecting" : "error",
+        });
+        expect(manager.status("local")).toMatchObject({
+          is_default: true,
+          state: "ready",
+        });
+        expect(store.load()?.default_connection_id).toBe("local");
+        await expect(service.remove("remote")).resolves.toEqual({ ok: true });
+        expect(manager.has("remote")).toBeFalse();
+        expect(timers.every((timer) => timer.cancelled)).toBeTrue();
+        const restarted = loadConnectionProfileBootstrap({
+          store,
+          legacyProfile: legacy,
+          explicitLegacyOverride: false,
+        });
+        expect(restarted.defaultConnectionId).toBe("local");
+        expect(
+          restarted.registrations.map(({ profile }) => profile.id),
+        ).toEqual(["local"]);
+      } finally {
+        service.stopSupervision();
+        await manager.stopAll();
+      }
+    });
+  }
 
   test("first create named local seeds the default server under a distinct id", async () => {
     const store = new ConnectionProfileStore({ path: tempPath() });
@@ -511,11 +584,12 @@ describe("connection profile service", () => {
 
     await expect(service.create(local("local"))).resolves.toMatchObject({
       id: "local",
-      is_default: true,
+      is_default: false,
     });
+    expect(manager.defaultId()).toBe("localhost");
     expect(store.load()).toEqual({
       version: 2,
-      default_connection_id: "local",
+      default_connection_id: "localhost",
       profiles: [
         {
           id: "localhost",
@@ -566,7 +640,7 @@ describe("connection profile service", () => {
 
     await expect(service.create(local("alpha"))).resolves.toMatchObject({
       id: "alpha",
-      is_default: true,
+      is_default: false,
     });
     expect(manager.has("legacy-default")).toBeFalse();
     expect(service.list().map(({ id }) => id)).toEqual(["local", "alpha"]);
@@ -642,6 +716,9 @@ describe("connection profile service", () => {
     await service.test({ id: "beta" });
     expect(tested).toEqual(["beta"]);
     await service.disconnect("alpha");
+    await expect(service.remove("alpha")).rejects.toThrow(
+      "cannot remove the default connection",
+    );
     await service.setDefault("beta");
     expect(manager.defaultId()).toBe("beta");
     await service.update("alpha", {
@@ -675,6 +752,9 @@ describe("connection profile service", () => {
       createRuntime: runtimeFactory(new Map()),
     });
 
+    await expect(service.remove("legacy-default")).rejects.toThrow(
+      "connection profile is read-only",
+    );
     await service.remove("alpha");
     expect(store.load()).toBeNull();
     expect(manager.defaultId()).toBe("legacy-default");

@@ -995,17 +995,32 @@ function ConnectionManagerDialog({ onClose }: { onClose: () => void }) {
                       Disconnect
                     </button>
                   ) : null}
-                  {capabilities.canRemove ? (
+                  {!connection.read_only ? (
                     <button
                       type="button"
                       className="danger"
-                      disabled={!!pending}
+                      disabled={!!pending || !capabilities.canRemove}
+                      aria-describedby={
+                        connection.is_default
+                          ? `connection-remove-help-${connection.id}`
+                          : undefined
+                      }
                       onClick={() => setRemoveTarget(connection)}
                     >
                       Remove
                     </button>
                   ) : null}
                 </div>
+                {connection.is_default && !connection.read_only ? (
+                  <p
+                    id={`connection-remove-help-${connection.id}`}
+                    className="connection-profile-policy"
+                  >
+                    To remove this default connection, use Set default on
+                    another connection first. If none is available, add a
+                    connection first.
+                  </p>
+                ) : null}
               </section>
             );
           })}
