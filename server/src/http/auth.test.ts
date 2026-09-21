@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { runInNewContext } from "node:vm";
+import { createHmac } from "node:crypto";
 import { createAuthHandlers, unauthenticatedLoginRedirect } from "./auth";
 import { browserUrlFor, withLoginToken } from "../config/server-config";
 
@@ -189,6 +190,66 @@ describe("request authentication boundaries", () => {
 });
 
 describe("browser logout", () => {
+  test.each(["password", "URL token"])(
+    "%s reauthentication preserves the current cookie and its expiry",
+    async (mode) => {
+      const handlers = createAuthHandlers({
+        authRequired: true,
+        password: "secret",
+        urlLoginToken: "secret",
+      });
+      const login = async (cookie = "", credential = "secret") =>
+        mode === "password"
+          ? handlers.handleLogin(
+              new Request("http://example.test/api/login", {
+                method: "POST",
+                headers: { cookie },
+                body: JSON.stringify({ password: credential }),
+              }),
+            )
+          : handlers.handleTokenLogin(
+              new Request(`http://example.test/?token=${credential}`, {
+                headers: { cookie },
+              }),
+            )!;
+      const first = cookieHeader(await login());
+      const otherBrowser = cookieHeader(await login());
+      expect(otherBrowser).not.toBe(first);
+      // No Set-Cookie means the browser retains both the token and original TTL.
+      expect((await login(first)).headers.has("set-cookie")).toBe(false);
+      expect((await login(first)).headers.has("set-cookie")).toBe(false);
+      expect(
+        handlers.isAuthed(
+          new Request("http://example.test/", { headers: { cookie: first } }),
+        ),
+      ).toBe(true);
+      const invalid = await login(first, "wrong");
+      expect(invalid.headers.has("set-cookie")).toBe(false);
+      if (mode === "password") expect(invalid.status).toBe(401);
+      else expect(invalid.headers.get("location")).toBe("/login");
+      const expiredPayload = Buffer.from(JSON.stringify({ exp: 0 })).toString(
+        "base64url",
+      );
+      const expiredSignature = createHmac("sha256", "secret")
+        .update(expiredPayload)
+        .digest("hex");
+      for (const cookie of [
+        "herdr_auth=invalid",
+        `herdr_auth=${expiredPayload}.${expiredSignature}`,
+      ]) {
+        const replaced = cookieHeader(await login(cookie));
+        expect(replaced).not.toBe(cookie);
+        expect(
+          handlers.isAuthed(
+            new Request("http://example.test/", {
+              headers: { cookie: replaced },
+            }),
+          ),
+        ).toBe(true);
+      }
+    },
+  );
+
   test.each([false, true])(
     "expires the cookie with matching attributes (TLS %s)",
     async (secureCookies) => {

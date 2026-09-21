@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Exercise the real HTTP router and socket cleanup, not a second test router.
-test("logout clears only this browser and closes all of its sockets", async () => {
+test("logout after reauthentication closes earlier and later tabs, not other browsers", async () => {
   const root = await mkdtemp(join(tmpdir(), "roamgate-logout-"));
   const sockets: WebSocket[] = [];
   const child = Bun.spawn([process.execPath, "server/src/index.ts"], {
@@ -51,13 +51,14 @@ test("logout clears only this browser and closes all of its sockets", async () =
     clearTimeout(deadline);
     const request = (path: string, init?: RequestInit) =>
       fetch(`${base}${path}`, { ...init, signal: AbortSignal.timeout(5000) });
-    const login = async () => {
+    const login = async (cookie = "") => {
       const response = await request("/api/login", {
         method: "POST",
+        headers: { cookie },
         body: JSON.stringify({ password: "logout-test-secret" }),
       });
       expect(response.status).toBe(200);
-      return response.headers.get("set-cookie")!.split(";", 1)[0];
+      return response.headers.get("set-cookie")?.split(";", 1)[0] ?? cookie;
     };
     const first = await login();
     const second = await login();
@@ -89,8 +90,12 @@ test("logout clears only this browser and closes all of its sockets", async () =
       return ws;
     };
     const a = await connect(first);
-    const sameBrowserTab = await connect(first);
+    const reauthenticated = await login(first);
+    expect(reauthenticated).toBe(first);
+    const sameBrowserTab = await connect(reauthenticated);
     const otherBrowser = await connect(second);
+    const currentCookie = await login(reauthenticated);
+    expect(currentCookie).toBe(first);
     const closures = [a, sameBrowserTab].map(
       (ws) =>
         new Promise<number>((resolve, reject) => {
@@ -132,7 +137,7 @@ test("logout clears only this browser and closes all of its sockets", async () =
     expect(a.readyState).toBe(WebSocket.OPEN);
     const logout = await request("/api/logout", {
       method: "POST",
-      headers: { cookie: first, "x-roamgate-logout": "1" },
+      headers: { cookie: currentCookie, "x-roamgate-logout": "1" },
     });
     expect(logout.status).toBe(204);
     expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");

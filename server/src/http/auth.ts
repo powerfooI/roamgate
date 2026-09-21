@@ -61,8 +61,12 @@ export function createAuthHandlers(args: {
     return `${payload}.${sign(payload)}`;
   }
 
-  function authCookie(): string {
-    return `${AUTH_COOKIE}=${signedToken()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${AUTH_TOKEN_TTL_SECONDS}${args.secureCookies ? "; Secure" : ""}`;
+  function authCookieHeaders(req: Request): Record<string, string> {
+    // Keep live tabs on the same session token without extending its expiry.
+    if (isAuthed(req)) return {};
+    return {
+      "set-cookie": `${AUTH_COOKIE}=${signedToken()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${AUTH_TOKEN_TTL_SECONDS}${args.secureCookies ? "; Secure" : ""}`,
+    };
   }
 
   function secretsEqual(actual: string, expected: string): boolean {
@@ -143,7 +147,7 @@ export function createAuthHandlers(args: {
       status: 303,
       headers: {
         location,
-        ...(valid ? { "set-cookie": authCookie() } : {}),
+        ...(valid ? authCookieHeaders(req) : {}),
         "cache-control": "no-store",
         "referrer-policy": "no-referrer",
       },
@@ -171,7 +175,7 @@ export function createAuthHandlers(args: {
       headers: {
         "content-type": "application/json",
         "cache-control": "no-store",
-        "set-cookie": authCookie(),
+        ...authCookieHeaders(req),
       },
     });
   }
