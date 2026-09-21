@@ -326,7 +326,6 @@
 .pane-jump-agent-status {
   flex: 0 0 auto;
   margin-left: auto;
-  color: var(--muted);
   font-size: 11px;
   text-transform: capitalize;
 }

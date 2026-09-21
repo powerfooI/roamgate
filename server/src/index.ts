@@ -22,6 +22,7 @@ import {
   SERVICE_COMMAND_CONTINUE,
 } from "./config/service-manager";
 import { runHerdrCommand } from "./herdr/cli";
+import { enrichIntegrationVersions } from "./herdr/integration-versions";
 import {
   createHerdrSetupHandlers,
   herdrSetupGuardForProfile,
@@ -1121,6 +1122,12 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
   try {
     const rawResult = await herdr.call(method, params ?? {});
     let result = rawResult;
+    if (method === "integration.list") {
+      result = await enrichIntegrationVersions(result, {
+        sshHost: sshHost(),
+        ping: () => herdr.ping(),
+      });
+    }
     if (method === "workspace.list") {
       result = await worktreeParents.enrichWorkspaceList(result);
       result = await enrichWorkspacesWithGitStatus(result);

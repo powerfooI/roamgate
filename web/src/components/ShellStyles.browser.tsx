@@ -1,3 +1,4 @@
+import { agentClass } from "../utils";
 import "../styles/tokens.css";
 import "../styles/base.css";
 import "../styles/layout/app.css";
@@ -51,6 +52,34 @@ async function run() {
   const header = fixture.querySelector<HTMLElement>(".lifecycle-head")!;
   const title = header.querySelector("h2")!;
   try {
+    const paneItem = document.createElement("button");
+    const statusBadge = document.createElement("span");
+    const referenceBadge = document.createElement("span");
+    paneItem.append(statusBadge);
+    fixture.append(paneItem, referenceBadge);
+    for (const theme of ["dark", "light"]) {
+      document.documentElement.dataset.theme = theme;
+      for (const layout of ["desktop", "mobile"]) {
+        document.documentElement.dataset.layout = layout;
+        for (const state of ["", "is-selected", "is-current"]) {
+          paneItem.className = `pane-jump-item ${state}`;
+          for (const status of ["working", "done", "blocked", "idle"]) {
+            referenceBadge.className = agentClass(status);
+            statusBadge.className = `${agentClass(status)} pane-jump-agent-status`;
+            statusBadge.textContent = status;
+            const actual = getComputedStyle(statusBadge);
+            const expected = getComputedStyle(referenceBadge);
+            check(
+              actual.color === expected.color &&
+                actual.backgroundColor === expected.backgroundColor,
+              `${theme} ${layout} ${state} ${status}: pane switcher must preserve the shared status badge palette`,
+            );
+          }
+        }
+      }
+    }
+    paneItem.remove();
+    referenceBadge.remove();
     const sidebar = document.createElement("aside");
     sidebar.className = "sidebar";
     sidebar.style.height = "300px";

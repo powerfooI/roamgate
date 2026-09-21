@@ -941,6 +941,12 @@ async function run() {
       .textContent!.includes("Version unavailable"),
     "missing version metadata was fabricated",
   );
+  check(
+    !!document.querySelector(
+      '.agent-integrations-version [title*="server API and CLI"][title*="herdr integration status"]',
+    ),
+    "missing integration versions must explain the metadata sources and CLI check",
+  );
   const otherAgents = document.querySelector<HTMLDetailsElement>(
     ".agent-integrations-unavailable",
   )!;

@@ -150,7 +150,7 @@
   padding: 2px 6px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  color: var(--muted);
+  color: var(--text);
   font-size: 10px;
   font-weight: 700;
   line-height: 1.2;

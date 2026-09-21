@@ -319,20 +319,20 @@ textarea:focus {
 }
 
 .git-dirty {
-  color: var(--yellow);
+  color: var(--warning-text);
   border-color: color-mix(in srgb, var(--yellow) 45%, var(--border));
 }
 
 .git-ahead,
 .git-behind {
-  color: var(--blue);
+  color: var(--info-text);
   border-color: color-mix(in srgb, var(--blue) 45%, var(--border));
 }
 
 .git-badge-error {
   color: var(--danger-text);
   border-color: var(--danger-border);
-  background: var(--danger-soft);
+  background: color-mix(in srgb, var(--panel) 86%, var(--red));
 }
 
 /* ===== modal ===== */
@@ -659,32 +659,32 @@ textarea:focus {
   padding: 1px 7px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  color: var(--muted);
+  color: var(--text);
   white-space: nowrap;
 }
 
 .badge-working {
   color: var(--warning-text);
   border-color: var(--yellow);
-  background: var(--warning-soft);
+  background: color-mix(in srgb, var(--panel) 88%, var(--yellow));
 }
 
 .badge-done {
   color: var(--success-text);
   border-color: var(--green);
-  background: var(--success-soft);
+  background: color-mix(in srgb, var(--panel) 89%, var(--green));
 }
 
 .badge-blocked {
   color: var(--danger-text);
   border-color: var(--danger-border);
-  background: var(--danger-soft);
+  background: color-mix(in srgb, var(--panel) 86%, var(--red));
 }
 
 .badge-idle {
-  color: var(--blue);
+  color: var(--info-text);
   border-color: var(--accent);
-  background: var(--accent-soft);
+  background: color-mix(in srgb, var(--panel) 85%, var(--accent));
 }
 
 .terminal-loading {

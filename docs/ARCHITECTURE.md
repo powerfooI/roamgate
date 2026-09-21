@@ -243,6 +243,19 @@ stay unresolved. Idle ordering uses mtime, then Herdr state-change sequence,
 without browser activity history. [History synchronization](./HISTORY.md) owns
 projection, caching, and incremental transcript contracts.
 
+## Agent integrations
+
+`integration.list` keeps Herdr's targets and installation states authoritative.
+Missing versions are supplemented by read-only `herdr integration status` on the
+selected host: locally for local connections, or through that connection's SSH
+account. The CLI binary version must match the running server's `ping` version;
+per-agent state and any existing version fields must agree before merging.
+The bridge/SSH account must use the same agent configuration environment as Herdr.
+RPC metadata is never overwritten, and a `current` state alone does not imply an
+available version. CLI commands have five-second timeouts; missing binaries,
+failed SSH commands, malformed output, and version mismatches leave missing
+metadata unknown without failing the list. There is no remote-to-local fallback.
+
 ## Task notifications
 
 Each runtime tracks agent transitions through per-pane subscriptions and periodic

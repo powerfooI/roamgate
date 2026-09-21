@@ -65,8 +65,9 @@ const stateLabels = {
 const INTEGRATION_DESCRIPTION =
   "Changes apply to the Herdr server user's configuration, shared across its sessions. " +
   "Integrations do not install agent applications. Start a new agent session after installation if reporting has not started. " +
-  "Versions refer to Herdr integration scripts, not agent applications. Only versions reported by the selected Herdr server are shown; missing version information stays unknown. " +
-  "Herdr 0.9.0 does not report version numbers. Available versions are bundled with that server, not checked online.";
+  "Versions refer to Herdr integration scripts, not agent applications. Missing API versions are supplemented by `herdr integration status` on the selected server's machine when the CLI matches the running Herdr version and integration state. " +
+  "The bridge or SSH account must use the same agent configuration as the Herdr server. Unavailable version information stays unknown. " +
+  "Available versions are bundled with that server, not checked online.";
 
 export function AgentIntegrationsSettings({
   connectionLabel,
@@ -259,7 +260,13 @@ export function AgentIntegrationsSettings({
             <div className="agent-integrations-meta">
               {item.state !== "not_installed" ? (
                 <span className="agent-integrations-version">
-                  <span title="Installed integration version">
+                  <span
+                    title={
+                      item.installed_version === undefined
+                        ? "Version metadata is unavailable from the server API and CLI. Run `herdr integration status` on the server using the bridge or SSH account to inspect it."
+                        : "Installed integration version"
+                    }
+                  >
                     {item.installed_version === undefined
                       ? "Version unavailable"
                       : `v${item.installed_version}`}

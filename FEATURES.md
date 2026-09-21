@@ -86,8 +86,9 @@ cross-worktree state mixing.
 - **Menu > Configuration > Integrations** installs, updates, or uninstalls
   Herdr's bundled integrations with confirmation, not agent applications.
   Changes affect the connected server user across sessions, including SSH.
-  Restart agent sessions if reporting has not started. Versions appear only
-  when Herdr reports them; “available” means bundled, not an online release.
+  Restart agent sessions if reporting has not started. Version metadata uses
+  Herdr's API with a same-host CLI fallback; “available” means bundled, not an
+  online release. See [integration version lookup](docs/ARCHITECTURE.md#agent-integrations).
 
 Session inspection supports **Codex, Claude, Kimi, Grok Build, Pi, Muse Code,
 and Antigravity CLI** with readable records. Missing metadata shows integration

@@ -17,6 +17,7 @@ for (const fixture of [
   "AgentHistoryDrawer",
   "OverlayScrollbarLayer",
   "ShellStyles",
+  "StatusBadges",
 ]) {
   test.skipIf(!chrome)(
     `${fixture} browser layout and interaction regressions`,
