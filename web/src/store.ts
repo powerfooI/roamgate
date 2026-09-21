@@ -34,6 +34,7 @@ import {
   type ConnectionStatus,
   type ConnectionSummary,
   type HerdrEventMsg,
+  type PopupStatePush,
   parseConnectionSummary,
 } from "./api";
 import {
@@ -77,6 +78,8 @@ export interface ServerSessionState {
   layout: PaneLayout | null;
   selectedPaneId: string | null;
   recentPaneIds: string[];
+  /** A plugin's session-modal floating pane (e.g. Herdr Float), if open. */
+  popup: PopupInfo | null;
   error: string | null;
   pendingFocusWorkspaceId: string | null;
   pendingFocusWorkspaceSeq: number;
@@ -84,6 +87,8 @@ export interface ServerSessionState {
   terminalAttachEpoch: number;
   lastRefresh: number;
 }
+
+export type PopupInfo = NonNullable<PopupStatePush["popup"]>;
 
 export interface State extends ServerSessionState {
   status: ConnectionStatus;
@@ -195,6 +200,7 @@ export function emptyServerSessionState(
     layout: null,
     selectedPaneId: null,
     recentPaneIds: [],
+    popup: null,
     error: null,
     pendingFocusWorkspaceId: null,
     pendingFocusWorkspaceSeq: 0,
@@ -358,6 +364,7 @@ function serverSessionFromState(snapshot: State): ServerSessionState {
     layout: snapshot.layout,
     selectedPaneId: snapshot.selectedPaneId,
     recentPaneIds: snapshot.recentPaneIds,
+    popup: snapshot.popup,
     error: snapshot.error,
     pendingFocusWorkspaceId: snapshot.pendingFocusWorkspaceId,
     pendingFocusWorkspaceSeq: snapshot.pendingFocusWorkspaceSeq,
@@ -1508,6 +1515,10 @@ function selectConnectionNow(connectionId: string, refresh = true): boolean {
   ) {
     startPolling();
     void refreshNow(captureConnectionLease());
+    // Popup state is tracked per connection on the bridge, so a switch needs
+    // its own query: otherwise only the connection that was active when the
+    // socket came up ever reports one.
+    void store.watchPopup();
   }
   return true;
 }
@@ -1912,6 +1923,19 @@ export function worktreeRemovalCompletionNotice(
   };
 }
 
+function handlePopupPush(push: PopupStatePush) {
+  if (
+    !state.connectionPaused &&
+    connectionEventIsActive(
+      state,
+      push.connection_id,
+      push.connection_generation,
+    )
+  ) {
+    set({ popup: push.popup });
+  }
+}
+
 function handleHerdrEvent(event: HerdrEventMsg) {
   if (
     !state.connectionPaused &&
@@ -2178,6 +2202,9 @@ export const store = {
           rearmTerminalAttachmentsAfterCatalog(true);
           void refreshNow();
           void refreshBridgeStatus();
+          // Popup state is pushed only on change, so ask once per
+          // settled connection.
+          void store.watchPopup();
         });
         if (state.pendingRestartVersion) {
           void reloadWhenUpdatedServerIsReady(state.pendingRestartVersion);
@@ -2185,6 +2212,7 @@ export const store = {
       }
     });
     bridge.onEvent(handleHerdrEvent);
+    bridge.onPopup(handlePopupPush);
     bridge.onControl((control) => {
       if (control.type === "pause_connection") {
         store.pauseConnection(
@@ -3469,6 +3497,71 @@ export const store = {
       }
       await refreshNow(lease);
       return result;
+    });
+  },
+
+  /**
+   * Ask the bridge which popup Herdr currently has open. Pushes only fire on
+   * change, so a browser that just connected, or just switched connection, has
+   * to ask once.
+   */
+  watchPopup() {
+    return action(async (lease) => {
+      const result = (await lease.client.call("terminal.watch_popup", {})) as
+        | { popup: PopupInfo | null }
+        | undefined;
+      setForConnection(lease, { popup: result?.popup ?? null });
+    });
+  },
+
+  /** Close the open popup, if any (Herdr's generic popup.close method). */
+  closePopup() {
+    return action((lease) => lease.client.call("popup.close", {}));
+  },
+
+  /**
+   * Hide the popup if one is open, otherwise invoke the plugin action that
+   * opens it.
+   *
+   * Asks Herdr rather than trusting this client's popup state, which can lag
+   * behind: opening on a stale "none" is refused with "a popup pane is already
+   * open", and that refusal only ever reaches the plugin's command log, so the
+   * key would look dead. "popup_not_open" is the definitive answer that
+   * nothing was open and the action should run.
+   */
+  togglePluginPopup(
+    pluginId: string,
+    actionId: string,
+    context: Record<string, unknown> = {},
+  ) {
+    return action(async (lease) => {
+      try {
+        await lease.client.call("popup.close", {});
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!message.includes("popup_not_open")) throw error;
+      }
+      if (!leaseIsCurrent(lease)) return;
+      // Herdr opens a popup in whichever Space it has focused, and a plugin
+      // handed a different one declines: herdr-float reports "Space changed"
+      // and exits successfully, so the key looks dead. Match Herdr's focus to
+      // the Space the action is invoked for.
+      const workspaceId = context.workspace_id;
+      if (typeof workspaceId === "string" && workspaceId) {
+        const focused = store.get().workspaces.find((w) => w.focused);
+        if (focused?.workspace_id !== workspaceId) {
+          await lease.client.call("workspace.focus", {
+            workspace_id: workspaceId,
+          });
+          if (!leaseIsCurrent(lease)) return;
+        }
+      }
+      await lease.client.call("plugin.action.invoke", {
+        plugin_id: pluginId,
+        action_id: actionId,
+        context,
+      });
     });
   },
 

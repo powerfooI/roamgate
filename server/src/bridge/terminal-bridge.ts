@@ -13,7 +13,10 @@ import { NO_TERMINAL_ATTACHED_MESSAGE } from "../utils/rpc-logging";
 import { ThinClient } from "./thin-client";
 import { roamgateEnv } from "../config/environment";
 import { isTerminalHelloProtocol } from "./protocol-compat";
-import { EndpointTerminalSession } from "./endpoint-terminal-session";
+import {
+  EndpointTerminalSession,
+  type PopupIdentity,
+} from "./endpoint-terminal-session";
 import { frameToAnsi } from "./frame-to-ansi";
 import { isTerminalClipboardPayload } from "./terminal-clipboard";
 
@@ -75,6 +78,8 @@ export function createTerminalBridge(args: {
     context?: string,
     coalesceKey?: string,
   ) => boolean;
+  /** Send to every browser on this connection, attached to a terminal or not. */
+  broadcast?: (payload: string, context?: string) => void;
   // Discard a frame held under backpressure once it is the wrong size. Without
   // this, a resize leaves the old-sized frame queued and it paints a short
   // surface into the new pane.
@@ -98,6 +103,14 @@ export function createTerminalBridge(args: {
     Map<string, { cols: number; rows: number }>
   >();
   const sharedTerminals = new Map<string, SharedTerminalSession>();
+  /**
+   * Herdr allows one session-modal popup at a time and reports it on every
+   * endpoint surface, so each pane's session sees the same value. One copy
+   * lives here: it answers terminal.watch_popup for a browser that just
+   * connected, and it collapses the duplicate reports that N sessions
+   * observing the same change would otherwise produce.
+   */
+  let popupState: PopupIdentity | null = null;
   const attachmentTokens = new Map<
     ServerWebSocket<unknown>,
     Map<string, object>
@@ -214,6 +227,43 @@ export function createTerminalBridge(args: {
       target: args.clientLabel(target),
     });
     args.safeSend(target, payload, "terminal-clipboard");
+  }
+
+  function popupChanged(popup: PopupIdentity | null) {
+    if (disposed) return;
+    if (
+      popupState?.terminalId === popup?.terminalId &&
+      popupState?.title === popup?.title &&
+      JSON.stringify(popupState?.width) === JSON.stringify(popup?.width) &&
+      JSON.stringify(popupState?.height) === JSON.stringify(popup?.height)
+    ) {
+      return;
+    }
+    popupState = popup;
+    logger.debug("popup state", {
+      connection: args.connectionId ?? "legacy-default",
+      popup: popup ? popup.terminalId : "none",
+      title: popup?.title ?? "",
+    });
+    const payload = serialize({
+      popup: popup
+        ? {
+            terminal_id: popup.terminalId,
+            title: popup.title,
+            width: popup.width,
+            height: popup.height,
+          }
+        : null,
+    });
+    // Deliberately not limited to terminal viewers: a browser that has just
+    // loaded, or just switched connections, has no attachment for a moment,
+    // and that is exactly when it would miss state nothing resends.
+    if (args.broadcast) {
+      args.broadcast(payload, "popup-state");
+      return;
+    }
+    for (const viewer of terminalViewers.keys())
+      args.safeSend(viewer, payload, "popup-state");
   }
 
   function closeClipboardRelay() {
@@ -533,8 +583,14 @@ export function createTerminalBridge(args: {
       sharedTerminals.delete(terminalId);
     }
 
+    // A popup's terminal is intentionally outside workspace layouts on the
+    // Herdr side, so lookupPaneId can never resolve it and the endpoint
+    // session refuses to attach ("no pane found for terminal"). Its content
+    // streams fine over the legacy direct-attach protocol, which addresses
+    // terminals by id with no pane or tab involved.
+    const isPopupTerminal = terminalId === popupState?.terminalId;
     const thin =
-      mode === "browser-local" && args.lookupPaneId
+      mode === "browser-local" && args.lookupPaneId && !isPopupTerminal
         ? new EndpointTerminalSession(
             args.clientSocketPath,
             terminalId,
@@ -544,6 +600,12 @@ export function createTerminalBridge(args: {
             surfaceCodecsEnabled,
           )
         : new ThinClient(args.clientSocketPath, args.herdrProtocol);
+    if (thin instanceof EndpointTerminalSession) {
+      thin.on("popup", (popup: PopupIdentity | null) => {
+        if (!isCurrent(creationRevision)) return;
+        popupChanged(popup);
+      });
+    }
     let resolveFirstFrame!: (seen: boolean) => void;
     const firstFrame = new Promise<boolean>((resolve) => {
       resolveFirstFrame = resolve;
@@ -892,6 +954,21 @@ export function createTerminalBridge(args: {
       if (!requestIsCurrent()) return fail(CONNECTION_CHANGED_DURING_REQUEST);
       if (disposed) return fail("terminal bridge disposed");
       const operationRevision = lifecycleRevision;
+      if (method === "terminal.watch_popup") {
+        // Pushes only fire on change, so a browser that just connected needs
+        // to ask once. Sessions report the popup as soon as any pane attaches.
+        return reply({
+          popup: popupState
+            ? {
+                terminal_id: popupState.terminalId,
+                title: popupState.title,
+                width: popupState.width,
+                height: popupState.height,
+              }
+            : null,
+        });
+      }
+
       if (method === "terminal.attach") {
         const terminalId = String(params.terminal_id ?? "");
         const cols = Number(params.cols ?? 100);

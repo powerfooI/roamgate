@@ -136,6 +136,7 @@ import {
   type WorktreeRemovedTarget,
 } from "./store";
 import { paneShortcutAction } from "./paneShortcuts";
+import { pluginActionShortcut } from "./pluginActionShortcuts";
 import {
   adjacentTabId,
   closeShortcutTarget,
@@ -204,6 +205,26 @@ const LazyTerminalView = lazyWithReload("terminal-view", () =>
     default: module.TerminalView,
   })),
 );
+
+// xterm.js is heavy; keep the overlay's own copy out of the initial bundle the
+// same way LazyTerminalView does, since most sessions never open a popup.
+const LazyPopupOverlay = lazyWithReload("popup-overlay", () =>
+  import("./components/PopupOverlay").then((module) => ({
+    default: module.PopupOverlay,
+  })),
+);
+
+function PopupOverlay() {
+  // Gate the dynamic import on popup presence, not just its content, so a
+  // session that never opens one never fetches xterm.js for it.
+  const hasPopup = useStoreSelector((s) => s.popup !== null);
+  if (!hasPopup) return null;
+  return (
+    <Suspense fallback={null}>
+      <LazyPopupOverlay />
+    </Suspense>
+  );
+}
 
 type TerminalViewProps = {
   paneId?: string;
@@ -2911,6 +2932,36 @@ export default function App() {
         store.focusTab(targetTabId);
         return;
       }
+      const pluginAction = pluginActionShortcut(e);
+      if (pluginAction) {
+        e.preventDefault();
+        e.stopPropagation();
+        // Typing into the popup's own terminal never reaches here, since
+        // isEditableElement stops at the xterm textarea.
+        if (
+          isEditableElement(e.target) ||
+          document.querySelector(".modal-backdrop")
+        ) {
+          return;
+        }
+        if (e.repeat) return;
+        const current = store.get();
+        const layoutActivePaneId = activePaneIdForSnapshot(current);
+        const activePane = current.panes.find(
+          (pane) => pane.pane_id === layoutActivePaneId,
+        );
+        // Hide-or-open is resolved against Herdr, not this client's popup
+        // state, which a Space switch can leave stale. See togglePluginPopup.
+        void store.togglePluginPopup(
+          pluginAction.pluginId,
+          pluginAction.actionId,
+          {
+            workspace_id: activePane?.workspace_id,
+            focused_pane_cwd: activePane?.foreground_cwd ?? activePane?.cwd,
+          },
+        );
+        return;
+      }
       const paneAction = paneShortcutAction(e);
       if (paneAction) {
         e.preventDefault();
@@ -3919,6 +3970,7 @@ export default function App() {
       </div>
       <GlobalTooltip />
       {viewportDebugEnabled ? <ViewportDebugOverlay /> : null}
+      <PopupOverlay />
       {paneJumpOpen ? (
         <PaneJumpOverlay
           entries={paneJumpOptions}

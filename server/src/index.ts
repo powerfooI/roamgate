@@ -430,6 +430,9 @@ function runtimeFactoryForProfile(
         config: profileConfig,
         logger: logger.child("connection"),
         safeSend,
+        broadcast: (payload, context) => {
+          for (const ws of clients) safeSend(ws, payload, context);
+        },
         clientLabel,
         markRpcError,
         onTaskEvent: (event) =>

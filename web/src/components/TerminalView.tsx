@@ -14,7 +14,7 @@ import {
   type AnnotationComposerDraft,
 } from "./AnnotationComposerPopover";
 import { isMobileLayout, LAYOUT_CHANGE_EVENT } from "../layoutPreferences";
-import { terminalFontOptions } from "../appearance";
+import { TERMINAL_FONT_FAMILY, terminalFontOptions } from "../appearance";
 import { detectShortcutPlatform } from "../shortcutBindings";
 import {
   getShortcutSnapshot,
@@ -146,7 +146,12 @@ import {
   terminalEndpointViewportSize,
   terminalRelayViewportSize,
 } from "../terminalResize";
-import { terminalPageScroll, terminalWheelScroll } from "../terminalScroll";
+import {
+  terminalCellAt,
+  terminalCellAtPoint,
+  terminalPageScroll,
+  terminalWheelScroll,
+} from "../terminalScroll";
 import { TerminalSelectionDragGuard } from "../terminalSelectionGuard";
 import { applyTerminalTheme } from "../terminalThemes";
 import { paneHasAgentHistory } from "./agentSession";
@@ -203,8 +208,6 @@ function sendBytes(
   });
 }
 
-const FONT_FAMILY =
-  'SFMono-Regular, Menlo, Monaco, "0xProto Nerd Font Mono", "JetBrainsMonoNL Nerd Font", "MesloLGS NF", "Hack Nerd Font", "FiraCode Nerd Font", Consolas, "Liberation Mono", "Courier New", "Noto Sans Mono CJK SC", "Source Han Mono SC", "Sarasa Mono SC", "Herdr Nerd Symbols", monospace';
 const CLIPBOARD_READ_TIMEOUT_MS = 2000;
 const TERMINAL_EVICTION_WINDOW_MS = 60_000;
 const TERMINAL_EVICTION_MAX_RETRIES = 3;
@@ -241,36 +244,6 @@ function isApplePlatform() {
 
 function shouldAvoidVirtualKeyboard() {
   return isMobileLayout() || window.matchMedia("(any-pointer: coarse)").matches;
-}
-
-function terminalCellAtPoint(term: Terminal, clientX: number, clientY: number) {
-  const element = term.element;
-  if (!element || term.cols <= 0 || term.rows <= 0) return {};
-  const rect = element.getBoundingClientRect();
-  const style = window.getComputedStyle(element);
-  const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
-  const paddingRight = Number.parseFloat(style.paddingRight) || 0;
-  const paddingTop = Number.parseFloat(style.paddingTop) || 0;
-  const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
-  const width = rect.width - paddingLeft - paddingRight;
-  const height = rect.height - paddingTop - paddingBottom;
-  if (width <= 0 || height <= 0) return {};
-
-  const x = clientX - rect.left - paddingLeft;
-  const y = clientY - rect.top - paddingTop;
-  const column = Math.max(
-    0,
-    Math.min(term.cols - 1, Math.floor(x / (width / term.cols))),
-  );
-  const row = Math.max(
-    0,
-    Math.min(term.rows - 1, Math.floor(y / (height / term.rows))),
-  );
-  return { column, row };
-}
-
-function terminalCellAt(term: Terminal, e: WheelEvent) {
-  return terminalCellAtPoint(term, e.clientX, e.clientY);
 }
 
 function isEditableElement(target: EventTarget | null) {
@@ -862,7 +835,7 @@ export function TerminalView({
     const term = new Terminal({
       cursorBlink: true,
       disableStdin: composerOpenRef.current || shouldAvoidVirtualKeyboard(),
-      fontFamily: FONT_FAMILY,
+      fontFamily: TERMINAL_FONT_FAMILY,
       ...terminalDensity(uiScaleRef.current),
       theme: terminalThemeRef.current,
       allowProposedApi: true,

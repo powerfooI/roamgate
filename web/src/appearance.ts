@@ -58,6 +58,12 @@ export function normalizeUiScale(value: string | null): number {
 
 // The terminal surface cancels page zoom so xterm's mouse coordinates, cell
 // measurements, and IME overlay share CSS pixels. Scale its font explicitly.
+// Every xterm surface shares this stack: the Nerd Font families carry the
+// powerline and icon glyphs prompts draw with, and dropping any of them
+// shows tofu boxes wherever the earlier fonts have no glyph.
+export const TERMINAL_FONT_FAMILY =
+  'SFMono-Regular, Menlo, Monaco, "0xProto Nerd Font Mono", "JetBrainsMonoNL Nerd Font", "MesloLGS NF", "Hack Nerd Font", "FiraCode Nerd Font", Consolas, "Liberation Mono", "Courier New", "Noto Sans Mono CJK SC", "Source Han Mono SC", "Sarasa Mono SC", "Herdr Nerd Symbols", monospace';
+
 export function terminalFontOptions(compact: boolean, uiScale: number) {
   return {
     fontSize: ((compact ? 12 : 13) * uiScale) / 100,

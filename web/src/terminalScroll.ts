@@ -1,3 +1,5 @@
+import type { Terminal } from "@xterm/xterm";
+
 export type TerminalScroll = {
   direction: "up" | "down";
   lines: number;
@@ -51,4 +53,45 @@ export function terminalPageScroll(
     // sessions must distinguish these coordinate-less shortcuts from a mouse.
     source: amount === "full" ? "page-key" : "history",
   };
+}
+
+/**
+ * The terminal cell under a client point. Herdr uses the cell to pick which
+ * pane a wheel event belongs to, so a scroll request carries it alongside the
+ * direction and line count. Returns an empty object when the geometry is not
+ * measurable yet (no element, or a zero-sized view), which the callers spread
+ * into the request as "no cell".
+ */
+export function terminalCellAtPoint(
+  term: Terminal,
+  clientX: number,
+  clientY: number,
+) {
+  const element = term.element;
+  if (!element || term.cols <= 0 || term.rows <= 0) return {};
+  const rect = element.getBoundingClientRect();
+  const style = window.getComputedStyle(element);
+  const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
+  const paddingRight = Number.parseFloat(style.paddingRight) || 0;
+  const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+  const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+  const width = rect.width - paddingLeft - paddingRight;
+  const height = rect.height - paddingTop - paddingBottom;
+  if (width <= 0 || height <= 0) return {};
+
+  const x = clientX - rect.left - paddingLeft;
+  const y = clientY - rect.top - paddingTop;
+  const column = Math.max(
+    0,
+    Math.min(term.cols - 1, Math.floor(x / (width / term.cols))),
+  );
+  const row = Math.max(
+    0,
+    Math.min(term.rows - 1, Math.floor(y / (height / term.rows))),
+  );
+  return { column, row };
+}
+
+export function terminalCellAt(term: Terminal, e: WheelEvent) {
+  return terminalCellAtPoint(term, e.clientX, e.clientY);
 }

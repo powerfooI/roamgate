@@ -8,7 +8,7 @@
  * must not steal focus from any of those surfaces.
  */
 const TERMINAL_FOCUS_OVERLAY_SELECTOR =
-  '[data-radix-popper-content-wrapper], .modal-backdrop, .workspace-tree-panel, .workspace-inspector, .annotation-panel, .tabbar-utilities, .mobile-nav, .pane-jump-backdrop, [role="dialog"], [role="menu"]';
+  '[data-radix-popper-content-wrapper], .modal-backdrop, .workspace-tree-panel, .workspace-inspector, .annotation-panel, .tabbar-utilities, .mobile-nav, .pane-jump-backdrop, .popup-overlay-backdrop, [role="dialog"], [role="menu"]';
 const RADIX_POPPER_CONTENT_WRAPPER = "[data-radix-popper-content-wrapper]";
 
 type FocusableLike = Pick<Element, "closest">;

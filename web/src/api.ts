@@ -195,6 +195,40 @@ export interface TerminalClipboardPush {
   data: string;
 }
 
+export interface PopupStatePush {
+  connection_id: string;
+  connection_generation?: number;
+  popup: {
+    terminal_id: string;
+    title: string;
+    width: { kind: "cells" | "percent"; value: number } | null;
+    height: { kind: "cells" | "percent"; value: number } | null;
+  } | null;
+}
+
+function isValidPopupSize(value: unknown): boolean {
+  if (value === null) return true;
+  if (!value || typeof value !== "object") return false;
+  const size = value as Record<string, unknown>;
+  return (
+    (size.kind === "cells" || size.kind === "percent") &&
+    typeof size.value === "number"
+  );
+}
+
+function isValidPopupPayload(value: unknown): boolean {
+  if (value === null) return true;
+  if (!value || typeof value !== "object") return false;
+  const popup = value as Record<string, unknown>;
+  return (
+    typeof popup.terminal_id === "string" &&
+    popup.terminal_id.length > 0 &&
+    typeof popup.title === "string" &&
+    isValidPopupSize(popup.width) &&
+    isValidPopupSize(popup.height)
+  );
+}
+
 export interface TerminalClosedPush {
   connection_id: string;
   connection_generation?: number;
@@ -334,6 +368,7 @@ export class Bridge {
   private terminalClosedHandlers = new Set<
     (closed: TerminalClosedPush) => void
   >();
+  private popupHandlers = new Set<(popup: PopupStatePush) => void>();
   private statusHandlers = new Set<(s: ConnectionStatus) => void>();
   private controlHandlers = new Set<(c: BridgeControlMsg) => void>();
   private helloHandlers = new Set<(hello: BridgeHello) => void>();
@@ -680,6 +715,7 @@ export class Bridge {
     const hasTerminal = owns("terminal");
     const hasClipboard = owns("terminal_clipboard");
     const hasTerminalClosed = owns("terminal_closed");
+    const hasPopup = owns("popup");
     const hasControl = owns("control");
     const kindCount = [
       hasHello,
@@ -688,6 +724,7 @@ export class Bridge {
       hasTerminal,
       hasClipboard,
       hasTerminalClosed,
+      hasPopup,
       hasControl,
     ].filter(Boolean).length;
     if (kindCount !== 1) return;
@@ -872,6 +909,26 @@ export class Bridge {
       return;
     }
 
+    if (hasPopup) {
+      if (
+        !isValidPopupPayload(msg.popup) ||
+        !this.pushGenerationMatches(
+          msg.connection_id,
+          msg.connection_generation,
+        )
+      ) {
+        return;
+      }
+      const popup = scopedPayload(
+        msg.connection_id,
+        msg.connection_generation,
+        { popup: msg.popup },
+        this._hello?.capabilities?.connection_runtime_generation === true,
+      );
+      if (popup) this.popupHandlers.forEach((handler) => handler(popup));
+      return;
+    }
+
     if (
       msg.control &&
       typeof msg.control === "object" &&
@@ -1030,6 +1087,11 @@ export class Bridge {
   ): () => void {
     this.terminalClipboardHandlers.add(cb);
     return () => this.terminalClipboardHandlers.delete(cb);
+  }
+
+  onPopup(cb: (popup: PopupStatePush) => void): () => void {
+    this.popupHandlers.add(cb);
+    return () => this.popupHandlers.delete(cb);
   }
 
   onTerminalClosed(cb: (closed: TerminalClosedPush) => void): () => void {

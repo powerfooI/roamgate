@@ -98,6 +98,7 @@ export function createLegacyConnectionRuntime(args: {
   config: SshTunnelConfig;
   logger?: Logger;
   safeSend: SafeSend;
+  broadcast?: (payload: string, context?: string) => void;
   clientLabel: (ws: ServerWebSocket<unknown>) => string;
   markRpcError: MarkRpcError;
   onEvent: (event: unknown, identity: ConnectionIdentity) => void;
@@ -214,6 +215,7 @@ export function createLegacyConnectionRuntime(args: {
   });
   const terminalBridge = createTerminalBridge({
     connectionId: identity.id,
+    broadcast: args.broadcast,
     logger: logger.child("terminal"),
     connectionGeneration: args.connectionGeneration,
     formatError: sanitizeConnectionError,
