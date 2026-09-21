@@ -23,6 +23,7 @@ import {
   findAntigravitySessionById,
   findAntigravitySessionForCwd,
 } from "./antigravity-session";
+import { findMuseSession, type MuseMetadataCache } from "./muse-session";
 import {
   integrationInstallCommand,
   isRecord,
@@ -32,14 +33,13 @@ import {
 
 export type AgentSessionResolverContext = {
   pathCache: Map<string, string>;
+  museMetadata: MuseMetadataCache;
 };
 
-const DEFAULT_RESOLVER_CONTEXT: AgentSessionResolverContext = {
-  pathCache: new Map(),
-};
+const DEFAULT_RESOLVER_CONTEXT = createAgentSessionResolverContext();
 
 export function createAgentSessionResolverContext(): AgentSessionResolverContext {
-  return { pathCache: new Map() };
+  return { pathCache: new Map(), museMetadata: new Map() };
 }
 
 function normalizeParams(raw: Record<string, unknown>): AgentHistoryParams {
@@ -191,6 +191,10 @@ async function sessionFileFor(
     const path = resolve(session.value);
     return files.statFile(path);
   }
+  if (agent === "muse") {
+    // A remote ID must never resolve to this machine's unrelated transcript.
+    return files.remote ? null : findMuseSession({ id: session.value });
+  }
   if (agent === "pi" && files.remote) {
     return files.findPiSessionById(session.value);
   }
@@ -259,10 +263,11 @@ export async function resolveAgentSessionInfo(
     agent !== "kimi" &&
     agent !== "grok" &&
     agent !== "pi" &&
+    agent !== "muse" &&
     agent !== "agy"
   ) {
     throw new Error(
-      `agent session only supports codex, claude, kimi, grok, pi, and agy`,
+      `agent session only supports codex, claude, kimi, grok, pi, muse, and agy`,
     );
   }
   // Native session files follow the agent process, which may have been
@@ -303,21 +308,41 @@ export async function resolveAgentSessionInfo(
       };
     }
   }
+  if (agent === "muse" && !resolvedSession && !files.remote) {
+    file = await findMuseSession({ cwd, metadataCache: context.museMetadata });
+    if (file?.sessionId) {
+      resolvedSession = {
+        source: "muse-local",
+        agent: "muse",
+        kind: "id",
+        value: file.sessionId,
+      };
+    }
+  }
   if (!resolvedSession) {
     return {
       ...base,
       status: "missing_session",
       detail:
-        agent === "grok"
-          ? cwd
-            ? `No local Grok Build session was found for ${cwd}. Start Grok Build in this directory, then refresh Session Inspect.`
-            : "Herdr did not report a working directory for this Grok Build pane."
-          : agent === "agy"
+        agent === "muse"
+          ? files.remote
+            ? "Muse session inspection over SSH requires a Herdr-reported transcript path. Local session discovery is not used for remote panes."
+            : cwd
+              ? `No local Muse Code session was found for ${cwd}. Start Muse Code in this directory without --no-session-log, then refresh Session Inspect.`
+              : "Herdr did not report a working directory for this Muse Code pane."
+          : agent === "grok"
             ? cwd
-              ? `No local Antigravity session was found for ${cwd}. Start Antigravity in this directory, then refresh Session Inspect.`
-              : "Herdr did not report a working directory for this Antigravity pane."
-            : "Herdr has not received an agent session id for this pane. Install the Herdr integration for this agent and start a new agent session.",
-      command: agent === "grok" ? undefined : integrationInstallCommand(agent),
+              ? `No local Grok Build session was found for ${cwd}. Start Grok Build in this directory, then refresh Session Inspect.`
+              : "Herdr did not report a working directory for this Grok Build pane."
+            : agent === "agy"
+              ? cwd
+                ? `No local Antigravity session was found for ${cwd}. Start Antigravity in this directory, then refresh Session Inspect.`
+                : "Herdr did not report a working directory for this Antigravity pane."
+              : "Herdr has not received an agent session id for this pane. Install the Herdr integration for this agent and start a new agent session.",
+      command:
+        agent === "grok" || agent === "muse"
+          ? undefined
+          : integrationInstallCommand(agent),
       updated_at: new Date(0).toISOString(),
       path: "",
       session: null,

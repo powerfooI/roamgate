@@ -29,7 +29,10 @@ export type TokenUsage = {
   cached_input_tokens?: number;
   output_tokens?: number;
   reasoning_output_tokens?: number;
-  total_tokens?: number;
+  // Counted-once prompt usage where the provider convention is known.
+  prompt_tokens?: number | null;
+  // Explicit null means unknown; clients must not reconstruct a total.
+  total_tokens?: number | null;
 };
 
 export type AtifMetrics = {

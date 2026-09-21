@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   agentStateKind,
   firstLinePreview,
+  formatTokenTotal,
+  type AgentSessionSummary,
   groupAgentPanesByWorkspace,
   groupTrajectoryTurns,
   type AgentSessionTrajectoryStep,
@@ -24,6 +26,33 @@ function step(
 }
 
 describe("agent session presentation", () => {
+  test("does not invent totals when the server explicitly reports unknown accounting", () => {
+    const summary: AgentSessionSummary = {
+      status: "ok",
+      agent: "muse",
+      pane_id: "p1",
+      path: "/session.jsonl",
+      updated_at: "2026-09-01T00:00:00Z",
+      file: null,
+      stats: {
+        turns: 1,
+        records: 1,
+        token_usage: {
+          input_tokens: 20,
+          cached_input_tokens: 4,
+          output_tokens: 5,
+          total_tokens: null,
+        },
+      },
+    };
+    expect(formatTokenTotal(summary)).toBe("-");
+    summary.stats.token_usage!.total_tokens = 25;
+    expect(formatTokenTotal(summary)).toBe("25");
+    summary.stats.token_usage!.total_tokens = 0;
+    expect(formatTokenTotal(summary)).toBe("0");
+    delete summary.stats.token_usage!.total_tokens;
+    expect(formatTokenTotal(summary)).toBe("29");
+  });
   test("keeps history available when an agent pane has unknown status", () => {
     expect(
       paneHasAgentHistory({ agent: "codex", agent_status: "unknown" }),

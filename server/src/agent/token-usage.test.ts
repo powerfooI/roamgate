@@ -87,6 +87,38 @@ describe("agent session token usage", () => {
     });
   });
 
+  test("preserves reported zeros while distinguishing absent counters", () => {
+    const zero = {
+      input_tokens: 0,
+      output_tokens: 0,
+      cached_input_tokens: 0,
+      reasoning_output_tokens: 0,
+      total_tokens: 0,
+    };
+    expect(summarizeTokenUsage([{ usage: zero }, { usage: zero }])).toEqual(
+      zero,
+    );
+    expect(
+      summarizeTokenUsage([{ usage: { output_tokens: 0 } }]),
+    ).toMatchObject({
+      output_tokens: 0,
+      input_tokens: undefined,
+      total_tokens: undefined,
+    });
+    expect(
+      summarizeTokenUsage([
+        { usage: zero },
+        { usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 } },
+      ]),
+    ).toMatchObject({
+      ...zero,
+      input_tokens: 2,
+      output_tokens: 1,
+      total_tokens: 3,
+    });
+    expect(summarizeTokenUsage([{ usage: {} }])).toBeNull();
+  });
+
   test("maps token usage into ATIF metrics", () => {
     expect(
       tokenUsageToMetrics({

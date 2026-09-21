@@ -109,7 +109,7 @@ type SessionTokenUsage = {
   cached_input_tokens?: number;
   output_tokens?: number;
   reasoning_output_tokens?: number;
-  total_tokens?: number;
+  total_tokens?: number | null;
 };
 
 export type AgentSessionTrajectoryStep = {
@@ -286,7 +286,7 @@ export function formatBytes(value?: number) {
 
 function totalTokens(summary?: AgentSessionSummary | null) {
   const usage = summary?.stats.token_usage;
-  if (!usage) return undefined;
+  if (!usage || usage.total_tokens === null) return undefined;
   return (
     usage.total_tokens ??
     (usage.input_tokens ?? 0) +

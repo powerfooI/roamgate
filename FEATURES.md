@@ -89,10 +89,18 @@ cross-worktree state mixing.
   Restart agent sessions if reporting has not started. Versions appear only
   when Herdr reports them; “available” means bundled, not an online release.
 
-Session inspection supports **Codex, Claude, Kimi, Grok Build, Pi, and Antigravity
-CLI** with readable records. Missing metadata shows integration guidance. SSH
-reads Herdr-reported paths and Pi ID lookups remotely; other ID/directory
-fallbacks remain local and require accessible transcripts.
+Session inspection supports **Codex, Claude, Kimi, Grok Build, Pi, Muse Code,
+and Antigravity CLI** with readable records. Missing metadata shows integration
+guidance where an integration is available. Muse uses the newest retained session
+matching the foreground working directory under
+`$XDG_DATA_HOME/muse/sessions` (default `~/.local/share/muse/sessions`), or a
+Herdr-reported session ID/path. Start Muse without `--no-session-log` to retain
+transcripts; sessions in the same directory require an explicit ID/path to
+distinguish them reliably. SSH reads Herdr-reported paths and Pi ID lookups
+remotely; Muse requires a reported path over SSH and never searches local files
+for a remote pane. Other ID/directory fallbacks remain local and require
+accessible transcripts. Muse token totals use per-run provider routing; when a
+cached-token convention is unknown, totals show `-` rather than an estimate.
 See [History synchronization](docs/HISTORY.md).
 
 ## Git Worktree Lifecycle
