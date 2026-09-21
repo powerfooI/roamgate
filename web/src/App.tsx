@@ -149,8 +149,8 @@ import {
 import {
   activePaneIdForSnapshot,
   type PaneJumpEntry,
+  paneJumpConnectionTarget,
   paneJumpEntries,
-  paneJumpEntryKey,
   paneJumpTargetId,
   paneSearchEntries,
   serverPaneSearchEntries,
@@ -161,6 +161,7 @@ import {
   openServerSession,
   useAllServerAgentSessions,
 } from "./useAllServerAgentSessions";
+import { useConnectionSessions } from "./components/useConnectionSessions";
 import {
   type Notice,
   noticeAutoDismissDelay,
@@ -771,14 +772,11 @@ function PaneJumpOverlay({
   const selectedItemRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searching = search !== null;
-  const selectedEntry = entries[selectedIndex];
-  const selectedPaneId = selectedEntry
-    ? paneJumpEntryKey(selectedEntry)
-    : undefined;
+  const selectedEntryKey = entries[selectedIndex]?.key;
 
   useEffect(() => {
     selectedItemRef.current?.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex, selectedPaneId]);
+  }, [selectedIndex, selectedEntryKey]);
   useEffect(() => {
     if (searching) searchInputRef.current?.focus();
   }, [searching]);
@@ -813,8 +811,8 @@ function PaneJumpOverlay({
               aria-autocomplete="list"
               aria-controls={listId}
               aria-activedescendant={
-                selectedPaneId
-                  ? `${listId}-${encodeURIComponent(selectedPaneId)}`
+                selectedEntryKey
+                  ? `${listId}-${encodeURIComponent(selectedEntryKey)}`
                   : undefined
               }
               onChange={(event) => onSearchChange(event.target.value)}
@@ -835,8 +833,8 @@ function PaneJumpOverlay({
         >
           {entries.map((entry, index) => (
             <button
-              key={paneJumpEntryKey(entry)}
-              id={`${listId}-${encodeURIComponent(paneJumpEntryKey(entry))}`}
+              key={entry.key}
+              id={`${listId}-${encodeURIComponent(entry.key)}`}
               ref={index === selectedIndex ? selectedItemRef : undefined}
               type="button"
               tabIndex={-1}
@@ -1627,6 +1625,7 @@ export default function App() {
     },
     [terminalComposerScopeKey],
   );
+  const connectionSessions = useConnectionSessions();
   const paneJumpOptions = useMemo(() => {
     const snapshot = {
       layout: s.layout,
@@ -1635,10 +1634,21 @@ export default function App() {
       tabs: s.tabs,
       workspaces: s.workspaces,
     };
-    if (paneJumpSearch === null) return paneJumpEntries(snapshot, activePaneId);
-    const multiServer = searchServerPanes.some(
-      (pane) => pane.connectionId !== s.activeConnectionId,
+    if (paneJumpSearch === null)
+      return paneJumpEntries(snapshot, activePaneId, connectionSessions);
+    // Connections already read for the all-connections view list every pane
+    // themselves; the server agent search only adds the others.
+    const listedConnectionIds = new Set(
+      connectionSessions
+        .filter((view) => !view.active)
+        .map((view) => view.connection.id),
     );
+    const serverPanes = searchServerPanes.filter(
+      (pane) => !listedConnectionIds.has(pane.connectionId),
+    );
+    const multiServer =
+      listedConnectionIds.size > 0 ||
+      serverPanes.some((pane) => pane.connectionId !== s.activeConnectionId);
     const activeServerLabel = multiServer
       ? s.connections.find(
           (connection) => connection.id === s.activeConnectionId,
@@ -1649,16 +1659,18 @@ export default function App() {
         snapshot,
         paneJumpSearch,
         activePaneId,
+        connectionSessions,
         activeServerLabel,
       ),
       ...serverPaneSearchEntries(
-        sortAgentPanes(searchServerPanes, [], "attention"),
+        sortAgentPanes(serverPanes, [], "attention"),
         paneJumpSearch,
         s.activeConnectionId,
       ),
     ];
   }, [
     activePaneId,
+    connectionSessions,
     paneJumpSearch,
     searchServerPanes,
     s.activeConnectionId,
@@ -2909,12 +2921,22 @@ export default function App() {
     (index = paneJumpIndexRef.current) => {
       const targetPaneId = paneJumpTargetId(paneJumpOptions, index);
       const source = paneJumpOptions[index]?.source;
-      closePaneJump(!targetPaneId);
-      if (!targetPaneId) return;
+      const connectionTarget = paneJumpConnectionTarget(paneJumpOptions, index);
+      closePaneJump(!targetPaneId && !connectionTarget);
+      if (!targetPaneId && !connectionTarget) return;
       if (!inspectorStateRef.current?.open) setMobileView("session");
-      if (source)
-        void openServerSession(source, source.workspaceId, targetPaneId);
-      else void store.focusPane(targetPaneId);
+      if (targetPaneId) {
+        if (source)
+          void openServerSession(source, source.workspaceId, targetPaneId);
+        else void store.focusPane(targetPaneId);
+        return;
+      }
+      if (connectionTarget) {
+        void store.jumpToConnectionPane(
+          connectionTarget.connectionId,
+          connectionTarget.paneId,
+        );
+      }
     },
     [closePaneJump, paneJumpOptions],
   );
@@ -2933,7 +2955,7 @@ export default function App() {
   // Typed search drops the held modifier: releasing it must keep the list open
   // instead of committing the way the recent switcher does.
   const openPaneJumpSearch = useCallback(() => {
-    if (store.get().panes.length === 0) return;
+    if (paneJumpOptions.length === 0) return;
     paneJumpReturnFocusRef.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
@@ -2943,7 +2965,7 @@ export default function App() {
     setPaneJumpIndex(0);
     setPaneJumpSearch("");
     setPaneJumpOpen(true);
-  }, []);
+  }, [paneJumpOptions.length]);
   const changePaneJumpSearch = useCallback((value: string) => {
     paneJumpIndexRef.current = 0;
     setPaneJumpIndex(0);

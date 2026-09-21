@@ -58,6 +58,12 @@ Switch between the 12 most recently focused panes across tabs and workspaces.
 On macOS hold Ctrl and press Tab (Shift reverses); release the modifier or press
 Enter to switch, Esc to cancel. Press K to switch to search mode.
 
+With **All servers** selected in the workspaces panel, other connections' panes
+follow yours, labelled with their connection: one per workspace here (the one
+most recently used there), every pane in search. Selecting one switches to that
+connection and focuses the pane. With **Current** the switcher covers only the
+connection you are on.
+
 ### Pane Search
 
 `Alt+K` searches **every** live pane by workspace, tab, cwd, or agent
@@ -65,6 +71,10 @@ name/status. Agents on the other ready servers follow, attention first, and
 every row shows its server, which is searchable too. All terms must match, in
 any order. Enter switches, opening another server's agent on its server;
 `Alt+K` or Esc closes.
+
+With **All servers** selected, search covers every pane of every connection, not
+only agent panes, so typing a workspace, agent, or connection name finds it
+wherever it lives.
 
 ## Full Browser Terminal
 

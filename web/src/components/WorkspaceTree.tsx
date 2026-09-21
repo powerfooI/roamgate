@@ -78,7 +78,6 @@ import {
 } from "../workspaceTabChips";
 import type { AgentStateKind } from "./agentSession";
 import {
-  AGENT_LIST_SCOPE_STORAGE_KEY,
   WORKSPACE_AGENT_LAYOUT_STORAGE_KEY,
   type WorkspaceAgentLayout,
   parseWorkspaceAgentLayout,
@@ -90,6 +89,10 @@ import {
   openServerSession,
   useAllServerAgentSessions,
 } from "../useAllServerAgentSessions";
+import {
+  setShowAllConnections,
+  useShowAllConnections,
+} from "../showAllConnections";
 import { useConnectionClient } from "../useConnectionClient";
 import { activePaneIdForSnapshot } from "../paneJump";
 import { ConfirmDialog } from "./ModalDialogs";
@@ -347,9 +350,10 @@ export function WorkspaceTree({
       roamgateLocalStorage.getItem(WORKSPACE_AGENT_LAYOUT_STORAGE_KEY),
     ),
   );
-  const [allServers, setAllServers] = useState(
-    () => roamgateLocalStorage.getItem(AGENT_LIST_SCOPE_STORAGE_KEY) === "all",
-  );
+  // Shared with the pane switchers and the store, which reads every other
+  // connection's topology while this scope is on.
+  const allServers = useShowAllConnections();
+  const setAllServers = setShowAllConnections;
   const allServerSessions = useAllServerAgentSessions(allServers);
   const agentSort =
     allServers && agentListPreferences.sort === "manual"
@@ -472,12 +476,6 @@ export function WorkspaceTree({
   }, [agentLayout]);
   useEffect(() => {
     roamgateLocalStorage.setItem(
-      AGENT_LIST_SCOPE_STORAGE_KEY,
-      allServers ? "all" : "current",
-    );
-  }, [allServers]);
-  useEffect(() => {
-    roamgateLocalStorage.setItem(
       agentOrderStorageKey,
       serializeAgentOrder(agentPaneOrder),
     );
@@ -538,11 +536,6 @@ export function WorkspaceTree({
           parseAgentListPreferences(
             roamgateLocalStorage.getItem(AGENT_LIST_PREFERENCES_STORAGE_KEY),
           ),
-        );
-      }
-      if (key === AGENT_LIST_SCOPE_STORAGE_KEY || key === null) {
-        setAllServers(
-          roamgateLocalStorage.getItem(AGENT_LIST_SCOPE_STORAGE_KEY) === "all",
         );
       }
       if (key === agentOrderStorageKey || key === null) {
