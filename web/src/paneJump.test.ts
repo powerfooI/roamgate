@@ -108,8 +108,9 @@ describe("recent pane projection", () => {
     expect(entries).toEqual([
       {
         paneId: "p1",
+        paneLabel: "Pane p1",
         title: "example-repo",
-        subtitle: "Tab 1 · Pane p1 · /repos/w1",
+        subtitle: "Tab 1 · /repos/w1",
         agent: "codex",
         agentStatus: "working",
         current: true,
@@ -156,9 +157,13 @@ describe("recent pane projection", () => {
       paneJumpEntries(snapshot),
       paneSearchEntries(snapshot, ""),
     ]) {
+      expect(entries.map((entry) => entry.paneLabel)).toEqual([
+        "Pane p1",
+        "Pane p2",
+      ]);
       expect(entries.map((entry) => entry.subtitle)).toEqual([
-        "Tab 1 · Pane p1 · /repos/w1",
-        "Tab 1 · Pane p2 · /repos/w1",
+        "Tab 1 · /repos/w1",
+        "Tab 1 · /repos/w1",
       ]);
     }
     expect(
@@ -170,12 +175,14 @@ describe("recent pane projection", () => {
     const entries = [
       {
         paneId: "current",
+        paneLabel: "Pane current",
         title: "one",
         subtitle: "Tab 1",
         current: true,
       },
       {
         paneId: "previous",
+        paneLabel: "Pane previous",
         title: "two",
         subtitle: "Tab 1",
         current: false,

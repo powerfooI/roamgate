@@ -4,6 +4,7 @@ import type { Pane, PaneLayout, Tab, Workspace } from "./types";
 
 export type PaneJumpEntry = {
   paneId: string;
+  paneLabel: string;
   title: string;
   subtitle: string;
   agent?: string;
@@ -117,6 +118,7 @@ function paneSearchValue(entry: PaneJumpEntry): string {
   return [
     entry.title,
     entry.subtitle,
+    entry.paneLabel,
     entry.agent,
     entry.agentStatus,
     entry.paneId,
@@ -149,12 +151,13 @@ function paneJumpEntry(
       ? tab.label
       : `Tab ${tab.number}`
     : pane.tab_id;
-  const subtitle = [tabLabel, `Pane ${shortId(pane.pane_id)}`, cwd]
+  const subtitle = [tabLabel, cwd]
     .filter((value) => value.trim().length > 0)
     .join(" · ");
 
   return {
     paneId: pane.pane_id,
+    paneLabel: `Pane ${shortId(pane.pane_id)}`,
     title: workspaceLabel,
     subtitle,
     agent: pane.agent,

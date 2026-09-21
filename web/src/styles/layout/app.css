@@ -321,6 +321,13 @@
   font-size: 12px;
 }
 
+.pane-jump-id {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .pane-jump-agent-identity {
   position: relative;
   width: 23px;
