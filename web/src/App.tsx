@@ -644,7 +644,7 @@ function PaneJumpOverlay({
           <span>
             {searching
               ? "Filters every open pane. Use Up / Down and Enter"
-              : "Use Up / Down and Enter, or release the opening modifier"}
+              : "K to search; Enter or release modifier to switch"}
           </span>
         </div>
         {searching ? (
@@ -2729,6 +2729,7 @@ export default function App() {
           if (paneJumpSearchShortcut || paneJumpNavigationKey) {
             e.preventDefault();
             e.stopPropagation();
+            if (paneJumpSearchShortcut && e.repeat) return;
             if (paneJumpSearchShortcut || e.key === "Escape") closePaneJump();
             else if (e.key === "Tab")
               movePaneJumpSelection(e.shiftKey ? -1 : 1);
@@ -2744,7 +2745,13 @@ export default function App() {
           // shortcut may fire while it has focus.
           return;
         }
-        if (paneJumpSearchShortcut) {
+        // Keep the opening modifiers held: Ctrl+K on macOS, Ctrl+Alt+K
+        // on Windows/Linux, and Shift when cycling backwards.
+        if (
+          paneJumpSearchShortcut ||
+          e.code === "KeyK" ||
+          e.key.toLowerCase() === "k"
+        ) {
           e.preventDefault();
           e.stopPropagation();
           openPaneJumpSearch();

@@ -329,7 +329,12 @@ export function CommandCombobox({
   );
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || document.querySelector(".modal-backdrop"))
+      // The pane switcher owns K even when its held modifiers match this
+      // shortcut. Both handlers run on window, so listener order cannot decide.
+      if (
+        e.defaultPrevented ||
+        document.querySelector(".modal-backdrop, .pane-jump-backdrop")
+      )
         return;
       if (!shortcutMatches(e, "command.menu") || e.repeat) return;
       if (

@@ -26,7 +26,9 @@ See [compatibility](docs/DEPLOYMENT.md#herdr-compatibility).
 Switch across tabs/workspaces using the 12 most recently focused live panes plus
 the current layout. Use Up/Down; release the opening modifier or press Enter to
 switch, Esc to cancel. On macOS, hold Ctrl and repeat Tab (Shift reverses).
-Entries show workspace, tab/cwd, and agent status; closed panes leave history.
+Entries show workspace, tab, pane ID, cwd, and agent status; closed panes leave
+history. Press K while the switcher is open to start searching, even while
+holding the opening modifiers (and Shift when cycling backwards).
 
 ### Pane Search
 
@@ -35,8 +37,9 @@ just recent ones, so a pane never visited stays reachable. Filter on workspace,
 tab, cwd, or agent name/status; terms match in any order, all must match, and
 results keep their recent-first order. Up/Down or Tab/Shift+Tab move, Enter
 switches, `Alt+K` or Esc closes. Search never commits on a modifier release, so
-it stays open while typing, and `Alt+K` inside the recent switcher converts it
-in place. The current pane stays listed for context, but selection starts on
+it stays open while typing. K (including with the opening modifiers held) or
+`Alt+K` inside the recent switcher converts it in place without opening the
+command menu. The current pane stays listed for context, but selection starts on
 the first pane a jump can reach.
 
 ## Full Browser Terminal

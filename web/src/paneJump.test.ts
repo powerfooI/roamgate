@@ -109,7 +109,7 @@ describe("recent pane projection", () => {
       {
         paneId: "p1",
         title: "example-repo",
-        subtitle: "Tab 1 · /repos/w1",
+        subtitle: "Tab 1 · Pane p1 · /repos/w1",
         agent: "codex",
         agentStatus: "working",
         current: true,
@@ -143,6 +143,27 @@ describe("recent pane projection", () => {
     expect(entries[0].title).toBe("two");
     expect(entries[0].agent).toBeUndefined();
     expect(entries[0].agentStatus).toBeUndefined();
+  });
+
+  test("distinguishes same-tab panes by their existing short IDs in both modes", () => {
+    const snapshot = {
+      panes: [pane("w1:p1", "w1", "t1"), pane("w1:p2", "w1", "t1")],
+      recentPaneIds: ["w1:p1", "w1:p2"],
+      tabs: [tab("t1", "w1")],
+      workspaces: [workspace("w1", "one")],
+    };
+    for (const entries of [
+      paneJumpEntries(snapshot),
+      paneSearchEntries(snapshot, ""),
+    ]) {
+      expect(entries.map((entry) => entry.subtitle)).toEqual([
+        "Tab 1 · Pane p1 · /repos/w1",
+        "Tab 1 · Pane p2 · /repos/w1",
+      ]);
+    }
+    expect(
+      paneSearchEntries(snapshot, "Pane p2").map((entry) => entry.paneId),
+    ).toEqual(["w1:p2"]);
   });
 
   test("does not refocus the pane that is already current", () => {

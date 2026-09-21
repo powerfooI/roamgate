@@ -1,4 +1,5 @@
 import { normalizeSearchText } from "./searchText";
+import { shortId } from "./utils";
 import type { Pane, PaneLayout, Tab, Workspace } from "./types";
 
 export type PaneJumpEntry = {
@@ -148,7 +149,7 @@ function paneJumpEntry(
       ? tab.label
       : `Tab ${tab.number}`
     : pane.tab_id;
-  const subtitle = [tabLabel, cwd]
+  const subtitle = [tabLabel, `Pane ${shortId(pane.pane_id)}`, cwd]
     .filter((value) => value.trim().length > 0)
     .join(" · ");
 

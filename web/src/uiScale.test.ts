@@ -19,6 +19,7 @@ const chrome =
 test.skipIf(!chrome).each([
   [1300, 1, "uiScale", 800, 100],
   [500, 1.25, "uiScale", 800, 100],
+  [1300, 1, "paneJump", 800, 100],
   [1300, 1, "taskPush", 800, 100],
   [390, 1, "taskPush", 800, 100],
   [1300, 1, "connectionProfiles", 800, 100],
