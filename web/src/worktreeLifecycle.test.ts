@@ -149,8 +149,8 @@ describe("worktree lifecycle rows", () => {
     expect(lifecycleOpenedWorkspaceId(null)).toBeUndefined();
   });
 
-  test("describes automatic main synchronization explicitly", () => {
-    expect(lifecycleAutoSyncLabel()).toBe("Main auto-sync off");
+  test("describes automatic default branch synchronization explicitly", () => {
+    expect(lifecycleAutoSyncLabel()).toBe("Default branch auto-sync off");
     expect(
       lifecycleAutoSyncLabel({
         workspace_id: "w1",
@@ -158,7 +158,7 @@ describe("worktree lifecycle rows", () => {
         interval_minutes: 15,
         running: false,
       }),
-    ).toBe("Sync origin/main every 15 min");
+    ).toBe("Sync origin's default branch every 15 min");
   });
 });
 

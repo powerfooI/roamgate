@@ -164,12 +164,12 @@ export function WorktreeLifecycleRow({
         {workspace ? (
           <button
             type="button"
-            aria-label={`Auto-sync origin/main into ${title}`}
+            aria-label={`Auto-sync origin's default branch into ${title}`}
             aria-pressed={syncInfo?.enabled ?? false}
             title={
               syncInfo?.enabled
-                ? "Auto sync from origin/main is enabled. Click to disable."
-                : "Auto sync from origin/main into this branch. Click to enable."
+                ? "Auto sync from origin's default branch is enabled. Click to disable."
+                : "Auto sync from origin's default branch into this branch. Click to enable."
             }
             className={`ghost lifecycle-sync-toggle ${
               syncInfo?.enabled ? "is-active" : ""

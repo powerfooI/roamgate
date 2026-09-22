@@ -122,11 +122,17 @@ See [History synchronization](docs/HISTORY.md).
 
 Open **Worktree Lifecycle** from a workspace menu or the command menu to:
 
-- Create a linked worktree from freshly fetched `origin/main`, without changing
-  the source branch or dirty files; discover/open existing worktrees.
+- Create a linked worktree from `origin`'s freshly fetched default branch,
+  without changing the source branch or dirty files; discover/open existing
+  worktrees. The default branch is queried from the remote, not cached `origin/HEAD`;
+  an unavailable remote or unresolved default branch stops creation.
 - Inspect paths, open/closed state, branch status, and uncommitted counts.
 - Focus, pull, configure branch updates, or remove with confirmation, hooks,
   process cleanup, and preservation of residual files when safe removal fails.
+
+Worktree creation and automatic branch updates reject a default branch named
+`HEAD` (case-insensitive) to avoid collisions with Git's reserved `origin/HEAD`
+symbolic ref.
 
 ### Paseo Worktree Hooks
 
@@ -141,9 +147,11 @@ See [configuration and variables](docs/DEPLOYMENT.md#worktree-hooks).
 
 Opt in per checkout through workspace menus, Worktree Lifecycle, or
 **Configuration > Connection > Automatic branch updates**. Updates fetch and
-merge `origin/main` every 10 minutes by default, only while the workspace is
-open in that connection. They skip dirty/detached checkouts, recheck branch/HEAD
-and worktree after fetch, and abort conflicts. They never push.
+merge `origin`'s default branch every 10 minutes by default, only while the
+workspace is open in that connection. Each update queries the remote's current
+default branch; if it cannot be resolved or fetched, the update fails without
+merging. Updates skip dirty/detached checkouts, recheck branch/HEAD and worktree
+after fetch, and abort conflicts. They never push.
 
 ## File Explorer and Preview
 

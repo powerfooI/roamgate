@@ -316,6 +316,10 @@ async function withBrowserStore(
             workspace: topology.workspaces[1],
             tab: topology.tabs[2],
             root_pane: topology.panes[3],
+            base_sync:
+              method === "worktree.create"
+                ? { base: "origin/master", commit: "0123456789abcdef" }
+                : undefined,
           };
         if (method === "pane.split") return { pane: topology.panes[1] };
         return {};
@@ -694,6 +698,15 @@ describe("store browser-local navigation", () => {
       expect(
         calls.find((call) => call.method === "worktree.open")?.params.focus,
       ).toBe(false);
+    });
+  });
+
+  test("worktree creation notice uses the resolved default branch", async () => {
+    await withBrowserStore(async () => {
+      await store.createWorktree("a", "topic");
+      expect(store.get().notice?.detail).toBe(
+        "topic starts from origin/master at 0123456789ab.",
+      );
     });
   });
 

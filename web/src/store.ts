@@ -2768,9 +2768,9 @@ export const store = {
           notice: {
             kind: "info",
             message: "Creating worktree",
-            detail: `Updating origin/main before creating ${branch}.`,
+            detail: `Updating origin's default branch before creating ${branch}.`,
             detailMode: "output",
-            detailTitle: "git fetch origin main",
+            detailTitle: "Fetch origin's default branch",
             loading: true,
           },
         });
@@ -2791,13 +2791,16 @@ export const store = {
           setForConnection(lease, { notice: setupNotice });
         } else {
           const commit = String(result?.base_sync?.commit ?? "").slice(0, 12);
+          const base = String(
+            result?.base_sync?.base ?? "origin's default branch",
+          );
           setForConnection(lease, {
             notice: {
               kind: "success",
               message: "Worktree created",
               detail: commit
-                ? `${branch} starts from origin/main at ${commit}.`
-                : `${branch} starts from the latest origin/main.`,
+                ? `${branch} starts from ${base} at ${commit}.`
+                : `${branch} starts from the latest ${base}.`,
               autoDismissMs: 5000,
             },
           });

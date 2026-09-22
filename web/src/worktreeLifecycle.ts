@@ -131,19 +131,19 @@ export async function removeTemporaryWorkspaceSafely<T>({
 }
 
 export function lifecycleAutoSyncLabel(info?: WorkspaceAutoSyncInfo): string {
-  if (!info?.enabled) return "Main auto-sync off";
-  if (info.running) return "Syncing origin/main";
+  if (!info?.enabled) return "Default branch auto-sync off";
+  if (info.running) return "Syncing origin's default branch";
   switch (info.last_status) {
     case "updated":
-      return "Synced with origin/main";
+      return "Synced with origin's default branch";
     case "up_to_date":
-      return "Up to date with origin/main";
+      return "Up to date with origin's default branch";
     case "skipped":
       return "Last sync skipped";
     case "failed":
       return "Last sync failed";
     default:
-      return `Sync origin/main every ${info.interval_minutes} min`;
+      return `Sync origin's default branch every ${info.interval_minutes} min`;
   }
 }
 

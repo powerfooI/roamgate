@@ -14,6 +14,7 @@ import {
   type RecoveryReporter,
   silentLogger,
 } from "../utils/logger";
+import { fetchOriginDefaultBranch } from "./default-branch";
 import { GIT_PULL_TIMEOUT_MS } from "./file-constants";
 import type { RunProcessWithCodeTimeout } from "./file-types";
 
@@ -137,11 +138,16 @@ export async function syncWorkspaceBranch({
     };
   }
 
-  const fetchResult = await runGit("fetch origin main");
-  if (fetchResult.code !== 0) {
+  let baseSync: Awaited<ReturnType<typeof fetchOriginDefaultBranch>>;
+  try {
+    baseSync = await fetchOriginDefaultBranch(runGit, shQuote);
+  } catch (error) {
     return {
       last_status: "failed",
-      last_message: processMessage(fetchResult, "git fetch origin main failed"),
+      last_message: (error instanceof Error
+        ? error.message
+        : String(error)
+      ).slice(0, 2_000),
       last_branch: branch,
     };
   }
@@ -166,7 +172,7 @@ export async function syncWorkspaceBranch({
           : statusAfterFetch.code !== 0
             ? statusAfterFetch
             : headAfterFetch,
-        "Unable to verify the workspace after fetching origin/main",
+        `Unable to verify the workspace after fetching ${baseSync.base}`,
       ),
       last_branch: branch,
     };
@@ -178,14 +184,13 @@ export async function syncWorkspaceBranch({
   ) {
     return {
       last_status: "skipped",
-      last_message:
-        "Skipped because the workspace changed while origin/main was being fetched.",
+      last_message: `Skipped because the workspace changed while ${baseSync.base} was being fetched.`,
       last_branch: branchAfterFetch.stdout.trim() || branch,
     };
   }
 
   const mergeResult = await runGit(
-    "-c commit.gpgsign=false merge --no-edit --no-stat FETCH_HEAD",
+    `-c commit.gpgsign=false merge --no-edit --no-stat ${shQuote(baseSync.commit)}`,
   );
   if (mergeResult.code !== 0) {
     // A failed merge may leave conflict state behind. Since the preflight
@@ -195,7 +200,7 @@ export async function syncWorkspaceBranch({
       last_status: "failed",
       last_message: processMessage(
         mergeResult,
-        "origin/main could not be merged; the merge was aborted",
+        `${baseSync.base} could not be merged; the merge was aborted`,
       ),
       last_branch: branch,
     };
@@ -213,8 +218,8 @@ export async function syncWorkspaceBranch({
   return {
     last_status: updated ? "updated" : "up_to_date",
     last_message: updated
-      ? `Merged origin/main into ${branch}.`
-      : `${branch} is already up to date with origin/main.`,
+      ? `Merged ${baseSync.base} into ${branch}.`
+      : `${branch} is already up to date with ${baseSync.base}.`,
     last_branch: branch,
   };
 }

@@ -118,10 +118,12 @@ is not a backup.** Cancel bulk actions if unsure.
 
 ### Separate parallel edits with worktrees
 
-1. Verify a fetchable `origin/main`. Review `paseo.json`; disable **Worktree hooks**
-   if you do not trust its commands. Hooks are enabled by default and run host code.
+1. Verify that `origin` is reachable and has a default branch. Review `paseo.json`;
+   disable **Worktree hooks** if you do not trust its commands. Hooks are enabled
+   by default and run host code.
 2. Open **Worktree Lifecycle** from the workspace/command menu and create a worktree.
-   It starts from freshly fetched `origin/main`, without copying source dirty files.
+   It starts from `origin`'s freshly fetched default branch, without copying source
+   dirty files.
 3. Run `pwd` and `git status` there before starting another agent.
 
 **You are done when:** parallel tasks have different checkout directories and branches.
