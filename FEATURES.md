@@ -11,8 +11,9 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
 - Split right/down, resize, focus neighbors, zoom, or close panes.
 - Search workspaces, worktrees, files, tabs, panes, and agents in the command
   menu. Enter a relative/absolute path to open a file.
-- Desktop **Zen mode** hides app chrome. Hover the top edge to reveal controls
-  or use **Exit Zen**; the sidebar restores its previous state on exit.
+- Desktop **Zen mode** hides app chrome and runs the terminal flush to every
+  edge. Hover **Exit Zen** at the top to pull the topbar back, or click it to
+  leave; the sidebar restores its previous state on exit.
 
 Endpoint connections use **Local navigation** per browser/connection; legacy
 connections use **Shared navigation**. Reconnect preserves selections; reload

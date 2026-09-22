@@ -162,10 +162,13 @@
   background: var(--red);
 }
 
+/* Parked fully off screen: the terminal gets the whole window, and the zen
+   exit tab is the pointer handle that pulls this back. Tabbing into a topbar
+   control still slides it in through :focus-within below. */
 .app.zen .topbar {
   position: absolute;
   inset: 0 0 auto 0;
-  transform: translateY(calc(-100% + 6px));
+  transform: translateY(-100%);
   transition: transform 0.15s ease;
 }
 
@@ -174,8 +177,8 @@
   transform: none;
 }
 
-/* The zen island tab is a wider pull handle for the hidden topbar: hovering
-   it or tabbing onto it slides the topbar down. */
+/* The zen island tab is the pull handle for the hidden topbar: hovering it or
+   tabbing onto it slides the topbar down. */
 .app.zen:has(.zen-island:hover) .topbar,
 .app.zen:has(.zen-island:focus-within) .topbar {
   transform: none;

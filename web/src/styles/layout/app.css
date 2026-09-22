@@ -107,27 +107,28 @@
   padding-left: 0;
 }
 
-/* Zen mode leaves only the terminal on screen. The topbar keeps a thin edge
-   so the connection switcher, command menu, and settings stay reachable with
-   the pointer without leaving Zen; the exit button lives at the left of the
-   pane toolbar, and the shortcut and the Appearance switch remain the
-   keyboard and menu paths back. */
+/* Zen mode leaves only the terminal on screen: it runs flush to every side,
+   without its own border, corner radius, or a reserved strip at the top.
+   Split layouts keep their pane borders so the focused pane stays
+   identifiable. The exit tab below is the pointer path back; the shortcut and
+   the Appearance switch remain the keyboard and menu paths. */
 .app.zen {
   position: relative;
 }
 
-/* Only the topbar's reveal edge is reserved; the terminal runs flush to every
-   other side, without its own border or corner radius. Split layouts keep
-   their pane borders so the focused pane stays identifiable. */
+/* Overrides the base .body gutter; without it Zen inherits 12px on every
+   side and never actually reaches the window edges. */
 .app.zen .body {
-  padding: 6px 0 0;
+  padding: 0;
 }
 
-/* Zen is easy to enter by accident through the shortcut, so a small tab
-   hangs flush from the top edge center holding the exit button. The corner
-   spots stay free for content and pane toolbars; the tab doubles as a pull
-   handle for the hidden topbar (see topbar.css) and floats above the
-   revealed topbar, whose center column is empty. */
+/* Zen is easy to enter by accident through the shortcut, so a small tab hangs
+   from the top edge center holding the exit button. The corner spots stay
+   free for content and pane toolbars. Since the topbar no longer keeps a
+   reveal edge of its own, this tab is the only thing that pulls it back with
+   the pointer (see topbar.css); it floats above the revealed topbar, whose
+   center column is empty. It sits translucent so it reads as chrome over the
+   terminal rather than as content, and firms up on hover or focus. */
 .zen-island {
   position: fixed;
   top: 0;
@@ -141,17 +142,29 @@
   border: 1px solid var(--border);
   border-top: 0;
   border-radius: 0 0 10px 10px;
-  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
   line-height: 1;
   box-shadow: var(--shadow-lg);
+  opacity: 0.85;
+  transition:
+    opacity 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .zen-island:hover,
 .zen-island:focus-visible {
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
   color: var(--text);
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zen-island {
+    transition: none;
+  }
 }
 
 .pane-jump-backdrop {
