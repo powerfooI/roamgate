@@ -30,6 +30,7 @@ test.skipIf(!chrome).each([
   [320, 1.5, "configuration", 800, 100],
   [320, 1.5, "configuration", 800, 150],
   [740, 1, "configuration", 360, 100],
+  [1300, 1, "terminalLoading", 800, 100],
   [1300, 1, "terminalLinks", 800, 100],
   [500, 1.25, "terminalLinks", 800, 100],
   [390, 1, "terminalLinks", 800, 100],
