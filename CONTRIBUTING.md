@@ -31,7 +31,7 @@ process tests. Then use focused checks while iterating:
 | Lint | `bun run lint`; use `--no-cache` after tooling/dependency changes. Cache: `node_modules/.cache/eslint/`. |
 | Tests | `bun test <path>` or `bun run test:quick` (four workers, integration included, browser regressions excluded). |
 | Browser | `bun run test:browser` runs serially; Chrome/Chromium or `CHROME_BIN` required, otherwise Chrome cases skip. Setup-card also uses macOS WebKit. |
-| Submission | `bun run precommit`: formatting, lint, full typechecks, full tests. Quick checks do not replace it. |
+| Submission | `bun run precommit`: formatting, lint, full typechecks, and `test:quick` (browser regressions excluded). |
 
 The installed `.githooks/pre-commit` runs the full gate: let it run when committing
 rather than repeating it manually on the same revision. Without the hook, run
@@ -40,7 +40,8 @@ bypass the gate.
 
 PR CI runs format/lint/types, site build, and `test:quick`. Browser CI is opt-in:
 **Actions > CI > Run workflow > Run browser regressions**. Local `bun run test`
-and pre-commit retain the full serial suite.
+retains the full serial suite; pre-commit uses `test:quick`. Run related browser
+regressions separately for UI changes.
 
 For a browser fixture: `bun test web/src/uiScale.test.ts --test-name-pattern terminalLinks`.
 Use `web/src/browserChrome.ts` bounded waits/teardown; wait for readiness/render
@@ -94,8 +95,9 @@ site installer URL and workflow probe.
 ## Pull Requests
 
 Use focused imperative commits. PRs describe behavior, verification, and
-compatibility impact. For UI changes, embed uploaded GitHub screenshot attachments,
-not screenshot-only commits. Keep generated assets/binaries out of Git.
+compatibility impact. Screenshots are not required for UI changes; capture or
+upload them only when explicitly requested. Do not commit screenshots solely for
+PR review. Keep generated assets/binaries out of Git.
 
 Unlabeled PRs receive `documentation`, `dependencies`, `bug` (fix titles), or
 `enhancement`; release preparation uses `skip-changelog`. Override with a

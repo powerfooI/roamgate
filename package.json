@@ -56,7 +56,7 @@
     "test:browser": "bun test ./web/src/uiScale.test.ts ./web/src/mobileTerminal.test.ts ./web/src/filePreviewNavigation.test.ts ./web/src/components/TerminalThemeDialog.test.ts ./web/src/components/VisualPreview.test.ts ./server/src/workspace/html-preview.browser.test.ts ./web/src/components/ThemedSelect.test.ts ./web/src/components/HerdrSetupCard.test.ts",
     "typecheck": "tsc --noEmit && bun run --filter roamgate-web typecheck && bun run --filter roamgate-server typecheck",
     "typecheck:quick": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json && tsc --noEmit -p server/tsconfig.json",
-    "precommit": "bun run format:check && bun run lint && bun run typecheck && bun run test",
+    "precommit": "bun run format:check && bun run lint && bun run typecheck && bun run test:quick",
     "install-hooks": "git config core.hooksPath .githooks",
     "clean:bun-build": "find server -maxdepth 1 -name '*.bun-build' -exec rm -rf {} +",
     "clean": "rm -rf web/dist server/public server/src/public-files.gen.ts server/roamgate server/roamgate.exe server/roamgate-* server/herdr-gui server/herdr-gui-* && bun run clean:bun-build",

@@ -42,7 +42,7 @@ the root manifest. Keep runtime dependencies in their owning workspace.
 - `bun run typecheck`: build/embed web assets and run all TypeScript checks.
 - `bun run typecheck:quick`: check types without rebuilding existing web assets.
   See [local validation](CONTRIBUTING.md#validation) for prerequisites and caching.
-- `bun run precommit`: run formatting, lint, type checks, and unit tests.
+- `bun run precommit`: run formatting, lint, full type checks, and `test:quick`.
 
 ## Coding Style & Naming Conventions
 
@@ -75,7 +75,9 @@ Process-level tests need generated web assets; on a fresh checkout, run
 tests require Chrome/Chromium (or `CHROME_BIN`) and skip when it is unavailable.
 Use Bun's fake timers for timer deadlines and events for socket readiness rather
 than waiting out production timeouts; restore real timers in `finally`.
-Run `bun run precommit` before committing; the quick suite does not replace it.
+Run `bun run precommit` before committing; `test:quick` alone does not replace
+its formatting, lint, and type checks. Run related browser regressions separately
+for UI changes.
 The installed pre-commit hook runs this gate, so do not also run it manually
 immediately before committing an unchanged revision. See the iteration workflow
 in [local validation](CONTRIBUTING.md#validation).
@@ -87,10 +89,9 @@ and inspect every supported platform archive and checksum.
 Git history uses concise imperative messages, for example `Use built-in CLI
 argument parser` or `Add command palette and release 0.0.3`. Keep commits
 focused and mention user-visible behavior in the message when relevant. PR
-descriptions should include a short summary and verification commands. For UI
-changes, upload screenshots as GitHub attachments and embed them in the PR
-description. Do not commit screenshot files to the repository solely for PR
-review.
+descriptions should include a short summary and verification commands.
+Screenshots are not required for UI changes; capture or upload them only when
+explicitly requested. Do not commit screenshot files solely for PR review.
 
 ## Release Notes
 

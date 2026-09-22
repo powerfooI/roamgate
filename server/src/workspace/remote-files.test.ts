@@ -154,11 +154,12 @@ describe("remote file protocol parsers", () => {
 });
 
 // Execute the exact remote shell command locally, without an SSH server.
-test("remote image reads share the preview formats and byte limits", async () => {
-  const root = await mkdtemp(join(tmpdir(), "roamgate-image-preview-"));
-  try {
-    const bytes = Buffer.alloc(600 * 1024, 65);
-    for (const [extension, mime] of IMAGE_MIME_TYPES) {
+test.each([...IMAGE_MIME_TYPES])(
+  "remote image reads support %s (%s) within preview byte limits",
+  async (extension, mime) => {
+    const root = await mkdtemp(join(tmpdir(), "roamgate-image-preview-"));
+    try {
+      const bytes = Buffer.alloc(600 * 1024, 65);
       const path = `image.${extension.toUpperCase()}`;
       await writeFile(join(root, path), bytes);
       const result = await readRemoteFile({
@@ -178,17 +179,19 @@ test("remote image reads share the preview formats and byte limits", async () =>
       expect(result.mime_type).toBe(mime);
       const encoded = result.image_data_url?.split(",")[1] ?? "";
       expect(Buffer.from(encoded, "base64").equals(bytes)).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
+  },
+);
 
-    const oversized = parseRemoteFilePreview(
-      `META\t${b64(root)}\t${PREVIEW_IMAGE_MAX_BYTES + 1}\t1\t${b64("large.apng")}\n${Buffer.alloc(PREVIEW_MAX_BYTES + 1).toString("base64")}`,
-      "large.apng",
-    );
-    expect(oversized.truncated).toBe(true);
-    expect(oversized.image_data_url).toBeUndefined();
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
+test("remote image previews reject oversized files", () => {
+  const oversized = parseRemoteFilePreview(
+    `META\t${b64("/repo")}\t${PREVIEW_IMAGE_MAX_BYTES + 1}\t1\t${b64("large.apng")}\n${Buffer.alloc(PREVIEW_MAX_BYTES + 1).toString("base64")}`,
+    "large.apng",
+  );
+  expect(oversized.truncated).toBe(true);
+  expect(oversized.image_data_url).toBeUndefined();
 });
 
 test("remote resolution includes directories but rejects relative and symlink escapes", async () => {
