@@ -1,7 +1,7 @@
 {
   "name": "roamgate",
   "private": true,
-  "version": "0.7.8",
+  "version": "0.7.9",
   "description": "Roamgate: an independent community Web and PWA client for Herdr.",
   "license": "MIT",
   "author": "Arthur",
