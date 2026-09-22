@@ -975,7 +975,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       });
       const result = await herdr.call(method, {
         ...(params ?? {}),
-        base: baseSync.base,
+        base: baseSync.commit,
       });
       // Herdr identifies the repository but not which of several workspaces
       // for that repository initiated creation. Keep that GUI relationship.

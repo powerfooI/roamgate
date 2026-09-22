@@ -130,9 +130,10 @@ Open **Worktree Lifecycle** from a workspace menu or the command menu to:
 - Focus, pull, configure branch updates, or remove with confirmation, hooks,
   process cleanup, and preservation of residual files when safe removal fails.
 
-Worktree creation and automatic branch updates reject a default branch named
-`HEAD` or starting with `HEAD/` (case-insensitive) to avoid collisions with Git's
-reserved `origin/HEAD` symbolic ref.
+Worktree creation and automatic branch updates fetch the advertised default
+commit by its object ID without rewriting remote-tracking refs or `FETCH_HEAD`.
+Stale tracking-ref names do not block creation or sync, and both operations use
+the resolved commit rather than a ref that another fetch could change.
 
 ### Paseo Worktree Hooks
 

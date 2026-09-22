@@ -36,6 +36,10 @@ describe("origin default branch with real Git", () => {
     "master",
     "release/next",
     "head-topic",
+    "HEAD",
+    "head",
+    "HEAD/topic",
+    "head/topic",
     "release/quote'$(printf${IFS}x)&`printf${IFS}y`",
   ])(
     "creates and syncs from %s, ignoring stale origin/HEAD",
@@ -52,7 +56,6 @@ describe("origin default branch with real Git", () => {
         await git("clone", "--bare", seed, remote);
         await git("clone", remote, root);
         await git("-C", root, "checkout", "-b", "feature/test");
-        if (branch !== "main") await git("-C", seed, "checkout", "-b", branch);
         const expectedCommit = await commit(seed, "default branch update");
         await git("-C", seed, "push", remote, `HEAD:refs/heads/${branch}`);
         await git("-C", remote, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
@@ -66,7 +69,7 @@ describe("origin default branch with real Git", () => {
             "refs/remotes/origin/HEAD",
           ),
         ).toBe("origin/main");
-        // Exercise explicit fetch destinations with a narrow fetch configuration.
+        // A narrow fetch configuration must not constrain the default commit.
         await git(
           "-C",
           root,
@@ -74,6 +77,16 @@ describe("origin default branch with real Git", () => {
           "remote.origin.fetch",
           "+refs/heads/main:refs/remotes/origin/main",
         );
+        const trackingRefs = await git(
+          "-C",
+          root,
+          "show-ref",
+          "--verify",
+          "refs/remotes/origin/main",
+        );
+        const fetchHeadPath = join(root, ".git", "FETCH_HEAD");
+        const fetchHead = `${before}\t\tbranch 'unrelated' of test\n`;
+        await writeFile(fetchHeadPath, fetchHead);
         const dirty = join(root, "uncommitted.txt");
         await writeFile(dirty, "keep me");
         const status = await git("-C", root, "status", "--porcelain");
@@ -85,6 +98,16 @@ describe("origin default branch with real Git", () => {
         });
         expect(base.base).toBe(`origin/${branch}`);
         expect(base.commit).toBe(expectedCommit);
+        expect(
+          await git(
+            "-C",
+            root,
+            "show-ref",
+            "--verify",
+            "refs/remotes/origin/main",
+          ),
+        ).toBe(trackingRefs);
+        expect(await readFile(fetchHeadPath, "utf8")).toBe(fetchHead);
         expect(await git("-C", root, "rev-parse", "HEAD")).toBe(before);
         expect(await git("-C", root, "status", "--porcelain")).toBe(status);
         expect(await readFile(dirty, "utf8")).toBe("keep me");
@@ -96,7 +119,7 @@ describe("origin default branch with real Git", () => {
           "-b",
           "created",
           join(directory, "created"),
-          base.base,
+          base.commit,
         );
         expect(
           await git("-C", directory + "/created", "rev-parse", "HEAD"),
@@ -112,6 +135,16 @@ describe("origin default branch with real Git", () => {
           last_message: `Merged origin/${branch} into feature/test.`,
         });
         expect(await git("-C", root, "rev-parse", "HEAD")).toBe(expectedCommit);
+        expect(
+          await git(
+            "-C",
+            root,
+            "show-ref",
+            "--verify",
+            "refs/remotes/origin/main",
+          ),
+        ).toBe(trackingRefs);
+        expect(await readFile(fetchHeadPath, "utf8")).toBe(fetchHead);
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
@@ -119,48 +152,61 @@ describe("origin default branch with real Git", () => {
     15_000,
   );
 
-  test.each(["HEAD", "head", "Head", "HEAD/topic", "head/topic", "Head/topic"])(
-    "rejects a default named %s without overwriting tracking refs",
-    async (branch) => {
-      const directory = await mkdtemp(join(tmpdir(), "roamgate-default-head-"));
+  test.each([
+    ["foo", "foo/bar"],
+    ["foo/bar", "foo"],
+  ])(
+    "supports a prefix-related default rename from %s to %s",
+    async (from, to) => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "roamgate-default-rename-"),
+      );
       try {
         const seed = join(directory, "seed");
         const remote = join(directory, "remote.git");
         const root = join(directory, "checkout");
-        await git("init", "--initial-branch=main", seed);
+        await git("init", `--initial-branch=${from}`, seed);
         const original = await commit(seed, "initial");
         await git("clone", "--bare", seed, remote);
         await git("clone", remote, root);
-        const next = await commit(seed, "different default branch");
-        await git("-C", seed, "push", remote, `${next}:refs/heads/${branch}`);
-        await git("-C", remote, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
+        await git("-C", root, "checkout", "-b", "feature/test");
+        await git("-C", root, "config", "fetch.prune", "true");
+        const next = await commit(seed, "renamed default");
+        await git("-C", remote, "symbolic-ref", "HEAD", `refs/heads/${to}`);
+        await git("-C", remote, "update-ref", "-d", `refs/heads/${from}`);
+        await git("-C", seed, "push", remote, `${next}:refs/heads/${to}`);
 
-        await expect(
-          syncWorktreeBase({
-            workspaceId: "w1",
-            resolveGitRoot: async () => ({ root }),
-            shQuote,
-            runProcessWithCodeTimeout,
-          }),
-        ).rejects.toThrow("origin/HEAD is reserved");
+        const base = await syncWorktreeBase({
+          workspaceId: "w1",
+          resolveGitRoot: async () => ({ root }),
+          shQuote,
+          runProcessWithCodeTimeout,
+        });
+        expect(base.base).toBe(`origin/${to}`);
+        expect(base.commit).toBe(next);
+        await git(
+          "-C",
+          root,
+          "worktree",
+          "add",
+          "-b",
+          "created",
+          join(directory, "created"),
+          base.commit,
+        );
         expect(
-          await git("-C", root, "rev-parse", "refs/remotes/origin/main"),
-        ).toBe(original);
-
+          await git("-C", join(directory, "created"), "rev-parse", "HEAD"),
+        ).toBe(next);
         const sync = await syncWorkspaceBranch({
           root,
           shQuote,
           runProcessWithCodeTimeout,
         });
-        expect(sync.last_status).toBe("failed");
-        expect(sync.last_message).toContain("origin/HEAD is reserved");
+        expect(sync.last_status).toBe("updated");
+        expect(await git("-C", root, "rev-parse", "HEAD")).toBe(next);
         expect(
-          await git("-C", root, "rev-parse", "refs/remotes/origin/main"),
+          await git("-C", root, "rev-parse", `refs/remotes/origin/${from}`),
         ).toBe(original);
-        expect(await git("-C", root, "rev-parse", "HEAD")).toBe(original);
-        expect(
-          await git("-C", root, "symbolic-ref", "refs/remotes/origin/HEAD"),
-        ).toBe("refs/remotes/origin/main");
       } finally {
         await rm(directory, { recursive: true, force: true });
       }

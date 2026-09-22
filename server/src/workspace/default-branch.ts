@@ -26,13 +26,6 @@ export async function fetchOriginDefaultBranch(
       "Unable to determine origin's default branch: origin HEAD does not identify a branch.",
     );
   }
-  // Fetch follows symbolic destinations, and a ref cannot contain child refs.
-  // Reserve origin/HEAD and descendants case-insensitively on every host.
-  if (/^refs\/heads\/head(?:\/|$)/i.test(ref)) {
-    throw new Error(
-      "Cannot fetch origin's default branch: origin/HEAD is reserved, including descendants (case-insensitive). Choose another default branch on origin.",
-    );
-  }
   const validRef = await runGit(`check-ref-format ${shQuote(ref)}`);
   if (validRef.code !== 0) {
     throw new Error(
@@ -41,9 +34,17 @@ export async function fetchOriginDefaultBranch(
   }
   const branch = ref.slice("refs/heads/".length);
   const base = `origin/${branch}`;
-  const trackingRef = `refs/remotes/${base}`;
-  // Explicitly update the tracking ref even with a narrow remote fetch config.
-  const fetchArgs = `fetch --no-tags origin ${shQuote(`+${ref}:${trackingRef}`)}`;
+  const commit = headResult.stdout.match(
+    /^([0-9a-f]{40}|[0-9a-f]{64})\tHEAD\r?$/m,
+  )?.[1];
+  if (!commit) {
+    throw new Error(
+      "Unable to determine origin's default commit: origin HEAD does not identify a commit.",
+    );
+  }
+  // Fetch the advertised object, not a mutable ref. Leave tracking refs and
+  // shared FETCH_HEAD untouched, even with stale ref prefixes or concurrent fetches.
+  const fetchArgs = `fetch --no-tags --no-write-fetch-head --refmap= origin ${shQuote(commit)}`;
   const fetchResult = await runGit(fetchArgs);
   if (fetchResult.code !== 0) {
     throw new Error(
@@ -51,10 +52,9 @@ export async function fetchOriginDefaultBranch(
     );
   }
   const revisionResult = await runGit(
-    `rev-parse --verify ${shQuote(`${trackingRef}^{commit}`)}`,
+    `rev-parse --verify ${shQuote(`${commit}^{commit}`)}`,
   );
-  const commit = revisionResult.stdout.trim();
-  if (revisionResult.code !== 0 || !commit) {
+  if (revisionResult.code !== 0 || revisionResult.stdout.trim() !== commit) {
     throw new Error(
       `Unable to resolve ${base} after fetching it: ${processError(revisionResult, `${base} does not point to a commit`)}`,
     );

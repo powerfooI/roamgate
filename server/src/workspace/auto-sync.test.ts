@@ -3,6 +3,8 @@ import { shQuote } from "../utils/process-utils";
 import { createWorkspaceAutoSync, syncWorkspaceBranch } from "./auto-sync";
 
 type Result = { code: number; stdout: string; stderr: string };
+const fetchedCommit = "a".repeat(40);
+const remoteHead = `ref: refs/heads/master\tHEAD\n${fetchedCommit}\tHEAD\n`;
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -80,10 +82,10 @@ describe("workspace branch auto-sync", () => {
           { code: 0, stdout: "feature/test\n", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "before\n", stderr: "" },
-          { code: 0, stdout: "ref: refs/heads/master\tHEAD\n", stderr: "" },
+          { code: 0, stdout: remoteHead, stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
-          { code: 0, stdout: "fetched\n", stderr: "" },
+          { code: 0, stdout: fetchedCommit, stderr: "" },
           { code: 0, stdout: "feature/test\n", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "before\n", stderr: "" },
@@ -101,10 +103,10 @@ describe("workspace branch auto-sync", () => {
     });
     expect(commands[4]).toContain("ls-remote --symref origin HEAD");
     expect(commands[6]).toContain(
-      "fetch --no-tags origin '+refs/heads/master:refs/remotes/origin/master'",
+      `fetch --no-tags --no-write-fetch-head --refmap= origin '${fetchedCommit}'`,
     );
     expect(commands[11]).toContain(
-      "-c commit.gpgsign=false merge --no-edit --no-stat 'fetched'",
+      `-c commit.gpgsign=false merge --no-edit --no-stat '${fetchedCommit}'`,
     );
   });
 
@@ -119,10 +121,10 @@ describe("workspace branch auto-sync", () => {
           { code: 0, stdout: "feature/test\n", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "before\n", stderr: "" },
-          { code: 0, stdout: "ref: refs/heads/master\tHEAD\n", stderr: "" },
+          { code: 0, stdout: remoteHead, stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
-          { code: 0, stdout: "fetched\n", stderr: "" },
+          { code: 0, stdout: fetchedCommit, stderr: "" },
           { code: 0, stdout: "feature/test\n", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "before\n", stderr: "" },
@@ -174,10 +176,10 @@ describe("workspace branch auto-sync", () => {
           { code: 0, stdout: "feature/test\n", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "before\n", stderr: "" },
-          { code: 0, stdout: "ref: refs/heads/master\tHEAD\n", stderr: "" },
+          { code: 0, stdout: remoteHead, stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
-          { code: 0, stdout: "fetched\n", stderr: "" },
+          { code: 0, stdout: fetchedCommit, stderr: "" },
           { code: 0, stdout: "feature/other\n", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "after\n", stderr: "" },
