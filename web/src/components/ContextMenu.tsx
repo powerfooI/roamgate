@@ -294,7 +294,17 @@ export function ContextMenu({
       },
     },
   ];
-  const worktreeItems: Item[] = [];
+  // Herdr only reports `worktree` metadata for workspaces it opened as
+  // worktrees, so a plain workspace whose cwd is a Git checkout carries none.
+  // worktree.list resolves the repository from the workspace's pane on
+  // demand, and the dialog shows Herdr's error for a non-Git workspace, so
+  // opening an existing worktree is offered everywhere, like creating one.
+  const worktreeItems: Item[] = [
+    {
+      label: "Open worktree…",
+      action: () => setOpenWorktreeWorkspaceId(w.workspace_id),
+    },
+  ];
   if (w.worktree) {
     organizeItems.push({
       label: "Copy checkout path",
@@ -319,10 +329,6 @@ export function ContextMenu({
       },
     });
     worktreeItems.push(
-      {
-        label: "Open worktree…",
-        action: () => setOpenWorktreeWorkspaceId(w.workspace_id),
-      },
       {
         label: "Worktree lifecycle…",
         action: () => setLifecycleWorkspaceId(w.workspace_id),
