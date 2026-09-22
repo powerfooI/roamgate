@@ -26,11 +26,11 @@ export async function fetchOriginDefaultBranch(
       "Unable to determine origin's default branch: origin HEAD does not identify a branch.",
     );
   }
-  // Fetch follows symbolic destinations; case-insensitive filesystems also
-  // alias origin/head to origin/HEAD. Reserve all variants on every host.
-  if (ref.toLowerCase() === "refs/heads/head") {
+  // Fetch follows symbolic destinations, and a ref cannot contain child refs.
+  // Reserve origin/HEAD and descendants case-insensitively on every host.
+  if (/^refs\/heads\/head(?:\/|$)/i.test(ref)) {
     throw new Error(
-      "Cannot fetch origin's default branch: origin/HEAD is reserved (case-insensitive). Choose another default branch on origin.",
+      "Cannot fetch origin's default branch: origin/HEAD is reserved, including descendants (case-insensitive). Choose another default branch on origin.",
     );
   }
   const validRef = await runGit(`check-ref-format ${shQuote(ref)}`);

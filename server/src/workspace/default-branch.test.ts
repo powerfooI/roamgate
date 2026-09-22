@@ -35,6 +35,7 @@ describe("origin default branch with real Git", () => {
     "main",
     "master",
     "release/next",
+    "head-topic",
     "release/quote'$(printf${IFS}x)&`printf${IFS}y`",
   ])(
     "creates and syncs from %s, ignoring stale origin/HEAD",
@@ -118,7 +119,7 @@ describe("origin default branch with real Git", () => {
     15_000,
   );
 
-  test.each(["HEAD", "head", "Head"])(
+  test.each(["HEAD", "head", "Head", "HEAD/topic", "head/topic", "Head/topic"])(
     "rejects a default named %s without overwriting tracking refs",
     async (branch) => {
       const directory = await mkdtemp(join(tmpdir(), "roamgate-default-head-"));

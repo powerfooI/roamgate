@@ -131,8 +131,8 @@ Open **Worktree Lifecycle** from a workspace menu or the command menu to:
   process cleanup, and preservation of residual files when safe removal fails.
 
 Worktree creation and automatic branch updates reject a default branch named
-`HEAD` (case-insensitive) to avoid collisions with Git's reserved `origin/HEAD`
-symbolic ref.
+`HEAD` or starting with `HEAD/` (case-insensitive) to avoid collisions with Git's
+reserved `origin/HEAD` symbolic ref.
 
 ### Paseo Worktree Hooks
 
