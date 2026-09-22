@@ -725,14 +725,23 @@ function PaneJumpOverlay({
                       <span className="pane-jump-agent-name">
                         {entry.agent}
                       </span>
-                      {entry.subtitle ? " · " : ""}
+                      {" · "}
                     </>
                   ) : null}
-                  {entry.subtitle}
+                  <span className="pane-jump-tab" title={entry.tabLabel}>
+                    {entry.tabLabel}
+                  </span>
+                  <span className="pane-jump-id" title={entry.paneId}>
+                    {" · "}
+                    {entry.paneLabel}
+                  </span>
+                  {entry.cwd ? (
+                    <span className="pane-jump-cwd" title={entry.cwd}>
+                      {" · "}
+                      {entry.cwd}
+                    </span>
+                  ) : null}
                 </span>
-              </span>
-              <span className="pane-jump-id" title={entry.paneId}>
-                {entry.paneLabel}
               </span>
             </button>
           ))}

@@ -110,7 +110,8 @@ describe("recent pane projection", () => {
         paneId: "p1",
         paneLabel: "Pane p1",
         title: "example-repo",
-        subtitle: "Tab 1 · /repos/w1",
+        tabLabel: "Tab 1",
+        cwd: "/repos/w1",
         agent: "codex",
         agentStatus: "working",
         current: true,
@@ -161,9 +162,13 @@ describe("recent pane projection", () => {
         "Pane p1",
         "Pane p2",
       ]);
-      expect(entries.map((entry) => entry.subtitle)).toEqual([
-        "Tab 1 · /repos/w1",
-        "Tab 1 · /repos/w1",
+      expect(entries.map((entry) => entry.tabLabel)).toEqual([
+        "Tab 1",
+        "Tab 1",
+      ]);
+      expect(entries.map((entry) => entry.cwd)).toEqual([
+        "/repos/w1",
+        "/repos/w1",
       ]);
     }
     expect(
@@ -177,14 +182,16 @@ describe("recent pane projection", () => {
         paneId: "current",
         paneLabel: "Pane current",
         title: "one",
-        subtitle: "Tab 1",
+        tabLabel: "Tab 1",
+        cwd: "",
         current: true,
       },
       {
         paneId: "previous",
         paneLabel: "Pane previous",
         title: "two",
-        subtitle: "Tab 1",
+        tabLabel: "Tab 1",
+        cwd: "",
         current: false,
       },
     ];

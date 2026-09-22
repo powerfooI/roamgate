@@ -86,6 +86,12 @@ function checkPaneIdsVisible() {
     const label = row.querySelector<HTMLElement>(".pane-jump-id");
     check(!!label, "Pane ID has no independent label");
     if (!label) continue;
+    check(
+      label.parentElement?.classList.contains("pane-jump-subtitle") === true &&
+        label.previousElementSibling?.classList.contains("pane-jump-tab") ===
+          true,
+      "Pane ID must follow the tab label in the left subtitle",
+    );
     const range = document.createRange();
     range.selectNodeContents(label);
     const text = range.getBoundingClientRect();
@@ -165,6 +171,7 @@ async function run() {
       tab_id: "w1:t1",
       cwd: "/repo",
       focused: n === 1,
+      agent: n === 2 ? "codex" : undefined,
       agent_status: "idle",
       revision: 1,
     })),

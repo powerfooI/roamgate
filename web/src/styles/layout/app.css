@@ -301,7 +301,8 @@
 }
 
 .pane-jump-title-line > strong,
-.pane-jump-subtitle,
+.pane-jump-tab,
+.pane-jump-cwd,
 .pane-jump-agent-name,
 .pane-jump-agent-status {
   overflow: hidden;
@@ -316,9 +317,21 @@
 }
 
 .pane-jump-subtitle {
-  display: block;
+  display: flex;
+  min-width: 0;
   color: var(--muted);
   font-size: 12px;
+  white-space: nowrap;
+}
+
+.pane-jump-tab {
+  min-width: 0;
+  max-width: 40%;
+}
+
+.pane-jump-cwd {
+  min-width: 0;
+  flex: 1;
 }
 
 .pane-jump-id {
@@ -345,6 +358,7 @@
 }
 
 .pane-jump-agent-name {
+  max-width: 25%;
   color: var(--text);
   font-weight: 650;
 }

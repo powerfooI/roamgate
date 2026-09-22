@@ -6,7 +6,8 @@ export type PaneJumpEntry = {
   paneId: string;
   paneLabel: string;
   title: string;
-  subtitle: string;
+  tabLabel: string;
+  cwd: string;
   agent?: string;
   agentStatus?: string;
   current: boolean;
@@ -117,7 +118,8 @@ function orderedPaneJumpEntries(
 function paneSearchValue(entry: PaneJumpEntry): string {
   return [
     entry.title,
-    entry.subtitle,
+    entry.tabLabel,
+    entry.cwd,
     entry.paneLabel,
     entry.agent,
     entry.agentStatus,
@@ -151,15 +153,13 @@ function paneJumpEntry(
       ? tab.label
       : `Tab ${tab.number}`
     : pane.tab_id;
-  const subtitle = [tabLabel, cwd]
-    .filter((value) => value.trim().length > 0)
-    .join(" · ");
 
   return {
     paneId: pane.pane_id,
     paneLabel: `Pane ${shortId(pane.pane_id)}`,
     title: workspaceLabel,
-    subtitle,
+    tabLabel,
+    cwd,
     agent: pane.agent,
     agentStatus: pane.agent ? pane.agent_status : undefined,
     current,
