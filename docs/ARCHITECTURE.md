@@ -82,8 +82,10 @@ metadata. Geometry changes require a full surface.
 
 Decoders bound collections and validate boot/projection/surface revisions, spans,
 and hyperlink indices. Invalid updates close the stream and clear its baseline;
-viewers reattach for a fresh full frame rather than keep stale output. Popup
-grids are validated, but popup and Kitty graphics rendering are not presented.
+viewers reattach for a fresh full frame rather than keep stale output. A
+connection-wide endpoint observer follows the focused Space to report popup
+identity even without pane viewers; the popup terminal uses direct attach.
+Kitty graphics are not presented.
 
 `settings.terminal_transport.get/update` persists `surface_codecs` per connection
 in `settings.json`. Changes close that runtime's endpoint displays and broadcast

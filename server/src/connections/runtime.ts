@@ -238,6 +238,14 @@ export function createLegacyConnectionRuntime(args: {
       );
       assertEndpointCreationSource(source, result?.pane);
     },
+    focusedWorkspaceId: async () => {
+      const result = await herdr.call("workspace.list", {}, 5000);
+      return (
+        result?.workspaces?.find(
+          (workspace: { focused?: boolean }) => workspace.focused,
+        )?.workspace_id ?? null
+      );
+    },
     lookupPaneId: async (terminalId) => {
       try {
         const result = await herdr.call("pane.list", {}, 5000);
@@ -365,6 +373,8 @@ export function createLegacyConnectionRuntime(args: {
     taskEvents.handleHerdrEvent(event);
     lastStepTurns.handleHerdrEvent(event);
     agentStatusSubscriptions.handleHerdrEvent(event);
+    if ((event as { event?: string })?.event === "workspace.focused")
+      terminalBridge.refreshPopupObserverFocus();
     args.onEvent(event, identity);
   };
   const onHerdrError = (error: unknown) => args.onError?.(error, identity);

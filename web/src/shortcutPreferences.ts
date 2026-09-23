@@ -41,6 +41,7 @@ const LATE_SHORTCUT_IDS: ShortcutId[] = [
   "annotations.copy",
   "annotations.prefill",
   "panes.search",
+  "plugin.herdrFloat.toggle",
 ];
 export function validateShortcutPreset(value: unknown): ShortcutPreset {
   if (!value || typeof value !== "object")
@@ -291,8 +292,13 @@ export function exportShortcutPreset(preset: ShortcutPreset): string {
 export function importShortcutPreset(raw: string): ShortcutPreset {
   if (raw.length > 100_000)
     throw new Error("Preset files must be smaller than 100 KB.");
-  const input = JSON.parse(raw);
-  if (input?.format !== "herdr-keybindings" || input?.version !== 1)
+  let input: { format?: unknown; version?: unknown; preset?: unknown } | null;
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    throw new Error("Invalid keybindings preset JSON.");
+  }
+  if (input?.format !== "herdr-keybindings" || input.version !== 1)
     throw new Error("Use a version 1 Herdr keybindings preset.");
   return validateShortcutPreset(input.preset);
 }

@@ -9,6 +9,7 @@ import {
   shortcutConflicts,
   shortcutFromEvent,
   validateShortcutKeys,
+  type ShortcutBindings,
   type ShortcutEvent,
 } from "./shortcutBindings";
 import { SHORTCUT_CATALOG } from "./shortcutCatalog";
@@ -330,6 +331,17 @@ test("older presets gain panel shortcuts without replacing saved assignments", (
     expect(taken.bindings["tab.close"]).toEqual(bindings["tab.close"]!);
     expect(taken.bindings["inspector.expand"]).toEqual([]);
     expect(taken.bindings["annotations.toggle"]).toEqual([]);
+  }
+});
+
+test("older presets keep a key assigned before the popup shortcut existed", () => {
+  for (const base of ["mac", "windows", "linux"] as const) {
+    const bindings: Partial<ShortcutBindings> = defaultShortcutBindings(base);
+    bindings["tab.close"] = bindings["plugin.herdrFloat.toggle"];
+    delete bindings["plugin.herdrFloat.toggle"];
+    const loaded = validateShortcutPreset({ ...preset(), base, bindings });
+    expect(loaded.bindings["tab.close"]).toEqual(bindings["tab.close"]!);
+    expect(loaded.bindings["plugin.herdrFloat.toggle"]).toEqual([]);
   }
 });
 

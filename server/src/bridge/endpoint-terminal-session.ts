@@ -1,6 +1,5 @@
 import { EventEmitter } from "node:events";
 import { EndpointClient, type EndpointSurface } from "./endpoint-client";
-import type { Popup, SurfaceBaseline } from "./endpoint-surface";
 import { EndpointCreationDeadline } from "./endpoint-creation";
 import { frameToAnsi } from "./frame-to-ansi";
 import type { FrameData } from "./thin-client";
@@ -32,28 +31,6 @@ type ScrollDispatch = {
  * uses (isClosed/connecting/resize/input/scroll/close/events) so the bridge
  * can hold either backend in one field.
  */
-/** What a browser needs to open the popup: which terminal, and how to frame it. */
-export type PopupIdentity = {
-  terminalId: string;
-  title: string;
-  width: Popup["width"];
-  height: Popup["height"];
-};
-
-function popupIdentitiesEqual(
-  a: PopupIdentity | null,
-  b: PopupIdentity | null,
-) {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  return (
-    a.terminalId === b.terminalId &&
-    a.title === b.title &&
-    JSON.stringify(a.width) === JSON.stringify(b.width) &&
-    JSON.stringify(a.height) === JSON.stringify(b.height)
-  );
-}
-
 export class EndpointTerminalSession extends EventEmitter {
   private client: EndpointClient;
   private classifier = new VtInputClassifier();
@@ -86,7 +63,6 @@ export class EndpointTerminalSession extends EventEmitter {
     emit: () => void;
   } | null = null;
   private paneSize = { cols: 0, rows: 0 };
-  private lastPopup: PopupIdentity | null = null;
   private fitAttempts = 0;
   private fitResizeInFlight = false;
   private lastRequest = { cols: 0, rows: 0 };
@@ -287,32 +263,8 @@ export class EndpointTerminalSession extends EventEmitter {
     return surface?.panes.some((p) => p.paneId === paneId) ?? false;
   }
 
-  /**
-   * Identity of Herdr's session-modal popup pane, as the surface reports it.
-   *
-   * The popup is server-wide rather than scoped to this session's pane, so it
-   * is reported before the pane lookup below returns and regardless of whether
-   * this session's pane appears in the surface at all. Only identity is
-   * emitted: the popup's own frame rides here too, but the browser attaches to
-   * its terminal like any other, which already carries content and input.
-   */
-  private notePopup(popup: Popup | null) {
-    const next = popup
-      ? {
-          terminalId: popup.terminalId,
-          title: popup.title,
-          width: popup.width,
-          height: popup.height,
-        }
-      : null;
-    if (popupIdentitiesEqual(this.lastPopup, next)) return;
-    this.lastPopup = next;
-    this.emit("popup", next);
-  }
-
   private onSurface(surface: EndpointSurface) {
     if (this.closed) return;
-    this.notePopup((surface as SurfaceBaseline).popup ?? null);
     if (!this.paneId) return; // connect() replays after lookup
     const pane = surface.panes.find((p) => p.paneId === this.paneId);
     if (!pane?.mouseReporting) this.pressedMouseButtons.clear();

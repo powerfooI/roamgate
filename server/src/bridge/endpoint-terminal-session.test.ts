@@ -11,6 +11,7 @@ import {
   resolvedFrameLink,
 } from "./endpoint-terminal-session";
 import type { CellData, FrameData } from "./thin-client";
+import type { Popup } from "./endpoint-surface";
 import type { ServerWebSocket } from "bun";
 import { createTerminalBridge } from "./terminal-bridge";
 import { silentLogger } from "../utils/logger";
@@ -126,10 +127,13 @@ function writePane(
   w.varint(0);
 }
 
+type TestPopup = Pick<Popup, "terminalId" | "title" | "width" | "height">;
+
 function surfaceFrame(
   revision: number,
   frame: FrameData,
   panes = DEFAULT_PANES,
+  popup: TestPopup | null = null,
 ): Buffer {
   const w = new BinWriter();
   w.variant(13);
@@ -154,7 +158,22 @@ function surfaceFrame(
       pane.focused,
     );
   w.varint(0); // splits
-  w.bool(false); // popup
+  w.option(popup, (value) => {
+    w.string(value.terminalId);
+    w.string(value.title);
+    for (const size of [value.width, value.height]) {
+      w.option(size, (dimension) => {
+        w.variant(dimension.kind === "cells" ? 0 : 1);
+        if (dimension.kind === "cells") w.varint(dimension.value);
+        else w.u8(dimension.value);
+      });
+    }
+    writeFrame(w, frame);
+    w.bool(false);
+    w.bool(false);
+    w.varint(0);
+    w.varint(0);
+  });
   w.varint(0); // graphics assets
   w.varint(0); // graphics placements
   w.varint(0); // retained assets
@@ -201,6 +220,7 @@ async function startSessionServer(handlers: {
   onDisconnectConnection?: (disconnect: () => void) => void;
   onControlConnection?: (send: (kind: string, data: string) => void) => void;
   initialSurface?: { frame: FrameData; panes: TestPane[] };
+  popupForSurface?: () => TestPopup | null;
   surfaceForHello?: (
     cols: number,
     rows: number,
@@ -246,7 +266,16 @@ async function startSessionServer(handlers: {
     let revision = 1;
     handlers.onConnection?.(
       (panes, nextFrame = handlers.initialSurface?.frame ?? frame) =>
-        socket.write(encodeFrame(surfaceFrame(++revision, nextFrame, panes))),
+        socket.write(
+          encodeFrame(
+            surfaceFrame(
+              ++revision,
+              nextFrame,
+              panes,
+              handlers.popupForSurface?.(),
+            ),
+          ),
+        ),
     );
     handlers.onPatchConnection?.((cursor, panes) => {
       const w = new BinWriter();
@@ -326,6 +355,7 @@ async function startSessionServer(handlers: {
                 1,
                 initialSurface?.frame ?? frame,
                 initialSurface?.panes ?? handlers.panes,
+                handlers.popupForSurface?.(),
               ),
             ),
           );
@@ -378,6 +408,81 @@ async function startSessionServer(handlers: {
   });
   return socketPath;
 }
+
+test("popup identity updates without any attached pane viewer", async () => {
+  const frame: FrameData = {
+    cells: [cell("x")],
+    width: 1,
+    height: 1,
+    cursor: null,
+    hyperlinks: [],
+  };
+  let popup: TestPopup | null = {
+    terminalId: "floating",
+    title: "Float",
+    width: { kind: "percent", value: 80 },
+    height: { kind: "cells", value: 20 },
+  };
+  let sendSurface!: (panes: TestPane[], frame?: FrameData) => void;
+  let greeted = false;
+  let observerWorkspace = "other";
+  const socketPath = await startSessionServer({
+    initialSurface: { frame, panes: [] },
+    methods: [...WELCOME.methods, "workspace.focus"],
+    popupForSurface: () =>
+      observerWorkspace === "floating-workspace" ? popup : null,
+    onRequest: (method, params) => {
+      if (method === "workspace.focus") {
+        observerWorkspace = params.workspace_id;
+        sendSurface([], frame);
+      }
+      return {};
+    },
+    onHello: () => {
+      greeted = true;
+    },
+    onConnection: (send) => {
+      sendSurface = send;
+    },
+  });
+  const pushes: Array<{ popup: { terminal_id: string } | null }> = [];
+  const replies: Array<{ result: { popup: { terminal_id: string } | null } }> =
+    [];
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 22,
+    lookupPaneId: async () => null,
+    focusedWorkspaceId: async () => "floating-workspace",
+    broadcast: (payload) => pushes.push(JSON.parse(payload)),
+    safeSend: (_ws, payload) => {
+      replies.push(JSON.parse(payload));
+      return true;
+    },
+    clientLabel: () => "test",
+    markRpcError: () => {},
+  });
+  try {
+    const ws = {} as ServerWebSocket<unknown>;
+    await bridge.handleTerminalRpc(ws, "watch", "terminal.watch_popup", {});
+    await settleUntil(
+      () =>
+        greeted &&
+        pushes.some((push) => push.popup?.terminal_id === "floating"),
+    );
+    await bridge.handleTerminalRpc(ws, "watch2", "terminal.watch_popup", {});
+    expect(observerWorkspace).toBe("floating-workspace");
+    expect(replies.at(-1)?.result.popup?.terminal_id).toBe("floating");
+    popup = null;
+    sendSurface([], frame);
+    await settleUntil(() => pushes.at(-1)?.popup === null);
+    expect(pushes.map((push) => push.popup?.terminal_id ?? null)).toEqual([
+      "floating",
+      null,
+    ]);
+  } finally {
+    bridge.dispose();
+  }
+});
 
 test.each(["cursor only", "other split pane"])(
   "restores a hidden cursor when a patch updates %s",

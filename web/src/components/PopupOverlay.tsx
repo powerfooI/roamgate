@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { Terminal } from "@xterm/xterm";
+import { useEffect, useRef, useState } from "react";
+import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { X } from "lucide-react";
 import { bridge } from "../api";
@@ -7,14 +7,11 @@ import { store, useStoreSelector, type PopupInfo } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
 import {
   normalizeUiScale,
-  resolveSystemTheme,
-  SYSTEM_THEME_QUERY,
   TERMINAL_FONT_FAMILY,
   terminalFontOptions,
 } from "../appearance";
 import { roamgateLocalStorage } from "../browserStorage";
 import { isMobileLayout } from "../layoutPreferences";
-import { terminalThemeFor } from "../terminalThemes";
 import { terminalPushMatches } from "../terminalConnection";
 import { terminalCellAt, terminalWheelScroll } from "../terminalScroll";
 
@@ -66,7 +63,7 @@ function cssSizeFrom(
  * protocol (see terminal-bridge.ts's ThinClient branch for popup terminals),
  * which does not carry those endpoint-only capabilities in the first place.
  */
-export function PopupOverlay() {
+export function PopupOverlay({ terminalTheme }: { terminalTheme: ITheme }) {
   const popup = useStoreSelector((s) => s.popup);
   const connectionClient = useConnectionClient();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -80,6 +77,16 @@ export function PopupOverlay() {
   // stream out from under it and the overlay never receives a frame.
   const liveAttachmentsRef = useRef(0);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const closedAttemptsRef = useRef<number[]>([]);
+  const [attachRetry, retryAttach] = useState(0);
+
+  useEffect(() => {
+    if (termRef.current) termRef.current.options.theme = terminalTheme;
+  }, [terminalTheme]);
+  useEffect(() => {
+    closedAttemptsRef.current = [];
+  }, [popup?.terminal_id, connectionClient]);
 
   // Mount/attach xterm.js once a popup exists; detach and tear it down once
   // it's gone. A change in terminal_id (a new popup replacing a hidden one
@@ -89,9 +96,14 @@ export function PopupOverlay() {
     const container = containerRef.current;
     if (!popup || !container) return;
     const terminalId = popup.terminal_id;
-    const theme = terminalThemeFor(
-      resolveSystemTheme(window.matchMedia(SYSTEM_THEME_QUERY)),
-    );
+    const activeElement = document.activeElement;
+    if (
+      !previousFocusRef.current?.isConnected &&
+      activeElement instanceof HTMLElement &&
+      !activeElement.closest(".popup-overlay-backdrop")
+    ) {
+      previousFocusRef.current = activeElement;
+    }
     // Same font stack and density as a normal pane: the popup is a terminal
     // like any other, and a prompt drawing Nerd Font glyphs must not fall back
     // to tofu just because it renders here.
@@ -102,7 +114,7 @@ export function PopupOverlay() {
         isMobileLayout(),
         normalizeUiScale(roamgateLocalStorage.getItem("uiScale")),
       ),
-      theme,
+      theme: terminalTheme,
       allowProposedApi: true,
       macOptionIsMeta: true,
       scrollback: 2000,
@@ -165,8 +177,7 @@ export function PopupOverlay() {
         }
       })
       .catch(() => {
-        /* surfaced implicitly: no frames arrive and the overlay stays blank
-           until the popup closes or a retry (re-toggling) succeeds */
+        if (!detached) term.writeln("Unable to attach popup terminal.");
       });
 
     const offTerminal = bridge.onTerminal((t) => {
@@ -175,8 +186,23 @@ export function PopupOverlay() {
       if (text !== null) term.write(text);
     });
     const offClosed = bridge.onTerminalClosed((closed) => {
-      if (closed.terminal_id !== terminalId) return;
+      if (!terminalPushMatches(identity, client, terminalId, closed)) return;
       attachedTerminalIdRef.current = null;
+      const now = Date.now();
+      closedAttemptsRef.current = closedAttemptsRef.current.filter(
+        (at) => now - at < 60_000,
+      );
+      closedAttemptsRef.current.push(now);
+      if (
+        closed.reason === "terminal_configuration_changed" ||
+        closedAttemptsRef.current.length <= 3
+      ) {
+        retryAttach((value) => value + 1);
+      } else {
+        term.writeln(
+          "Popup terminal stream closed; reopen the popup to retry.",
+        );
+      }
     });
 
     const onData = term.onData((data) => {
@@ -254,11 +280,18 @@ export function PopupOverlay() {
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      if (
+        !store.get().popup &&
+        client.isCurrent() &&
+        previousFocusRef.current?.isConnected
+      ) {
+        previousFocusRef.current.focus();
+        previousFocusRef.current = null;
+      }
     };
-    // connectionClient is captured once per popup identity on purpose: a
-    // mid-session connection swap tears this effect down like any unmount.
+    // Title/size render separately; the theme is updated without reattaching.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [popup?.terminal_id]);
+  }, [popup?.terminal_id, connectionClient, attachRetry]);
 
   if (!popup) return null;
 

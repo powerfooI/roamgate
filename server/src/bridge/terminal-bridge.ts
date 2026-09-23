@@ -13,10 +13,9 @@ import { NO_TERMINAL_ATTACHED_MESSAGE } from "../utils/rpc-logging";
 import { ThinClient } from "./thin-client";
 import { roamgateEnv } from "../config/environment";
 import { isTerminalHelloProtocol } from "./protocol-compat";
-import {
-  EndpointTerminalSession,
-  type PopupIdentity,
-} from "./endpoint-terminal-session";
+import { EndpointTerminalSession } from "./endpoint-terminal-session";
+import { EndpointClient } from "./endpoint-client";
+import type { Popup, SurfaceBaseline } from "./endpoint-surface";
 import { frameToAnsi } from "./frame-to-ansi";
 import { isTerminalClipboardPayload } from "./terminal-clipboard";
 
@@ -56,6 +55,8 @@ const TERMINAL_FIRST_FRAME_WAIT_MS = 20_000;
 const STANDARD_BASE64_RE =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
+type PopupIdentity = Pick<Popup, "terminalId" | "title" | "width" | "height">;
+
 export function createTerminalBridge(args: {
   connectionId?: string;
   connectionGeneration?: number;
@@ -65,6 +66,8 @@ export function createTerminalBridge(args: {
   herdrProtocol: () => Promise<number>;
   /** Resolve a terminal id to its owning pane id (control-socket pane.list). */
   lookupPaneId?: (terminalId: string) => Promise<string | null>;
+  /** Popup surfaces follow this connection's focused Space, not the shell default. */
+  focusedWorkspaceId?: () => Promise<string | null>;
   surfaceCodecsEnabled?: () => Promise<boolean>;
   validateCreationSource?: (source: EndpointCreationSource) => Promise<void>;
   createEmptyWorkspace?: (
@@ -103,14 +106,13 @@ export function createTerminalBridge(args: {
     Map<string, { cols: number; rows: number }>
   >();
   const sharedTerminals = new Map<string, SharedTerminalSession>();
-  /**
-   * Herdr allows one session-modal popup at a time and reports it on every
-   * endpoint surface, so each pane's session sees the same value. One copy
-   * lives here: it answers terminal.watch_popup for a browser that just
-   * connected, and it collapses the duplicate reports that N sessions
-   * observing the same change would otherwise produce.
-   */
+  /** The dedicated endpoint observer owns this connection-wide popup state. */
   let popupState: PopupIdentity | null = null;
+  let popupObserver: EndpointClient | null = null;
+  let popupObserverStarting = false;
+  let popupObserverRetry: ReturnType<typeof setTimeout> | null = null;
+  let popupObserverWorkspace: string | null = null;
+  let popupFocusChain: Promise<void> = Promise.resolve();
   const attachmentTokens = new Map<
     ServerWebSocket<unknown>,
     Map<string, object>
@@ -264,6 +266,89 @@ export function createTerminalBridge(args: {
     }
     for (const viewer of terminalViewers.keys())
       args.safeSend(viewer, payload, "popup-state");
+  }
+
+  // Popup identity belongs to the connection, not to any pane viewer. Keep an
+  // endpoint surface open even when every browser is showing a non-pane view.
+  function retryPopupObserver() {
+    if (disposed || popupObserverRetry) return;
+    popupObserverRetry = setTimeout(() => {
+      popupObserverRetry = null;
+      void startPopupObserver();
+    }, 2_000);
+  }
+
+  function refreshPopupObserverFocus() {
+    const observer = popupObserver;
+    if (!observer || !args.focusedWorkspaceId) return;
+    popupFocusChain = popupFocusChain
+      .then(async () => {
+        const workspaceId = await args.focusedWorkspaceId!();
+        if (
+          !workspaceId ||
+          popupObserver !== observer ||
+          observer.isClosed ||
+          popupObserverWorkspace === workspaceId
+        )
+          return;
+        await observer.callEndpoint(
+          "workspace.focus",
+          { workspace_id: workspaceId },
+          5_000,
+        );
+        popupObserverWorkspace = workspaceId;
+      })
+      .catch((error) => {
+        logger.warn("popup observer focus failed", {
+          error: formatError(error),
+        });
+      });
+  }
+
+  async function startPopupObserver() {
+    if (disposed || popupObserver || popupObserverStarting) return;
+    popupObserverStarting = true;
+    try {
+      if ((await navigationMode()) !== "browser-local") return;
+      const codecs = await (args.surfaceCodecsEnabled?.() ?? true);
+      if (disposed || popupObserver) return;
+      const observer = new EndpointClient(args.clientSocketPath, codecs);
+      popupObserver = observer;
+      observer.on("surface", (surface: SurfaceBaseline) => {
+        if (popupObserver !== observer) return;
+        const popup = surface.popup;
+        popupChanged(
+          popup
+            ? {
+                terminalId: popup.terminalId,
+                title: popup.title,
+                width: popup.width,
+                height: popup.height,
+              }
+            : null,
+        );
+      });
+      observer.on("error", (error: Error) => {
+        logger.warn("popup observer error", { error: formatError(error) });
+      });
+      observer.on("close", () => {
+        if (popupObserver !== observer) return;
+        popupObserver = null;
+        popupObserverWorkspace = null;
+        popupChanged(null);
+        retryPopupObserver();
+      });
+      await observer.connect(80, 24);
+      refreshPopupObserverFocus();
+    } catch (error) {
+      logger.warn("popup observer connect failed", {
+        error: formatError(error),
+      });
+      popupObserver?.close();
+      retryPopupObserver();
+    } finally {
+      popupObserverStarting = false;
+    }
   }
 
   function closeClipboardRelay() {
@@ -600,12 +685,6 @@ export function createTerminalBridge(args: {
             surfaceCodecsEnabled,
           )
         : new ThinClient(args.clientSocketPath, args.herdrProtocol);
-    if (thin instanceof EndpointTerminalSession) {
-      thin.on("popup", (popup: PopupIdentity | null) => {
-        if (!isCurrent(creationRevision)) return;
-        popupChanged(popup);
-      });
-    }
     let resolveFirstFrame!: (seen: boolean) => void;
     const firstFrame = new Promise<boolean>((resolve) => {
       resolveFirstFrame = resolve;
@@ -955,8 +1034,8 @@ export function createTerminalBridge(args: {
       if (disposed) return fail("terminal bridge disposed");
       const operationRevision = lifecycleRevision;
       if (method === "terminal.watch_popup") {
-        // Pushes only fire on change, so a browser that just connected needs
-        // to ask once. Sessions report the popup as soon as any pane attaches.
+        // The observer sends its first surface even if no pane is attached.
+        void startPopupObserver();
         return reply({
           popup: popupState
             ? {
@@ -1352,6 +1431,7 @@ export function createTerminalBridge(args: {
   function refreshSurfaceCodecs() {
     if (disposed) return;
     surfaceSettingsRevision += 1;
+    if (popupObserver) popupObserver.close();
     for (const shared of sharedTerminals.values()) {
       if (!(shared.thin instanceof EndpointTerminalSession)) continue;
       shared.lastError = "terminal_configuration_changed";
@@ -1363,6 +1443,8 @@ export function createTerminalBridge(args: {
     if (disposed) return;
     disposed = true;
     lifecycleRevision += 1;
+    if (popupObserverRetry) clearTimeout(popupObserverRetry);
+    popupObserver?.close();
     closeClipboardRelay();
     for (const ws of terminalViewers.keys()) detachTerminalViewer(ws);
     for (const shared of sharedTerminals.values()) shared.thin.close();
@@ -1383,6 +1465,7 @@ export function createTerminalBridge(args: {
     viewedTerminals,
     statusTerminals,
     browserClientCountChanged,
+    refreshPopupObserverFocus,
     refreshSurfaceCodecs,
     dispose,
   };

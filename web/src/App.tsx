@@ -214,14 +214,14 @@ const LazyPopupOverlay = lazyWithReload("popup-overlay", () =>
   })),
 );
 
-function PopupOverlay() {
+function PopupOverlay({ terminalTheme }: { terminalTheme: ITheme }) {
   // Gate the dynamic import on popup presence, not just its content, so a
   // session that never opens one never fetches xterm.js for it.
   const hasPopup = useStoreSelector((s) => s.popup !== null);
   if (!hasPopup) return null;
   return (
     <Suspense fallback={null}>
-      <LazyPopupOverlay />
+      <LazyPopupOverlay terminalTheme={terminalTheme} />
     </Suspense>
   );
 }
@@ -3970,7 +3970,7 @@ export default function App() {
       </div>
       <GlobalTooltip />
       {viewportDebugEnabled ? <ViewportDebugOverlay /> : null}
-      <PopupOverlay />
+      <PopupOverlay terminalTheme={terminalTheme} />
       {paneJumpOpen ? (
         <PaneJumpOverlay
           entries={paneJumpOptions}
