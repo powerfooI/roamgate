@@ -109,6 +109,29 @@ describe("terminal theme presets", () => {
 });
 
 describe("custom terminal themes", () => {
+  test("persists every theme at capacity, including a selected replacement in the freed slot", () => {
+    const full = Array.from(
+      { length: MAX_CUSTOM_TERMINAL_THEMES },
+      (_, index) => ({
+        id: `custom-${index}`,
+        name: `Custom ${index}`,
+        variant: "dark" as const,
+        colors: { background: "#000000", foreground: "#ffffff" },
+      }),
+    );
+    expect(
+      parseCustomTerminalThemes(serializeCustomTerminalThemes(full)),
+    ).toEqual(full);
+    const selected = { ...full[0]!, id: "replacement", name: "Replacement" };
+    const replaced = [...full.slice(1), selected];
+    const restored = parseCustomTerminalThemes(
+      serializeCustomTerminalThemes(replaced),
+    );
+    expect(restored).toEqual(replaced);
+    expect(restored.find((theme) => theme.id === selected.id)).toEqual(
+      selected,
+    );
+  });
   test("round-trip through serialize and parse", () => {
     const themes = [
       {

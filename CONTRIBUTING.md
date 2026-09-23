@@ -30,9 +30,8 @@ process tests. Then use focused checks while iterating:
 | Format | `bun run format <paths...>` or `format:check`; omit paths for the whole repo. |
 | Types | `bun run typecheck:quick` checks scripts/web/server without rebuilding assets or checking production bundles. |
 | Lint | `bun run lint` runs Oxlint without a cache. Rule/scope regression checks: `bun test scripts/lint.test.ts`. |
-| Tests | `bun test <path>` or `bun run test:quick` (four workers, integration included, browser regressions excluded). |
-| Browser | `bun run test:browser` runs serially; Chrome/Chromium or `CHROME_BIN` required, otherwise Chrome cases skip. Setup-card also uses macOS WebKit. |
-| Submission | `bun run precommit`: formatting, lint, full typechecks, and `test:quick` (browser regressions excluded). |
+| Tests | `bun test <path>`, `bun run test` (serial), or `bun run test:quick` (four workers). Both full-suite commands include unit and server integration tests. |
+| Submission | `bun run precommit`: formatting, lint, full typechecks, and `test:quick`. |
 
 Oxlint's explicit rules live in `.oxlintrc.json`; formatting stays in Biome.
 Existing `eslint-disable` comments are supported, including unused-directive
@@ -45,16 +44,24 @@ rather than repeating it manually on the same revision. Without the hook, run
 `bun run precommit` before committing. Further edits require revalidation; never
 bypass the gate.
 
-PR CI runs format/lint/types, site build, and `test:quick`. Browser CI is opt-in:
-**Actions > CI > Run workflow > Run browser regressions**. Local `bun run test`
-retains the full serial suite; pre-commit uses `test:quick`. Run related browser
-regressions separately for UI changes.
+PR CI runs format/lint/types, site build, and the complete `test:quick` suite.
+Automated tests do not launch Chrome or WebKit. Browser-specific focus, layout,
+input, accessibility, and security enforcement require manual validation against
+a real backend for affected changes:
 
-For a browser fixture: `bun test web/src/uiScale.test.ts --test-name-pattern terminalLinks`.
-Use `web/src/browserChrome.ts` bounded waits/teardown; wait for readiness/render
-conditions, not fixed delays. Keep observation windows for long presses,
-cancellation, and repeated events. Setup-card uses ephemeral `Bun.WebView`, never
-a user's existing Chrome session.
+- Check dialog focus/keyboard navigation, scaled layout, and HTML preview
+  iframe/direct-navigation isolation, including workspace assets and CSP.
+
+- On iOS Safari and Android Chrome, check keyboard opening/dismissal, IME,
+  selection/copy while output streams, and short-landscape/scaled menu bounds.
+  Check mixed mouse/touch input on actual hybrid hardware.
+- Exercise connection recovery and profile controls, notification permission and
+  delivery with the page closed, and settings/integration changes on the server.
+- Check desktop focus after app switching, OS clipboard/rectangular selection,
+  and responsiveness during sustained terminal output and real network latency.
+
+Record device/browser and results in the PR. Passing unit and server integration
+tests does not establish browser behavior or real-user-experience acceptance.
 
 Workspace types: `bun run --filter roamgate-web typecheck` or
 `bun run --filter roamgate-server typecheck` (builds web assets first).

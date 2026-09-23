@@ -42,6 +42,12 @@ const preset = () => ({
 });
 
 describe("platform shortcut maps", () => {
+  test("Linux and Windows share the pane-switcher bindings", () => {
+    for (const id of ["panes.recent", "panes.search", "command.menu"] as const)
+      expect(defaultShortcutBindings("linux")[id]).toEqual(
+        defaultShortcutBindings("windows")[id],
+      );
+  });
   test("detects desktop and mobile client platforms", () => {
     expect(
       detectShortcutPlatform({ platform: "MacIntel", userAgent: "Macintosh" }),

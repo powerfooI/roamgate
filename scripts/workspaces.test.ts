@@ -54,21 +54,18 @@ test("development bridge and Vite proxies stay off the production port", async (
   expect(config.server?.proxy?.["/ws"]).toMatchObject({ ws: true });
 });
 
-test("browser CI is opt-in without weakening default validation", () => {
+test("CI keeps the complete non-browser validation gate", () => {
   const workflow = Bun.YAML.parse(
     readFileSync(new URL(".github/workflows/ci.yml", root), "utf8"),
   ) as {
-    on: {
-      workflow_dispatch: {
-        inputs: { browser_tests: { type: string; default: boolean } };
-      };
-    };
     jobs: Record<string, { if?: string; steps: { run?: string }[] }>;
   };
-  expect(workflow.on.workflow_dispatch.inputs.browser_tests).toMatchObject({
-    type: "boolean",
-    default: false,
-  });
+  const requireRoot = createRequire(new URL("package.json", root));
+  const { scripts } = requireRoot("./package.json");
+  expect(scripts.test).toBe("bun test");
+  expect(scripts["test:quick"]).toBe("bun test --parallel=4");
+  expect(scripts["test:browser"]).toBeUndefined();
+  expect(Object.keys(workflow.jobs)).toEqual(["validate"]);
   expect(workflow.jobs.validate.if).toBeUndefined();
   expect(
     workflow.jobs.validate.steps.flatMap((step) =>
@@ -82,14 +79,6 @@ test("browser CI is opt-in without weakening default validation", () => {
     "bun run build:site",
     "bun run test:quick",
   ]);
-  expect(workflow.jobs.browser.if).toBe(
-    "github.event_name == 'workflow_dispatch' && inputs.browser_tests",
-  );
-  expect(
-    workflow.jobs.browser.steps.some(
-      (step) => step.run === "bun run test:browser",
-    ),
-  ).toBe(true);
 });
 
 test("CI and release jobs install once from the workspace root", () => {

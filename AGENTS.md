@@ -35,10 +35,8 @@ the root manifest. Keep runtime dependencies in their owning workspace.
   Biome config, or all supported files when no paths are given.
 - `bun run format:check [paths...]`: check formatting with the same path scope.
 - `bun run lint`: lint JavaScript, TypeScript, and React code with Oxlint.
-- `bun run test`: run the full Bun suite, including integration and browser tests.
-- `bun run test:quick`: run the suite without the Chrome-based browser test
-  files for local feedback; this still includes server integration tests.
-- `bun run test:browser`: run the Chrome-based browser regressions separately.
+- `bun run test`: run all unit and server integration tests serially.
+- `bun run test:quick`: run the same complete suite with four workers.
 - `bun run typecheck`: build/embed web assets and run all TypeScript checks.
 - `bun run typecheck:quick`: check types without rebuilding existing web assets.
   See [local validation](CONTRIBUTING.md#validation) for prerequisites and caching.
@@ -71,13 +69,13 @@ work, consolidate or delete stale status documents and repair their links.
 Tests live beside their modules as `*.test.ts` and use `bun:test`. During local
 iteration, run a related file with `bun test <path>` or use `bun run test:quick`.
 Process-level tests need generated web assets; on a fresh checkout, run
-`bun run typecheck` once after installing dependencies to generate them. Browser
-tests require Chrome/Chromium (or `CHROME_BIN`) and skip when it is unavailable.
+`bun run typecheck` once after installing dependencies to generate them.
+Automated tests do not launch browsers; validate affected UI and browser security
+behavior manually against a real backend using the checklist in `CONTRIBUTING.md`.
 Use Bun's fake timers for timer deadlines and events for socket readiness rather
 than waiting out production timeouts; restore real timers in `finally`.
 Run `bun run precommit` before committing; `test:quick` alone does not replace
-its formatting, lint, and type checks. Run related browser regressions separately
-for UI changes.
+its formatting, lint, and type checks.
 The installed pre-commit hook runs this gate, so do not also run it manually
 immediately before committing an unchanged revision. See the iteration workflow
 in [local validation](CONTRIBUTING.md#validation).
