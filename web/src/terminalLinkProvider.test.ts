@@ -507,6 +507,35 @@ describe("endpoint terminal link provider", () => {
     },
   );
 
+  test.each(["incomplete", "complete"])(
+    "probes a standalone indented URL whose semantic target is %s",
+    async (kind) => {
+      const head = "  https://example.com/part";
+      const f = fixture(["", head, "  continuation"], 60);
+      Object.assign(f.term.buffer.active, { viewportY: 0 });
+      const calls: number[][] = [];
+      registerTerminalLinkProvider(f.term, undefined, undefined, () => true, {
+        state: () => 1,
+        resolve: async (row, col) => {
+          calls.push([row, col]);
+          return {
+            url: kind === "complete" ? head.trimStart() : null,
+            regions: [
+              { row: 1, start_col: 2, end_col: head.length - 1 },
+              ...(kind === "incomplete"
+                ? [{ row: 2, start_col: 2, end_col: 13 }]
+                : []),
+            ],
+          };
+        },
+      });
+      expect((await f.links(2)).map((link) => link.text)).toEqual(
+        kind === "complete" ? [head.trimStart()] : [],
+      );
+      expect(calls).toEqual([[1, 2]]);
+    },
+  );
+
   test("keeps a wrapped continuation before a complete URL on the same row", async () => {
     const head = "https://example.com/aaaa";
     const tail = "part";

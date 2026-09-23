@@ -353,6 +353,7 @@ export function registerTerminalLinkProvider(
         // Sanitization can hide an unclosed suffix at the screen edge. Require
         // a raw token boundary, leaving room for a possible wide-glyph spacer.
         // An interior suffix like part/http://x.test has no proven left edge.
+        // Leading indentation may be an application's own wrapping boundary.
         const whitespace = rowText!.text.slice(link.end).search(/\s/);
         const complete =
           /(?:^|\s)[("'`[{<]*$/.test(rowText!.text.slice(0, link.start)) &&
@@ -365,7 +366,7 @@ export function registerTerminalLinkProvider(
               local.range.end.y === bufferLineNumber &&
               local.range.start.x === col + 1 &&
               local.range.end.x < columnCount - 1 &&
-              col > 0,
+              link.start > first,
           );
         if (!complete) columns.add(col);
       }
