@@ -719,6 +719,41 @@ async function run() {
     );
   }
 
+  // Complete URLs must not depend on a remote region including prose, or on
+  // a resolver reply that a live elapsed-time display keeps invalidating.
+  render(100);
+  await settle();
+  for (const url of [
+    "https://github.com/powerfool/roamgate/pull/252",
+    "http://127.0.0.1:5175/",
+  ]) {
+    const text = `(${url}): merged.`;
+    if (text.length >= term.cols - 1) continue;
+    target = {
+      url: `${url}):`,
+      regions: [{ row: 1, start_col: 1, end_col: url.length + 2 }],
+    };
+    await frame(["", text]);
+    const count = opened.length;
+    await click(1, 5);
+    check(opened.length, count + 1, "parenthesized URL remains clickable");
+    check(opened[opened.length - 1], url, "prose is excluded from destination");
+  }
+  const liveUrl = "http://127.0.0.1:5175/";
+  held = new Promise(() => {});
+  for (let tick = 0; tick < 3; tick++) {
+    await frame(["", `Local: ${liveUrl} (${tick}s)`]);
+    const count = opened.length;
+    await click(1, 10, tick === 0);
+    check(
+      opened.length,
+      count + 1,
+      "live URL survives timer repaint without rehover",
+    );
+    check(opened[opened.length - 1], liveUrl, "live URL target");
+  }
+  held = null;
+
   // Herdr 0.9.1 emits a full equivalent surface on resolve and on mouse-down
   // focus, even when the cursor owner is the only thing that changed.
   for (const native of [false, true]) {

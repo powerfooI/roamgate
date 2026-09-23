@@ -335,9 +335,39 @@ export function registerTerminalLinkProvider(
         : null;
       const first = rowText?.text.search(/\S/) ?? -1;
       const columns = new Set<number>();
-      if (first >= 0) columns.add(rowText!.cells[first]!.start.x - 1);
-      for (const link of findTerminalHttpLinks(rowText?.text ?? "")) {
-        columns.add(rowText!.cells[link.start]!.start.x - 1);
+      const rowUrls = findTerminalHttpLinks(rowText?.text ?? "");
+      // A complete visible URL is already authoritative. Probing it remotely
+      // can replace its trimmed punctuation with a wider region, or lose every
+      // reply while a TUI timer repaints. Reserve RPCs for wraps/clipped edges.
+      const previousLine = activeBuffer.getLine(bufferLineNumber - 2);
+      const continuation =
+        first === 0 &&
+        previousLine &&
+        lineTextWithCells(previousLine, columnCount, bufferLineNumber - 1)
+          .text.slice(-2)
+          .trim();
+      if (first >= 0 && (rowUrls.length === 0 || continuation))
+        columns.add(rowText!.cells[first]!.start.x - 1);
+      for (const link of rowUrls) {
+        const col = rowText!.cells[link.start]!.start.x - 1;
+        // Sanitization can hide an unclosed suffix at the screen edge. Require
+        // a raw token boundary, leaving room for a possible wide-glyph spacer.
+        // An interior suffix like part/http://x.test has no proven left edge.
+        const whitespace = rowText!.text.slice(link.end).search(/\s/);
+        const complete =
+          /(?:^|\s)[("'`[{<]*$/.test(rowText!.text.slice(0, link.start)) &&
+          whitespace >= 0 &&
+          rowText!.cells[link.end + whitespace]!.start.x < columnCount &&
+          links.some(
+            (local) =>
+              local.target.kind === "url" &&
+              local.range.start.y === bufferLineNumber &&
+              local.range.end.y === bufferLineNumber &&
+              local.range.start.x === col + 1 &&
+              local.range.end.x < columnCount - 1 &&
+              col > 0,
+          );
+        if (!complete) columns.add(col);
       }
       if (touch) {
         columns.clear();

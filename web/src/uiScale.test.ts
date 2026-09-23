@@ -353,7 +353,7 @@ test.skipIf(!chrome).each([
       const deadline = new Promise<never>((_, reject) => {
         const timer = setTimeout(
           () => reject(new Error("Browser regression checks timed out")),
-          fixture === "terminalLinks" && width < 400 ? 40000 : 30000,
+          fixture === "terminalLinks" ? 60000 : 30000,
         );
         timers.add(timer);
       });
@@ -376,5 +376,5 @@ test.skipIf(!chrome).each([
       await rm(dir, { recursive: true, force: true });
     }
   },
-  45000,
+  75000,
 );

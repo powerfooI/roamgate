@@ -413,6 +413,127 @@ describe("endpoint terminal link provider", () => {
     },
   );
 
+  test("resolves a complete parenthesized URL without waiting for an upstream repaint", () => {
+    const url = "https://github.com/powerfool/roamgate/pull/252";
+    const text = `See PR #252 (${url}): merged.`;
+    const f = fixture(["", text], 100);
+    Object.assign(f.term.buffer.active, { viewportY: 0 });
+    let probes = 0;
+    registerTerminalLinkProvider(f.term, undefined, undefined, () => true, {
+      state: () => 1,
+      resolve: () => {
+        probes++;
+        return new Promise(() => {});
+      },
+    });
+    let found: ILink[] | undefined;
+    f.provide(2, (links) => {
+      found = links;
+    });
+    expect(found?.map((link) => link.text)).toEqual([url]);
+    expect(found?.[0]?.range).toEqual({
+      start: { x: text.indexOf(url) + 1, y: 2 },
+      end: { x: text.indexOf(url) + url.length, y: 2 },
+    });
+    expect(probes).toBe(0);
+  });
+
+  test.each([
+    [" https://example.com/Foo_(bar", "baz)"],
+    [" https://example.com/Foo?", "q=value"],
+  ])(
+    "resolves the raw wrapped token before trimming %s",
+    async (head, tail) => {
+      const f = fixture(["", head, tail], head.length);
+      Object.assign(f.term.buffer.active, { viewportY: 0 });
+      let probes = 0;
+      registerTerminalLinkProvider(f.term, undefined, undefined, () => true, {
+        state: () => 1,
+        resolve: async () => {
+          probes++;
+          return {
+            url: head.trimStart() + tail,
+            regions: [
+              { row: 1, start_col: 1, end_col: head.length - 1 },
+              { row: 2, start_col: 0, end_col: tail.length - 1 },
+            ],
+          };
+        },
+      });
+      expect((await f.links(2)).map((link) => link.text)).toEqual([
+        head.trimStart() + tail,
+      ]);
+      expect(probes).toBe(1);
+    },
+  );
+
+  test("does not publish a trimmed URL whose raw suffix is clipped below the viewport", async () => {
+    const text = " https://example.com/Foo_(bar";
+    const f = fixture(["", text], text.length);
+    Object.assign(f.term.buffer.active, { viewportY: 0 });
+    let probes = 0;
+    registerTerminalLinkProvider(f.term, undefined, undefined, () => true, {
+      state: () => 1,
+      resolve: async () => {
+        probes++;
+        return {
+          url: null,
+          regions: [{ row: 1, start_col: 1, end_col: text.length - 1 }],
+        };
+      },
+    });
+    expect(await f.links(2)).toEqual([]);
+    expect(probes).toBe(1);
+  });
+
+  test.each(["part/http://x.test", "part/(http://x.test)"])(
+    "does not bypass clipped-prefix validation for %s",
+    async (text) => {
+      const f = fixture([text], 40);
+      Object.assign(f.term.buffer.active, { viewportY: 0 });
+      let probes = 0;
+      registerTerminalLinkProvider(f.term, undefined, undefined, () => true, {
+        state: () => 1,
+        resolve: async () => {
+          probes++;
+          return {
+            url: null,
+            regions: [{ row: 0, start_col: 0, end_col: text.length - 1 }],
+          };
+        },
+      });
+      expect(await f.links(1)).toEqual([]);
+      expect(probes).toBe(1);
+    },
+  );
+
+  test("keeps a wrapped continuation before a complete URL on the same row", async () => {
+    const head = "https://example.com/aaaa";
+    const tail = "part";
+    const local = "http://x.test";
+    const f = fixture(["", head, `${tail} ${local}`], head.length);
+    Object.assign(f.term.buffer.active, { viewportY: 0 });
+    const calls: number[][] = [];
+    registerTerminalLinkProvider(f.term, undefined, undefined, () => true, {
+      state: () => 1,
+      resolve: async (row, col) => {
+        calls.push([row, col]);
+        return {
+          url: head + tail,
+          regions: [
+            { row: 1, start_col: 0, end_col: head.length - 1 },
+            { row: 2, start_col: 0, end_col: tail.length - 1 },
+          ],
+        };
+      },
+    });
+    expect((await f.links(3)).map((link) => link.text)).toEqual([
+      local,
+      head + tail,
+    ]);
+    expect(calls).toEqual([[2, 0]]);
+  });
+
   test.each([0, 7])(
     "keeps the complete upstream link range from either row at viewport %d",
     async (viewportY) => {
@@ -455,7 +576,6 @@ describe("endpoint terminal link provider", () => {
           ],
         ]);
       expect(calls).toEqual([
-        [1, 0],
         [1, 4],
         [2, 0],
       ]);
