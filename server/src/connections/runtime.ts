@@ -339,9 +339,33 @@ export function createLegacyConnectionRuntime(args: {
     failureMessage: "agent status subscription failed",
     recoveryMessage: "agent status subscription recovered",
   });
-  const taskEvents = createTaskEventTracker((event) =>
-    args.onTaskEvent?.(event),
-  );
+  const taskEvents = createTaskEventTracker(async (event) => {
+    if (!args.onTaskEvent || disposed) return;
+    // Resolve labels on demand so push works without a browser and after renames.
+    const [workspaceResult, tabResult] = await Promise.all([
+      herdr
+        .call("workspace.get", { workspace_id: event.workspaceId }, 5000)
+        .catch(() => null),
+      herdr
+        .call("tab.list", { workspace_id: event.workspaceId }, 5000)
+        .catch(() => null),
+    ]);
+    if (disposed) return;
+    const workspaceLabel = workspaceResult?.workspace?.label;
+    const tab = Array.isArray(tabResult?.tabs)
+      ? tabResult.tabs.find(
+          (tab: { tab_id?: unknown; workspace_id?: unknown } | null) =>
+            tab?.tab_id === event.tabId &&
+            tab?.workspace_id === event.workspaceId,
+        )
+      : undefined;
+    args.onTaskEvent({
+      ...event,
+      workspaceLabel:
+        typeof workspaceLabel === "string" ? workspaceLabel : undefined,
+      tabLabel: typeof tab?.label === "string" ? tab.label : undefined,
+    });
+  });
   let taskListRevision = 0;
   const agentStatusSubscriptions = createAgentStatusSubscriptionLoop({
     herdr,

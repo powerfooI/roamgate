@@ -292,6 +292,66 @@ test("completion and blocked preferences, stale runtimes and expired endpoints a
   }
 });
 
+test.each([
+  [{}, "Example agent · w1 · p1"],
+  [
+    {
+      connectionId: "legacy-default",
+      workspaceLabel: "Agents",
+      tabLabel: "Peter",
+    },
+    "Example agent · Agents · Peter",
+  ],
+  [
+    { connectionLabel: "Remote", workspaceLabel: "Agents", tabLabel: "Peter" },
+    "Example agent · Remote · Agents · Peter",
+  ],
+  [
+    { connectionId: "legacy-default", connectionLabel: "Default", tabId: "t1" },
+    "Example agent · Default · w1 · t1",
+  ],
+  [
+    { workspaceLabel: "  ", tabLabel: "", tabId: "t1" },
+    "Example agent · w1 · t1",
+  ],
+  [
+    { workspaceLabel: "工作区".repeat(80), tabLabel: "Peter".repeat(80) },
+    `Example agent · ${"工作区".repeat(80).slice(0, 80)} · ${"Peter".repeat(80).slice(0, 80)}`,
+  ],
+] satisfies Array<[Partial<PushTask>, string]>)(
+  "push body uses labels with ID fallbacks: %j",
+  async (labels, body) => {
+    const payloads: string[] = [];
+    const f = fixture(async (_subscription, payload) => {
+      payloads.push(String(payload));
+      return { statusCode: 201, body: "", headers: {} };
+    });
+    try {
+      await f.service.handle(request("POST", device()));
+      for (const kind of ["blocked", "completed"] as const) {
+        const input = { ...task, ...labels, kind };
+        f.service.notify(input, () => true);
+        expect(JSON.parse(payloads.at(-1)!)).toEqual({
+          title:
+            kind === "blocked"
+              ? "Roamgate agent needs input"
+              : "Roamgate task completed",
+          body,
+          tag: JSON.stringify(["roamgate-task", input.connectionId, 3, "p1"]),
+          target: {
+            connectionId: input.connectionId,
+            runtimeGeneration: 3,
+            workspaceId: "w1",
+            paneId: "p1",
+          },
+        });
+      }
+    } finally {
+      f.cleanup();
+    }
+  },
+);
+
 test("native delivery uses encrypted fetch with a hard deadline and no redirects", async () => {
   const f = fixture();
   const originalFetch = globalThis.fetch;
@@ -381,7 +441,14 @@ test("corrupt private data is preserved and disables push instead of rotating ke
   }
 });
 
-test("runtime agent subscriptions deliver without any browser clients and stop with the runtime", async () => {
+test.each([
+  "labels",
+  "renamed",
+  "missing",
+  "malformed",
+  "workspace failure",
+  "tab failure",
+])("runtime resolves push labels without browser clients: %s", async (mode) => {
   const sent = Promise.withResolvers<string>();
   const f = fixture(async (_subscription, payload) => {
     sent.resolve(String(payload));
@@ -390,9 +457,12 @@ test("runtime agent subscriptions deliver without any browser clients and stop w
   const pane = {
     pane_id: "p1",
     workspace_id: "w1",
+    tab_id: "t1",
     agent: "Example agent",
     agent_status: "working",
   };
+  let workspaceLabel = "Agents";
+  let tabLabel = "Peter";
   const subscribed = Promise.withResolvers<void>();
   const runtime = createLegacyConnectionRuntime({
     config: {
@@ -414,7 +484,41 @@ test("runtime agent subscriptions deliver without any browser clients and stop w
       ),
   });
   runtime.workspaceAutoSync.start = () => {};
-  runtime.herdr.call = async () => ({ panes: [pane] });
+  runtime.herdr.call = async (method, params, timeout) => {
+    if (method === "pane.list") return { panes: [pane] };
+    expect(params).toEqual({ workspace_id: "w1" });
+    expect(timeout).toBe(5000);
+    if (method === "workspace.get") {
+      if (mode === "workspace failure") throw new Error("offline");
+      return {
+        workspace: {
+          label:
+            mode === "missing"
+              ? " "
+              : mode === "malformed"
+                ? 42
+                : workspaceLabel,
+        },
+      };
+    }
+    expect(method).toBe("tab.list");
+    if (mode === "tab failure") throw new Error("offline");
+    return {
+      tabs:
+        mode === "malformed"
+          ? {}
+          : [
+              null,
+              { tab_id: "other", workspace_id: "w1", label: "Wrong tab" },
+              { tab_id: "t1", workspace_id: "other", label: "Wrong workspace" },
+              {
+                tab_id: "t1",
+                workspace_id: "w1",
+                label: mode === "missing" ? "" : tabLabel,
+              },
+            ],
+    };
+  };
   runtime.herdr.subscribe = (types) => {
     const closed = Promise.withResolvers<void>();
     if (
@@ -435,12 +539,24 @@ test("runtime agent subscriptions deliver without any browser clients and stop w
     await f.service.handle(request("POST", device()));
     runtime.startBackground();
     await subscribed.promise;
+    if (mode === "renamed") {
+      workspaceLabel = "Renamed workspace";
+      tabLabel = "Renamed tab";
+    }
     runtime.herdr.emit("event", {
       event: "pane.agent_status_changed",
-      data: { ...pane, agent_status: "blocked" },
+      data: { pane_id: "p1", workspace_id: "w1", agent_status: "blocked" },
     });
-    expect(JSON.parse(await sent.promise).title).toBe(
-      "Roamgate agent needs input",
+    const payload = JSON.parse(await sent.promise);
+    expect(payload.title).toBe("Roamgate agent needs input");
+    expect(payload.body).toBe(
+      mode === "missing" || mode === "malformed"
+        ? "Example agent · w1 · t1"
+        : mode === "workspace failure"
+          ? "Example agent · w1 · Peter"
+          : mode === "tab failure"
+            ? "Example agent · Agents · t1"
+            : `Example agent · ${workspaceLabel} · ${tabLabel}`,
     );
     await runtime.stop();
     f.service.stop();

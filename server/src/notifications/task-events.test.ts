@@ -34,8 +34,20 @@ test("initial snapshots seed, transitions notify once, and stale snapshots canno
   expect(events[0]).toMatchObject({
     paneId: "p1",
     workspaceId: "w1",
+    tabId: "t1",
     agent: "Example agent",
   });
+});
+
+test("partial status events retain the tab from the pane snapshot", () => {
+  const events: TaskEvent[] = [];
+  const tracker = createTaskEventTracker((task) => events.push(task));
+  tracker.reconcilePaneList({ panes: [pane] }, 0);
+  tracker.handleHerdrEvent({
+    event: "pane.agent_status_changed",
+    data: { pane_id: "p1", workspace_id: "w1", agent_status: "done" },
+  });
+  expect(events[0]).toMatchObject({ tabId: "t1", agent: "Example agent" });
 });
 
 test("moves, closures, malformed lists and stopped runtimes do not fabricate tasks", () => {

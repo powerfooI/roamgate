@@ -4,6 +4,9 @@ export interface TaskEvent {
   kind: "completed" | "blocked";
   workspaceId: string;
   paneId: string;
+  tabId?: string;
+  workspaceLabel?: string;
+  tabLabel?: string;
   agent: string;
 }
 
@@ -42,6 +45,7 @@ export function createTaskEventTracker(notify: (event: TaskEvent) => void) {
       kind: status === "blocked" ? "blocked" : "completed",
       workspaceId: pane.workspace_id,
       paneId: pane.pane_id,
+      tabId: typeof pane.tab_id === "string" ? pane.tab_id : undefined,
       agent:
         typeof pane.agent === "string"
           ? pane.agent

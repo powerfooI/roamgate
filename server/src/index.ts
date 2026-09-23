@@ -435,15 +435,23 @@ function runtimeFactoryForProfile(
         },
         clientLabel,
         markRpcError,
-        onTaskEvent: (event) =>
+        onTaskEvent: (event) => {
+          const connections = connectionProfiles.list();
           webPush.notify(
             {
               ...event,
               connectionId: identity.id,
+              connectionLabel:
+                connections.length > 1
+                  ? (connections.find(
+                      (connection) => connection.id === identity.id,
+                    )?.label ?? identity.label)
+                  : undefined,
               runtimeGeneration: context.generation,
             },
             context.isCurrent,
-          ),
+          );
+        },
         onEvent: (event, eventIdentity) => {
           if (!context.isCurrent()) return;
           logger.debug("Herdr event", {

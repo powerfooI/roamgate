@@ -33,6 +33,7 @@ interface Registry {
 }
 export interface PushTask extends TaskEvent {
   connectionId: string;
+  connectionLabel?: string;
   runtimeGeneration: number;
 }
 const MAX_DEVICES = 128;
@@ -257,7 +258,15 @@ export function createWebPushService(
             task.kind === "blocked"
               ? "Roamgate agent needs input"
               : "Roamgate task completed",
-          body: `${task.agent.slice(0, 80)} · ${task.connectionId.slice(0, 80)} · workspace ${task.workspaceId.slice(0, 80)}`,
+          body: [
+            task.agent,
+            task.connectionLabel?.trim(),
+            task.workspaceLabel?.trim() || task.workspaceId,
+            task.tabLabel?.trim() || task.tabId || task.paneId,
+          ]
+            .filter((part): part is string => !!part)
+            .map((part) => part.slice(0, 80))
+            .join(" · "),
           tag: JSON.stringify([
             "roamgate-task",
             task.connectionId,
