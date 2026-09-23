@@ -28,10 +28,16 @@ process tests. Then use focused checks while iterating:
 | --- | --- |
 | Format | `bun run format <paths...>` or `format:check`; omit paths for the whole repo. |
 | Types | `bun run typecheck:quick` checks scripts/web/server without rebuilding assets or checking production bundles. |
-| Lint | `bun run lint`; use `--no-cache` after tooling/dependency changes. Cache: `node_modules/.cache/eslint/`. |
+| Lint | `bun run lint` runs Oxlint without a cache. Rule/scope regression checks: `bun test scripts/lint.test.ts`. |
 | Tests | `bun test <path>` or `bun run test:quick` (four workers, integration included, browser regressions excluded). |
 | Browser | `bun run test:browser` runs serially; Chrome/Chromium or `CHROME_BIN` required, otherwise Chrome cases skip. Setup-card also uses macOS WebKit. |
 | Submission | `bun run precommit`: formatting, lint, full typechecks, and `test:quick` (browser regressions excluded). |
+
+Oxlint's explicit rules live in `.oxlintrc.json`; formatting stays in Biome.
+Existing `eslint-disable` comments are supported, including unused-directive
+warnings. Declare globals in the config rather than inline `/* global */`
+comments. Duplicate parameters remain checked by `no-redeclare` or the parser;
+legacy octal literals in non-module JavaScript have no dedicated lint check.
 
 The installed `.githooks/pre-commit` runs the full gate: let it run when committing
 rather than repeating it manually on the same revision. Without the hook, run

@@ -34,7 +34,7 @@ the root manifest. Keep runtime dependencies in their owning workspace.
 - `bun run format [paths...]`: format the given paths with the pinned root
   Biome config, or all supported files when no paths are given.
 - `bun run format:check [paths...]`: check formatting with the same path scope.
-- `bun run lint`: lint all TypeScript and React code with a local content cache.
+- `bun run lint`: lint JavaScript, TypeScript, and React code with Oxlint.
 - `bun run test`: run the full Bun suite, including integration and browser tests.
 - `bun run test:quick`: run the suite without the Chrome-based browser test
   files for local feedback; this still includes server integration tests.
