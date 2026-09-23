@@ -441,6 +441,95 @@ test("corrupt private data is preserved and disables push instead of rotating ke
   }
 });
 
+test.each(["older first", "newer first"])(
+  "pending label lookups only publish the latest task per pane: %s",
+  async (order) => {
+    const payloads: Array<{ title: string; target: { paneId: string } }> = [];
+    const f = fixture(async (_subscription, payload) => {
+      payloads.push(JSON.parse(String(payload)));
+      return { statusCode: 201, body: "", headers: {} };
+    });
+    const lookups = Array.from({ length: 4 }, () =>
+      Promise.withResolvers<{ workspace: { label: string } }>(),
+    );
+    let lookupIndex = 0;
+    const runtime = createLegacyConnectionRuntime({
+      config: {
+        socketPath: join(dirname(f.path), "control.sock"),
+        clientSocketPath: join(dirname(f.path), "client.sock"),
+        hasExplicitSocketPath: true,
+        hasExplicitClientSocketPath: true,
+      },
+      safeSend: () => {
+        throw new Error("No browser clients expected");
+      },
+      clientLabel: () => "test",
+      markRpcError() {},
+      onEvent() {},
+      onTaskEvent: (event) =>
+        f.service.notify(
+          { ...event, connectionId: "alpha", runtimeGeneration: 3 },
+          () => true,
+        ),
+    });
+    runtime.herdr.call = async (method) => {
+      if (method === "workspace.get") return lookups[lookupIndex++]!.promise;
+      expect(method).toBe("tab.list");
+      return { tabs: [{ tab_id: "t1", workspace_id: "w1", label: "Peter" }] };
+    };
+    function status(paneId: string, agentStatus: string) {
+      runtime.herdr.emit("event", {
+        event: "pane.agent_status_changed",
+        data: {
+          pane_id: paneId,
+          workspace_id: "w1",
+          tab_id: "t1",
+          agent: "Example agent",
+          agent_status: agentStatus,
+        },
+      });
+    }
+    async function finishLookup(index: number) {
+      lookups[index]!.resolve({ workspace: { label: "Agents" } });
+      // Drain the lookup/callback microtasks, including any unwanted delivery.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    try {
+      await f.service.handle(request("POST", device()));
+      status("p1", "working");
+      status("p1", "blocked");
+      status("p1", "working");
+      status("p1", "done");
+      status("p2", "working");
+      status("p2", "blocked");
+      expect(lookupIndex).toBe(3);
+      await finishLookup(2);
+      expect(payloads.map((payload) => payload.target.paneId)).toEqual(["p2"]);
+      const indexes = order === "older first" ? [0, 1] : [1, 0];
+      await finishLookup(indexes[0]!);
+      expect(payloads).toHaveLength(order === "older first" ? 1 : 2);
+      await finishLookup(indexes[1]!);
+      expect(
+        payloads.map((payload) => [payload.target.paneId, payload.title]),
+      ).toEqual([
+        ["p2", "Roamgate agent needs input"],
+        ["p1", "Roamgate task completed"],
+      ]);
+      status("p1", "working");
+      status("p1", "blocked");
+      expect(lookupIndex).toBe(4);
+      await runtime.stop();
+      await finishLookup(3);
+      expect(payloads).toHaveLength(2);
+    } finally {
+      await runtime.stop();
+      for (const lookup of lookups)
+        lookup.resolve({ workspace: { label: "Agents" } });
+      f.cleanup();
+    }
+  },
+);
+
 test.each([
   "labels",
   "renamed",

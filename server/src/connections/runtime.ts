@@ -339,8 +339,10 @@ export function createLegacyConnectionRuntime(args: {
     failureMessage: "agent status subscription failed",
     recoveryMessage: "agent status subscription recovered",
   });
+  const pendingTaskEvents = new Map<string, TaskEvent>();
   const taskEvents = createTaskEventTracker(async (event) => {
     if (!args.onTaskEvent || disposed) return;
+    pendingTaskEvents.set(event.paneId, event);
     // Resolve labels on demand so push works without a browser and after renames.
     const [workspaceResult, tabResult] = await Promise.all([
       herdr
@@ -350,7 +352,9 @@ export function createLegacyConnectionRuntime(args: {
         .call("tab.list", { workspace_id: event.workspaceId }, 5000)
         .catch(() => null),
     ]);
-    if (disposed) return;
+    // An older lookup must not publish over a newer notification for this pane.
+    if (disposed || pendingTaskEvents.get(event.paneId) !== event) return;
+    pendingTaskEvents.delete(event.paneId);
     const workspaceLabel = workspaceResult?.workspace?.label;
     const tab = Array.isArray(tabResult?.tabs)
       ? tabResult.tabs.find(
@@ -471,6 +475,7 @@ export function createLegacyConnectionRuntime(args: {
     herdr.off("event", onHerdrEvent);
     herdr.off("error", onHerdrError);
     taskEvents.stop();
+    pendingTaskEvents.clear();
     const autoSyncStop = workspaceAutoSync.stop();
     terminalBridge.dispose();
     const subscriptionStop = subscriptionLoop.stop();
