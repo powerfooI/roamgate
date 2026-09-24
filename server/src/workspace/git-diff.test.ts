@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { access, mkdtemp, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunProcessWithCodeTimeout } from "./file-types";
@@ -252,40 +252,33 @@ describe("last-step worktree snapshots", () => {
     expect(calls[0]).toContain("dev.example");
     const command = calls[0]?.at(-1) ?? "";
     expect(command).toContain("GIT_INDEX_FILE");
-    expect(command).toContain("git -C '/repo with spaces' add -A");
+    expect(command).toContain("cd '/repo with spaces'");
+    expect(command).toContain("hash-object -w --no-filters");
     expect(command).toContain("write-tree");
-    expect(command).toContain("trap cleanup EXIT HUP INT TERM");
+    expect(command).toContain("trap cleanup EXIT");
   });
 
-  test("tracks worktree changes across snapshots with a reusable index", async () => {
+  test("tracks worktree changes across bounded snapshots", async () => {
     const root = await initRepository();
-    const indexDir = await mkdtemp(join(tmpdir(), "herdr-git-index-test-"));
-    const indexFile = join(indexDir, "index");
     try {
       await writeFile(join(root, "tracked.txt"), "one\n");
       const first = await snapshotWorktreeTree({
         root,
-        indexFile,
         shQuote,
         runProcessWithCodeTimeout,
       });
-      await access(indexFile);
-      expect((await stat(indexFile)).mode & 0o777).toBe(0o600);
 
       await writeFile(join(root, "tracked.txt"), "two\n");
       const second = await snapshotWorktreeTree({
         root,
-        indexFile,
         shQuote,
         runProcessWithCodeTimeout,
       });
       expect(second).not.toBe(first);
-      expect((await stat(indexFile)).mode & 0o777).toBe(0o600);
 
       await writeFile(join(root, "untracked.txt"), "new\n");
       const third = await snapshotWorktreeTree({
         root,
-        indexFile,
         shQuote,
         runProcessWithCodeTimeout,
       });
@@ -298,7 +291,6 @@ describe("last-step worktree snapshots", () => {
       await rm(join(root, "tracked.txt"));
       const fourth = await snapshotWorktreeTree({
         root,
-        indexFile,
         shQuote,
         runProcessWithCodeTimeout,
       });
@@ -312,11 +304,10 @@ describe("last-step worktree snapshots", () => {
       expect(fourthFiles.trim()).toBe("untracked.txt");
     } finally {
       await rm(root, { recursive: true, force: true });
-      await rm(indexDir, { recursive: true, force: true });
     }
   });
 
-  test("removes reusable snapshot indexes during disposal", async () => {
+  test("leaves no capture scratch directory after successful disposal", async () => {
     const root = await initRepository();
     const commands: string[] = [];
     const runner: RunProcessWithCodeTimeout = async (argv, timeoutMs) => {
@@ -332,23 +323,22 @@ describe("last-step worktree snapshots", () => {
       await baselines.captureWorkspace("workspace", async () => root);
       await baselines.completeWorkspace("workspace");
       await baselines.dispose();
-      const removals = commands.filter((command) =>
-        command.includes("rm -f '/tmp/herdr-git-index-"),
+      expect(await readdir(join(root, ".git"))).not.toContain(
+        "roamgate-last-step-capture",
       );
-      expect(removals.length).toBeGreaterThan(0);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  test("rebuilds the reusable snapshot index after a failed snapshot", async () => {
+  test("does not delete capture storage after an uncertain failure", async () => {
     const root = await initRepository();
     const commands: string[] = [];
     let failSnapshots = true;
     const runner: RunProcessWithCodeTimeout = async (argv, timeoutMs) => {
       const joined = argv.join(" ");
       commands.push(joined);
-      if (failSnapshots && joined.includes("herdr-git-index-")) {
+      if (failSnapshots && joined.includes("roamgate-last-step-capture")) {
         return { code: 1, stdout: "", stderr: "snapshot failed" };
       }
       return runProcessWithCodeTimeout(argv, timeoutMs);
@@ -370,9 +360,9 @@ describe("last-step worktree snapshots", () => {
       expect(baseline).toMatch(/^[0-9a-f]{40,64}$/);
       expect(
         commands.some((command) =>
-          command.includes("rm -f '/tmp/herdr-git-index-"),
+          command.includes("rm -f '/tmp/roamgate-last-step-capture"),
         ),
-      ).toBe(true);
+      ).toBe(false);
       await baselines.dispose();
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -570,7 +560,7 @@ describe("last-step worktree snapshots", () => {
       releaseFirstCompletion = resolve;
     });
     const runner: RunProcessWithCodeTimeout = async (argv, timeoutMs) => {
-      if (argv.join(" ").includes("herdr-git-index")) {
+      if (argv.join(" ").includes("roamgate-last-step-capture")) {
         snapshotCall += 1;
         if (snapshotCall === 2) {
           signalFirstCompletion();
@@ -949,7 +939,7 @@ describe("last-step worktree snapshots", () => {
       releaseFirst = resolve;
     });
     const runner: RunProcessWithCodeTimeout = async (argv, timeoutMs) => {
-      if (argv.join(" ").includes("herdr-git-index")) {
+      if (argv.join(" ").includes("roamgate-last-step-capture")) {
         snapshotCall += 1;
         if (snapshotCall === 1) {
           signalFirstStarted();
@@ -1081,7 +1071,7 @@ describe("last-step worktree snapshots", () => {
     const runner: RunProcessWithCodeTimeout = async (argv, timeoutMs) => {
       const command = argv.join(" ");
       if (command.includes("cat-file --batch-check")) catFileCalls += 1;
-      if (holdSnapshots && command.includes("herdr-git-index")) {
+      if (holdSnapshots && command.includes("roamgate-last-step-capture")) {
         await snapshotGate;
       }
       return runProcessWithCodeTimeout(argv, timeoutMs);
@@ -1133,7 +1123,10 @@ describe("last-step worktree snapshots", () => {
     const root = await initRepository();
     let failNextSnapshot = false;
     const runner: RunProcessWithCodeTimeout = async (argv, timeoutMs) => {
-      if (failNextSnapshot && argv.join(" ").includes("herdr-git-index")) {
+      if (
+        failNextSnapshot &&
+        argv.join(" ").includes("roamgate-last-step-capture")
+      ) {
         failNextSnapshot = false;
         return { code: 1, stdout: "", stderr: "snapshot failed" };
       }
@@ -1281,7 +1274,7 @@ describe("last-step worktree snapshots", () => {
       releaseSnapshot = resolve;
     });
     const runner: RunProcessWithCodeTimeout = async (argv, timeoutMs) => {
-      if (argv.join(" ").includes("herdr-git-index")) {
+      if (argv.join(" ").includes("roamgate-last-step-capture")) {
         signalSnapshot();
         await snapshotGate;
       }

@@ -221,6 +221,61 @@ used only inside the checkout. Removal clears only that checkout's state; closin
 one workspace retains resources another workspace still uses. Terminals stay
 mounted across Inspector changes; layout preferences and content caches are separate.
 
+### Last step capture limits and ownership
+
+Last step captures checkout contents at workspace active/idle boundaries, not
+when Changes is viewed. Captures include small untracked files and changes
+committed during the turn; they never stage files in the user's index. Both
+endpoints contain raw on-disk bytes, without Git clean filters, CRLF conversion,
+or `working-tree-encoding` conversion. Gitlinks retain the submodule commit;
+regular files retain their executable/non-executable distinction.
+
+Automatic capture refuses the whole snapshot when a file exceeds 8 MiB, regular
+file content exceeds 32 MiB in total, or there are more than 10,000 regular files.
+The byte limits apply to the bytes actually copied, including tracked changes,
+not just preflight sizes. Applicable `filter` attributes (other than unset or
+unspecified), symlinks (including symlink ancestors), special/unreadable files,
+and newline/tab filenames are unsupported and cause refusal. Unused filter
+configuration does not prevent capture. Shared repositories are unsupported:
+capture refuses enabled or unrecognized effective `core.sharedRepository` values
+(including inherited configuration) before creating quarantine storage or
+publishing objects. Only an unset value, `false`, `0`, or `umask` is supported;
+manual object publication does not implement Git's shared permission handling.
+A capture also fails if required shell file-size limits, hard links, or the GNU/BSD `dd` byte-count report are unavailable;
+files on another filesystem from the Git directory cannot be pinned by hard link.
+The command has a ten-second caller timeout and refuses to begin publication
+once nine seconds have elapsed on the executing host. A refusal is logged and
+never publishes a partial range; the previous successfully completed Last step
+remains available. Snapshots are not atomic against concurrent file edits.
+
+Capture uses an owner-only, exclusively created
+`roamgate-last-step-capture` directory inside the checkout's Git directory (the
+worktree-specific Git directory for linked worktrees). Bounded copies, temporary
+objects, and the scratch index stay there until Git has finished successfully.
+Only complete loose objects are published, by non-overwriting hard links into
+Git's ordinary object database. No automatic `git add` or streaming pack write
+runs against the user's objects. Successful objects deduplicate normally and
+remain subject to Git's existing unreachable-object garbage collection; Roamgate
+does not run GC or remove user object files. Metadata and temporary object copies
+require space in addition to the 32 MiB content budget.
+
+Normal completion and confirmed command failures remove the owned directory.
+Signals or crashes retain it: later captures refuse the existing directory rather
+than deleting a possibly live lock or allocating replacement scratch storage.
+Disposal does not delete uncertain storage. The `owner-pid` file is diagnostic,
+not proof that descendants have exited. For recovery, stop captures for that
+checkout and confirm that its capture shell and all children have exited (reboot
+the executing host if uncertain). Only then remove the exact
+`$(git rev-parse --absolute-git-dir)/roamgate-last-step-capture` directory. Do not
+remove anything from `objects`, `objects/pack`, or the user's index.
+
+SSH uses the same script on the selected host. Killing or losing the local SSH
+transport does not guarantee a remote signal: an unsignaled remote capture can
+finish, publish bounded complete objects, and clean its directory after the
+caller has failed. Those objects may be unreachable; no successful snapshot token
+is returned to the failed caller. Concurrent captures still contend on the same
+fixed remote ownership directory. No remote process-tree termination is assumed.
+
 ## Filesystem browsing
 
 `file.list` is checkout-relative with realpath/symlink escape checks. Each

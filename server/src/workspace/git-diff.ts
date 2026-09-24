@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { worktreeSnapshotCommand } from "./git-snapshot";
 import { sshCommandArgv } from "../bridge/ssh-command";
 import { collectWorktreeFingerprints } from "./git-actions";
 import {
@@ -361,50 +362,11 @@ function runGitShellCommand({
 
 export async function snapshotWorktreeTree({
   root,
-  indexFile,
   host,
   shQuote,
   runProcessWithCodeTimeout,
-}: { root: string; indexFile?: string } & GitCommandContext): Promise<string> {
-  // With a throwaway index, `git add -A` has no stat cache and content-hashes
-  // every file in the worktree. Passing a reusable indexFile keeps the cache
-  // warm so repeat snapshots only re-hash files whose stat changed. Callers
-  // passing indexFile must serialize calls sharing it; the script removes a
-  // stale index lock left behind by a killed git process.
-  const command = indexFile
-    ? `
-set -eu
-export GIT_INDEX_FILE=${shQuote(indexFile)}
-rm -f "$GIT_INDEX_FILE.lock"
-if [ ! -f "$GIT_INDEX_FILE" ]; then
-  if git -C ${shQuote(root)} rev-parse --verify --quiet 'HEAD^{commit}' >/dev/null; then
-    git -C ${shQuote(root)} read-tree HEAD
-  else
-    git -C ${shQuote(root)} read-tree --empty
-  fi
-fi
-git -C ${shQuote(root)} add -A
-git -C ${shQuote(root)} write-tree
-# Every git index write, including the cache-tree update from write-tree,
-# re-creates the file with umask permissions; keep the long-lived reusable
-# index owner-only on multi-user hosts.
-chmod 600 "$GIT_INDEX_FILE"
-`
-    : `
-set -eu
-index_file=$(mktemp "\${TMPDIR:-/tmp}/herdr-git-index.XXXXXX")
-cleanup() { rm -f "$index_file" "$index_file.lock"; }
-trap cleanup EXIT HUP INT TERM
-rm -f "$index_file"
-export GIT_INDEX_FILE="$index_file"
-if git -C ${shQuote(root)} rev-parse --verify --quiet 'HEAD^{commit}' >/dev/null; then
-  git -C ${shQuote(root)} read-tree HEAD
-else
-  git -C ${shQuote(root)} read-tree --empty
-fi
-git -C ${shQuote(root)} add -A
-git -C ${shQuote(root)} write-tree
-`;
+}: { root: string } & GitCommandContext): Promise<string> {
+  const command = worktreeSnapshotCommand(root, shQuote);
   const result = await runProcessWithCodeTimeout(
     host ? sshCommandArgv(host, command) : ["sh", "-lc", command],
     GIT_DIFF_TIMEOUT_MS,
@@ -436,8 +398,6 @@ export function createLastStepBaselineStore(
   >();
   const inFlight = new Set<Promise<unknown>>();
   const snapshotQueues = new Map<string, Promise<unknown>>();
-  // Isolates the reusable snapshot indexes of other stores on the same host.
-  const storeId = randomUUID();
   let disposed = false;
   let disposeTask: Promise<void> | null = null;
 
@@ -470,15 +430,8 @@ export function createLastStepBaselineStore(
     }
   }
 
-  // A fixed literal path is required so cleanups can run without an extra
-  // round trip; /tmp is the same fallback the one-shot snapshot script uses.
-  function snapshotIndexFile(root: string) {
-    const key = createHash("sha256").update(root).digest("hex").slice(0, 16);
-    return `/tmp/herdr-git-index-${storeId}-${key}`;
-  }
-
-  // Serializes snapshots per root so concurrent captures never contend on
-  // the shared reusable index lock.
+  // Serialize captures sharing a checkout within this store. The on-disk
+  // quarantine lock also excludes other stores and survives uncertain exits.
   function enqueueForRoot<T>(root: string, task: () => Promise<T>): Promise<T> {
     const prior = snapshotQueues.get(root) ?? Promise.resolve();
     const turn = prior.then(task);
@@ -494,36 +447,13 @@ export function createLastStepBaselineStore(
     return turn;
   }
 
-  function removeSnapshotIndex(root: string) {
-    const indexFile = snapshotIndexFile(root);
-    const command = `rm -f ${context.shQuote(indexFile)} ${context.shQuote(`${indexFile}.lock`)}`;
-    return context.runProcessWithCodeTimeout(
-      context.host
-        ? sshCommandArgv(context.host, command)
-        : ["sh", "-lc", command],
-      GIT_DIFF_TIMEOUT_MS,
-    );
-  }
-
   async function snapshotRoot(root: string): Promise<string> {
-    try {
-      return await enqueueForRoot(root, () =>
-        snapshotWorktreeTree({
-          root,
-          indexFile: snapshotIndexFile(root),
-          ...context,
-        }),
-      );
-    } catch (error) {
-      // A failed snapshot can leave the reusable index stale (e.g. referring
-      // to pruned objects), so queue its removal behind any serialized
-      // snapshot for this root and let the next capture rebuild it cold.
-      // Removal is best-effort: a failure only leaves a small file in /tmp.
-      void enqueueForRoot(root, () => removeSnapshotIndex(root)).catch(
-        () => undefined,
-      );
-      throw error;
-    }
+    return enqueueForRoot(root, () =>
+      snapshotWorktreeTree({
+        root,
+        ...context,
+      }),
+    );
   }
 
   return {
@@ -643,13 +573,7 @@ export function createLastStepBaselineStore(
         // shutdown boundary only drains every task before final state clearing.
         await Promise.allSettled(Array.from(inFlight));
         clearState();
-        // Drop every reusable snapshot index this store created; removals
-        // are best-effort for the same reason as in snapshotRoot.
-        await Promise.allSettled(
-          Array.from(snapshotQueues.keys(), (root) =>
-            removeSnapshotIndex(root),
-          ),
-        );
+        // Uncertain captures own their quarantine until operator recovery.
         snapshotQueues.clear();
       })();
       return disposeTask;
