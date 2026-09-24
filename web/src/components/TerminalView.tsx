@@ -96,6 +96,7 @@ import {
   terminalFocusBlockedByOverlay,
   terminalPointerShouldBlurInput,
   terminalTouchShouldDismissInput,
+  terminalTouchShouldOpenLink,
 } from "../terminalFocus";
 import { uploadTerminalImage } from "../terminalImageUpload";
 import {
@@ -125,7 +126,11 @@ import {
 } from "./TerminalFileLinkMenu";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
 import { directoryPreviewName } from "../filesystemPaths";
-import { sanitizeTerminalHttpUrl, terminalFileUriPath } from "../terminalLinks";
+import {
+  openTerminalUrlFromGesture,
+  sanitizeTerminalHttpUrl,
+  terminalFileUriPath,
+} from "../terminalLinks";
 import {
   createTerminalPasteRunner,
   type TerminalPasteTextareaSnapshot,
@@ -395,9 +400,21 @@ export function TerminalView({
   const [workspaceDirectory, setWorkspaceDirectory] = useState<string | null>(
     null,
   );
+  // Fallback when a tapped URL resolves after the gesture lost activation.
+  const [tapLink, setTapLink] = useState<{
+    value: string;
+    x: number;
+    y: number;
+    current: () => boolean;
+  } | null>(null);
   const touchLinkIntentRef = useRef(0);
   const linkRevisionRef = useRef(0);
   const linkReadyRef = useRef(false);
+  useEffect(() => {
+    if (!tapLink) return;
+    const timer = setTimeout(() => setTapLink(null), 5_000);
+    return () => clearTimeout(timer);
+  }, [tapLink]);
   const [terminalLoading, setTerminalLoading] = useState(
     s.status === "connected" && !s.connectionPaused,
   );
@@ -795,6 +812,7 @@ export function TerminalView({
     const retireTouchLink = () => {
       touchLinkIntentRef.current++;
       setTouchLink(null);
+      setTapLink(null);
     };
     let latestLinkFrame: string | undefined;
     let latestEndpointText: string | undefined;
@@ -2305,8 +2323,32 @@ export function TerminalView({
     let touchLastY: number | null = null;
     let touchMoved = false;
     let touchRemainder = 0;
+    /** A tap opens the link under it; plain text keeps today's no-op. */
+    const openLinkAtTap = (x: number, y: number) => {
+      const { column, row } = terminalCellAtPoint(term, x, y);
+      if (column === undefined || row === undefined) return;
+      const intent = touchLinkIntentRef.current;
+      const state = linkState();
+      const current = () =>
+        !!state &&
+        state === linkState() &&
+        !touchSelection.active &&
+        intent === touchLinkIntentRef.current;
+      void linkProvider.resolveTouch(row, column, current).then((target) => {
+        if (!target || !current()) return;
+        if (target.kind === "url") {
+          if (!openTerminalUrlFromGesture(target.value))
+            setTapLink({ value: target.value, x, y, current });
+          return;
+        }
+        const workspaceId = previewWorkspaceIdRef.current;
+        if (workspaceId)
+          setFileLinkMenu({ path: target.value, workspaceId, x, y });
+      });
+    };
     const onTouchStart = (e: TouchEvent) => {
       lastPointerType = "touch";
+      setTapLink(null);
       if (e.touches.length !== 1) {
         retireTouchLink();
         touchMoved = true;
@@ -2381,11 +2423,21 @@ export function TerminalView({
     const onTouchEnd = (e: TouchEvent) => {
       touchSelection.cancelPending();
       if (!touchSelection.active) endpointPresentation.cancelSelection();
+      const started = touchStartX !== null && touchStartY !== null;
       const dismissInput = terminalTouchShouldDismissInput(
-        touchStartX !== null && touchStartY !== null,
+        started,
         touchMoved,
         inputActiveRef.current,
       );
+      const tapPoint = e.touches.length === 0 ? e.changedTouches[0] : undefined;
+      const openLink =
+        !!tapPoint &&
+        terminalTouchShouldOpenLink({
+          started,
+          moved: touchMoved,
+          inputActive: inputActiveRef.current,
+          selectionActive: touchSelection.active,
+        });
       touchStartX = null;
       touchStartY = null;
       touchLastY = null;
@@ -2395,6 +2447,7 @@ export function TerminalView({
       e.preventDefault();
       e.stopImmediatePropagation();
       if (dismissInput) closeTerminalInput();
+      if (openLink) openLinkAtTap(tapPoint.clientX, tapPoint.clientY);
     };
     const onTouchCancel = () => {
       retireTouchLink();
@@ -2988,6 +3041,34 @@ export function TerminalView({
 
   return (
     <>
+      {tapLink
+        ? createPortal(
+            <button
+              type="button"
+              className="terminal-tap-link"
+              style={{
+                left: Math.max(
+                  8,
+                  Math.min(window.innerWidth - 120, tapLink.x - 48),
+                ),
+                top:
+                  tapLink.y + 64 < window.innerHeight
+                    ? tapLink.y + 16
+                    : Math.max(8, tapLink.y - 56),
+              }}
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => {
+                // Runs inside this tap's activation, so the tab is never blocked.
+                if (tapLink.current())
+                  window.open(tapLink.value, "_blank", "noopener,noreferrer");
+                setTapLink(null);
+              }}
+            >
+              Open link
+            </button>,
+            document.body,
+          )
+        : null}
       {fileLinkMenu
         ? createPortal(
             <TerminalFileLinkMenu

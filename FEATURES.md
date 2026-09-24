@@ -57,8 +57,11 @@ the first pane a jump can reach.
   OSC 52 clipboard writes follow Herdr's foreground recipient, not proven source
   pane ownership; see [clipboard limits](docs/DEPLOYMENT.md#herdr-compatibility).
 - `Cmd/Ctrl`-click HTTP(S) links to open a browser tab; file/directory paths open
-  preview/workspace actions. Touch uses long-press, then **Open link** or
-  **File actions**. Nothing opens on hover or ordinary touch.
+  preview/workspace actions. On touch, tap a link: URLs open a browser tab (or
+  a one-tap **Open link** button when the lookup outlasts the tap's activation)
+  and paths open file actions. A tap that closes the device keyboard only
+  closes it. Long-press still selects text, with **Open link** or **File
+  actions**. Nothing opens on hover.
 
 Herdr 0.9.1 supports read-only wrapped-link resolution; OSC 8 keeps explicit
 full destinations. Viewport-clipped plain URLs cannot be recovered safely.
@@ -222,7 +225,8 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   `desktop`, or `auto` overrides saved mode until a menu choice clears it.
   Agent/workspace panel order is saved separately for each layout.
 - Touch reads output without opening the keyboard. Use **Open device keyboard**
-  to type; a light terminal tap dismisses it without input. Long-press selects
+  to type; a light terminal tap dismisses it without input. Tap a link to open
+  it. Long-press selects
   text for **Copy**, **Add comment**, or link actions; **Done**/Esc exits.
   Scroll first to select older output. Selection freezes the displayed frame,
   not the connection; legacy streams resume at a 1 MiB buffered UTF-16 limit.

@@ -151,6 +151,8 @@ uses the cropped frame's hyperlink table; optional plain-text resolution runs on
 that exact socket with its content revision and scroll offset. Coordinates are
 zero-based **cropped-pane display cells**, never surface origins or CSS pixels.
 Hover probes are bounded and independently timed out; hover never activates.
+Touch taps and long-press share the exact-cell touch lookup; a tap opens a URL
+only while its user activation lasts, otherwise it offers an explicit button.
 
 Herdr 0.9.1's `pane.link.resolve` returns inclusive visible regions, not URLs.
 Roamgate reconstructs complete HTTP(S) targets, including wrapped/wide cells,

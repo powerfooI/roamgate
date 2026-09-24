@@ -143,3 +143,27 @@ export function findTerminalHttpLinks(text: string): TerminalHttpLink[] {
   }
   return links;
 }
+
+type GestureEnvironment = {
+  userActivation?: { readonly isActive: boolean } | null;
+  open: (url: string, target: string, features: string) => unknown;
+};
+
+/**
+ * Opens an already sanitized terminal URL from a touch gesture. Returns false
+ * when the gesture no longer grants activation (e.g. after an async lookup),
+ * so the caller can offer an explicit button instead of a blocked popup.
+ * `noopener` hides whether a popup opened, so activation is checked first.
+ */
+export function openTerminalUrlFromGesture(
+  url: string,
+  env: GestureEnvironment = {
+    userActivation:
+      typeof navigator === "undefined" ? null : navigator.userActivation,
+    open: (href, target, features) => window.open(href, target, features),
+  },
+): boolean {
+  if (env.userActivation && !env.userActivation.isActive) return false;
+  env.open(url, "_blank", "noopener,noreferrer");
+  return true;
+}

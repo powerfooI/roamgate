@@ -3,6 +3,7 @@ import {
   terminalFocusBlockedByOverlay,
   terminalPointerShouldBlurInput,
   terminalTouchShouldDismissInput,
+  terminalTouchShouldOpenLink,
 } from "./terminalFocus";
 
 function docWithOpenPopper(open: boolean) {
@@ -72,5 +73,24 @@ describe("terminal pointer focus", () => {
     expect(terminalTouchShouldDismissInput(true, true, true)).toBe(false);
     expect(terminalTouchShouldDismissInput(true, false, false)).toBe(false);
     expect(terminalTouchShouldDismissInput(false, false, true)).toBe(false);
+  });
+
+  test("only a clean tap without keyboard or selection opens links", () => {
+    const tap = {
+      started: true,
+      moved: false,
+      inputActive: false,
+      selectionActive: false,
+    };
+    expect(terminalTouchShouldOpenLink(tap)).toBe(true);
+    expect(terminalTouchShouldOpenLink({ ...tap, started: false })).toBe(false);
+    expect(terminalTouchShouldOpenLink({ ...tap, moved: true })).toBe(false);
+    // Closing the keyboard is the whole job of that tap.
+    expect(terminalTouchShouldOpenLink({ ...tap, inputActive: true })).toBe(
+      false,
+    );
+    expect(terminalTouchShouldOpenLink({ ...tap, selectionActive: true })).toBe(
+      false,
+    );
   });
 });

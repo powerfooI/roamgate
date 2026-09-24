@@ -405,7 +405,17 @@
   gap: 8px;
 }
 
+/* One-tap fallback when a tapped URL resolved after the tap's activation. */
+.terminal-tap-link {
+  position: fixed;
+  z-index: 1190;
+  padding: 0 14px;
+  font-size: calc(13px * var(--ui-scale, 1));
+  box-shadow: var(--shadow-lg);
+}
+
 .terminal-mobile-input-actions button,
+.terminal-tap-link,
 .terminal-touch-selection-actions button {
   min-width: max(44px, calc(44px / var(--ui-scale, 1)));
   min-height: max(44px, calc(44px / var(--ui-scale, 1)));

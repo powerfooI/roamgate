@@ -3,6 +3,7 @@ import {
   findTerminalHttpLinks,
   sanitizeTerminalHttpUrl,
   terminalFileUriPath,
+  openTerminalUrlFromGesture,
 } from "./terminalLinks";
 
 describe("terminal HTTP links", () => {
@@ -125,5 +126,37 @@ describe("terminal OSC 8 local file URIs", () => {
     "vscode://file/tmp/docs",
   ])("rejects unsupported or unsafe target %s", (uri) => {
     expect(terminalFileUriPath(uri)).toBeNull();
+  });
+});
+
+describe("opening terminal URLs from touch", () => {
+  const url = "https://example.com/a";
+  function env(isActive?: boolean) {
+    const calls: unknown[][] = [];
+    return {
+      calls,
+      env: {
+        userActivation: isActive === undefined ? undefined : { isActive },
+        open: (...args: unknown[]) => void calls.push(args),
+      },
+    };
+  }
+
+  test("opens without an opener while the gesture is active", () => {
+    const e = env(true);
+    expect(openTerminalUrlFromGesture(url, e.env)).toBe(true);
+    expect(e.calls).toEqual([[url, "_blank", "noopener,noreferrer"]]);
+  });
+
+  test("defers to an explicit button once activation has expired", () => {
+    const e = env(false);
+    expect(openTerminalUrlFromGesture(url, e.env)).toBe(false);
+    expect(e.calls).toEqual([]);
+  });
+
+  test("opens when the browser has no user activation API", () => {
+    const e = env(undefined);
+    expect(openTerminalUrlFromGesture(url, e.env)).toBe(true);
+    expect(e.calls).toHaveLength(1);
   });
 });

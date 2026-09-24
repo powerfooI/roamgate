@@ -22,6 +22,24 @@ export function terminalTouchShouldDismissInput(
   return started && !moved && inputActive;
 }
 
+/**
+ * A clean tap opens the link under it. A tap that closes the device keyboard
+ * only closes it, and taps during long-press selection stay with the selection.
+ */
+export function terminalTouchShouldOpenLink({
+  started,
+  moved,
+  inputActive,
+  selectionActive,
+}: {
+  started: boolean;
+  moved: boolean;
+  inputActive: boolean;
+  selectionActive: boolean;
+}): boolean {
+  return started && !moved && !inputActive && !selectionActive;
+}
+
 export function terminalPointerShouldBlurInput(
   coarsePointer: boolean,
   editableTarget: boolean,
