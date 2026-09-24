@@ -1352,6 +1352,43 @@ describe("workspace source navigation", () => {
   });
 });
 
+describe("plugin popup toggle", () => {
+  test("focuses the target Space even when this browser already shows it", async () => {
+    const previousState = store.get();
+    const originalConnection = bridge.connection;
+    const methods: string[] = [];
+    bridge.connection = ((connectionId = "alpha", runtimeGeneration = 1) => ({
+      connectionId,
+      generation: 10,
+      serverRuntimeGeneration: runtimeGeneration,
+      isCurrent: () => true,
+      acceptsServerGeneration: (value: unknown) => value === runtimeGeneration,
+      call: async (method: string) => {
+        methods.push(method);
+        if (method === "popup.close") throw new Error("popup_not_open");
+        return {};
+      },
+    })) as typeof bridge.connection;
+    try {
+      // The workspace is already marked focused, as browser-local navigation
+      // projects it, but Herdr's own focus may sit on another Space.
+      __storeTesting.replaceState(partitionState());
+      expect(store.get().workspaces[0]?.focused).toBe(true);
+      await store.togglePluginPopup("float", "toggle", {
+        workspace_id: "same-workspace",
+      });
+      expect(methods.slice(0, 3)).toEqual([
+        "popup.close",
+        "workspace.focus",
+        "plugin.action.invoke",
+      ]);
+    } finally {
+      bridge.connection = originalConnection;
+      __storeTesting.replaceState(previousState);
+    }
+  });
+});
+
 describe("stabilizeRefreshPatch", () => {
   test("returns null when a refresh reproduces the current state", () => {
     const snapshot = partitionState();

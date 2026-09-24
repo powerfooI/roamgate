@@ -4070,19 +4070,21 @@ export const store = {
         if (!message.includes("popup_not_open")) throw error;
       }
       if (!leaseIsCurrent(lease)) return;
-      // Herdr opens a popup in whichever Space it has focused, and a plugin
-      // handed a different one declines: herdr-float reports "Space changed"
-      // and exits successfully, so the key looks dead. Match Herdr's focus to
-      // the Space the action is invoked for.
+      // Herdr opens a popup in whichever Space it has focused, and the
+      // observer that reports popup state watches that same Space, so a
+      // mismatch opens a popup nobody sees and the key looks dead. Always
+      // align Herdr with the Space the action is invoked for: browser-local
+      // navigation keeps its selection in this browser, and Herdr's own
+      // focus can sit on another Space entirely. This cannot be skipped by
+      // comparing against `workspaces[].focused`, which browser-local
+      // navigation projects to this browser's selection (see
+      // projectBrowserNavigation), making the comparison always agree.
       const workspaceId = context.workspace_id;
       if (typeof workspaceId === "string" && workspaceId) {
-        const focused = store.get().workspaces.find((w) => w.focused);
-        if (focused?.workspace_id !== workspaceId) {
-          await lease.client.call("workspace.focus", {
-            workspace_id: workspaceId,
-          });
-          if (!leaseIsCurrent(lease)) return;
-        }
+        await lease.client.call("workspace.focus", {
+          workspace_id: workspaceId,
+        });
+        if (!leaseIsCurrent(lease)) return;
       }
       await lease.client.call("plugin.action.invoke", {
         plugin_id: pluginId,
