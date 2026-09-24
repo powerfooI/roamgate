@@ -379,6 +379,114 @@ describe("bounded worktree snapshot transaction", () => {
     }
   });
 
+  test("captures a newly staged submodule without changing the real index", async () => {
+    const root = await repository();
+    const source = await repository();
+    try {
+      for (const repo of [root, source]) {
+        await git(repo, "config", "user.name", "Test");
+        await git(repo, "config", "user.email", "test@example.com");
+        await git(repo, "commit", "--allow-empty", "-m", "initial");
+      }
+      const baseline = await capture(root);
+      await git(
+        root,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        source,
+        "module",
+      );
+      const index = await readFile(join(root, ".git", "index"));
+      const tree = await capture(root);
+      expect(await git(root, "ls-tree", tree, "module")).toBe(
+        `160000 commit ${await git(source, "rev-parse", "HEAD")}\tmodule`,
+      );
+      expect(await git(root, "diff", "--name-only", baseline, tree)).toBe(
+        ".gitmodules\nmodule",
+      );
+      expect(await readFile(join(root, ".git", "index"))).toEqual(index);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(source, { recursive: true, force: true });
+    }
+  });
+
+  test.each(["regular", "sparse", "split"])(
+    "preserves absent sparse-checkout entries with a %s index",
+    async (mode) => {
+      const root = await repository();
+      try {
+        await git(root, "config", "user.name", "Test");
+        await git(root, "config", "user.email", "test@example.com");
+        for (const directory of ["included", "excluded"]) {
+          await mkdir(join(root, directory));
+          await writeFile(join(root, directory, "file"), "initial\n");
+        }
+        await git(root, "add", ".");
+        await git(root, "commit", "-m", "initial");
+        await git(
+          root,
+          "sparse-checkout",
+          "set",
+          "--cone",
+          mode === "sparse" ? "--sparse-index" : "--no-sparse-index",
+          "included",
+        );
+        if (mode === "split") await git(root, "update-index", "--split-index");
+        expect(await readdir(root)).not.toContain("excluded");
+        const index = await readFile(join(root, ".git", "index"));
+        const baseline = await capture(root);
+        expect(await git(root, "show", `${baseline}:excluded/file`)).toBe(
+          "initial",
+        );
+        expect(await readFile(join(root, ".git", "index"))).toEqual(index);
+
+        await git(root, "sparse-checkout", "set", "included", "excluded");
+        expect(await capture(root)).toBe(baseline);
+        await writeFile(join(root, "excluded", "file"), "committed change\n");
+        await git(root, "add", "excluded/file");
+        await git(root, "commit", "-m", "change excluded file");
+        await git(root, "sparse-checkout", "set", "included");
+        expect(await readdir(root)).not.toContain("excluded");
+        const changedIndex = await readFile(join(root, ".git", "index"));
+        const current = await capture(root);
+        expect(await git(root, "show", `${current}:excluded/file`)).toBe(
+          "committed change",
+        );
+        expect(await git(root, "diff", "--name-only", baseline, current)).toBe(
+          "excluded/file",
+        );
+        expect(await readFile(join(root, ".git", "index"))).toEqual(
+          changedIndex,
+        );
+
+        await rm(join(root, "included", "file"));
+        const deleted = await capture(root);
+        expect(await git(root, "ls-tree", "-r", "--name-only", deleted)).toBe(
+          "excluded/file",
+        );
+        expect(await readFile(join(root, ".git", "index"))).toEqual(
+          changedIndex,
+        );
+
+        // A manually materialized sparse file must override its indexed blob.
+        await mkdir(join(root, "excluded"));
+        await writeFile(join(root, "excluded", "file"), "materialized edit\n");
+        const materialized = await capture(root);
+        expect(await git(root, "show", `${materialized}:excluded/file`)).toBe(
+          "materialized edit",
+        );
+        expect(await readFile(join(root, ".git", "index"))).toEqual(
+          changedIndex,
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("captures current gitlinks and their deletion", async () => {
     const root = await repository();
     try {

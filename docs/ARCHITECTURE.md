@@ -225,10 +225,13 @@ mounted across Inspector changes; layout preferences and content caches are sepa
 
 Last step captures checkout contents at workspace active/idle boundaries, not
 when Changes is viewed. Captures include small untracked files and changes
-committed during the turn; they never stage files in the user's index. Both
-endpoints contain raw on-disk bytes, without Git clean filters, CRLF conversion,
-or `working-tree-encoding` conversion. Gitlinks retain the submodule commit;
-regular files retain their executable/non-executable distinction. Resolved Git
+committed during the turn; they never stage files in the user's index. A private
+copy of the current index preserves newly staged gitlinks and sparse-checkout
+metadata. Absent skip-worktree entries retain their indexed Git objects rather
+than appearing deleted. Materialized files use raw on-disk bytes, without Git
+clean filters, CRLF conversion, or `working-tree-encoding` conversion, and override
+their indexed contents. Gitlinks retain the submodule commit; regular files retain
+their executable/non-executable distinction. Resolved Git
 metadata directories inside the checkout are excluded from capture, including
 nonstandard separate Git directories and linked-worktree shared metadata.
 

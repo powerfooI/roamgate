@@ -46,15 +46,22 @@ case "$objects$git_dir" in *'
 '*) fail 'object directory contains a newline';; esac
 mkdir "$quarantine/objects" "$quarantine/objects/info" "$quarantine/files" "$quarantine/sources"
 printf '%s\\n' "$objects" > "$quarantine/objects/info/alternates"
+index=$(git rev-parse --git-path index)
 export GIT_OBJECT_DIRECTORY="$quarantine/objects"
 export GIT_INDEX_FILE="$quarantine/index"
-if git rev-parse --verify --quiet 'HEAD^{commit}' >/dev/null; then
+# Preserve staged gitlinks and skip-worktree metadata without writing the real index.
+if [ -f "$index" ]; then
+  cp "$index" "$GIT_INDEX_FILE"
+elif git rev-parse --verify --quiet 'HEAD^{commit}' >/dev/null; then
   git read-tree HEAD
 else
   git read-tree --empty
 fi
 git ls-files --cached --others --exclude-standard -z -- "$@" > "$quarantine/paths"
 git ls-files --cached --others --exclude-standard -- "$@" > "$quarantine/quoted-paths"
+# Preserve sparse entries in one batch; materialized files override them below.
+git ls-files -t --stage -- "$@" > "$quarantine/index-entries"
+awk 'substr($0, 1, 2) == "S " { print substr($0, 3) }' "$quarantine/index-entries" > "$quarantine/sparse-entries"
 git check-attr filter --stdin < "$quarantine/quoted-paths" > "$quarantine/attributes"
 if grep -Ev ': filter: (unspecified|unset)$' "$quarantine/attributes" > /dev/null; then
   fail 'Git filter attributes are not supported'
@@ -123,6 +130,7 @@ xargs -0 sh -c '
   printf "%s %s\\n" "$count" "$total" > "$quarantine/budget"
 ' sh < "$quarantine/paths"
 git read-tree --empty
+git update-index --index-info < "$quarantine/sparse-entries"
 git update-index -z --index-info < "$quarantine/gitlinks"
 if [ -f "$quarantine/blob-paths" ]; then
   # --no-filters is essential: a racing .gitattributes/config edit cannot
