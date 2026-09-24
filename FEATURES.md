@@ -57,7 +57,8 @@ the first pane a jump can reach.
   OSC 52 clipboard writes follow Herdr's foreground recipient, not proven source
   pane ownership; see [clipboard limits](docs/DEPLOYMENT.md#herdr-compatibility).
 - `Cmd/Ctrl`-click HTTP(S) links to open a browser tab; file/directory paths open
-  preview/workspace actions. Touch uses long-press, then **Open link** or
+  preview/workspace actions. The link click opens on press and is never
+  forwarded to mouse-aware apps. Touch uses long-press, then **Open link** or
   **File actions**. Nothing opens on hover or ordinary touch.
 
 Herdr 0.9.1 supports read-only wrapped-link resolution; OSC 8 keeps explicit

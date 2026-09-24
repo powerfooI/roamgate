@@ -149,6 +149,21 @@ export function registerTerminalLinkProvider(
   let disposed = false;
   let requestGeneration = 0;
   type TargetLink = ILink & { target: TerminalTouchLink };
+  // xterm keeps its hovered link private. Track it so a modifier click can
+  // activate on mousedown, before mouse reporting forwards it to the app.
+  let hovered: TargetLink | null = null;
+  const track = (link: TargetLink) => {
+    const { hover, leave } = link;
+    link.hover = (event, text) => {
+      hovered = link;
+      hover?.(event, text);
+    };
+    link.leave = (event, text) => {
+      if (hovered === link) hovered = null;
+      leave?.(event, text);
+    };
+    return link;
+  };
   const provideLinks = (
     bufferLineNumber: number,
     reply: (links: TargetLink[] | undefined) => void,
@@ -159,7 +174,8 @@ export function registerTerminalLinkProvider(
       touch ? touch.current() : generation === requestGeneration;
     // xterm stores replies in its current row cache, even for older requests.
     const callback = (links: TargetLink[] | undefined) => {
-      if (touch || (!disposed && requestCurrent())) reply(links);
+      if (touch) reply(links);
+      else if (!disposed && requestCurrent()) reply(links?.map(track));
     };
     const activeBuffer = term.buffer.active;
     const columnCount = term.cols;
@@ -524,8 +540,15 @@ export function registerTerminalLinkProvider(
         );
       });
     },
+    /** Activates the link under the pointer; false when none is hovered. */
+    activateHovered(event: MouseEvent) {
+      if (!hovered) return false;
+      hovered.activate(event, hovered.text);
+      return true;
+    },
     dispose() {
       disposed = true;
+      hovered = null;
       registration.dispose();
     },
   };

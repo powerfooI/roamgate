@@ -832,6 +832,28 @@ export function TerminalView({
           y: event.clientY,
         });
     };
+    const activateOscLink = (event: MouseEvent, text: string) => {
+      event.preventDefault();
+      if (
+        !terminalLinkModifierMatches(event) ||
+        !oscHover?.ready ||
+        !oscHover.state ||
+        oscHover.text !== text ||
+        oscHover.state !== linkState()
+      )
+        return;
+      const path = terminalFileUriPath(text);
+      if (path) {
+        term.clearSelection();
+        showFileLinkMenu(path, event);
+        return;
+      }
+      const url = sanitizeTerminalHttpUrl(text);
+      if (url) {
+        term.clearSelection();
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    };
     const term = new Terminal({
       cursorBlink: true,
       disableStdin: composerOpenRef.current || shouldAvoidVirtualKeyboard(),
@@ -857,26 +879,7 @@ export function TerminalView({
           oscHover = null;
         },
         activate(event, text) {
-          event.preventDefault();
-          if (
-            !terminalLinkModifierMatches(event) ||
-            !oscHover?.ready ||
-            !oscHover.state ||
-            oscHover.text !== text ||
-            oscHover.state !== linkState()
-          )
-            return;
-          const path = terminalFileUriPath(text);
-          if (path) {
-            term.clearSelection();
-            showFileLinkMenu(path, event);
-            return;
-          }
-          const url = sanitizeTerminalHttpUrl(text);
-          if (url) {
-            term.clearSelection();
-            window.open(url, "_blank", "noopener,noreferrer");
-          }
+          activateOscLink(event, text);
         },
       },
       scrollbar: { showScrollbar: false },
@@ -1936,6 +1939,8 @@ export function TerminalView({
       );
     };
     let reviewSelectionDrag = false;
+    // A modifier click on a hovered link owns the rest of its gesture.
+    let linkClick = false;
     let lastPointerType = "";
     // WebKit lacks sourceCapabilities. Compatibility mouse events retain the
     // touch pointer type until a genuine mouse pointerdown replaces it.
@@ -1947,6 +1952,7 @@ export function TerminalView({
     };
     const onTerminalMouseDown = (e: MouseEvent) => {
       if (replayingSelection) return;
+      linkClick = false;
       if (touchSelection.active && !isTouchMouse(e)) touchSelection.reset();
       if (
         (lastPointerType !== "mouse" &&
@@ -1956,6 +1962,20 @@ export function TerminalView({
         e.preventDefault();
         e.stopImmediatePropagation();
         if (!isTouchMouse(e)) closeTerminalInput();
+        return;
+      }
+      // Open on press, like Herdr, before xterm reports the click to a
+      // mouse-tracking app. That report would repaint and retire the link.
+      if (
+        e.button === 0 &&
+        terminalLinkModifierMatches(e) &&
+        (oscHover
+          ? (activateOscLink(e, oscHover.text), true)
+          : linkProvider.activateHovered(e))
+      ) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        linkClick = true;
         return;
       }
       // A physical mouse on a hybrid desktop retains normal xterm input.
@@ -2014,6 +2034,15 @@ export function TerminalView({
       }
     };
     const onDeferredMouseMove = (e: MouseEvent) => {
+      if (linkClick) {
+        // The opened tab can take focus and keep the release; a buttonless
+        // move ends the gesture without disturbing hover.
+        if (e.buttons !== 0) {
+          e.stopImmediatePropagation();
+          return;
+        }
+        linkClick = false;
+      }
       if (
         !endpointPresentation.selectionPending &&
         historySelection.move(
@@ -2109,6 +2138,13 @@ export function TerminalView({
     };
     document.addEventListener("keydown", onTouchSelectionEscape, true);
     const onDocumentMouseUp = (e: MouseEvent) => {
+      if (linkClick) {
+        // xterm never saw the press; its Linkifier must not activate again.
+        linkClick = false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
       if (historySelection.releasingNative) return;
       historySelection.finish();
       if (endpointPresentation.selectionPending) {

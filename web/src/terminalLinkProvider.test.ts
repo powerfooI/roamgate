@@ -750,6 +750,52 @@ describe("endpoint terminal link provider", () => {
       selectShortcutPreset(previous);
     }
   });
+
+  test("activates only the hovered link and keeps its click-time checks", async () => {
+    const f = fixture(["/tmp/docs/a.md /tmp/docs/b.md"], 40);
+    let state = 1;
+    const previewed: string[] = [];
+    const provider = registerTerminalLinkProvider(
+      f.term,
+      (path) => previewed.push(path),
+      undefined,
+      () => false,
+      {
+        state: () => state,
+        resolve: async () => null,
+      },
+    );
+    const previous = getShortcutSnapshot().preferences.active;
+    try {
+      selectShortcutPreset("windows");
+      const event = {
+        ctrlKey: true,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        preventDefault() {},
+      } as MouseEvent;
+      const [a, b] = await f.links(1);
+      expect(provider.activateHovered(event)).toBe(false);
+      b!.hover!(event, b!.text);
+      expect(provider.activateHovered(event)).toBe(true);
+      expect(previewed).toEqual(["/tmp/docs/b.md"]);
+      b!.leave!(event, b!.text);
+      expect(provider.activateHovered(event)).toBe(false);
+      a!.hover!(event, a!.text);
+      // Leaving a link that is no longer hovered keeps the current one.
+      b!.leave!(event, b!.text);
+      expect(provider.activateHovered(event)).toBe(true);
+      expect(previewed).toEqual(["/tmp/docs/b.md", "/tmp/docs/a.md"]);
+      state++;
+      expect(provider.activateHovered(event)).toBe(true);
+      expect(previewed).toHaveLength(2);
+      provider.dispose();
+      expect(provider.activateHovered(event)).toBe(false);
+    } finally {
+      selectShortcutPreset(previous);
+    }
+  });
 });
 
 describe("terminal touch link lookup", () => {
