@@ -82,6 +82,59 @@ const quarantine = (root: string) =>
   join(root, ".git", "roamgate-last-step-capture");
 
 describe("bounded worktree snapshot transaction", () => {
+  test.each([".repo", ".repo [meta] 'quote"])(
+    "excludes an in-worktree Git directory %s without excluding neighboring files",
+    async (name) => {
+      const root = await repository();
+      const gitDir = join(root, name);
+      try {
+        await git(root, "init", `--separate-git-dir=${gitDir}`);
+        await writeFile(join(root, "tracked"), "staged\n");
+        await git(root, "add", "tracked");
+        await git(
+          root,
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.com",
+          "commit",
+          "-m",
+          "initial",
+        );
+        await writeFile(join(root, "tracked"), "changed\n");
+        await writeFile(join(root, "untracked"), "new\n");
+        const neighbor = `${name}-content`;
+        await mkdir(join(root, neighbor));
+        await writeFile(join(root, neighbor, "file"), "keep\n");
+        const index = await readFile(join(gitDir, "index"));
+        const first = await capture(root);
+        expect(
+          (await git(root, "ls-tree", "-rz", "--name-only", first))
+            .split("\0")
+            .filter(Boolean)
+            .sort(),
+        ).toEqual([`${neighbor}/file`, "tracked", "untracked"].sort());
+        const objects = await readdir(join(gitDir, "objects"), {
+          recursive: true,
+        });
+        for (let attempt = 0; attempt < 2; attempt++) {
+          expect(await capture(root)).toBe(first);
+          expect(
+            (
+              await readdir(join(gitDir, "objects"), { recursive: true })
+            ).sort(),
+          ).toEqual(objects.toSorted());
+        }
+        expect(await readFile(join(gitDir, "index"))).toEqual(index);
+        expect(await readdir(gitDir)).not.toContain(
+          "roamgate-last-step-capture",
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("refuses shared or ambiguous repository modes without changing objects, permissions, or staging", async () => {
     const root = await repository();
     try {

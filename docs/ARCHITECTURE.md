@@ -228,7 +228,9 @@ when Changes is viewed. Captures include small untracked files and changes
 committed during the turn; they never stage files in the user's index. Both
 endpoints contain raw on-disk bytes, without Git clean filters, CRLF conversion,
 or `working-tree-encoding` conversion. Gitlinks retain the submodule commit;
-regular files retain their executable/non-executable distinction.
+regular files retain their executable/non-executable distinction. Resolved Git
+metadata directories inside the checkout are excluded from capture, including
+nonstandard separate Git directories and linked-worktree shared metadata.
 
 Automatic capture refuses the whole snapshot when a file exceeds 8 MiB, regular
 file content exceeds 32 MiB in total, or there are more than 10,000 regular files.

@@ -25,6 +25,15 @@ esac
 git_dir=$(git rev-parse --absolute-git-dir)
 objects=$(git rev-parse --git-path objects)
 objects=$(cd "$objects" && pwd -P)
+# Nonstandard Git directories are not implicitly ignored like .git. Exclude
+# their actual subtrees, including shared metadata for linked worktrees.
+set -- .
+for directory in "$git_dir" "$(git rev-parse --git-common-dir)"; do
+  directory=$(cd "$directory" && pwd -P)
+  case "$directory" in
+    "$snapshot_root"/*) set -- "$@" ":(top,exclude,literal)\${directory#"$snapshot_root"/}";;
+  esac
+done
 quarantine="$git_dir/roamgate-last-step-capture"
 mkdir "$quarantine" 2>/dev/null || fail "capture locked at $quarantine; see docs/ARCHITECTURE.md"
 cleanup() { rm -rf "$quarantine"; }
@@ -44,8 +53,8 @@ if git rev-parse --verify --quiet 'HEAD^{commit}' >/dev/null; then
 else
   git read-tree --empty
 fi
-git ls-files --cached --others --exclude-standard -z > "$quarantine/paths"
-git ls-files --cached --others --exclude-standard > "$quarantine/quoted-paths"
+git ls-files --cached --others --exclude-standard -z -- "$@" > "$quarantine/paths"
+git ls-files --cached --others --exclude-standard -- "$@" > "$quarantine/quoted-paths"
 git check-attr filter --stdin < "$quarantine/quoted-paths" > "$quarantine/attributes"
 if grep -Ev ': filter: (unspecified|unset)$' "$quarantine/attributes" > /dev/null; then
   fail 'Git filter attributes are not supported'
