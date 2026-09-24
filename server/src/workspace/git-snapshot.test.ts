@@ -379,7 +379,7 @@ describe("bounded worktree snapshot transaction", () => {
     }
   });
 
-  test("captures a newly staged submodule without changing the real index", async () => {
+  test("captures submodules through staging, deinitialization, and index-only removal", async () => {
     const root = await repository();
     const source = await repository();
     try {
@@ -407,6 +407,29 @@ describe("bounded worktree snapshot transaction", () => {
         ".gitmodules\nmodule",
       );
       expect(await readFile(join(root, ".git", "index"))).toEqual(index);
+
+      await git(root, "commit", "-m", "add module");
+      await git(root, "submodule", "deinit", "-f", "module");
+      const deinitializedIndex = await readFile(join(root, ".git", "index"));
+      expect(await capture(root)).toBe(tree);
+      expect(await readFile(join(root, ".git", "index"))).toEqual(
+        deinitializedIndex,
+      );
+
+      await git(
+        root,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "update",
+        "--init",
+        "module",
+      );
+      await git(root, "rm", "--cached", "module");
+      expect(await git(root, "ls-files", "--stage", "--", "module")).toBe("");
+      const removedIndex = await readFile(join(root, ".git", "index"));
+      expect(await capture(root)).toBe(tree);
+      expect(await readFile(join(root, ".git", "index"))).toEqual(removedIndex);
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(source, { recursive: true, force: true });
@@ -493,6 +516,9 @@ describe("bounded worktree snapshot transaction", () => {
       const child = join(root, "module");
       await mkdir(child);
       await git(child, "init");
+      const objects = await objectFiles(root);
+      await expect(capture(root)).rejects.toThrow();
+      expect(await objectFiles(root)).toEqual(objects);
       await git(
         child,
         "-c",
@@ -505,6 +531,10 @@ describe("bounded worktree snapshot transaction", () => {
         "first",
       );
       const first = await git(child, "rev-parse", "HEAD");
+      const untracked = await capture(root);
+      expect(await git(root, "ls-tree", untracked)).toBe(
+        `160000 commit ${first}\tmodule`,
+      );
       await git(
         root,
         "update-index",

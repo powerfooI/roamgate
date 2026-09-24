@@ -77,6 +77,8 @@ xargs -0 sh -c '
   read count total < "$quarantine/budget"
   for path do
     cd "$snapshot_root"
+    # Untracked nested repositories are listed with a trailing slash.
+    path=\${path%/}
     case "$path" in *"
 "*|*"\t"*) fail "newline/tab filenames are not supported";; esac
     file="./$path"
@@ -87,16 +89,19 @@ xargs -0 sh -c '
       case "$parent" in */*) parent=\${parent%/*};; *) break;; esac
     done
     if [ -d "$file" ]; then
-      entry=$(git ls-files --stage -- ":(literal)$path")
-      case "$entry" in
-        "160000 "*)
-          set -- $entry
-          oid=$2
-          if [ -e "$file/.git" ]; then oid=$(git -C "$file" rev-parse --verify HEAD); fi
-          printf "160000 %s\\t%s\\0" "$oid" "$path" >> "$quarantine/gitlinks"
-          continue;;
-      esac
-      fail "non-file: $path"
+      # Working repositories are gitlinks even when absent from the index.
+      # Only uninitialized submodules need the indexed commit as a fallback.
+      if [ -e "$file/.git" ]; then
+        oid=$(git -C "$file" rev-parse --verify HEAD)
+      else
+        entry=$(git ls-files --stage -- ":(literal)$path")
+        case "$entry" in
+          "160000 "*) set -- $entry; oid=$2;;
+          *) fail "non-file: $path";;
+        esac
+      fi
+      printf "160000 %s\\t%s\\0" "$oid" "$path" >> "$quarantine/gitlinks"
+      continue
     fi
     [ -e "$file" ] || continue
     [ -f "$file" ] && [ -r "$file" ] || fail "unreadable or special file: $path"

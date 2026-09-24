@@ -230,8 +230,9 @@ copy of the current index preserves newly staged gitlinks and sparse-checkout
 metadata. Absent skip-worktree entries retain their indexed Git objects rather
 than appearing deleted. Materialized files use raw on-disk bytes, without Git
 clean filters, CRLF conversion, or `working-tree-encoding` conversion, and override
-their indexed contents. Gitlinks retain the submodule commit; regular files retain
-their executable/non-executable distinction. Resolved Git
+their indexed contents. Initialized nested repositories retain their current
+commit even when untracked; uninitialized submodules retain their indexed commit.
+Regular files retain their executable/non-executable distinction. Resolved Git
 metadata directories inside the checkout are excluded from capture, including
 nonstandard separate Git directories and linked-worktree shared metadata.
 
