@@ -83,6 +83,8 @@ Inspector button, shortcuts, or workspace/agent menus.
   Wide panels show commits, changed files, and diffs in three columns; drag the
   commit-list divider to resize it, or double-click to reset. Narrow panels
   navigate from commits to files to diffs, with Back returning one level.
+- Changes counts the lines of untracked files when there are at most 500 of
+  them; a larger untracked tree is listed without line counts.
 - The **PR/MR status** card in **Changes** and **Commits** shows the branch's
   GitHub pull request or GitLab merge request: state, checks, and reviews. It
   needs `gh` or `glab` authenticated on the checkout host and never changes

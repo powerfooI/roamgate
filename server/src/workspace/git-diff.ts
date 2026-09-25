@@ -8,7 +8,9 @@ import {
   GIT_DIFF_MAX_BYTES,
   GIT_DIFF_TIMEOUT_MS,
   GIT_PULL_TIMEOUT_MS,
+  GIT_UNTRACKED_NUMSTAT_BATCH_SIZE,
   GIT_UNTRACKED_NUMSTAT_CONCURRENCY,
+  GIT_UNTRACKED_NUMSTAT_MAX_FILES,
 } from "./file-constants";
 import { sanitizeExplorerPath } from "./file-paths";
 import { trimIncompleteUtf8Tail } from "./preview";
@@ -20,6 +22,20 @@ import type {
 } from "./file-types";
 
 const GIT_ATTRIBUTE_BATCH_SIZE = 100;
+/**
+ * Refreshes for one workspace view supersede each other: a second browser, a
+ * trailing poll, or a tree that changed mid-pass all leave an older pass
+ * counting files nobody is waiting for. Claiming a generation lets the newer
+ * pass retire it instead.
+ */
+const diffSummaryGenerations = new Map<string, number>();
+
+function claimDiffSummaryGeneration(key: string) {
+  const generation = (diffSummaryGenerations.get(key) ?? 0) + 1;
+  diffSummaryGenerations.set(key, generation);
+  return () => diffSummaryGenerations.get(key) === generation;
+}
+
 const LAST_STEP_SNAPSHOT_LIMIT = 64;
 const LAST_STEP_STORE_DISPOSED = "LAST_STEP_STORE_DISPOSED";
 
@@ -777,6 +793,7 @@ async function collectStats({
   host,
   shQuote,
   runProcessWithCodeTimeout,
+  isCurrent,
 }: {
   root: string;
   mode: GitDiffMode;
@@ -786,6 +803,7 @@ async function collectStats({
   host?: string;
   shQuote: (value: string) => string;
   runProcessWithCodeTimeout: RunProcessWithCodeTimeout;
+  isCurrent?: () => boolean;
 }) {
   const stats = new Map<string, { additions: number; deletions: number }>();
   const mergeStats = (
@@ -840,32 +858,57 @@ async function collectStats({
   const untrackedEntries = entries.filter(
     (entry) => entry.kind === "untracked",
   );
+  // A remote command per untracked file is a fresh SSH login per untracked
+  // file, so one workspace holding an ignored build tree turns a single
+  // refresh into tens of thousands of logins. Count a whole batch per command,
+  // and past the cap list the files with no line counts rather than paying for
+  // them: a tree that large is noise in the panel either way.
+  const countedEntries =
+    untrackedEntries.length > GIT_UNTRACKED_NUMSTAT_MAX_FILES
+      ? []
+      : untrackedEntries;
+  const batches: GitDiffEntry[][] = [];
+  for (
+    let index = 0;
+    index < countedEntries.length;
+    index += GIT_UNTRACKED_NUMSTAT_BATCH_SIZE
+  ) {
+    batches.push(
+      countedEntries.slice(index, index + GIT_UNTRACKED_NUMSTAT_BATCH_SIZE),
+    );
+  }
   let cursor = 0;
   const worker = async () => {
-    while (cursor < untrackedEntries.length) {
-      const entry = untrackedEntries[cursor];
+    while (cursor < batches.length) {
+      const batch = batches[cursor];
       cursor += 1;
-      if (!entry) continue;
-      const result = await runGitShellCommand({
-        root,
-        command: `diff --no-ext-diff --no-index --numstat -- /dev/null ${shQuote(entry.path)}`,
-        host,
-        shQuote,
-        runProcessWithCodeTimeout,
-      });
+      if (!batch) continue;
+      // A newer refresh owns the answer: the rest of this pass would be spent
+      // counting a tree that has already moved on, often path by vanished path.
+      if (isCurrent?.() === false) return;
+      const command = `
+set -- ${batch.map((entry) => shQuote(entry.path)).join(" ")}
+for p in "$@"; do
+  git -C ${shQuote(root)} -c core.quotepath=false diff --no-ext-diff --no-index --numstat -- /dev/null "$p"
+done
+# The loop's status is only its last file's; keep the batch's other counts.
+exit 0
+`;
+      const result = await runProcessWithCodeTimeout(
+        gitShellCommandArgv(command, host),
+        GIT_DIFF_TIMEOUT_MS,
+      );
       if (result.code !== 0 && result.code !== 1) continue;
-      const value = parseNumstat(result.stdout).get(entry.path);
-      if (value) stats.set(entryKeyForStats(entry), value);
+      const values = parseNumstat(result.stdout);
+      for (const entry of batch) {
+        const value = values.get(entry.path);
+        if (value) stats.set(entryKeyForStats(entry), value);
+      }
     }
   };
   await Promise.all(
     Array.from(
-      {
-        length: Math.min(
-          GIT_UNTRACKED_NUMSTAT_CONCURRENCY,
-          untrackedEntries.length,
-        ),
-      },
+      { length: Math.min(GIT_UNTRACKED_NUMSTAT_CONCURRENCY, batches.length) },
       () => worker(),
     ),
   );
@@ -980,6 +1023,9 @@ export async function readDiffSummary({
   lastStepBaselines?: LastStepBaselineStore;
 }) {
   const mode = diffMode(params);
+  const isCurrent = claimDiffSummaryGeneration(
+    [workspaceId, root, mode].join(" "),
+  );
   const comparison =
     mode === "branch-main"
       ? await resolveComparisonBase({
@@ -1082,6 +1128,7 @@ export async function readDiffSummary({
       host,
       shQuote,
       runProcessWithCodeTimeout,
+      isCurrent,
     });
   }
   const fingerprintTask =
