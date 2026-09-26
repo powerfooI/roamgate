@@ -92,6 +92,7 @@ async function startThinServer(
   options: {
     protocol?: number;
     clipboardData?: string;
+    clipboardDelayMs?: number;
     appWelcomeDelayMs?: number;
     appWelcomeError?: string;
     skipAppWelcome?: boolean;
@@ -191,7 +192,11 @@ async function startThinServer(
         } else if (variant === 1) {
           if (!isAppSocket) options.tracker?.events.push("input");
           if (options.clipboardData) {
-            appSocket?.write(clipboardFrame(options.clipboardData));
+            const frame = clipboardFrame(options.clipboardData);
+            const sendClipboard = () => appSocket?.write(frame);
+            if (options.clipboardDelayMs)
+              setTimeout(sendClipboard, options.clipboardDelayMs);
+            else sendClipboard();
           }
         } else if (variant === 3 || variant === 5) {
           if (variant === 3) {
@@ -461,78 +466,94 @@ describe("terminal bridge sharing", () => {
     bridge.cleanupWs(browser);
   });
 
-  test("routes Herdr clipboard messages from the app relay to the input owner", async () => {
-    const clipboardData = "cmVtb3RlIGNvcHk=";
-    const socketPath = await startThinServer({
-      clipboardData,
-      appWelcomeDelayMs: 30,
-    });
-    const browser = {} as ServerWebSocket<unknown>;
-    const observer = {} as ServerWebSocket<unknown>;
-    const messages = new Map<ServerWebSocket<unknown>, string[]>([
-      [browser, []],
-      [observer, []],
-    ]);
-    const bridge = createTerminalBridge({
-      clientSocketPath: socketPath,
-      herdrProtocol: async () => 17,
-      safeSend: (ws, payload) => {
-        messages.get(ws)?.push(payload);
-        return true;
-      },
-      clientLabel: (ws) => (ws === browser ? "browser" : "observer"),
-      markRpcError: () => undefined,
-    });
+  test.each([0, 20])(
+    "routes Herdr clipboard messages from the app relay to the input owner (reply delay %sms)",
+    async (clipboardDelayMs) => {
+      const clipboardData = "cmVtb3RlIGNvcHk=";
+      const socketPath = await startThinServer({
+        clipboardData,
+        clipboardDelayMs,
+        appWelcomeDelayMs: 30,
+      });
+      const browser = {} as ServerWebSocket<unknown>;
+      const observer = {} as ServerWebSocket<unknown>;
+      const messages = new Map<ServerWebSocket<unknown>, string[]>([
+        [browser, []],
+        [observer, []],
+      ]);
+      const bridge = createTerminalBridge({
+        clientSocketPath: socketPath,
+        herdrProtocol: async () => 17,
+        safeSend: (ws, payload) => {
+          messages.get(ws)?.push(payload);
+          return true;
+        },
+        clientLabel: (ws) => (ws === browser ? "browser" : "observer"),
+        markRpcError: () => undefined,
+      });
 
-    await bridge.handleTerminalRpc(browser, "attach", "terminal.attach", {
-      terminal_id: "term_1",
-      cols: 100,
-      rows: 30,
-    });
-    await bridge.handleTerminalRpc(observer, "observe", "terminal.attach", {
-      terminal_id: "term_1",
-      cols: 100,
-      rows: 30,
-    });
-    await bridge.handleTerminalRpc(browser, "input", "terminal.input", {
-      terminal_id: "term_1",
-      data: Buffer.from("copy").toString("base64"),
-    });
-    await Bun.sleep(5);
+      await bridge.handleTerminalRpc(browser, "attach", "terminal.attach", {
+        terminal_id: "term_1",
+        cols: 100,
+        rows: 30,
+      });
+      await bridge.handleTerminalRpc(observer, "observe", "terminal.attach", {
+        terminal_id: "term_1",
+        cols: 100,
+        rows: 30,
+      });
+      await bridge.handleTerminalRpc(browser, "input", "terminal.input", {
+        terminal_id: "term_1",
+        data: Buffer.from("copy").toString("base64"),
+      });
+      await waitForCondition(
+        () =>
+          messages
+            .get(browser)!
+            .some((message) => JSON.parse(message).terminal_clipboard),
+        "timed out waiting for the input owner's clipboard message",
+      );
 
-    expect(
-      messages
-        .get(browser)!
-        .map((message) => JSON.parse(message))
-        .find((message) => message.terminal_clipboard)?.terminal_clipboard,
-    ).toEqual({ terminal_id: "term_1", data: clipboardData });
-    expect(
-      messages
-        .get(observer)!
-        .some((message) => JSON.parse(message).terminal_clipboard),
-    ).toBe(false);
+      expect(
+        messages
+          .get(browser)!
+          .map((message) => JSON.parse(message))
+          .find((message) => message.terminal_clipboard)?.terminal_clipboard,
+      ).toEqual({ terminal_id: "term_1", data: clipboardData });
+      expect(
+        messages
+          .get(observer)!
+          .some((message) => JSON.parse(message).terminal_clipboard),
+      ).toBe(false);
 
-    messages.get(browser)!.length = 0;
-    messages.get(observer)!.length = 0;
-    await bridge.handleTerminalRpc(observer, "input-2", "terminal.input", {
-      terminal_id: "term_1",
-      data: Buffer.from("copy again").toString("base64"),
-    });
-    await Bun.sleep(5);
-    expect(
-      messages
-        .get(observer)!
-        .map((message) => JSON.parse(message))
-        .find((message) => message.terminal_clipboard)?.terminal_clipboard,
-    ).toEqual({ terminal_id: "term_1", data: clipboardData });
-    expect(
-      messages
-        .get(browser)!
-        .some((message) => JSON.parse(message).terminal_clipboard),
-    ).toBe(false);
-    bridge.cleanupWs(browser);
-    bridge.cleanupWs(observer);
-  });
+      messages.get(browser)!.length = 0;
+      messages.get(observer)!.length = 0;
+      await bridge.handleTerminalRpc(observer, "input-2", "terminal.input", {
+        terminal_id: "term_1",
+        data: Buffer.from("copy again").toString("base64"),
+      });
+      await waitForCondition(
+        () =>
+          messages
+            .get(observer)!
+            .some((message) => JSON.parse(message).terminal_clipboard),
+        "timed out waiting for the new input owner's clipboard message",
+      );
+      expect(
+        messages
+          .get(observer)!
+          .map((message) => JSON.parse(message))
+          .find((message) => message.terminal_clipboard)?.terminal_clipboard,
+      ).toEqual({ terminal_id: "term_1", data: clipboardData });
+      expect(
+        messages
+          .get(browser)!
+          .some((message) => JSON.parse(message).terminal_clipboard),
+      ).toBe(false);
+      bridge.cleanupWs(browser);
+      bridge.cleanupWs(observer);
+    },
+  );
 
   test("isolates duplicate terminal ids, operations, frames, and clipboard by connection", async () => {
     const alphaTracker = {
