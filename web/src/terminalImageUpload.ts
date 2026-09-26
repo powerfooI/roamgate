@@ -3,8 +3,10 @@ import { connectionHttpPath } from "./connectionHttp";
 
 /**
  * Uploads an image through the connection's HTTP endpoint and returns the
- * server-side path. Callers decide when (or whether) that path reaches a
- * terminal; uploading here never writes to a PTY by itself.
+ * server-side path as text ready to insert at a shell or agent prompt. The
+ * server formats it because only the host knows its path conventions. Callers
+ * decide when (or whether) that text reaches a terminal; uploading here never
+ * writes to a PTY by itself.
  */
 export async function uploadTerminalImage(
   client: ConnectionClient,
@@ -59,7 +61,10 @@ export async function uploadTerminalImage(
   if (data === null || typeof data !== "object" || Array.isArray(data)) {
     throw new Error("image upload response was not an object");
   }
-  const payload = data as { path?: unknown };
+  const payload = data as { path?: unknown; text?: unknown };
+  if (typeof payload.text === "string" && payload.text.length > 0) {
+    return payload.text;
+  }
   if (typeof payload.path !== "string" || payload.path.length === 0) {
     throw new Error("image upload response did not include a path");
   }

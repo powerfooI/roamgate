@@ -55,6 +55,13 @@ the first pane a jump can reach.
   modifier. Selection freezes presentation until cleared. Desktop edge-drag
   captures offscreen rows; release, blur, or changed content stops scrolling.
 - Paste images to upload them to the connected host and insert their paths.
+  Local connections store them in a private `roamgate-images-*` folder under the
+  OS temp directory, created per server process; SSH connections use the remote
+  `/tmp`. Inserted paths are absolute and quoted when needed. POSIX hosts use
+  POSIX shell quoting; Windows uses forward slashes and quoting for PowerShell
+  and common Git Bash paths. Windows paths containing an apostrophe together
+  with `$` or a backtick require PowerShell; that combination is not supported
+  in Git Bash. Windows `cmd.exe` built-ins are not supported by this path format.
   OSC 52 clipboard writes follow Herdr's foreground recipient, not proven source
   pane ownership; see [clipboard limits](docs/DEPLOYMENT.md#herdr-compatibility).
 - `Cmd/Ctrl`-click HTTP(S) links to open a browser tab; file/directory paths,

@@ -40,6 +40,18 @@ describe("terminal image upload responses", () => {
     );
   });
 
+  test("prefers the server's shell-safe text over the raw path", async () => {
+    globalThis.fetch = (async () =>
+      Response.json({
+        path: "C:\\Users\\John Doe\\Temp\\image.png",
+        text: "'C:/Users/John Doe/Temp/image.png'",
+      })) as unknown as typeof fetch;
+
+    await expect(uploadTerminalImage(client, image)).resolves.toBe(
+      "'C:/Users/John Doe/Temp/image.png'",
+    );
+  });
+
   test("rejects malformed JSON instead of silently continuing", async () => {
     globalThis.fetch = (async () =>
       new Response("{", {
