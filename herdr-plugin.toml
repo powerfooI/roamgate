@@ -1,6 +1,6 @@
 id = "roamgate"
 name = "Roamgate"
-version = "0.7.10"
+version = "0.7.11"
 min_herdr_version = "0.7.2"
 description = "Web and PWA client for Herdr: workspaces, tabs, panes, agent status, session inspection, diffs, and review annotations"
 platforms = ["linux", "macos", "windows"]
