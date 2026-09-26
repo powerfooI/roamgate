@@ -582,10 +582,31 @@
     color: var(--muted);
   }
 
-  .mobile-controls-toggle:active {
+  .mobile-controls-toggle:active,
+  .mobile-controls-dragging .mobile-controls-toggle {
     background: var(--accent-soft);
     color: var(--text-strong);
     box-shadow: inset 0 0 0 1px var(--accent);
+  }
+
+  /* The toggle doubles as the drag handle for the floating stack. */
+  .mobile-controls-toggle {
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  .mobile-controls-dragging .mobile-terminal-controls {
+    box-shadow:
+      var(--shadow-lg),
+      0 0 0 1px var(--accent);
+  }
+
+  .mobile-controls-left .mobile-workspace-shortcut {
+    right: auto;
+    left: calc(10px + env(safe-area-inset-left, 0px));
+    transform-origin: left bottom;
   }
 
   .mobile-workspace-shortcut {
@@ -594,6 +615,7 @@
     bottom: calc(
       156px +
       var(--mobile-floating-controls-lift, 0px) +
+      var(--mobile-controls-offset-y, 0px) +
       env(safe-area-inset-bottom, 0px)
     );
     z-index: 73;
@@ -610,6 +632,8 @@
     box-shadow: var(--shadow-lg);
     transform: translate3d(0, 0, 0) scale(1);
     transform-origin: right bottom;
+    translate: var(--mobile-controls-drag-x, 0px)
+      var(--mobile-controls-drag-y, 0px);
     opacity: 1;
     transition:
       opacity 160ms ease,

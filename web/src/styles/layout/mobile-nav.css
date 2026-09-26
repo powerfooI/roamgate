@@ -11,6 +11,7 @@
     bottom: calc(
       58px +
       var(--mobile-floating-controls-lift, 0px) +
+      var(--mobile-controls-offset-y, 0px) +
       env(safe-area-inset-bottom, 0px)
     );
     z-index: 72;
@@ -23,6 +24,10 @@
     box-shadow: var(--shadow-lg);
     transform: translate3d(0, 0, 0) scale(1);
     transform-origin: right bottom;
+    /* Dragging the controls toggle moves the whole stack; see
+       useMobileControlsDrag. `translate` composes with `transform`. */
+    translate: var(--mobile-controls-drag-x, 0px)
+      var(--mobile-controls-drag-y, 0px);
     opacity: 1;
     transition:
       opacity 160ms ease,
@@ -116,6 +121,7 @@
     bottom: calc(
       106px +
       var(--mobile-floating-controls-lift, 0px) +
+      var(--mobile-controls-offset-y, 0px) +
       env(safe-area-inset-bottom, 0px)
     );
     z-index: 74;
@@ -129,6 +135,8 @@
     box-shadow: var(--shadow-lg);
     transform: translate3d(0, 0, 0) scale(1);
     transform-origin: right bottom;
+    translate: var(--mobile-controls-drag-x, 0px)
+      var(--mobile-controls-drag-y, 0px);
     opacity: 1;
     transition:
       opacity 160ms ease,
@@ -139,6 +147,8 @@
 
   .mobile-nav.mobile-terminal-tools {
     position: static;
+    /* Moves with its parent pill, not on its own. */
+    translate: none;
     right: auto;
     bottom: auto;
     z-index: auto;
@@ -192,6 +202,27 @@
     opacity: 0;
     pointer-events: none;
     transform: translate3d(10px, 0, 0) scale(0.72);
+  }
+
+  /* Left edge: mirror the stack so the toggle hugs the edge and pills open
+     towards the screen. */
+  .mobile-controls-left .mobile-nav:not(.mobile-terminal-tools),
+  .mobile-controls-left .mobile-terminal-controls {
+    right: auto;
+    left: calc(10px + env(safe-area-inset-left, 0px));
+    transform-origin: left bottom;
+  }
+
+  .mobile-controls-left .mobile-terminal-controls {
+    flex-direction: row-reverse;
+  }
+
+  .mobile-controls-left .mobile-nav.mobile-terminal-tools {
+    transform-origin: left center;
+  }
+
+  .mobile-controls-left.mobile-controls-collapsed .mobile-terminal-tools {
+    transform: translate3d(-10px, 0, 0) scale(0.72);
   }
 
   @media (hover: none) and (pointer: coarse) and (forced-colors: none) {

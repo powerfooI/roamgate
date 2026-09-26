@@ -15,6 +15,12 @@ import {
   type ReviewAnnotation,
 } from "./annotations";
 import { roamgateLocalStorage } from "./browserStorage";
+import {
+  readMobileControlsPlacement,
+  writeMobileControlsPlacement,
+  type MobileControlsPlacement,
+} from "./mobileControlsPlacement";
+import { useMobileControlsDrag } from "./components/useMobileControlsDrag";
 import { LAYOUT_CHANGE_EVENT, useLayoutPreferences } from "./layoutPreferences";
 import {
   shortcutMatches,
@@ -42,6 +48,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  type CSSProperties,
   Suspense,
   useCallback,
   useEffect,
@@ -1294,6 +1301,21 @@ export default function App() {
   // What the sidebar was doing before Zen hid it, restored when Zen ends.
   const sidebarBeforeZenRef = useRef(false);
   const [mobileControlsCollapsed, setMobileControlsCollapsed] = useState(false);
+  const [mobileControlsPlacement, setMobileControlsPlacement] = useState(
+    readMobileControlsPlacement,
+  );
+  const appRef = useRef<HTMLDivElement>(null);
+  const mobileControlsToggleRef = useRef<HTMLButtonElement>(null);
+  const mobileControlsOffset = useMobileControlsDrag({
+    enabled: mobile,
+    appRef,
+    toggleRef: mobileControlsToggleRef,
+    placement: mobileControlsPlacement,
+    onPlacementChange: (next: MobileControlsPlacement) => {
+      setMobileControlsPlacement(next);
+      writeMobileControlsPlacement(next);
+    },
+  });
   const [mobileTabSheetOpen, setMobileTabSheetOpen] = useState(false);
   const terminalComposerScopeKey = JSON.stringify([
     s.activeConnectionId,
@@ -3458,9 +3480,17 @@ export default function App() {
   };
   return (
     <div
+      ref={appRef}
       className={`app ${sidebarHidden && !mobile ? "sidebar-hidden" : ""} ${
         zenMode && !mobile ? "zen" : ""
-      } ${mobileControlsCollapsed ? "mobile-controls-collapsed" : ""}`}
+      } ${mobileControlsCollapsed ? "mobile-controls-collapsed" : ""} ${
+        mobileControlsPlacement.side === "left" ? "mobile-controls-left" : ""
+      }`}
+      style={
+        {
+          "--mobile-controls-offset-y": `${mobileControlsOffset}px`,
+        } as CSSProperties
+      }
     >
       <header className="topbar">
         <div className="topbar-start">
@@ -3699,8 +3729,10 @@ export default function App() {
           ) : null}
         </nav>
         <button
+          ref={mobileControlsToggleRef}
           type="button"
           className="mobile-controls-toggle"
+          aria-description="Drag to move the controls"
           aria-label={
             mobileControlsCollapsed
               ? "Show mobile controls"

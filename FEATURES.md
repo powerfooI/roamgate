@@ -240,6 +240,9 @@ separate for desktop/mobile. Jump from a diff to its file preview.
 - Customize the floating `2×8` grid and up to four side buttons under
   **Configuration > Behavior > Mobile terminal shortcuts**. The Tabs sheet and
   pane controls work when the tab strip is hidden.
+- Drag the `⋯` controls button to move the floating controls; release snaps
+  them to the nearer side edge at that height, mirrored on the left. The
+  position is kept per browser and stays clear of the header and tab strip.
 - The composer supports IME, dictation, multiline text, and images. **Insert**
   does not execute; **Send** adds one Enter. Drafts are in-memory per
   connection/pane; closing their pane/tab/workspace asks before discarding.
