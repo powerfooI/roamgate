@@ -255,6 +255,7 @@ export function useMobileControlsDrag({
     const cancel = () => {
       start = null;
       clearDrag();
+      reclamp.current();
     };
 
     const touchStart = (event: TouchEvent) => {
@@ -291,7 +292,7 @@ export function useMobileControlsDrag({
       if (event.pointerType !== "touch" && start) cancel();
     };
     const clickCapture = (event: MouseEvent) => {
-      if (!dragged) return;
+      if (!dragged || event.detail === 0) return;
       dragged = false;
       event.preventDefault();
       event.stopPropagation();
@@ -309,7 +310,8 @@ export function useMobileControlsDrag({
     toggle.addEventListener("click", clickCapture, true);
     return () => {
       for (const animation of animations) animation.cancel();
-      cancel();
+      // Disposing listeners must not schedule a placement state update.
+      clearDrag();
       toggle.removeEventListener("touchstart", touchStart);
       toggle.removeEventListener("touchmove", touchMove);
       toggle.removeEventListener("touchend", touchEnd);

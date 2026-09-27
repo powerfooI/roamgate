@@ -4,7 +4,7 @@ import type { MobileControlsPlacement } from "../mobileControlsPlacement";
 import { useMobileControlsDrag } from "./useMobileControlsDrag";
 
 for (const scale of [1, 1.25, 1.5]) {
-  test(`mobile control geometry at ${scale * 100}% UI scale`, () => {
+  test(`mobile control geometry and drag lifecycle at ${scale * 100}% UI scale`, () => {
     const globals = [
       "document",
       "window",
@@ -112,6 +112,16 @@ for (const scale of [1, 1.25, 1.5]) {
         button: 0,
         pointerId: 1,
       });
+    const touch = (type: string, x: number, y: number) => {
+      const event = {
+        touches: [{ clientX: x, clientY: y }],
+        changedTouches: [{ clientX: x, clientY: y }],
+        cancelable: true,
+        preventDefault: mock(() => {}),
+      };
+      listeners.get(type)!(event);
+      return event;
+    };
     try {
       useMobileControlsDrag({
         enabled: true,
@@ -161,13 +171,58 @@ for (const scale of [1, 1.25, 1.5]) {
       expect(after.left + dx! * scale).toBeCloseTo(before.left);
       expect(after.top + dy! * scale).toBeCloseTo(before.top);
 
-      // Re-clamping uses the CSS-pixel offset even after the viewport shrinks.
-      // This layout callback sees the original stored offset (0).
-      appBottom = 400;
-      layoutEffects[1]!();
-      expect(appliedOffset).toBe(
-        Math.round(400 / scale - 300 - Math.max(60, 140 / scale) - 8),
+      touch("touchstart", startX, 500);
+      touch("touchmove", startX - 120, 410);
+      expect(touch("touchend", 10, 410).preventDefault).toHaveBeenCalledTimes(
+        1,
       );
+      const click = {
+        detail: 0,
+        preventDefault: mock(() => {}),
+        stopPropagation: mock(() => {}),
+      };
+      listeners.get("click")!(click);
+      expect(click.preventDefault).not.toHaveBeenCalled();
+      expect(click.stopPropagation).not.toHaveBeenCalled();
+      // Compatibility pointer clicks must still be suppressed after a drag.
+      listeners.get("click")!({ ...click, detail: 1 });
+      expect(click.preventDefault).toHaveBeenCalledTimes(1);
+      expect(click.stopPropagation).toHaveBeenCalledTimes(1);
+
+      // This layout callback sees the original stored offset (0). Resize
+      // during a drag defers clamping; every cancellation path must retry it.
+      for (const cancelEvent of [
+        "touchcancel",
+        "pointercancel",
+        "lostpointercapture",
+      ]) {
+        appBottom = 844;
+        layoutEffects[1]!();
+        if (cancelEvent === "touchcancel") {
+          touch("touchstart", startX, 500);
+          touch("touchmove", startX - 120, 410);
+        } else {
+          pointer("pointerdown", startX, 500);
+          pointer("pointermove", startX - 120, 410);
+        }
+        appBottom = 400;
+        setOffset.mockClear();
+        layoutEffects[1]!();
+        expect(setOffset).not.toHaveBeenCalled();
+        const savedPlacement = placement;
+        listeners.get(cancelEvent)!({ pointerType: "mouse" });
+        expect(setOffset).toHaveBeenCalledTimes(1);
+        expect(appliedOffset).toBe(
+          Math.round(400 / scale - 300 - Math.max(60, 140 / scale) - 8),
+        );
+        expect(styles.size).toBe(0);
+        expect(placement).toBe(savedPlacement);
+      }
+
+      setOffset.mockClear();
+      for (const cleanup of cleanups.splice(0).reverse()) cleanup();
+      expect(setOffset).not.toHaveBeenCalled();
+      expect(listeners.size).toBe(0);
     } finally {
       for (const cleanup of cleanups.reverse()) cleanup();
       for (const spy of spies.reverse()) spy.mockRestore();
