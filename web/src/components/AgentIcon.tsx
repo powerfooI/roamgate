@@ -102,6 +102,10 @@ function agentKind(agent?: string): AgentKind {
   return "unknown";
 }
 
+export function hasAgentIcon(agent?: string): boolean {
+  return Boolean(AGENT_ICON_SVGS[agentKind(agent)]);
+}
+
 export function AgentIcon({
   agent,
   compact = false,

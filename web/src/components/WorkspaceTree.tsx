@@ -65,6 +65,7 @@ import {
   AgentContextMenu,
   type AgentMenuState,
   AgentRow,
+  nestedAgentPaneIds,
 } from "./WorkspaceAgentRows";
 import {
   exportSessionForConnection,
@@ -926,9 +927,11 @@ function WorkspaceRow({
   const s = useStoreSelector(
     (state) => ({
       pendingFocusWorkspaceId: state.pendingFocusWorkspaceId,
+      tabs: state.tabs,
     }),
     shallowEqual,
   );
+  const paneIdsToShow = nestedAgentPaneIds(agents, s.tabs);
   const isChild = depth > 0;
   const hasChildren = children.length > 0;
   const hasNestedItems = hasChildren || agents.length > 0;
@@ -1165,7 +1168,7 @@ function WorkspaceRow({
               key={pane.pane_id}
               pane={pane}
               depth={depth + 1}
-              showPaneId={agents.length > 1}
+              showPaneId={paneIdsToShow.has(pane.pane_id)}
               selected={
                 pane.pane_id === activePaneId || (!activePaneId && pane.focused)
               }

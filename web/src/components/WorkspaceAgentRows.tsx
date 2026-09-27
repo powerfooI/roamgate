@@ -5,10 +5,11 @@ import {
   treeKeyboardAction,
 } from "./treeKeyboard";
 import { store, useStoreSelector } from "../store";
-import type { Pane } from "../types";
+import type { Pane, Tab } from "../types";
 import { agentClass, basename, shortId } from "../utils";
 import { shouldShowAgentStatusLabel } from "./agentSession";
 import { AgentStatusIcon } from "./AgentStatusIcon";
+import { hasAgentIcon } from "./AgentIcon";
 import { observeClampedContextMenu } from "./contextMenuPosition";
 import { TREE_DEPTH_INDENT } from "./treeIndent";
 import "./WorkspaceAgentRows.css";
@@ -39,6 +40,51 @@ function agentLocationName(pane: Pane): string {
   return location ? basename(location.replace(/\\/g, "/")) : "";
 }
 
+function meaningfulTabLabel(label: string): string {
+  const trimmed = label.trim();
+  return /^(?:Tab )?\d+$/.test(trimmed) ? "" : trimmed;
+}
+
+function nestedAgentTitle(pane: Pane, tabLabel: string): string[] {
+  const location = agentLocationName(pane);
+  const agent = pane.agent?.trim() || "Agent";
+  const primary = meaningfulTabLabel(tabLabel) || location || agent;
+  return [
+    ...new Set([primary, location, hasAgentIcon(pane.agent) ? "" : agent]),
+  ].filter(Boolean);
+}
+
+// Panes belong to a single workspace, as grouped by WorkspaceTree.
+export function nestedAgentPaneIds(
+  panes: readonly Pane[],
+  tabs: readonly Tab[],
+): Set<string> {
+  const tabLabels = new Map(
+    tabs
+      .filter((tab) => tab.workspace_id === panes[0]?.workspace_id)
+      .map((tab) => [tab.tab_id, tab.label]),
+  );
+  const tabCounts = new Map<string, number>();
+  const titleCounts = new Map<string, number>();
+  const titles = panes.map((pane) => {
+    const title = nestedAgentTitle(pane, tabLabels.get(pane.tab_id) ?? "").join(
+      " · ",
+    );
+    tabCounts.set(pane.tab_id, (tabCounts.get(pane.tab_id) ?? 0) + 1);
+    titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
+    return title;
+  });
+  return new Set(
+    panes
+      .filter(
+        (pane, index) =>
+          tabCounts.get(pane.tab_id)! > 1 ||
+          titleCounts.get(titles[index])! > 1,
+      )
+      .map((pane) => pane.pane_id),
+  );
+}
+
 export function AgentRow({
   pane,
   selected,
@@ -67,15 +113,17 @@ export function AgentRow({
     onDragEnd: () => void;
   };
 }) {
-  const tabLabel = useStoreSelector((state) => {
-    const label = state.tabs
-      .find(
-        (tab) =>
-          tab.tab_id === pane.tab_id && tab.workspace_id === pane.workspace_id,
-      )
-      ?.label.trim();
-    return label && !/^(?:Tab )?\d+$/.test(label) ? label : "";
-  });
+  const rawTabLabel = useStoreSelector(
+    (state) =>
+      state.tabs
+        .find(
+          (tab) =>
+            tab.tab_id === pane.tab_id &&
+            tab.workspace_id === pane.workspace_id,
+        )
+        ?.label.trim() ?? "",
+  );
+  const tabLabel = meaningfulTabLabel(rawTabLabel);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressStart = useRef<{ x: number; y: number } | null>(null);
   const longPressTriggered = useRef(false);
@@ -93,7 +141,16 @@ export function AgentRow({
   };
   const showStatus = shouldShowAgentStatusLabel(pane.agent_status);
   const nested = variant === "nested";
-  const locationName = agentLocationName(pane);
+  const [primaryTitle, ...secondaryTitles] = nestedAgentTitle(
+    pane,
+    rawTabLabel,
+  );
+  const details = [
+    `${pane.agent?.trim() || "Agent"} pane ${pane.pane_id}`,
+    rawTabLabel ? `tab ${rawTabLabel}` : `tab ${pane.tab_id}`,
+    `status ${pane.agent_status}`,
+    ...new Set([pane.foreground_cwd, pane.cwd].filter(Boolean)),
+  ].join(", ");
 
   return (
     <div
@@ -197,22 +254,34 @@ export function AgentRow({
         e.preventDefault();
         openMenu(e.clientX, e.clientY);
       }}
-      title={[pane.pane_id, tabLabel, pane.cwd].filter(Boolean).join(" · ")}
-      aria-label={`${pane.agent ?? "Agent"} pane${tabLabel ? `, tab ${tabLabel}` : ""}, status ${pane.agent_status}`}
+      title={
+        nested
+          ? details
+          : [pane.pane_id, tabLabel, pane.cwd].filter(Boolean).join(" · ")
+      }
+      aria-label={
+        nested
+          ? details
+          : `${pane.agent ?? "Agent"} pane${tabLabel ? `, tab ${tabLabel}` : ""}, status ${pane.agent_status}`
+      }
     >
       <AgentStatusIcon agent={pane.agent} status={pane.agent_status} />
       <div className="agent-info">
         <div className="agent-title">
           <span className="agent-title-label">
-            {nested
-              ? (pane.agent ?? "Agent")
-              : (workspaceLabel ?? pane.workspace_id)}
-            {tabLabel ? <span className="muted"> · {tabLabel}</span> : null}
+            {nested ? primaryTitle : (workspaceLabel ?? pane.workspace_id)}
+            {nested ? (
+              secondaryTitles.map((label) => (
+                <span key={label} className="muted">
+                  {" "}
+                  · {label}
+                </span>
+              ))
+            ) : tabLabel ? (
+              <span className="muted"> · {tabLabel}</span>
+            ) : null}
             {showPaneId ? (
               <span className="muted"> · {shortId(pane.pane_id)}</span>
-            ) : null}
-            {nested && locationName ? (
-              <span className="muted"> · {locationName}</span>
             ) : null}
           </span>
           {showStatus ? (
