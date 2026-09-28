@@ -20,6 +20,10 @@ describe("workspace preview helpers", () => {
     expect(inlinePreviewMimeForPath("images/demo.webp")).toBe("image/webp");
     expect(inlinePreviewMimeForPath("page.html")).toBeNull();
     expect(inlinePreviewMimeForPath("vector.svg")).toBe("image/svg+xml");
+    expect(inlinePreviewMimeForPath("voice/take.WAV")).toBe("audio/wav");
+    expect(inlinePreviewMimeForPath("song.mp3")).toBe("audio/mpeg");
+    expect(inlinePreviewMimeForPath("clip.m4a")).toBe("audio/mp4");
+    expect(inlinePreviewMimeForPath("video.mp4")).toBeNull();
   });
 
   test("chooses larger limits only for previewable images", () => {

@@ -14,6 +14,19 @@ export const IMAGE_MIME_TYPES: ReadonlyMap<string, string> = new Map([
   ["avif", "image/avif"],
 ]);
 
+// Served inline for <audio>; whether a codec plays depends on the browser.
+export const AUDIO_MIME_TYPES: ReadonlyMap<string, string> = new Map([
+  ["mp3", "audio/mpeg"],
+  ["wav", "audio/wav"],
+  ["ogg", "audio/ogg"],
+  ["oga", "audio/ogg"],
+  ["opus", "audio/ogg"],
+  ["m4a", "audio/mp4"],
+  ["aac", "audio/aac"],
+  ["flac", "audio/flac"],
+  ["weba", "audio/webm"],
+]);
+
 export const HTML_PREVIEW_MAX_BYTES = 512 * 1024;
 
 export function isHtmlPath(path: string) {
@@ -23,5 +36,11 @@ export function isHtmlPath(path: string) {
 export function imageMimeForPath(path: string) {
   return (
     IMAGE_MIME_TYPES.get(path.toLowerCase().split(".").pop() ?? "") ?? null
+  );
+}
+
+export function audioMimeForPath(path: string) {
+  return (
+    AUDIO_MIME_TYPES.get(path.toLowerCase().split(".").pop() ?? "") ?? null
   );
 }

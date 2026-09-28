@@ -183,6 +183,8 @@ after fetch, and abort conflicts. They never push.
   fonts are blocked; HTML source is limited to 512 KiB. Files outside the workspace
   remain available as source or downloads.
 - Preview images (including SVG), PDFs, and local Markdown images with zoom/Fit.
+  Audio files (`.mp3`, `.wav`, `.ogg`/`.oga`/`.opus`, `.m4a`, `.aac`, `.flac`,
+  `.weba`) play in a native audio player.
   Unsupported binaries are download-only; decoding depends on the browser.
 - Upload by dragging onto a checkout directory; download files or workspace
   `.tar.gz` directories; copy paths or delete with confirmation via right-click

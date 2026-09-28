@@ -175,6 +175,21 @@ describe("workspace file handlers", () => {
         "nosniff",
       );
       expect(await inlineResponse.text()).toBe("%PDF-1.7");
+
+      await writeFile(join(root, "take.wav"), "RIFF");
+      const audioResponse = await handlers.downloadWorkspaceFile({
+        workspace_id: "w1",
+        path: "take.wav",
+        inline: true,
+      });
+      expect(audioResponse.headers.get("content-type")).toBe("audio/wav");
+      expect(audioResponse.headers.get("content-disposition")).toContain(
+        "inline;",
+      );
+      expect(audioResponse.headers.get("x-content-type-options")).toBe(
+        "nosniff",
+      );
+      expect(await audioResponse.text()).toBe("RIFF");
     });
   });
 
