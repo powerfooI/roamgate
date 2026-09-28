@@ -8,6 +8,7 @@ import { validateSshDestination } from "../bridge/ssh-command";
 import { assertSshTunnelPlatformSupported } from "../bridge/ssh-tunnel";
 import { defaultAuthTokenPath, loadOrCreateAuthToken } from "./auth-token";
 import { roamgateEnv } from "./environment";
+import { dataRoot } from "./data-paths";
 import { type LogLevel, parseLogLevel, serverLogger } from "../utils/logger";
 import {
   parseTaskNotificationSource,
@@ -27,6 +28,9 @@ type CliArgs = Partial<{
   "public-dir": string;
   "log-level": string;
   "notification-source": string;
+  profile: boolean;
+  "profile-duration": string;
+  "profile-dir": string;
   open: boolean;
   help: boolean;
   version: boolean;
@@ -49,6 +53,7 @@ export type ServerConfig = {
   openBrowserRequested: boolean;
   logLevel: LogLevel;
   taskNotificationSource: TaskNotificationSource;
+  profile?: { directory: string; durationMs: number };
   hasExplicitSocketPath: boolean;
   hasExplicitClientSocketPath: boolean;
 };
@@ -66,6 +71,9 @@ const cliOptions = {
   "public-dir": { type: "string" },
   "log-level": { type: "string" },
   "notification-source": { type: "string" },
+  profile: { type: "boolean" },
+  "profile-duration": { type: "string" },
+  "profile-dir": { type: "string" },
   open: { type: "boolean" },
   help: { type: "boolean" },
   version: { type: "boolean", short: "V" },
@@ -76,6 +84,25 @@ export function resolveServerLogLevel(
   envValue: string | undefined,
 ): LogLevel {
   return parseLogLevel(cliValue ?? envValue ?? "info");
+}
+
+export function resolveServerProfile(
+  enabled: boolean,
+  duration: string | undefined,
+  directory: string | undefined,
+): ServerConfig["profile"] {
+  if (!enabled) return undefined;
+  const seconds = Number(duration ?? "30");
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > 300)
+    throw new Error(
+      "--profile-duration must be an integer from 1 to 300 seconds.",
+    );
+  if (directory !== undefined && !directory.trim())
+    throw new Error("--profile-dir must not be empty.");
+  return {
+    durationMs: seconds * 1_000,
+    directory: resolve(directory ?? join(dataRoot(), "profiles")),
+  };
 }
 
 export function loadServerTls(
@@ -142,6 +169,9 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
   --log-level <level>        error|warn|info|debug  (env ROAMGATE_LOG_LEVEL, default: info)
   --notification-source <s>  herdr|status: task alerts follow Herdr notifications or
                              Roamgate's own status tracker (env ROAMGATE_NOTIFICATION_SOURCE, default: herdr)
+  --profile                  capture server CPU samples (env ROAMGATE_PROFILE=1)
+  --profile-duration <secs>   capture for 1..300 seconds (env ROAMGATE_PROFILE_DURATION, default: 30)
+  --profile-dir <path>        output parent directory (env ROAMGATE_PROFILE_DIR, default: Roamgate data dir/profiles)
   --open                     open browser on start (env OPEN_BROWSER=1)
   -V, --version              show version
   --help                     show this help
@@ -169,6 +199,18 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
   try {
     taskNotificationSource = parseTaskNotificationSource(
       args["notification-source"] ?? roamgateEnv("NOTIFICATION_SOURCE"),
+    );
+  } catch (error) {
+    console.error(`[bridge] ${(error as Error).message}`);
+    process.exit(2);
+  }
+
+  let profile: ServerConfig["profile"];
+  try {
+    profile = resolveServerProfile(
+      args.profile === true || roamgateEnv("PROFILE") === "1",
+      args["profile-duration"] ?? roamgateEnv("PROFILE_DURATION"),
+      args["profile-dir"] ?? roamgateEnv("PROFILE_DIR"),
     );
   } catch (error) {
     console.error(`[bridge] ${(error as Error).message}`);
@@ -249,6 +291,7 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
       args.open === true || process.env.OPEN_BROWSER === "1",
     logLevel,
     taskNotificationSource,
+    profile,
     hasExplicitSocketPath,
     hasExplicitClientSocketPath,
   };

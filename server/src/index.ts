@@ -115,6 +115,13 @@ if (herdrCommandResult !== null) {
 const config = loadServerConfig(APP_VERSION);
 configureServerLogger(config.logLevel);
 const logger = serverLogger;
+const cpuProfile = config.profile
+  ? (await import("./utils/cpu-profile")).startCpuProfile(
+      config.profile,
+      APP_VERSION,
+      logger,
+    )
+  : undefined;
 const webPush = createWebPushService({
   warn: (message) => logger.warn(message),
 });
@@ -1578,7 +1585,10 @@ let managerStopTask: Promise<void> | null = null;
 function stopManagerOnce(): Promise<void> {
   webPush.stop();
   connectionProfiles.stopSupervision();
-  managerStopTask ??= connectionManager.stopAll();
+  managerStopTask ??= Promise.all([
+    connectionManager.stopAll(),
+    cpuProfile?.stop(),
+  ]).then(() => undefined);
   return managerStopTask;
 }
 

@@ -1,0 +1,13 @@
+[package]
+name = "roamgate-terminal-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+base64 = "=0.22.1"
+libc = "=0.2.155"
+serde = { version = "=1.0.203", features = ["derive"] }
+serde_json = "=1.0.117"
+sha2 = "=0.10.8"
+unicode-width = "=0.2.0"

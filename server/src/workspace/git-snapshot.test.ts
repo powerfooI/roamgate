@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from "bun:test";
+import { describe, expect, jest, setDefaultTimeout, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import {
   chmod,
@@ -17,6 +17,10 @@ import { join } from "node:path";
 import { runProcessWithCodeTimeout, shQuote } from "../utils/process-utils";
 import type { RunProcessWithCodeTimeout } from "./file-types";
 import { snapshotWorktreeTree } from "./git-diff";
+
+// Budget the complete integration scenario, not one capture. The production
+// 9s publication deadline and 10s caller timeout remain independently enforced.
+setDefaultTimeout(30_000);
 
 async function repository() {
   const root = await mkdtemp(join(tmpdir(), "roamgate-snapshot-safety-"));

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { homedir, tmpdir } from "node:os";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { runServiceCommand } from "./service-manager";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   herdrConfigDir,
   nativeSocketPath,
@@ -10,6 +10,7 @@ import {
   loadServerConfig,
   loadServerTls,
   resolveServerLogLevel,
+  resolveServerProfile,
 } from "./server-config";
 
 describe("herdrConfigDir", () => {
@@ -38,6 +39,57 @@ describe("resolveServerLogLevel", () => {
   test("uses the environment and defaults to info", () => {
     expect(resolveServerLogLevel(undefined, "warn")).toBe("warn");
     expect(resolveServerLogLevel(undefined, undefined)).toBe("info");
+  });
+});
+
+describe("CPU profile configuration", () => {
+  test("is opt-in and bounds capture duration", () => {
+    expect(resolveServerProfile(false, undefined, undefined)).toBeUndefined();
+    expect(resolveServerProfile(true, undefined, undefined)).toMatchObject({
+      durationMs: 30_000,
+    });
+    expect(resolveServerProfile(true, "300", tmpdir())).toEqual({
+      durationMs: 300_000,
+      directory: resolve(tmpdir()),
+    });
+    for (const duration of ["", "0", "-1", "301", "NaN", "Infinity", "1.5"])
+      expect(() => resolveServerProfile(true, duration, undefined)).toThrow(
+        "1 to 300",
+      );
+    expect(() => resolveServerProfile(true, "30", " ")).toThrow("empty");
+  });
+
+  test("loads CLI flags with precedence over environment settings", () => {
+    const originalArgs = process.argv;
+    const keys = [
+      "ROAMGATE_PROFILE",
+      "ROAMGATE_PROFILE_DURATION",
+      "ROAMGATE_PROFILE_DIR",
+    ] as const;
+    const originalEnv = keys.map((key) => process.env[key]);
+    try {
+      process.env.ROAMGATE_PROFILE = "1";
+      process.env.ROAMGATE_PROFILE_DURATION = "45";
+      process.env.ROAMGATE_PROFILE_DIR = tmpdir();
+      process.argv = [process.execPath, "roamgate", "--host", "127.0.0.1"];
+      expect(loadServerConfig("test").profile?.durationMs).toBe(45_000);
+      process.env.ROAMGATE_PROFILE = "0";
+      expect(loadServerConfig("test").profile).toBeUndefined();
+      process.argv.push(
+        "--profile",
+        "--profile-duration",
+        "2",
+        "--profile-dir",
+        tmpdir(),
+      );
+      expect(loadServerConfig("test").profile?.durationMs).toBe(2_000);
+    } finally {
+      process.argv = originalArgs;
+      keys.forEach((key, i) => {
+        if (originalEnv[i] === undefined) delete process.env[key];
+        else process.env[key] = originalEnv[i];
+      });
+    }
   });
 });
 

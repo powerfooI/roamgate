@@ -273,6 +273,9 @@ explicit connection registry paths remain authoritative, including empty values.
 | `--public-dir <path>` | `PUBLIC_DIR` | Embedded assets |
 | `--log-level <level>` | `ROAMGATE_LOG_LEVEL` | `info` |
 | `--notification-source <herdr\|status>` | `ROAMGATE_NOTIFICATION_SOURCE` | `herdr`; see [Web Push](#web-push-notifications) |
+| `--profile` | `ROAMGATE_PROFILE=1` | Disabled; bounded server CPU capture |
+| `--profile-duration <seconds>` | `ROAMGATE_PROFILE_DURATION` | `30`; integer 1..300 |
+| `--profile-dir <path>` | `ROAMGATE_PROFILE_DIR` | Roamgate data directory's `profiles/` |
 | `--open` | `OPEN_BROWSER=1` | Disabled |
 
 | Additional environment variable | Purpose |
@@ -398,6 +401,50 @@ Logs use one line per event: timestamp, severity, scope, bounded key/value conte
 Use `roamgate --log-level debug` or `ROAMGATE_LOG_LEVEL=debug` temporarily;
 restart services after editing their environment. Debug can expose paths/IDs;
 return to `info` afterwards. Logs omit URL auth tokens, which remain in protected files.
+
+### Performance profiling
+
+Start a short foreground capture on an unused port, then reproduce the slow
+interaction in that instance's browser page:
+
+```bash
+roamgate --host 127.0.0.1 --port 8788 --profile --profile-duration 30 --open
+```
+
+Sampling begins during startup and stops automatically after the requested
+interval; the server keeps running. Ctrl+C/SIGTERM attempts to save the partial
+capture before normal shutdown. Force-kill/crash or a forced shutdown deadline
+may lose it. The deadline is event-loop scheduled, so a blocked loop can delay
+completion. Profiling adds CPU/memory overhead and exporting the report can
+briefly pause the server; leave it off for ordinary use. No debugger port or
+profiling HTTP endpoint is opened.
+
+Each run creates a private, uniquely named subdirectory under `--profile-dir`
+(default `~/.config/roamgate/profiles`, or `%APPDATA%\\roamgate\\profiles` on Windows).
+The log reports the output directory. Files are owner-only on POSIX; Windows
+access follows directory ACLs. Keep diagnostic files private and remove them
+when no longer needed; captures accumulate without automatic cleanup.
+
+- `summary.txt`: elapsed time, process CPU time, ending RSS, event-loop-delay
+  statistics, hottest sampled functions and JIT-tier/bytecode breakdown.
+- `cpu.json`: Bun/JSC's raw `functions`, `bytecodes` and `stackTraces` result.
+  This is **not Chrome's `.cpuprofile` format**. It can contain source paths,
+  function names and source-map references; review it before sharing.
+
+Process CPU time sums all process threads and can exceed elapsed time. The
+20 ms event-loop-delay probe includes scheduling delays; it cannot by itself
+separate CPU contention from synchronous JavaScript. CPU samples also do not
+measure browser drawing, network wait or keyboard-to-screen latency. Minified
+standalone builds may have shortened function names; for source-level diagnosis,
+run the matching checkout with `bun server/src/index.ts --profile` after building
+web assets. To investigate browser stalls, separately record its Performance
+panel while reproducing the same interaction.
+
+For a managed service, set `ROAMGATE_PROFILE=1` and optionally
+`ROAMGATE_PROFILE_DURATION`/`ROAMGATE_PROFILE_DIR` in its environment file, then
+restart when appropriate. The capture is once per process start, not an on-demand
+capture of an already running process. Remove the settings afterwards. Do not
+combine `--profile` with Bun's other CPU sampling profilers in the same process.
 
 ## Multiple and remote Herdr connections
 

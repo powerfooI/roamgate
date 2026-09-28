@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +14,10 @@ import {
   statusLabel,
   type LastStepBaselineStore,
 } from "./git-diff";
+
+// Real-Git cases perform several snapshots plus repository setup. Their total
+// runtime can exceed 5s even while each capture stays within its own deadline.
+setDefaultTimeout(30_000);
 
 const runProcessWithCodeTimeout: RunProcessWithCodeTimeout = async (argv) => {
   const process = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" });
