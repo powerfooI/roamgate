@@ -14,7 +14,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { EditorView as CodeMirrorEditorView } from "@codemirror/view";
-import { ChevronLeft, FolderPlus, RefreshCw } from "lucide-react";
+import { ChevronLeft, FolderPlus, RefreshCw, X } from "lucide-react";
 import { fileReviewLineLabel, MAX_QUOTE_LENGTH } from "../annotations";
 import {
   FileAnnotationDrag,
@@ -193,6 +193,7 @@ export function FilePreviewContent({
   onOpenChanges,
   onOpenFile,
   onRefresh,
+  onClosePreview,
   onCreateAnnotation,
   onReanchorAnnotations,
 }: {
@@ -208,6 +209,7 @@ export function FilePreviewContent({
   onOpenChanges?: () => void;
   onOpenFile?: (path: string, fragment?: string) => void;
   onRefresh?: () => void;
+  onClosePreview?: () => void;
   onCreateAnnotation?: (annotation: NewReviewAnnotation) => void;
   onReanchorAnnotations?: (path: string, text: string) => void;
 }) {
@@ -558,6 +560,17 @@ export function FilePreviewContent({
                 }
               >
                 Changes
+              </button>
+            ) : null}
+            {entry && onClosePreview ? (
+              <button
+                type="button"
+                className="file-preview-refresh"
+                title="Close preview"
+                aria-label="Close file preview"
+                onClick={onClosePreview}
+              >
+                <X size={13} aria-hidden="true" />
               </button>
             ) : null}
           </div>
