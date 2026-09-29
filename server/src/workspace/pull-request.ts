@@ -187,6 +187,24 @@ export async function readPullRequestStatus(
         "Select the source repository remote to resolve this branch.",
       );
     result.remote = selected.name;
+    const branchRef = `refs/heads/${result.branch}`;
+    const tracking = await run([
+      "git",
+      "for-each-ref",
+      "--format=%(refname)%00%(upstream:remotename)%00%(upstream:remoteref)",
+      branchRef,
+    ]);
+    if (tracking.code !== 0) throw new Error("Cannot read upstream branch");
+    const upstream = tracking.stdout
+      .split(/\r?\n/)
+      .map((line) => line.split("\0"))
+      .find(([ref]) => ref === branchRef);
+    // A checkout may use a local alias (e.g. pr-299). Only its selected
+    // remote's upstream identifies the provider-side source branch.
+    const sourceBranch =
+      upstream?.[1] === selected.name && upstream[2]?.startsWith("refs/heads/")
+        ? upstream[2].slice("refs/heads/".length)
+        : result.branch;
     let provider: ReviewProvider | undefined =
       selected.host === "github.com"
         ? "github"
@@ -263,14 +281,14 @@ export async function readPullRequestStatus(
       for (const repository of new Set(repositories)) {
         const query = new URLSearchParams({
           state: "all",
-          head: `${sourceRepository.split("/")[0]}:${result.branch}`,
+          head: `${sourceRepository.split("/")[0]}:${sourceBranch}`,
           per_page: "100",
         });
         const pulls = list(await api(`repos/${repository}/pulls?${query}`));
         for (const raw of pulls) {
           const pr = object(raw);
           if (
-            pr.head?.ref !== result.branch ||
+            pr.head?.ref !== sourceBranch ||
             pr.head?.repo?.full_name?.toLowerCase() !==
               sourceRepository.toLowerCase()
           )
@@ -301,7 +319,7 @@ export async function readPullRequestStatus(
         const query = new URLSearchParams({
           scope: "all",
           state: "all",
-          source_branch: result.branch,
+          source_branch: sourceBranch,
           per_page: "100",
         });
         for (const raw of list(
@@ -310,7 +328,7 @@ export async function readPullRequestStatus(
           const mr = object(raw);
           if (
             mr.source_project_id !== sourceId ||
-            mr.source_branch !== result.branch
+            mr.source_branch !== sourceBranch
           )
             continue;
           const id = number(mr.iid);

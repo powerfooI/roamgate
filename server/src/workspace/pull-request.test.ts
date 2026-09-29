@@ -76,6 +76,8 @@ function fixture(
     const overridden = options.override?.(command);
     if (overridden) return overridden;
     if (command.includes("'symbolic-ref'")) return ok("feature/card\n");
+    if (command.includes("'for-each-ref'"))
+      return ok("refs/heads/feature/card\0\0\n");
     if (command.includes("'git' 'remote'"))
       return ok(
         options.remoteOutput ??
@@ -178,6 +180,40 @@ describe("PR/MR status", () => {
   });
 
   for (const provider of ["github", "gitlab"] as const) {
+    test(`${provider} resolves a renamed local branch through its upstream over local and SSH`, async () => {
+      for (const ssh of [false, true]) {
+        const f = fixture(provider, {
+          ssh,
+          override: (command) => {
+            if (command.includes("'symbolic-ref'")) return ok("pr-299\n");
+            if (command.includes("'for-each-ref'"))
+              return ok("refs/heads/pr-299\0origin\0refs/heads/feature/card\n");
+          },
+        });
+        const result = await f.read({ branch: "pr-299" });
+        expect(result.state).toBe("ready");
+        expect(result.branch).toBe("pr-299");
+        expect(result.request?.number).toBe(provider === "github" ? 12 : 7);
+        const queries = f.commands
+          .flat()
+          .filter((arg) => arg.includes("per_page="));
+        expect(queries.length).toBeGreaterThan(0);
+        expect(queries.every((query) => query.includes("feature%2Fcard"))).toBe(
+          true,
+        );
+      }
+    });
+    test(`${provider} never uses a different remote or local upstream's branch`, async () => {
+      for (const remote of ["other", "."]) {
+        const result = await fixture(provider, {
+          override: (command) =>
+            command.includes("'for-each-ref'")
+              ? ok(`refs/heads/feature/card\0${remote}\0refs/heads/main\n`)
+              : undefined,
+        }).read();
+        expect(result.state).toBe("ready");
+      }
+    });
     test(`${provider} resolves a fork and preserves provider status over local and SSH`, async () => {
       for (const ssh of [false, true]) {
         const f = fixture(provider, { ssh });
