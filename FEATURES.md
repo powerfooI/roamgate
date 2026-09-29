@@ -184,7 +184,8 @@ after fetch, and abort conflicts. They never push.
   remain available as source or downloads.
 - Preview images (including SVG), PDFs, and local Markdown images with zoom/Fit.
   Audio files (`.mp3`, `.wav`, `.ogg`/`.oga`/`.opus`, `.m4a`, `.aac`, `.flac`,
-  `.weba`) play in a native audio player.
+  `.weba`) up to 25 MiB play in a native audio player with byte-range seeking,
+  including on SSH profiles. Larger audio files remain download-only.
   Unsupported binaries are download-only; decoding depends on the browser.
 - Upload by dragging onto a checkout directory; download files or workspace
   `.tar.gz` directories; copy paths or delete with confirmation via right-click

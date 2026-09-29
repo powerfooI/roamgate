@@ -1,6 +1,7 @@
 import { shortcutMatches } from "../shortcutPreferences";
 import {
   audioMimeForPath,
+  AUDIO_INLINE_PREVIEW_MAX_BYTES,
   HTML_PREVIEW_MAX_BYTES,
   isHtmlPath,
 } from "../../../shared/filePreview";
@@ -243,6 +244,8 @@ export function FilePreviewContent({
   const hasAudioPreview = Boolean(
     preview && preview.type !== "directory" && audioMimeForPath(previewPath),
   );
+  const audioTooLarge =
+    hasAudioPreview && (preview?.size ?? 0) > AUDIO_INLINE_PREVIEW_MAX_BYTES;
   const hasMediaPreview = hasPdfPreview || hasAudioPreview;
   const hasHtmlPreview =
     hasPreviewText &&
@@ -627,7 +630,17 @@ export function FilePreviewContent({
               PDF is too large to preview. Use Download from the file menu.
             </div>
           ) : null}
-          {!loading && !error && hasAudioPreview && inlinePreviewUrl ? (
+          {!loading && !error && audioTooLarge ? (
+            <div className="file-preview-state">
+              Audio is too large to preview (25 MiB maximum). Use Download from
+              the file menu.
+            </div>
+          ) : null}
+          {!loading &&
+          !error &&
+          hasAudioPreview &&
+          !audioTooLarge &&
+          inlinePreviewUrl ? (
             <div className="file-preview-audio">
               <audio
                 key={inlinePreviewUrl}

@@ -1,4 +1,13 @@
-import { IMAGE_MIME_TYPES } from "../../../shared/filePreview";
+import {
+  AUDIO_INLINE_PREVIEW_MAX_BYTES,
+  AUDIO_MIME_TYPES,
+  IMAGE_MIME_TYPES,
+} from "../../../shared/filePreview";
+import {
+  FileDownloadError,
+  fileDownloadRange,
+  type FileDownloadOptions,
+} from "./file-download";
 import { sshCommandArgv } from "../bridge/ssh-command";
 import {
   DELETE_TIMEOUT_MS,
@@ -292,10 +301,7 @@ printf '\\n'
   return parseRemoteFilePreview(result.stdout, requestedPath);
 }
 
-export function parseRemoteFileDownload(
-  stdout: string,
-  requestedPath: string,
-): FileDownloadResult {
+export function parseRemoteFileDownload(stdout: string, requestedPath: string) {
   const lines = stdout.split(/\r?\n/);
   const meta = lines.shift() ?? "";
   const [kind, rawSize, rawRelative, rawName, rawContentType] =
@@ -330,14 +336,21 @@ export async function downloadRemoteFile({
   requestedPath,
   runProcessWithCodeTimeout,
   shQuote,
+  options = {},
 }: {
   host: string;
   rootPath: string;
   requestedPath: string;
   runProcessWithCodeTimeout: RunProcessWithCodeTimeout;
   shQuote: (value: string) => string;
-}) {
-  const command = `
+  options?: FileDownloadOptions;
+}): Promise<FileDownloadResult> {
+  const blockSize = 64 * 1024;
+  async function readDownload(
+    metadataOnly = false,
+    slice?: { start: number; end: number; size: number },
+  ) {
+    const command = `
 set -euo pipefail
 root=${shQuote(rootPath)}
 request=${shQuote(requestedPath)}
@@ -360,32 +373,87 @@ else
   rel="\${target_real#"$root_real"/}"
 fi
 name="\${target_real##*/}"
+${slice ? '[ -f "$target_real" ] || { echo "file changed during download" >&2; exit 16; }' : ""}
 if [ -d "$target_real" ]; then
   parent="$(dirname "$target_real")"
   archive_name="$name.tar.gz"
   content_type="application/gzip"
   printf 'META\\t%s\\t%s\\t%s\\t%s\\n' "0" "$(printf '%s' "$rel" | base64 | tr -d '\\n')" "$(printf '%s' "$archive_name" | base64 | tr -d '\\n')" "$(printf '%s' "$content_type" | base64 | tr -d '\\n')"
+  ${metadataOnly ? "exit 0" : ""}
   COPYFILE_DISABLE=1 tar -czf - -C "$parent" -- "$name" | base64 | tr -d '\\n'
 else
-  size="$(stat -c %s "$target_real" 2>/dev/null || stat -f %z "$target_real" 2>/dev/null || printf 0)"
+  size="$(stat -c %s "$target_real" 2>/dev/null || stat -f %z "$target_real")"
+  ${
+    options.inline
+      ? `case "$(printf '%s' "$rel" | tr '[:upper:]' '[:lower:]')" in
+    ${Array.from(AUDIO_MIME_TYPES.keys(), (extension) => `*.${extension}`).join("|")})
+      [ "$size" -le ${AUDIO_INLINE_PREVIEW_MAX_BYTES} ] || exit 15 ;;
+  esac`
+      : ""
+  }
+  ${slice ? `[ "$size" -eq ${slice.size} ] || { echo "file changed during download" >&2; exit 16; }` : ""}
   content_type="application/octet-stream"
   printf 'META\\t%s\\t%s\\t%s\\t%s\\n' "$size" "$(printf '%s' "$rel" | base64 | tr -d '\\n')" "$(printf '%s' "$name" | base64 | tr -d '\\n')" "$(printf '%s' "$content_type" | base64 | tr -d '\\n')"
-  base64 "$target_real" | tr -d '\\n'
+  ${metadataOnly ? "exit 0" : ""}
+  ${slice ? `dd if="$target_real" bs=${blockSize} skip=${Math.floor(slice.start / blockSize)} count=${Math.ceil(slice.end / blockSize) - Math.floor(slice.start / blockSize)} 2>/dev/null | base64` : 'base64 "$target_real"'} | tr -d '\\n'
 fi
 printf '\\n'
 `;
-  const result = await runProcessWithCodeTimeout(
-    sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
-    DOWNLOAD_TIMEOUT_MS,
-  );
-  if (result.code !== 0) {
-    throw new Error(
-      (result.stderr || result.stdout || `file download exited ${result.code}`)
-        .trim()
-        .slice(0, 1000),
+    const result = await runProcessWithCodeTimeout(
+      sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
+      DOWNLOAD_TIMEOUT_MS,
     );
+    if (result.code === 15) {
+      throw new FileDownloadError(
+        "Audio is too large to preview. Use Download.",
+        413,
+      );
+    }
+    if (result.code !== 0) {
+      throw new Error(
+        (
+          result.stderr ||
+          result.stdout ||
+          `file download exited ${result.code}`
+        )
+          .trim()
+          .slice(0, 1000),
+      );
+    }
+    return parseRemoteFileDownload(result.stdout, requestedPath);
   }
-  return parseRemoteFileDownload(result.stdout, requestedPath);
+
+  if (!options.inline && !options.range) return readDownload();
+  const metadata = await readDownload(true);
+  if (metadata.contentType === "application/gzip") return readDownload();
+  if (!Number.isSafeInteger(metadata.size) || metadata.size < 0) {
+    throw new Error("Invalid file download size");
+  }
+  const range = fileDownloadRange(metadata.path, metadata.size, options);
+  const start = range?.start ?? 0;
+  const end = range ? range.end + 1 : metadata.size;
+  const download = await readDownload(false, {
+    start,
+    end,
+    size: metadata.size,
+  });
+  // Read only intersecting blocks; trim their edges without byte-at-a-time dd.
+  const body = download.body.subarray(
+    start % blockSize,
+    (start % blockSize) + end - start,
+  );
+  if (body.length !== end - start || download.path !== metadata.path) {
+    throw new Error("File changed during download");
+  }
+  return {
+    ...download,
+    acceptRanges: true,
+    ...(range
+      ? { contentRange: `bytes ${start}-${end - 1}/${metadata.size}` }
+      : {}),
+    size: body.length,
+    body,
+  };
 }
 
 export function parseRemoteFileUpload(stdout: string): FileUploadResult {

@@ -34,6 +34,8 @@ export type FilePreviewResult = FilePreviewDecoded & {
 };
 
 export type FileDownloadResult = {
+  acceptRanges?: boolean;
+  contentRange?: string;
   filename: string;
   path: string;
   size: number;

@@ -9,7 +9,12 @@ import {
   sanitizePreviewPath,
   sanitizeUploadFilename,
 } from "./file-paths";
-import type { FileResolution, RunProcessWithCodeTimeout } from "./file-types";
+import type {
+  FileDownloadResult,
+  FileResolution,
+  RunProcessWithCodeTimeout,
+} from "./file-types";
+import { FileDownloadError } from "./file-download";
 import {
   deleteLocalFile,
   downloadLocalFile,
@@ -344,17 +349,41 @@ export function createFileHandlers({
         });
       }
     }
-    const download = host
-      ? await downloadRemoteFile({
-          host,
-          rootPath: checkoutPath,
-          requestedPath: path,
-          runProcessWithCodeTimeout,
-          shQuote,
-        })
-      : await downloadLocalFile(checkoutPath, path);
+    const options = {
+      inline: params.inline === true,
+      range: typeof params.range === "string" ? params.range : undefined,
+      ifRange:
+        typeof params.if_range === "string" ? params.if_range : undefined,
+    };
+    let download: FileDownloadResult;
+    try {
+      download = host
+        ? await downloadRemoteFile({
+            host,
+            rootPath: checkoutPath,
+            requestedPath: path,
+            runProcessWithCodeTimeout,
+            shQuote,
+            options,
+          })
+        : await downloadLocalFile(checkoutPath, path, options);
+    } catch (error) {
+      if (!(error instanceof FileDownloadError)) throw error;
+      return new Response(error.message, {
+        status: error.status,
+        headers: {
+          "cache-control": "private, no-store",
+          "x-content-type-options": "nosniff",
+          ...(error.status === 416
+            ? { "content-range": `bytes */${error.size}` }
+            : {}),
+        },
+      });
+    }
     const inlineMime =
-      params.inline === true ? inlinePreviewMimeForPath(download.path) : null;
+      options.inline && download.contentType !== "application/gzip"
+        ? inlinePreviewMimeForPath(download.path)
+        : null;
     const headers: Record<string, string> = {
       "content-type": inlineMime ?? download.contentType,
       "content-length": String(download.size),
@@ -363,6 +392,8 @@ export function createFileHandlers({
         : downloadContentDisposition(download.filename),
       "x-file-path": encodeURIComponent(download.path),
     };
+    if (download.acceptRanges) headers["accept-ranges"] = "bytes";
+    if (download.contentRange) headers["content-range"] = download.contentRange;
     if (inlineMime) {
       headers["cache-control"] = "private, no-store";
       headers["x-content-type-options"] = "nosniff";
@@ -373,7 +404,10 @@ export function createFileHandlers({
       headers["content-security-policy"] =
         "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
     }
-    return new Response(download.body, { headers });
+    return new Response(download.body, {
+      status: download.contentRange ? 206 : 200,
+      headers,
+    });
   }
 
   async function uploadFile(params: Record<string, unknown>, request: Request) {

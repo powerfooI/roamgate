@@ -27,6 +27,7 @@ export const AUDIO_MIME_TYPES: ReadonlyMap<string, string> = new Map([
   ["weba", "audio/webm"],
 ]);
 
+export const AUDIO_INLINE_PREVIEW_MAX_BYTES = 25 * 1024 * 1024;
 export const HTML_PREVIEW_MAX_BYTES = 512 * 1024;
 
 export function isHtmlPath(path: string) {

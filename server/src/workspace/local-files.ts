@@ -24,6 +24,7 @@ import type {
 } from "./file-types";
 import { runBinaryProcessWithTimeout } from "./process";
 import { decodePreviewBuffer, previewLimitForPath } from "./preview";
+import { fileDownloadRange, type FileDownloadOptions } from "./file-download";
 
 export async function listLocalFiles(
   rootPath: string,
@@ -138,6 +139,7 @@ export async function readLocalFile(
 export async function downloadLocalFile(
   rootPath: string,
   requestedPath: string,
+  options: FileDownloadOptions = {},
 ): Promise<FileDownloadResult> {
   const rootReal = await realpath(rootPath);
   const requestedAbsolute = isAbsolute(requestedPath);
@@ -179,11 +181,18 @@ export async function downloadLocalFile(
   if (!info.isFile()) {
     throw new Error("only regular files and directories can be downloaded");
   }
+  const range = fileDownloadRange(displayPath, info.size, options);
+  const start = range?.start ?? 0;
+  const end = range ? range.end + 1 : info.size;
   return {
+    acceptRanges: true,
+    ...(range
+      ? { contentRange: `bytes ${start}-${end - 1}/${info.size}` }
+      : {}),
     filename: basename(targetReal) || "download",
     path: displayPath,
-    size: info.size,
-    body: Bun.file(targetReal),
+    size: end - start,
+    body: Bun.file(targetReal).slice(start, end),
     contentType: "application/octet-stream",
   };
 }
