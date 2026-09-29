@@ -1,3 +1,7 @@
+import {
+  WorktreeHookConfigError,
+  type createWorktreeHookRunner,
+} from "../worktree/worktree-hooks";
 import type { ServerWebSocket } from "bun";
 import {
   CONNECTION_CHANGED_DURING_REQUEST,
@@ -22,18 +26,9 @@ import {
   sourceCheckoutPath as workspaceSourceCheckoutPath,
 } from "../workspace/utils";
 
-type ReadPaseoWorktreeHooks = (
-  checkoutPath: string,
-  sourceCheckoutPath?: string,
-) => Promise<{
-  path: string;
-  config: {
-    setup?: string;
-    opened?: string;
-    teardown?: string;
-    removed?: string;
-  };
-} | null>;
+type ReadWorktreeHooks = ReturnType<
+  typeof createWorktreeHookRunner
+>["readWorktreeHooks"];
 
 export function createSettingsRpcHandler(args: {
   connectionId?: string;
@@ -42,7 +37,7 @@ export function createSettingsRpcHandler(args: {
   updateSettings?: typeof updateGuiSettings;
   herdr: HerdrClient;
   sshHost: () => string | undefined;
-  readPaseoWorktreeHooks: ReadPaseoWorktreeHooks;
+  readWorktreeHooks: ReadWorktreeHooks;
   resolveWorkspaceGitRoot: (workspaceId: string) => Promise<{
     workspace: any;
     root: string;
@@ -165,6 +160,8 @@ export function createSettingsRpcHandler(args: {
             key: null,
             enabled: true,
             hooks: {},
+            config_path: null,
+            config_source: null,
             paseo_path: null,
             error: "workspace has no worktree metadata",
           });
@@ -172,16 +169,24 @@ export function createSettingsRpcHandler(args: {
         const key = repoSettingsKey(workspace);
         const checkoutPath = workspaceCheckoutPath(workspace);
         const sourceCheckoutPath = workspaceSourceCheckoutPath(workspace);
-        let paseo: Awaited<ReturnType<ReadPaseoWorktreeHooks>> = null;
+        let loaded: Awaited<ReturnType<ReadWorktreeHooks>> = null;
         let readError: string | undefined;
+        let configPath: string | null = null;
+        let configSource: "roamgate" | "paseo" | null = null;
         try {
-          paseo = await args.readPaseoWorktreeHooks(
+          loaded = await args.readWorktreeHooks(
             checkoutPath,
             sourceCheckoutPath,
           );
         } catch (e) {
           readError = (e as Error).message;
+          if (e instanceof WorktreeHookConfigError) {
+            configPath = e.path;
+            configSource = e.source;
+          }
         }
+        configPath = loaded?.path ?? configPath;
+        configSource = loaded?.source ?? configSource;
         return reply({
           workspace_id: workspaceId,
           key,
@@ -190,8 +195,10 @@ export function createSettingsRpcHandler(args: {
           repo_root: workspace.worktree.repo_root,
           checkout_path: checkoutPath,
           source_checkout_path: sourceCheckoutPath,
-          paseo_path: paseo?.path ?? null,
-          hooks: paseo?.config ?? {},
+          config_path: configPath,
+          config_source: configSource,
+          paseo_path: configSource === "paseo" ? configPath : null,
+          hooks: loaded?.config ?? {},
           error: readError,
         });
       }

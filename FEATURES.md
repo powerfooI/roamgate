@@ -144,9 +144,9 @@ commit by its object ID without rewriting remote-tracking refs or `FETCH_HEAD`.
 Stale tracking-ref names do not block creation or sync, and both operations use
 the resolved commit rather than a ref that another fetch could change.
 
-### Paseo Worktree Hooks
+### Worktree Hooks
 
-`paseo.json` supports `setup`, `opened`, `teardown`, and `removed` hooks.
+`roamgate.json` (with legacy `paseo.json` compatibility) supports `setup`, `opened`, `teardown`, and `removed` hooks.
 **Hooks are enabled by default and execute trusted, unsandboxed repository code**
 on the connected host. Review them or disable them under **Worktree hooks** /
 **Worktree Lifecycle** before acting. Failed teardown stops removal; other hook

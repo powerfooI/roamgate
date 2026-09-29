@@ -823,7 +823,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
   const { enrichWorkspacesWithGitStatus, invalidateGitStatus } =
     connection.status;
   const {
-    runPaseoWorktreeHook,
+    runWorktreeHook,
     worktreeRemoveHookContext,
     runWorktreeRemovedHook,
     runWorktreeOpenedHook,
@@ -1089,7 +1089,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
             : "unknown";
           const beforeRemoveHook =
             removeHookContext && checkoutState !== "missing"
-              ? await runPaseoWorktreeHook({
+              ? await runWorktreeHook({
                   hook: "teardown",
                   checkoutPath: removeHookContext.checkoutPath,
                   sourceCheckoutPath: removeHookContext.sourceCheckoutPath,

@@ -491,7 +491,7 @@ See [isolation](./ARCHITECTURE.md#connection-isolation) and
 
 ## Worktree hooks
 
-Configure [Paseo hooks](https://paseo.sh/docs/worktrees) in `paseo.json`:
+Configure hooks in `roamgate.json` at the repository root:
 
 ```json
 {
@@ -511,23 +511,51 @@ Configure [Paseo hooks](https://paseo.sh/docs/worktrees) in `paseo.json`:
 | `teardown` | Before removal; target worktree |
 | `removed` | After removal; source checkout |
 
-For the first three, the target's config wins; only an absent file falls back to
-the source. `removed` normally uses source config because the target is gone.
-Commands run through `sh -c`, remotely for SSH connections.
+Roamgate selects the first existing file in this order:
+
+1. Target worktree's `roamgate.json`
+2. Source checkout's `roamgate.json`
+3. Target worktree's `paseo.json` (legacy compatibility)
+4. Source checkout's `paseo.json` (legacy compatibility)
+
+One complete configuration is selected; files are never merged and hooks never
+run twice. Missing or blank hook commands are skipped. Valid empty objects (`{}`
+or `{"worktree": {}}`) suppress fallback. Empty files, invalid JSON, non-object
+configuration or `worktree` values, non-string known hook fields, and read
+failures report an error with the selected path, without trying another file.
+Unknown fields are ignored.
+
+After removal, the target is gone and resolution uses the source checkout;
+the `removed` configuration and its scripts must be available there.
+Configuration reads and commands run on the connected local or SSH host.
+Commands use the existing `sh -c` runner and the working directories above.
+
+To migrate, rename `paseo.json` to `roamgate.json`, preserving its `worktree`
+object. Review both checkouts: even a source native file overrides a target
+legacy file. No automatic migration is performed. **Worktree Hooks** and
+**Worktree Lifecycle** show the effective path, errors, and legacy compatibility.
+The settings RPC exposes `config_path` and `config_source` (`roamgate`, `paseo`,
+or `null`); the compatibility field `paseo_path` is set only for a Paseo file.
+
+Prefer the `ROAMGATE_HOOK_*` variables in new scripts:
 
 | Variable | Value |
 | --- | --- |
-| `PASEO_HOOK` | Hook name |
-| `PASEO_CHECKOUT_PATH` | Target path, including former path after removal |
-| `PASEO_SOURCE_CHECKOUT_PATH` | Source checkout when known |
 | `ROAMGATE_HOOK_EVENT` | `worktree.created`, `worktree.opened`, `worktree.before_remove`, or `worktree.removed` |
-| `ROAMGATE_HOOK_CHECKOUT_PATH` | Same target path |
-| `ROAMGATE_HOOK_SOURCE_CHECKOUT_PATH` | Same source path |
+| `ROAMGATE_HOOK_CHECKOUT_PATH` | Target path, including former path after removal |
+| `ROAMGATE_HOOK_SOURCE_CHECKOUT_PATH` | Source checkout when known |
 
-Legacy `HERDR_GUI_HOOK_*` aliases remain. Notices show bounded diagnostics.
+`HERDR_GUI_HOOK_*` remains an alias for each corresponding Roamgate variable.
+`PASEO_HOOK` contains `setup`, `opened`, `teardown`, or `removed`;
+`PASEO_CHECKOUT_PATH` and `PASEO_SOURCE_CHECKOUT_PATH` retain the same paths.
+All aliases are available for both native and legacy configuration.
+Notices show bounded diagnostics including the actual configuration path.
 **Failed teardown stops removal; other failures do not roll back completed actions.**
 Hooks default on; inspect/disable per repository under **Worktree hooks** or
-**Worktree Lifecycle**. They are trusted, unsandboxed code: review before acting.
+**Worktree Lifecycle**. Disabling applies to both formats and skips execution
+even when configuration is invalid. Hooks are trusted, unsandboxed repository
+code executed with the execution user's permissions. A native filename does
+not establish trust: review configuration and scripts before worktree operations.
 
 ## Run as a user service
 

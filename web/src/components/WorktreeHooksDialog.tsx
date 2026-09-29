@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { store } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
+import type { WorktreeHookInfo } from "../worktreeLifecycle";
 import { CloseButton } from "./CloseButton";
 import "./WorktreeHooksDialog.css";
 
@@ -10,20 +11,6 @@ const HOOKS = [
   ["teardown", "Teardown"],
   ["removed", "Removed"],
 ] as const;
-
-type HookName = (typeof HOOKS)[number][0];
-
-type WorktreeHookInfo = {
-  key: string | null;
-  enabled: boolean;
-  repo_name?: string;
-  repo_root?: string;
-  checkout_path?: string;
-  source_checkout_path?: string;
-  paseo_path?: string | null;
-  hooks?: Partial<Record<HookName, string>>;
-  error?: string;
-};
 
 export function WorktreeHooksDialog({
   open,
@@ -138,10 +125,10 @@ export function WorktreeHooksDialog({
           <CloseButton onClick={onClose} />
         </div>
         <p className="hook-doc-note">
-          Hooks are loaded from the current repository's <code>paseo.json</code>{" "}
-          <code>worktree</code> config.{" "}
+          Hooks use <code>roamgate.json</code>, with <code>paseo.json</code>{" "}
+          supported for legacy compatibility.{" "}
           <a
-            href="https://paseo.sh/docs/worktrees"
+            href="https://github.com/powerfooI/roamgate/blob/main/docs/DEPLOYMENT.md#worktree-hooks"
             target="_blank"
             rel="noreferrer"
           >
@@ -163,7 +150,20 @@ export function WorktreeHooksDialog({
             <div className="hook-summary">
               <SummaryRow label="Repo" value={info?.repo_name ?? "-"} />
               <SummaryRow label="Store key" value={info?.key ?? "-"} />
-              <SummaryRow label="paseo.json" value={info?.paseo_path ?? "-"} />
+              <SummaryRow
+                label="Configuration"
+                value={info?.config_path ?? "-"}
+              />
+              <SummaryRow
+                label="Format"
+                value={
+                  info?.config_source === "paseo"
+                    ? "paseo.json (legacy compatibility)"
+                    : info?.config_source === "roamgate"
+                      ? "roamgate.json (native)"
+                      : "-"
+                }
+              />
               <SummaryRow label="Checkout" value={info?.checkout_path ?? "-"} />
             </div>
 

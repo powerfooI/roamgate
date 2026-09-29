@@ -118,7 +118,7 @@ is not a backup.** Cancel bulk actions if unsure.
 
 ### Separate parallel edits with worktrees
 
-1. Verify that `origin` is reachable and has a default branch. Review `paseo.json`;
+1. Verify that `origin` is reachable and has a default branch. Review `roamgate.json` and legacy `paseo.json`;
    disable **Worktree hooks** if you do not trust its commands. Hooks are enabled
    by default and run host code.
 2. Open **Worktree Lifecycle** from the workspace/command menu and create a worktree.

@@ -16,7 +16,12 @@ export type WorktreeHookName = "setup" | "opened" | "teardown" | "removed";
 export type WorktreeHookInfo = {
   key: string | null;
   enabled: boolean;
-  paseo_path?: string | null;
+  repo_name?: string;
+  repo_root?: string;
+  checkout_path?: string;
+  source_checkout_path?: string;
+  config_path?: string | null;
+  config_source?: "roamgate" | "paseo" | null;
   hooks?: Partial<Record<WorktreeHookName, string>>;
   error?: string;
 };

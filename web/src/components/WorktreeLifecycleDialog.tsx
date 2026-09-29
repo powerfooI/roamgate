@@ -583,12 +583,18 @@ export function WorktreeLifecycleDialog({
                   <div>
                     <strong>Repository hooks</strong>
                     <span>
-                      {hooks?.error
-                        ? hooks.error
-                        : hooks?.paseo_path
-                          ? `${configuredHooks} configured in paseo.json`
-                          : "No paseo.json worktree hooks found"}
+                      {hooks?.config_source
+                        ? `${configuredHooks} configured - ${hooks.config_source === "paseo" ? "paseo.json (legacy compatibility)" : "roamgate.json (native)"}`
+                        : "No worktree hook configuration found"}
                     </span>
+                    {hooks?.config_path ? (
+                      <span title={hooks.config_path}>{hooks.config_path}</span>
+                    ) : null}
+                    {hooks?.error ? (
+                      <span role="alert" title={hooks.error}>
+                        {hooks.error}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
                 <button

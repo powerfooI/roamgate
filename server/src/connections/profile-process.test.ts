@@ -199,7 +199,15 @@ test("production dispatcher isolates two local profiles and profile CRUD", async
   chmodSync(root, 0o700);
   const alpha = await fakeHerdr(root, "alpha", 14, undefined, ({ method }) =>
     method === "workspace.get"
-      ? { workspace: { worktree: { checkout_path: root } } }
+      ? {
+          workspace: {
+            worktree: {
+              checkout_path: root,
+              repo_root: root,
+              is_linked_worktree: true,
+            },
+          },
+        }
       : undefined,
   );
   const beta = await fakeHerdr(root, "beta");
@@ -334,6 +342,30 @@ test("production dispatcher isolates two local profiles and profile CRUD", async
     );
     expect(initialAlpha.connection_generation).toBe(oldAlphaGeneration);
     expect(initialAlpha.result.workspaces[0].name).toBe("from-alpha");
+    // A native teardown failure must stop before dispatching removal to Herdr.
+    const hookPath = join(root, "roamgate.json");
+    writeFileSync(join(root, "paseo.json"), '{"worktree":{"teardown":"true"}}');
+    for (const config of [
+      '{"worktree":{"teardown":"exit 7"}}',
+      '{"worktree":{"teardown":false}}',
+    ]) {
+      writeFileSync(hookPath, config);
+      const removal = await rpc(
+        "worktree.remove",
+        { workspace_id: "shared-workspace" },
+        "alpha",
+        oldAlphaGeneration,
+      );
+      expect(removal).toMatchObject({
+        ok: false,
+        skipped_remove: true,
+        before_remove_hook: { status: "failed" },
+      });
+      expect(JSON.stringify(removal.before_remove_hook)).toContain(hookPath);
+      expect(controlCalls.get("alpha")).not.toContain("worktree.remove");
+    }
+    rmSync(hookPath);
+    rmSync(join(root, "paseo.json"));
     writeFileSync(
       join(root, "page.html"),
       "<h1>HTML marker</h1><script>throw 1</script>",

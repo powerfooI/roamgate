@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import type { ServerWebSocket } from "bun";
 import type { GuiSettings } from "../config/gui-settings";
 import type { HerdrClient } from "./herdr-client";
+import { WorktreeHookConfigError } from "../worktree/worktree-hooks";
 import { createSettingsRpcHandler } from "./settings-rpc";
 
 function deferred<T>() {
@@ -44,7 +45,7 @@ test("terminal transport settings validate input, persist by connection, and rec
     },
     herdr: {} as HerdrClient,
     sshHost: () => undefined,
-    readPaseoWorktreeHooks: async () => null,
+    readWorktreeHooks: async () => null,
     resolveWorkspaceGitRoot: async () => ({ workspace: {}, root: "/tmp" }),
     workspaceAutoSyncIsRunning: () => false,
     onWorkspaceAutoSyncSettingsChanged: () => {},
@@ -112,7 +113,7 @@ test("settings RPC errors carry their runtime connection identity", async () => 
     connectionGeneration: 6,
     herdr: {} as HerdrClient,
     sshHost: () => undefined,
-    readPaseoWorktreeHooks: async () => null,
+    readWorktreeHooks: async () => null,
     resolveWorkspaceGitRoot: async () => ({ workspace: {}, root: "/tmp" }),
     workspaceAutoSyncIsRunning: () => false,
     onWorkspaceAutoSyncSettingsChanged: () => undefined,
@@ -171,7 +172,7 @@ test("settings RPC lists and mutates only its connection namespace", async () =>
     },
     herdr: {} as HerdrClient,
     sshHost: () => undefined,
-    readPaseoWorktreeHooks: async () => null,
+    readWorktreeHooks: async () => null,
     resolveWorkspaceGitRoot: async () => ({ workspace: {}, root: "/same" }),
     workspaceAutoSyncIsRunning: () => false,
     onWorkspaceAutoSyncSettingsChanged: () => undefined,
@@ -230,7 +231,7 @@ test("settings RPC suppresses a delayed result after replacement", async () => {
       call: () => workspace.promise,
     } as unknown as HerdrClient,
     sshHost: () => undefined,
-    readPaseoWorktreeHooks: async () => null,
+    readWorktreeHooks: async () => null,
     resolveWorkspaceGitRoot: async () => ({ workspace: {}, root: "/tmp" }),
     workspaceAutoSyncIsRunning: () => false,
     onWorkspaceAutoSyncSettingsChanged: () => undefined,
@@ -289,7 +290,7 @@ test("settings RPC cancels a queued mutation after replacement", async () => {
     },
     herdr: {} as HerdrClient,
     sshHost: () => undefined,
-    readPaseoWorktreeHooks: async () => null,
+    readWorktreeHooks: async () => null,
     resolveWorkspaceGitRoot: async () => ({ workspace: {}, root: "/same" }),
     workspaceAutoSyncIsRunning: () => false,
     onWorkspaceAutoSyncSettingsChanged: () => {
@@ -325,4 +326,60 @@ test("settings RPC cancels a queued mutation after replacement", async () => {
     id: "stale-mutation",
     error: { message: "connection changed during request" },
   });
+});
+
+test("hook settings expose selected config and errors without mislabeling native files as Paseo", async () => {
+  let selected: "roamgate" | "paseo" | null = "roamgate";
+  let invalid = false;
+  const messages: any[] = [];
+  const handler = createSettingsRpcHandler({
+    herdr: {
+      call: async () => ({
+        workspace: {
+          worktree: { checkout_path: "/target", repo_root: "/source" },
+        },
+      }),
+    } as unknown as HerdrClient,
+    sshHost: () => undefined,
+    readWorktreeHooks: async (target, source) => {
+      expect([target, source]).toEqual(["/target", "/source"]);
+      if (!selected) return null;
+      const path = `/source/${selected}.json`;
+      if (invalid)
+        throw new WorktreeHookConfigError(
+          path,
+          selected,
+          new Error("worktree.setup must be a string"),
+        );
+      return { path, source: selected, config: { setup: "true" } };
+    },
+    resolveWorkspaceGitRoot: async () => ({ workspace: {}, root: "/source" }),
+    workspaceAutoSyncIsRunning: () => false,
+    onWorkspaceAutoSyncSettingsChanged: () => {},
+    safeSend: (_ws, payload) => {
+      messages.push(JSON.parse(payload));
+      return true;
+    },
+    markRpcError: () => {},
+  });
+  for (selected of ["roamgate", "paseo", null] as const) {
+    for (invalid of [false, true]) {
+      await handler(
+        {} as ServerWebSocket<unknown>,
+        "hooks",
+        "settings.worktree_hooks.get",
+        { workspace_id: "workspace" },
+      );
+      const result = messages.at(-1).result;
+      expect(result).toMatchObject({
+        config_path: selected ? `/source/${selected}.json` : null,
+        config_source: selected,
+        paseo_path: selected === "paseo" ? "/source/paseo.json" : null,
+        hooks: selected && !invalid ? { setup: "true" } : {},
+      });
+      if (selected && invalid)
+        expect(result.error).toContain(`/source/${selected}.json`);
+      else expect(result.error).toBeUndefined();
+    }
+  }
 });

@@ -1,3 +1,4 @@
+import { lstat, readFile } from "node:fs/promises";
 import { sshCommandArgv } from "../bridge/ssh-command";
 import {
   repoWorktreeHooksEnabled,
@@ -37,14 +38,27 @@ export type WorktreeHookRunResult = {
   error?: string;
 };
 
-type PaseoWorktreeHook = "setup" | "opened" | "teardown" | "removed";
+type WorktreeHook = "setup" | "opened" | "teardown" | "removed";
 
-export type PaseoWorktreeHookConfig = {
+export type WorktreeHookConfig = {
   setup?: string;
   opened?: string;
   teardown?: string;
   removed?: string;
 };
+
+export class WorktreeHookConfigError extends Error {
+  constructor(
+    readonly path: string,
+    readonly source: "roamgate" | "paseo",
+    cause: unknown,
+  ) {
+    super(
+      `Failed to read worktree hooks from ${path}: ${(cause as Error).message}`,
+      { cause },
+    );
+  }
+}
 
 export function createWorktreeHookRunner(args: {
   connectionId?: string;
@@ -65,48 +79,76 @@ export function createWorktreeHookRunner(args: {
     );
   }
 
-  // Read a file from the same host where Herdr is operating, local or via SSH.
+  // Read on the execution host, distinguishing a missing file from empty content.
   async function readTextFileMaybe(path: string): Promise<string | null> {
-    if (!path) return null;
     const host = args.sshHost();
     if (host) {
+      const quoted = args.shQuote(path);
       const { stdout } = await args.runProcess(
         sshCommandArgv(
           host,
-          `if [ -f ${args.shQuote(path)} ]; then cat ${args.shQuote(path)}; fi`,
+          `if [ -e ${quoted} ] || [ -L ${quoted} ]; then printf '1'; cat ${quoted}; fi`,
         ),
       );
-      return stdout.trim() ? stdout : null;
+      return stdout ? stdout.slice(1) : null;
     }
-    const file = Bun.file(path);
-    return (await file.exists()) ? await file.text() : null;
+    try {
+      await lstat(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+    return readFile(path, "utf8");
   }
 
-  // Load repo-local paseo.json hook config from the target worktree first.
-  async function readPaseoWorktreeHooks(
+  async function readWorktreeHooks(
     checkoutPath: string,
     sourceCheckoutPath?: string,
-  ): Promise<{
-    path: string;
-    config: PaseoWorktreeHookConfig;
-  } | null> {
-    for (const base of uniqueStrings([checkoutPath, sourceCheckoutPath])) {
-      const path = `${base.replace(/\/+$/, "")}/paseo.json`;
-      const text = await readTextFileMaybe(path);
-      if (!text) continue;
-      const raw = JSON.parse(text);
-      const worktree = raw?.worktree;
-      const config =
-        worktree && typeof worktree === "object"
-          ? (worktree as PaseoWorktreeHookConfig)
-          : {};
-      return { path, config };
+  ) {
+    for (const source of ["roamgate", "paseo"] as const) {
+      for (const base of uniqueStrings([checkoutPath, sourceCheckoutPath])) {
+        const path = `${base.replace(/\/+$/, "")}/${source}.json`;
+        try {
+          const text = await readTextFileMaybe(path);
+          if (text === null) continue;
+          const raw = JSON.parse(text.replace(/^\uFEFF/, ""));
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+            throw new Error("configuration must be an object");
+          }
+          const config: WorktreeHookConfig = {};
+          if ("worktree" in raw) {
+            const worktree = raw.worktree;
+            if (
+              !worktree ||
+              typeof worktree !== "object" ||
+              Array.isArray(worktree)
+            ) {
+              throw new Error("worktree must be an object");
+            }
+            for (const hook of [
+              "setup",
+              "opened",
+              "teardown",
+              "removed",
+            ] as const) {
+              if (!(hook in worktree)) continue;
+              if (typeof worktree[hook] !== "string") {
+                throw new Error(`worktree.${hook} must be a string`);
+              }
+              config[hook] = worktree[hook];
+            }
+          }
+          return { path, source, config };
+        } catch (error) {
+          throw new WorktreeHookConfigError(path, source, error);
+        }
+      }
     }
     return null;
   }
 
-  // Map paseo's small hook vocabulary onto the existing GUI notice events.
-  function paseoHookEvent(hook: PaseoWorktreeHook): WorktreeHookEvent {
+  // Map the hook vocabulary onto the existing GUI notice events.
+  function worktreeHookEvent(hook: WorktreeHook): WorktreeHookEvent {
     switch (hook) {
       case "setup":
         return "worktree.created";
@@ -126,24 +168,24 @@ export function createWorktreeHookRunner(args: {
       .join(" ");
   }
 
-  // Execute a paseo worktree hook inside the target checkout and capture output.
-  async function runPaseoWorktreeHook(hookArgs: {
-    hook: PaseoWorktreeHook;
+  // Execute a worktree hook inside the target checkout and capture output.
+  async function runWorktreeHook(hookArgs: {
+    hook: WorktreeHook;
     checkoutPath: string;
     sourceCheckoutPath?: string;
     cwdPath?: string;
     repoSettingsKey?: string | null;
   }): Promise<WorktreeHookRunResult> {
-    const event = paseoHookEvent(hookArgs.hook);
+    const event = worktreeHookEvent(hookArgs.hook);
     if (!hookArgs.checkoutPath) return { event, status: "skipped" };
     const hooksEnabled = args.hooksEnabled ?? repoWorktreeHooksEnabled;
     if (!(await hooksEnabled(hookArgs.repoSettingsKey))) {
       return { event, status: "skipped" };
     }
 
-    let paseo: Awaited<ReturnType<typeof readPaseoWorktreeHooks>>;
+    let loaded: Awaited<ReturnType<typeof readWorktreeHooks>>;
     try {
-      paseo = await readPaseoWorktreeHooks(
+      loaded = await readWorktreeHooks(
         hookArgs.checkoutPath,
         hookArgs.sourceCheckoutPath,
       );
@@ -151,11 +193,11 @@ export function createWorktreeHookRunner(args: {
       return {
         event,
         status: "failed",
-        error: `Failed to read paseo.json: ${(e as Error).message}`,
+        error: (e as Error).message,
       };
     }
-    const command = paseo?.config[hookArgs.hook];
-    if (!paseo || typeof command !== "string" || !command.trim()) {
+    const command = loaded?.config[hookArgs.hook];
+    if (!loaded || typeof command !== "string" || !command.trim()) {
       return { event, status: "skipped" };
     }
 
@@ -179,8 +221,8 @@ export function createWorktreeHookRunner(args: {
       ? await args.runProcessWithCode(sshCommandArgv(host, script))
       : await args.runProcessWithCode(["sh", "-c", script]);
     const prefix = [
-      `paseo ${hookArgs.hook} hook`,
-      `config: ${paseo.path}`,
+      `worktree ${hookArgs.hook} hook`,
+      `config: ${loaded.path}`,
       `checkout: ${hookArgs.checkoutPath}`,
       cwdPath !== hookArgs.checkoutPath ? `cwd: ${cwdPath}` : "",
       hookArgs.sourceCheckoutPath
@@ -226,7 +268,7 @@ export function createWorktreeHookRunner(args: {
     context: Awaited<ReturnType<typeof worktreeRemoveHookContext>>,
   ): Promise<WorktreeHookRunResult> {
     if (!context) return { event: "worktree.removed", status: "skipped" };
-    return runPaseoWorktreeHook({
+    return runWorktreeHook({
       hook: "removed",
       checkoutPath: context.checkoutPath,
       sourceCheckoutPath: context.sourceCheckoutPath,
@@ -244,7 +286,7 @@ export function createWorktreeHookRunner(args: {
     if (!workspace?.worktree?.is_linked_worktree) {
       return { event: "worktree.opened", status: "skipped" };
     }
-    return runPaseoWorktreeHook({
+    return runWorktreeHook({
       hook: "opened",
       checkoutPath: workspaceCheckoutPath(workspace),
       sourceCheckoutPath: sourceWorkspace
@@ -299,7 +341,7 @@ export function createWorktreeHookRunner(args: {
     return null;
   }
 
-  // Run paseo worktree.setup after Herdr has created and opened the worktree.
+  // Run worktree.setup after Herdr has created and opened the worktree.
   async function runWorktreeSetupHook(
     result: any,
     sourceWorkspace: any | null,
@@ -308,7 +350,7 @@ export function createWorktreeHookRunner(args: {
     if (!workspace?.worktree?.is_linked_worktree) {
       return { event: "worktree.created", status: "skipped" };
     }
-    return runPaseoWorktreeHook({
+    return runWorktreeHook({
       hook: "setup",
       checkoutPath: workspaceCheckoutPath(workspace),
       sourceCheckoutPath: sourceWorkspace
@@ -319,8 +361,8 @@ export function createWorktreeHookRunner(args: {
   }
 
   return {
-    readPaseoWorktreeHooks,
-    runPaseoWorktreeHook,
+    readWorktreeHooks,
+    runWorktreeHook,
     worktreeRemoveHookContext,
     runWorktreeRemovedHook,
     runWorktreeOpenedHook,

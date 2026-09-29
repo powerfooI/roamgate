@@ -205,7 +205,7 @@ export function createLegacyConnectionRuntime(args: {
     connectionGeneration: args.connectionGeneration,
     herdr,
     sshHost,
-    readPaseoWorktreeHooks: worktreeHooks.readPaseoWorktreeHooks,
+    readWorktreeHooks: worktreeHooks.readWorktreeHooks,
     resolveWorkspaceGitRoot: async (workspaceId) =>
       files.resolveWorkspaceGitRoot({ workspace_id: workspaceId }),
     workspaceAutoSyncIsRunning: workspaceAutoSync.isRunning,
