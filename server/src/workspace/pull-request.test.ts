@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { shQuote } from "../utils/process-utils";
+import {
+  shQuote,
+  type runProcessWithCodeTimeout,
+} from "../utils/process-utils";
 import {
   githubChecks,
   gitlabApprovals,
@@ -55,9 +58,21 @@ function fixture(
 ) {
   const host = options.host ?? `${provider}.com`;
   const commands: string[][] = [];
-  const run = async (argv: string[]) => {
+  const run: typeof runProcessWithCodeTimeout = async (
+    argv,
+    _timeout,
+    launchOptions,
+  ) => {
     commands.push(argv);
-    const command = argv.at(-1)!;
+    if (options.ssh) {
+      expect(launchOptions).toBeUndefined();
+    } else {
+      expect(launchOptions?.cwd).toBe("/repo with 'quote");
+      expect(launchOptions?.env?.GH_PROMPT_DISABLED).toBe("1");
+      expect(launchOptions?.env?.GIT_TERMINAL_PROMPT).toBe("0");
+      expect(launchOptions?.env?.NO_COLOR).toBe("1");
+    }
+    const command = options.ssh ? argv.at(-1)! : argv.map(shQuote).join(" ");
     const overridden = options.override?.(command);
     if (overridden) return overridden;
     if (command.includes("'symbolic-ref'")) return ok("feature/card\n");
@@ -179,12 +194,15 @@ describe("PR/MR status", () => {
         );
         expect(Number.isFinite(Date.parse(result.refreshedAt))).toBe(true);
         expect(
-          f.commands.every((argv) => argv[0] === (ssh ? "ssh" : "sh")),
+          f.commands.every((argv) =>
+            ssh ? argv[0] === "ssh" : ["git", "gh", "glab"].includes(argv[0]),
+          ),
         ).toBe(true);
         expect(
           f.commands
-            .filter((argv) => argv.at(-1)?.includes("'api'"))
-            .every((argv) => argv.at(-1)?.includes("'--method' 'GET'")),
+            .map((argv) => (ssh ? argv.at(-1)! : argv.map(shQuote).join(" ")))
+            .filter((command) => command.includes("'api'"))
+            .every((command) => command.includes("'--method' 'GET'")),
         ).toBe(true);
       }
     });
@@ -217,6 +235,17 @@ describe("PR/MR status", () => {
         expect(JSON.stringify(result)).not.toContain("secret-token");
         expect(result.request).toBeUndefined();
       }
+    });
+    test(`${provider} reports a missing native executable explicitly`, async () => {
+      const result = await fixture(provider, {
+        override: (command) => {
+          if (command.includes("'--version'"))
+            throw Object.assign(new Error("Executable missing"), {
+              code: "ENOENT",
+            });
+        },
+      }).read();
+      expect(result.state).toBe("missing_cli");
     });
     test(`${provider} does not promote failed or missing CI/review to success`, async () => {
       const result = await fixture(provider, {
@@ -322,9 +351,7 @@ describe("PR/MR status", () => {
     });
     expect((await f.read()).state).toBe("select_remote");
     expect((await f.read({ remote: "'; bad" })).state).toBe("select_remote");
-    expect(f.commands.every((argv) => argv.at(-1)?.includes("'git'"))).toBe(
-      true,
-    );
+    expect(f.commands.every((argv) => argv[0] === "git")).toBe(true);
     expect((await f.read({ remote: "origin" })).state).toBe("ready");
   });
   test("unsupported hosts and detached HEAD have explicit states", async () => {

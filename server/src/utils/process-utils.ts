@@ -31,8 +31,10 @@ export async function runProcessWithCode(
 export async function runProcessWithCodeTimeout(
   argv: string[],
   timeoutMs: number,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(argv, {
+    ...options,
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",

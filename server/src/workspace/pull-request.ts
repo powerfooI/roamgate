@@ -113,15 +113,32 @@ export async function readPullRequestStatus(
   };
   const deadline = Date.now() + 55_000;
   async function run(argv: string[]) {
-    const command = `cd ${context.shQuote(context.root)} && GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 NO_COLOR=1 ${argv.map(context.shQuote).join(" ")}`;
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new Error("Request timed out");
-    return context.runProcessWithCodeTimeout(
-      context.host
-        ? sshCommandArgv(context.host, command)
-        : ["sh", "-lc", command],
-      Math.min(15_000, remaining),
-    );
+    const timeout = Math.min(15_000, remaining);
+    if (context.host) {
+      const command = `cd ${context.shQuote(context.root)} && GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 NO_COLOR=1 ${argv.map(context.shQuote).join(" ")}`;
+      return context.runProcessWithCodeTimeout(
+        sshCommandArgv(context.host, command),
+        timeout,
+      );
+    }
+    try {
+      return await context.runProcessWithCodeTimeout(argv, timeout, {
+        cwd: context.root,
+        env: {
+          ...process.env,
+          GH_PROMPT_DISABLED: "1",
+          GIT_TERMINAL_PROMPT: "0",
+          NO_COLOR: "1",
+        },
+      });
+    } catch (error) {
+      // Native spawning reports a missing executable by throwing, unlike SSH's shell.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT")
+        return { code: 127, stdout: "", stderr: "" };
+      throw error;
+    }
   }
   async function json(argv: string[]) {
     const output = await run(argv);

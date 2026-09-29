@@ -81,7 +81,5 @@ export type GitDiffEntry = {
   size?: number;
 };
 
-export type RunProcessWithCodeTimeout = (
-  argv: string[],
-  timeoutMs: number,
-) => Promise<{ code: number; stdout: string; stderr: string }>;
+export type RunProcessWithCodeTimeout =
+  typeof import("../utils/process-utils").runProcessWithCodeTimeout;
