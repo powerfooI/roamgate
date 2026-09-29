@@ -655,7 +655,7 @@ describe("EndpointTerminalSession", () => {
     }
   });
 
-  test("retries a foreign resize after the first-frame deadline", async () => {
+  test("retries a foreign resize at the deadline without another surface", async () => {
     const original = splitSurface(134, 69);
     const foreign = splitSurface(100, 69);
     let publish!: (frame: FrameData, panes: TestPane[]) => void;
@@ -690,11 +690,7 @@ describe("EndpointTerminalSession", () => {
       await session.focus(() => true); // drain the foreign surface
       jest.advanceTimersByTime(500);
       expect(frames.at(-1)?.width).toBe(foreign.panes[0]!.innerRect.width);
-      expect(resizes).toHaveLength(1);
-
-      const corrected = once(session, "terminal");
-      publish(foreign.frame, foreign.panes);
-      await corrected;
+      await session.focus(() => true); // drain the retry and its corrected frame
       expect(resizes).toHaveLength(2);
       expect(frames.at(-1)).toMatchObject({ width: 134, height: 69 });
     } finally {
@@ -4551,9 +4547,16 @@ test("terminal.link.resolve requires this viewer's attachment and frame token", 
       return resolvedRegions([]);
     },
   });
-  const { bridge, ws, replies, attach } = creationBridge(socketPath);
+  const { bridge, ws, replies } = creationBridge(socketPath);
   try {
-    await attach();
+    await bridge.handleTerminalRpc(ws, "attach", "terminal.attach", {
+      terminal_id: "term1",
+      cols: 8,
+      rows: 3,
+      surface_cols: 10,
+      surface_rows: 5,
+      relay_active: false,
+    });
     await settleUntil(() =>
       replies.some((reply) => reply.terminal?.link_frame),
     );

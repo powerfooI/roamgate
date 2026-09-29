@@ -380,9 +380,13 @@ export class EndpointTerminalSession extends EventEmitter {
           this.deferredFrame = null;
           this.fitResizeInFlight = false;
           // The request did not settle. Treat the fallback as observed
-          // geometry, but retain the remaining fit budget for later frames.
+          // geometry, but retain the remaining fit budget for a retry.
           this.lastRequest = pending.size;
           pending.emit();
+          // An idle pane may not send another surface after a foreign resize.
+          const surface = this.latestSurface();
+          const pane = surface?.panes.find((p) => p.paneId === this.paneId);
+          if (!this.closed && surface && pane) this.fitSurface(surface, pane);
         }, FIT_DEFER_MS);
         this.deferredFrame = {
           timer,
