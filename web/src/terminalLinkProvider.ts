@@ -344,6 +344,10 @@ export function registerTerminalLinkProvider(
       const columns = new Set<number>();
       const completeUrlColumns = new Set<number>();
       const rowUrls = findTerminalHttpLinks(rowText?.text ?? "");
+      const nextLine = activeBuffer.getLine(bufferLineNumber);
+      const nextText = nextLine
+        ? lineTextWithCells(nextLine, columnCount, bufferLineNumber + 1).text
+        : "";
       // A complete visible URL is already authoritative. Probing it remotely
       // can replace its trimmed punctuation with a wider region, or lose every
       // reply while a TUI timer repaints. Reserve RPCs for wraps/clipped edges.
@@ -373,10 +377,12 @@ export function registerTerminalLinkProvider(
               local.range.start.y === bufferLineNumber &&
               local.range.end.y === bufferLineNumber &&
               local.range.start.x === col + 1 &&
-              local.range.end.x < columnCount - 1 &&
-              link.start > first,
+              local.range.end.x < columnCount - 1,
           );
-        if (!complete) columns.add(col);
+        const delimited = rowText!.text.slice(link.end).trim().length > 0;
+        const independentlyComplete =
+          complete && (delimited || !nextText.trim());
+        if (!independentlyComplete) columns.add(col);
         else completeUrlColumns.add(col);
       }
       if (touch) {

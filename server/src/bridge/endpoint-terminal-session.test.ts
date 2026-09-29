@@ -620,6 +620,68 @@ describe("EndpointTerminalSession", () => {
     }
   });
 
+  test("refits when another client shrinks the selected tab", async () => {
+    const original = splitSurface(19, 5);
+    const foreign = splitSurface(9, 5);
+    let publish!: (frame: FrameData, panes: TestPane[]) => void;
+    const resizes: Array<[number, number]> = [];
+    const socketPath = await startSessionServer({
+      initialSurface: original,
+      onConnection: (send) => {
+        publish = (frame, panes) => send(panes, frame);
+      },
+      onResize: (cols, rows, send) => {
+        resizes.push([cols, rows]);
+        const resized = splitSurface(cols, rows);
+        send(resized.frame, resized.panes);
+      },
+    });
+    const session = new EndpointTerminalSession(
+      socketPath,
+      "terminal",
+      async () => "w1:p1",
+    );
+    const frames: Array<{ width: number; height: number }> = [];
+    session.on("terminal", (frame) => frames.push(frame));
+    try {
+      await session.connect(6, 3, { cols: 19, rows: 5 });
+      expect(frames.at(-1)).toMatchObject({ width: 6, height: 3 });
+      publish(foreign.frame, foreign.panes);
+      await once(session, "terminal");
+      expect(resizes.length).toBeGreaterThan(0);
+      expect(frames.at(-1)).toMatchObject({ width: 6, height: 3 });
+    } finally {
+      session.close();
+    }
+  });
+
+  test("refits a stale tab surface during attach", async () => {
+    const stale = splitSurface(9, 5);
+    const resizes: Array<[number, number]> = [];
+    const socketPath = await startSessionServer({
+      initialSurface: stale,
+      onResize: (cols, rows, send) => {
+        resizes.push([cols, rows]);
+        const resized = splitSurface(cols, rows);
+        send(resized.frame, resized.panes);
+      },
+    });
+    const session = new EndpointTerminalSession(
+      socketPath,
+      "terminal",
+      async () => "w1:p1",
+    );
+    const firstFrame = once(session, "terminal");
+    try {
+      await session.connect(6, 3, { cols: 19, rows: 5 });
+      const [frame] = await firstFrame;
+      expect(resizes.length).toBeGreaterThan(0);
+      expect(frame).toMatchObject({ width: 6, height: 3 });
+    } finally {
+      session.close();
+    }
+  });
+
   test.each([
     [2, 0],
     [2, 1],
@@ -984,22 +1046,25 @@ describe("EndpointTerminalSession", () => {
         text: t.bytes.toString("utf8"),
       }),
     );
-    await session.connect(80, 24);
+    try {
+      await session.connect(80, 24);
+      await settleUntil(() => frames.length > 0);
 
-    expect(requests).toEqual([
-      { method: "pane.focus", params: { pane_id: "w1:p1" } },
-    ]);
-    expect(frames.length).toBeGreaterThan(0);
-    const first = frames[0];
-    expect(first.width).toBe(8);
-    expect(first.height).toBe(3);
-    expect(first.full).toBe(true);
-    // Cropped content: inner rect starts at (1,1) of the 10x5 grid,
-    // so the first row is cells 11-18 (L..S).
-    expect(first.text).toContain("LMNOPQRS");
-    // Cursor was at (2,2) in tab space -> (1,1) in crop space.
-    expect(first.text).toContain("\x1b[2;2H");
-    session.close();
+      expect(requests).toEqual([
+        { method: "pane.focus", params: { pane_id: "w1:p1" } },
+      ]);
+      const first = frames[0];
+      expect(first.width).toBe(8);
+      expect(first.height).toBe(3);
+      expect(first.full).toBe(true);
+      // Cropped content: inner rect starts at (1,1) of the 10x5 grid,
+      // so the first row is cells 11-18 (L..S).
+      expect(first.text).toContain("LMNOPQRS");
+      // Cursor was at (2,2) in tab space -> (1,1) in crop space.
+      expect(first.text).toContain("\x1b[2;2H");
+    } finally {
+      session.close();
+    }
   });
 
   test("rejects connect when the terminal has no pane", async () => {
@@ -4440,6 +4505,9 @@ test("terminal.link.resolve requires this viewer's attachment and frame token", 
   const { bridge, ws, replies, attach } = creationBridge(socketPath);
   try {
     await attach();
+    await settleUntil(() =>
+      replies.some((reply) => reply.terminal?.link_frame),
+    );
     const frame = replies.find((reply) => reply.terminal?.link_frame)?.terminal
       .link_frame;
     expect(frame).toBeString();

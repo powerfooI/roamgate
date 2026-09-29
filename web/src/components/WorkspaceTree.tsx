@@ -18,6 +18,7 @@ import {
   GitBranch,
   Layers,
   Pin,
+  Plus,
 } from "lucide-react";
 import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
 import {
@@ -544,11 +545,11 @@ export function WorkspaceTree({
           <div className="panel-head">
             <h2>Workspaces</h2>
             <button
-              className="panel-add"
+              className="panel-add panel-action-icon"
               title="New workspace"
               onClick={() => setCreateOpen(true)}
             >
-              +
+              <Plus size={14} />
             </button>
           </div>
           <div className="workspace-tree-content">
@@ -599,11 +600,11 @@ export function WorkspaceTree({
             </button>
           ) : null}
           <button
-            className="panel-add"
+            className="panel-add panel-action-icon"
             title="New workspace"
             onClick={() => setCreateOpen(true)}
           >
-            +
+            <Plus size={14} />
           </button>
         </div>
       </div>

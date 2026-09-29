@@ -394,7 +394,10 @@ describe("endpoint terminal link provider", () => {
   test.each(["resolved", "invalidated"])(
     "suppresses superseded row callbacks when %s",
     async (mode) => {
-      const f = fixture(["https://a.example", "https://b.example"], 30);
+      const f = fixture(
+        ["https://a.example", "https://b.example"],
+        "https://a.example".length,
+      );
       const completions: ((value: null) => void)[] = [];
       let state = 1;
       registerTerminalLinkProvider(f.term, undefined, undefined, () => false, {
@@ -435,6 +438,25 @@ describe("endpoint terminal link provider", () => {
       start: { x: text.indexOf(url) + 1, y: 2 },
       end: { x: text.indexOf(url) + url.length, y: 2 },
     });
+    expect(probes).toBe(0);
+  });
+
+  test("opens a standalone URL without waiting for an upstream lookup", () => {
+    const url = "https://example.com/guide";
+    const f = fixture([`${url} done`], 50);
+    let probes = 0;
+    registerTerminalLinkProvider(f.term, undefined, undefined, () => true, {
+      state: () => 1,
+      resolve: () => {
+        probes++;
+        return new Promise(() => {});
+      },
+    });
+    let found: ILink[] | undefined;
+    f.provide(1, (links) => {
+      found = links;
+    });
+    expect(found?.map((link) => link.text)).toEqual([url]);
     expect(probes).toBe(0);
   });
 

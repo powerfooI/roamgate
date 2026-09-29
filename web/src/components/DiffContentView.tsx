@@ -541,6 +541,7 @@ const DiffFileSection = memo(function DiffFileSection({
     onToggle(section.key, true);
     onSelectFile?.(section.entry);
   };
+  const canToggle = section.active || !!onSelectFile;
 
   const statusCode = gitDiffCode(section.entry);
   const metaNote = [
@@ -583,25 +584,13 @@ const DiffFileSection = memo(function DiffFileSection({
             </button>
           )}
           <div
-            className={`diff-file-section-title ${
-              mobile && (section.active || onSelectFile) ? "is-toggle" : ""
-            }`}
-            onClick={
-              mobile && (section.active || onSelectFile) ? toggle : undefined
-            }
-            role={
-              mobile && (section.active || onSelectFile) ? "button" : undefined
-            }
-            tabIndex={
-              mobile && (section.active || onSelectFile) ? 0 : undefined
-            }
-            aria-expanded={
-              mobile && (section.active || onSelectFile)
-                ? !section.collapsed
-                : undefined
-            }
+            className={`diff-file-section-title ${canToggle ? "is-toggle" : ""}`}
+            onClick={canToggle ? toggle : undefined}
+            role={canToggle ? "button" : undefined}
+            tabIndex={canToggle ? 0 : undefined}
+            aria-expanded={canToggle ? !section.collapsed : undefined}
             onKeyDown={
-              mobile && (section.active || onSelectFile)
+              canToggle
                 ? (e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();

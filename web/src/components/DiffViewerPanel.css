@@ -543,8 +543,7 @@
   opacity: 0.5;
 }
 
-/* Compact mode: slimmer file cards; the collapse button is dropped and the
-   whole title row toggles instead. */
+/* Compact mode: slimmer file cards; the collapse button is dropped. */
 .diff-content-view.is-mobile .diff-file-section-head {
   min-height: 26px;
   padding: 2px 8px;
@@ -562,11 +561,11 @@
   word-break: break-all;
 }
 
-.diff-content-view.is-mobile .diff-file-section-title.is-toggle {
+.diff-file-section-title.is-toggle {
   cursor: pointer;
 }
 
-.diff-content-view.is-mobile .diff-file-section-title.is-toggle:hover strong {
+.diff-file-section-title.is-toggle:hover strong {
   color: var(--accent);
 }
 
