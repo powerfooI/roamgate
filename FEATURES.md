@@ -91,6 +91,15 @@ keyboard shortcuts, or workspace/agent menus.
   their pane's workspace. Changes describe the checkout, not agent ownership.
 - Closed worktrees must open before browsing; missing ones offer cleanup, never
   sibling files. Directory previews can prefill **New workspace**.
+- The expandable **PR/MR status** card shows the current branch's GitHub pull
+  request or GitLab merge request, including draft/state, author, branches,
+  checks/pipeline and provider-reported review/approval status. Select a source
+  remote or matching request when ambiguous; **Refresh PR/MR** shows its last
+  refresh time, and **Open on GitHub/GitLab** opens the provider. Missing status
+  is shown as unavailable. This card performs no remote mutations.
+  Install and authenticate `gh` or `glab` on the checkout host (the SSH host for
+  SSH connections); configured self-hosted instances are detected through the
+  CLI. Credentials stay on that host. Fork lookups include the parent project.
 
 Inspector and Annotations leave the sidebar unchanged. Preview is read-only;
 [resource ownership](docs/ARCHITECTURE.md#workspace-resource-ownership) prevents

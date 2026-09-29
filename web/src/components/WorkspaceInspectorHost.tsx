@@ -22,6 +22,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { ConnectionClient } from "../api";
+import { connectionClientScopeKey } from "../useConnectionClient";
 import { roamgateLocalStorage } from "../browserStorage";
 import {
   type NewReviewAnnotation,
@@ -56,6 +57,7 @@ import {
   FilePreviewContent,
 } from "./FilePreviewContent";
 import { workspaceInspectorLayout } from "./workspaceInspectorLayout";
+import { PullRequestCard } from "./PullRequestCard";
 import "./WorkspaceInspectorHost.css";
 
 const DiffContentView = lazyWithReload("diff-content-view", () =>
@@ -570,6 +572,23 @@ export function WorkspaceInspectorHost({
           </button>
         </div>
       </header>
+
+      {visible && state.open && workspace ? (
+        <PullRequestCard
+          key={connectionClientScopeKey(
+            connectionClient,
+            connectionClient.serverRuntimeGeneration,
+            contentResourceKey,
+            workspace.workspace_id,
+            workspace.worktree?.checkout_path,
+            workspace.cwd,
+            workspace.worktree?.git_status?.branch,
+          )}
+          client={connectionClient}
+          workspaceId={workspace.workspace_id}
+          branch={workspace.worktree?.git_status?.branch}
+        />
+      ) : null}
 
       {!workspace ? (
         <div className="workspace-inspector-unavailable">

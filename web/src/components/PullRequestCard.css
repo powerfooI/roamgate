@@ -1,0 +1,56 @@
+.pull-request-card {
+  flex: 0 0 auto;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.pull-request-card summary {
+  padding: 10px 12px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pull-request-card-content {
+  display: grid;
+  gap: 8px;
+  max-height: min(230px, 35dvh);
+  overflow: auto;
+  padding: 0 12px 12px;
+}
+
+.pull-request-card-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pull-request-card button,
+.pull-request-card select,
+.pull-request-card a {
+  min-height: 36px;
+}
+
+.pull-request-card a {
+  display: inline-flex;
+  align-items: center;
+}
+
+.pull-request-card label {
+  display: grid;
+  gap: 4px;
+}
+
+.pull-request-card select {
+  width: 100%;
+  min-width: 0;
+}
+
+.pull-request-card-identity,
+.pull-request-card-time {
+  color: var(--muted);
+}

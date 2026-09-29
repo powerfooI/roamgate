@@ -38,6 +38,7 @@ import {
   type LastStepBaselineStore,
 } from "./git-diff";
 import { runGitFileAction, runGitRepoAction } from "./git-actions";
+import { readPullRequestStatus } from "./pull-request";
 import { collectIgnoredNames } from "./git-ignore";
 import { GIT_DIFF_TIMEOUT_MS } from "./file-constants";
 import { inlinePreviewMimeForPath } from "./preview";
@@ -527,6 +528,14 @@ export function createFileHandlers({
     });
   }
 
+  async function readWorkspacePullRequest(params: Record<string, unknown>) {
+    const { root } = await workspaceAndGitRoot(params, "git.pull_request");
+    return readPullRequestStatus(
+      { root, host: sshHost(), shQuote, runProcessWithCodeTimeout },
+      params,
+    );
+  }
+
   async function readGitDiffFile(params: Record<string, unknown>) {
     const { workspaceId, root } = await workspaceAndGitRoot(params);
     return readDiffFile({
@@ -584,6 +593,7 @@ export function createFileHandlers({
     uploadWorkspaceFile: uploadFile,
     deleteWorkspaceFile: deleteFile,
     readGitDiffSummary,
+    readWorkspacePullRequest,
     readGitDiffFile,
     runGitPull,
     runWorkspaceGitFileAction,

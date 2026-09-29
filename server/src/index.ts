@@ -814,6 +814,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     readWorkspaceFile,
     revealWorkspaceFile,
     readGitDiffSummary,
+    readWorkspacePullRequest,
     readGitDiffFile,
     runGitPull,
     runWorkspaceGitFileAction,
@@ -935,6 +936,19 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       sendReply({ id, result }, "git-diff-summary");
     } catch (e) {
       sendError("git-diff-summary-error", e);
+    }
+    return;
+  }
+  if (method === "git.pull_request") {
+    try {
+      const result = await readWorkspacePullRequest(params ?? {});
+      sendReply({ id, result }, "git-pull-request");
+    } catch {
+      // Root resolution errors may include remote URLs or CLI diagnostics.
+      sendError(
+        "git-pull-request-error",
+        new Error("Cannot resolve this workspace's Git checkout."),
+      );
     }
     return;
   }
