@@ -112,12 +112,21 @@ export function TerminalComposer({
   const commandListRef = useRef<HTMLDivElement | null>(null);
   const commandPickerRef = useRef<HTMLElement | null>(null);
   const commandsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const replacementCancelRef = useRef<HTMLButtonElement | null>(null);
   const matches =
     pickerMode === "inline"
       ? filterComposerCommands(commands, /^\/[^\s]*/.exec(text)?.[0] ?? "")
       : commands;
   const pickerOpen = pickerMode !== null && commands.length > 0;
   const selectedCommand = matches[activeCommand];
+
+  // Agent metadata can arrive while editing. Reset only its command UI, not
+  // the textarea (or its focus, selection, and active IME composition).
+  useEffect(() => {
+    setPickerMode(null);
+    setActiveCommand(0);
+    setReplacement(null);
+  }, [agent]);
 
   useEffect(() => {
     if (pickerOpen)
@@ -370,7 +379,10 @@ export function TerminalComposer({
     if (e.key === "Tab" && selectedCommand && !busy) {
       e.preventDefault();
       e.stopPropagation();
-      selectCommand(selectedCommand);
+      // Keyboard selection must enter the confirmation's tab order. Touch
+      // selection keeps the editor focused so its soft keyboard stays open.
+      flushSync(() => selectCommand(selectedCommand));
+      replacementCancelRef.current?.focus({ preventScroll: true });
       return true;
     }
     return false;
@@ -475,6 +487,8 @@ export function TerminalComposer({
                 </p>
                 <button
                   type="button"
+                  ref={replacementCancelRef}
+                  tabIndex={0}
                   onMouseDown={keepTextareaFocus}
                   onClick={() => {
                     setReplacement(null);
@@ -486,6 +500,7 @@ export function TerminalComposer({
                 <button
                   type="button"
                   disabled={busy || composing}
+                  tabIndex={0}
                   onMouseDown={keepTextareaFocus}
                   onClick={() => selectCommand(replacement.command, true)}
                 >

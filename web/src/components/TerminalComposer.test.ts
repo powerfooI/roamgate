@@ -23,6 +23,7 @@ type Host = {
 test.each(["claude", "grok-build", "agy"])(
   "%s commands own focus, preserve drafts until confirmed, and never send",
   (agent) => {
+    let currentAgent: string | undefined = agent;
     let draft = "keep this draft";
     let listener: ((text: string) => void) | undefined;
     const onSubmit = mock(async () => {});
@@ -135,7 +136,11 @@ test.each(["claude", "grok-build", "agy"])(
         ).ref;
         if (ref && typeof ref === "object") {
           const key = String(
-            child.props.className ?? child.props["aria-label"] ?? child.type,
+            child.props.className ??
+              child.props["aria-label"] ??
+              (typeof child.props.children === "string"
+                ? child.props.children
+                : child.type),
           );
           let host = nodes.get(key);
           if (!host) {
@@ -176,7 +181,7 @@ test.each(["claude", "grok-build", "agy"])(
         visit(
           TerminalComposer({
             draftKey: "command-interaction",
-            agent,
+            agent: currentAgent,
             shortcutRows: [],
             onRunShortcut,
             onClose() {},
@@ -254,6 +259,17 @@ test.each(["claude", "grok-build", "agy"])(
       expect(activeElement).toBe(textarea);
       expect(editor().props["aria-expanded"]).toBe(false);
 
+      // Tab from the focused textarea enters the confirmation, not the actions.
+      invoke(commands(), "onClick", { detail: 1 });
+      key(editor(), "Tab");
+      expect(activeElement).toBe(nodes.get("Cancel")!);
+      expect(find("children", "Cancel").props.tabIndex).toBe(0);
+      expect(find("children", "Replace draft").props.tabIndex).toBe(0);
+      expect(draft).toBe("keep this draft");
+      invoke(find("children", "Cancel"), "onClick");
+      expect(activeElement).toBe(nodes.get("terminal-composer-commands")!);
+      key(picker(), "Escape");
+
       // Touch without an editor: focus a non-editable group.
       activeElement = {};
       invoke(commands(), "onClick", { detail: 1 });
@@ -269,6 +285,7 @@ test.each(["claude", "grok-build", "agy"])(
       key(picker(), "Tab");
       expect(draft).toBe("keep this draft");
       expect(find("aria-label", "Confirm draft replacement")).toBeDefined();
+      expect(activeElement).toBe(nodes.get("Cancel")!);
       expect(editor().props["aria-activedescendant"]).toBeUndefined();
       invoke(find("children", "Cancel"), "onClick");
       expect(draft).toBe("keep this draft");
@@ -309,6 +326,7 @@ test.each(["claude", "grok-build", "agy"])(
       // A pending confirmation may not discard a draft changed asynchronously.
       invoke(commands(), "onClick", { detail: 0 });
       invoke(option(), "onClick");
+      expect(activeElement).toBe(textarea);
       const staleConfirm = find("children", "Replace draft");
       drafts.writeTerminalComposerDraft(
         "command-interaction",
@@ -316,6 +334,42 @@ test.each(["claude", "grok-build", "agy"])(
       );
       invoke(staleConfirm, "onClick");
       expect(draft).toBe("new upload or edit");
+
+      // Agent detection changes only the picker; composing/editor state survives.
+      textarea.focus();
+      textarea.setSelectionRange(2, 5);
+      invoke(editor(), "onCompositionStart");
+      currentAgent = undefined;
+      render();
+      currentAgent = "pi";
+      render();
+      expect(activeElement).toBe(textarea);
+      expect(textarea.selectionStart).toBe(2);
+      expect(textarea.selectionEnd).toBe(5);
+      expect(draft).toBe("new upload or edit");
+      expect(editor().props["aria-expanded"]).toBe(false);
+      expect(commands().props.disabled).toBe(true);
+      invoke(editor(), "onCompositionEnd");
+      expect(commands().props.disabled).toBe(false);
+
+      // A pending command from the previous agent cannot remain in the menu.
+      invoke(commands(), "onClick", { detail: 1 });
+      invoke(option(), "onClick");
+      expect(find("aria-label", "Confirm draft replacement")).toBeDefined();
+      currentAgent = "codex";
+      render();
+      expect(editor().props["aria-expanded"]).toBe(false);
+      expect(
+        elements.some(
+          (element) => element.props.className === "terminal-composer-commands",
+        ),
+      ).toBe(false);
+      expect(activeElement).toBe(textarea);
+      expect(draft).toBe("new upload or edit");
+      invoke(commands(), "onClick", { detail: 1 });
+      expect(
+        elements.filter((element) => element.props.role === "option").length,
+      ).toBe(terminalComposerCommands("codex").length);
       expect(onSubmit).not.toHaveBeenCalled();
       expect(onRunShortcut).not.toHaveBeenCalled();
     } finally {

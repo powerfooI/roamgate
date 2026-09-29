@@ -3445,7 +3445,7 @@ export function TerminalView({
         ) : null}
         {composerOpen ? (
           <TerminalComposer
-            key={JSON.stringify([composerDraftKey, pane.agent])}
+            key={composerDraftKey}
             draftKey={composerDraftKey}
             agent={pane.agent}
             shortcutRows={mobileShortcuts}
