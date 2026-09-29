@@ -655,6 +655,54 @@ describe("EndpointTerminalSession", () => {
     }
   });
 
+  test("retries a foreign resize after the first-frame deadline", async () => {
+    const original = splitSurface(134, 69);
+    const foreign = splitSurface(100, 69);
+    let publish!: (frame: FrameData, panes: TestPane[]) => void;
+    const firstResize = Promise.withResolvers<void>();
+    const resizes: Array<[number, number]> = [];
+    const socketPath = await startSessionServer({
+      initialSurface: original,
+      onConnection: (send) => {
+        publish = (frame, panes) => send(panes, frame);
+      },
+      onResize: (cols, rows, send) => {
+        resizes.push([cols, rows]);
+        if (resizes.length === 1) firstResize.resolve();
+        else {
+          const settled = splitSurface(cols, rows);
+          send(settled.frame, settled.panes);
+        }
+      },
+    });
+    const session = new EndpointTerminalSession(
+      socketPath,
+      "terminal",
+      async () => "w1:p1",
+    );
+    const frames: Array<{ width: number; height: number }> = [];
+    session.on("terminal", (frame) => frames.push(frame));
+    jest.useFakeTimers();
+    try {
+      await session.connect(134, 69);
+      await firstResize.promise;
+      publish(foreign.frame, foreign.panes);
+      await session.focus(() => true); // drain the foreign surface
+      jest.advanceTimersByTime(500);
+      expect(frames.at(-1)?.width).toBe(foreign.panes[0]!.innerRect.width);
+      expect(resizes).toHaveLength(1);
+
+      const corrected = once(session, "terminal");
+      publish(foreign.frame, foreign.panes);
+      await corrected;
+      expect(resizes).toHaveLength(2);
+      expect(frames.at(-1)).toMatchObject({ width: 134, height: 69 });
+    } finally {
+      session.close();
+      jest.useRealTimers();
+    }
+  });
+
   test("refits a stale tab surface during attach", async () => {
     const stale = splitSurface(9, 5);
     const resizes: Array<[number, number]> = [];
@@ -770,6 +818,7 @@ describe("EndpointTerminalSession", () => {
       );
       send(false);
       await session.focus(() => true);
+      jest.advanceTimersByTime(500); // a bounded refit may defer later frames
       expect(frames.at(-1)?.mouseReporting).toBe(false);
     } finally {
       session.close();

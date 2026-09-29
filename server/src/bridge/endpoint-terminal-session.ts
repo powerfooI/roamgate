@@ -379,9 +379,8 @@ export class EndpointTerminalSession extends EventEmitter {
           if (pending?.timer !== timer) return;
           this.deferredFrame = null;
           this.fitResizeInFlight = false;
-          // The request did not settle. Treat the fallback as the observed
-          // geometry so later stale frames do not start another fit loop.
-          this.fitAttempts = 0;
+          // The request did not settle. Treat the fallback as observed
+          // geometry, but retain the remaining fit budget for later frames.
           this.lastRequest = pending.size;
           pending.emit();
         }, FIT_DEFER_MS);
