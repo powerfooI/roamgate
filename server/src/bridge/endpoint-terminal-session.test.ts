@@ -620,7 +620,7 @@ describe("EndpointTerminalSession", () => {
     }
   });
 
-  test("refits when another client shrinks the selected tab", async () => {
+  test("only refits a foreign tab size after this viewer focuses it", async () => {
     const original = splitSurface(19, 5);
     const foreign = splitSurface(9, 5);
     let publish!: (frame: FrameData, panes: TestPane[]) => void;
@@ -648,7 +648,19 @@ describe("EndpointTerminalSession", () => {
       expect(frames.at(-1)).toMatchObject({ width: 6, height: 3 });
       publish(foreign.frame, foreign.panes);
       await once(session, "terminal");
-      expect(resizes.length).toBeGreaterThan(0);
+      expect(resizes).toEqual([]);
+      publish(original.frame, original.panes);
+      await once(session, "terminal");
+      publish(foreign.frame, foreign.panes);
+      await once(session, "terminal");
+      expect(resizes).toEqual([]);
+      await session.focus(() => true);
+      await settleUntil(
+        () =>
+          resizes.length > 0 &&
+          frames.at(-1)?.width === 6 &&
+          frames.at(-1)?.height === 3,
+      );
       expect(frames.at(-1)).toMatchObject({ width: 6, height: 3 });
     } finally {
       session.close();

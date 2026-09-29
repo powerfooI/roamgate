@@ -188,6 +188,12 @@ export class EndpointTerminalSession extends EventEmitter {
       if (!isCurrent()) return;
       if (!this.paneId) throw new Error("Endpoint terminal is not ready");
       await this.client.callEndpoint("pane.focus", { pane_id: this.paneId });
+      // Reclaim the viewport only when this viewer focuses the tab again.
+      // Passive surfaces from other viewers must not restart fitting.
+      this.fitAttempts = SURFACE_FIT_MAX_ATTEMPTS;
+      const surface = this.latestSurface();
+      const pane = surface?.panes.find((p) => p.paneId === this.paneId);
+      if (surface && pane) this.fitSurface(surface, pane);
     });
   }
 
@@ -489,7 +495,6 @@ export class EndpointTerminalSession extends EventEmitter {
         cols: surface.frame.width,
         rows: surface.frame.height,
       };
-      this.fitAttempts = SURFACE_FIT_MAX_ATTEMPTS;
     }
     this.fitResizeInFlight = false;
     if (this.fitAttempts === 0) return;
