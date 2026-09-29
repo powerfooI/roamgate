@@ -253,6 +253,17 @@ separate for desktop/mobile. Jump from a diff to its file preview.
 - The composer supports IME, dictation, multiline text, and images. **Insert**
   does not execute; **Send** adds one Enter. Drafts are in-memory per
   connection/pane; closing their pane/tab/workspace asks before discarding.
+- In the mobile composer, the **terminal command icon (`>_`)** opens a floating
+  command picker above the input without shrinking the editor or terminal.
+  It browses built-in catalogs for Claude Code, Codex, Pi, Kimi Code, Grok Build,
+  and Antigravity CLI (`agy`) using the pane's agent identity.
+  Type a leading `/` for prefix completion. Up/Down selects
+  a suggestion, Tab prepares it, and Escape dismisses; Enter still
+  inserts a newline. Selection never sends input. Inline completion preserves
+  arguments; browsing requires confirmation before replacing a non-empty draft.
+  Catalogs are static; command availability depends on the installed agent's
+  version and configuration. Unknown agents have no built-in suggestions;
+  custom commands remain sendable.
 - Install as a PWA for an app window; a bundled Nerd Font supplies terminal
   icons. **PWA is not offline access**: Roamgate must remain reachable.
   See [installation steps](README.md#install-as-a-pwa).

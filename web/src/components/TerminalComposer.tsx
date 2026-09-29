@@ -10,10 +10,11 @@ import {
   CornerDownRight,
   ImagePlus,
   Keyboard,
+  SquareTerminal,
   X,
 } from "lucide-react";
-import { type CSSProperties, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { type CSSProperties, useEffect, useId, useRef, useState } from "react";
+import { createPortal, flushSync } from "react-dom";
 import {
   type MobileTerminalShortcut,
   mobileTerminalShortcutOption,
@@ -35,6 +36,13 @@ import {
   writeTerminalComposerDraft,
   writeTerminalComposerSelection,
 } from "../terminalComposer";
+import {
+  type ComposerCommand,
+  completeComposerCommand,
+  composerCommandPrefix,
+  filterComposerCommands,
+  terminalComposerCommands,
+} from "../terminalComposerCommands";
 import { MessageDialog } from "./ModalDialogs";
 import "./TerminalComposer.css";
 
@@ -62,6 +70,7 @@ const TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY =
  */
 export function TerminalComposer({
   draftKey,
+  agent,
   shortcutRows,
   onRunShortcut,
   shortcutDisabledReason,
@@ -71,6 +80,7 @@ export function TerminalComposer({
   onError,
 }: {
   draftKey: string;
+  agent?: string;
   shortcutRows: (MobileTerminalShortcut | null)[][];
   onRunShortcut: (shortcut: MobileTerminalShortcut) => void;
   shortcutDisabledReason?: (shortcut: MobileTerminalShortcut) => string | null;
@@ -89,6 +99,37 @@ export function TerminalComposer({
   );
   const [composing, setComposing] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [pickerMode, setPickerMode] = useState<"browse" | "inline" | null>(
+    null,
+  );
+  const [activeCommand, setActiveCommand] = useState(0);
+  const [replacement, setReplacement] = useState<{
+    command: ComposerCommand;
+    draft: string;
+  } | null>(null);
+  const commands = terminalComposerCommands(agent);
+  const pickerId = useId();
+  const commandListRef = useRef<HTMLDivElement | null>(null);
+  const commandPickerRef = useRef<HTMLElement | null>(null);
+  const commandsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const matches =
+    pickerMode === "inline"
+      ? filterComposerCommands(commands, /^\/[^\s]*/.exec(text)?.[0] ?? "")
+      : commands;
+  const pickerOpen = pickerMode !== null && commands.length > 0;
+  const selectedCommand = matches[activeCommand];
+
+  useEffect(() => {
+    if (pickerOpen)
+      commandListRef.current?.children[activeCommand]?.scrollIntoView({
+        block: "nearest",
+      });
+  }, [activeCommand, pickerOpen, text]);
+
+  // Async uploads or edits must not be discarded by a stale confirmation.
+  useEffect(() => {
+    if (replacement && replacement.draft !== text) setReplacement(null);
+  }, [replacement, text]);
   const [shortcutsOpen, setShortcutsOpen] = useState(
     () =>
       roamgateLocalStorage.getItem(
@@ -145,6 +186,19 @@ export function TerminalComposer({
   // the measured inset through shared CSS variables.
   const updateText = (textarea: HTMLTextAreaElement) => {
     setText(textarea.value);
+    setReplacement(null);
+    if (pickerMode !== "browse") {
+      setPickerMode(
+        composerCommandPrefix(
+          textarea.value,
+          textarea.selectionStart,
+          textarea.selectionEnd,
+        ) !== null
+          ? "inline"
+          : null,
+      );
+      setActiveCommand(0);
+    }
     writeTerminalComposerDraft(draftKey, textarea.value);
     writeTerminalComposerSelection(
       draftKey,
@@ -196,6 +250,8 @@ export function TerminalComposer({
       return;
     }
 
+    dismissCommands();
+
     // Remove the submitted prefix before the request so an unmount/remount
     // cannot expose it as a second send while the first request is pending.
     // New text remains in the shared draft and is restored with the submitted
@@ -222,9 +278,102 @@ export function TerminalComposer({
     }
   };
 
-  const keepTextareaFocus = (e: React.PointerEvent<HTMLButtonElement>) => {
+  const keepTextareaFocus = (e: React.MouseEvent<HTMLButtonElement>) => {
+    // Cancel the focus-taking mouse event, not pointerdown: WebKit can
+    // suppress a touch's click entirely when pointerdown is cancelled.
     e.preventDefault();
-    e.currentTarget.blur();
+  };
+
+  const dismissCommands = () => {
+    setPickerMode(null);
+    setReplacement(null);
+    setActiveCommand(0);
+  };
+
+  const commandEditorFocused = () =>
+    document.activeElement === textareaRef.current;
+
+  const focusPickerWithoutKeyboard = () => {
+    if (!commandEditorFocused())
+      commandPickerRef.current?.focus({ preventScroll: true });
+  };
+
+  const closeCommandPicker = () => {
+    const target = commandEditorFocused()
+      ? textareaRef.current
+      : commandsButtonRef.current;
+    dismissCommands();
+    target?.focus({ preventScroll: true });
+  };
+
+  const selectCommand = (command: ComposerCommand, confirmed = false) => {
+    if (busy || composingRef.current) return;
+    const draft = readTerminalComposerDraft(draftKey);
+    if (confirmed && replacement?.draft !== draft) {
+      setReplacement(null);
+      return;
+    }
+    if (pickerMode === "browse" && draft && !confirmed) {
+      setReplacement({ command, draft });
+      return;
+    }
+    const textarea = textareaRef.current;
+    const next =
+      pickerMode === "inline"
+        ? completeComposerCommand(
+            draft,
+            command,
+            textarea?.selectionStart ?? 0,
+            textarea?.selectionEnd ?? 0,
+          )
+        : {
+            text: `${command.name} `,
+            start: command.name.length + 1,
+            end: command.name.length + 1,
+          };
+    if (!next) return;
+    writeTerminalComposerDraft(draftKey, next.text);
+    writeTerminalComposerSelection(draftKey, next.start, next.end);
+    focusSelectionAfterInsertRef.current = true;
+    dismissCommands();
+    // Also restore focus/selection when choosing the already-present command.
+    textarea?.focus({ preventScroll: true });
+    textarea?.setSelectionRange(next.start, next.end);
+  };
+
+  const commandKeyDown = (e: React.KeyboardEvent) => {
+    if (
+      !pickerOpen ||
+      e.nativeEvent.isComposing ||
+      composingRef.current ||
+      e.keyCode === 229
+    )
+      return false;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeCommandPicker();
+      return true;
+    }
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || replacement)
+      return false;
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && matches.length) {
+      e.preventDefault();
+      e.stopPropagation();
+      setActiveCommand(
+        (index) =>
+          (index + (e.key === "ArrowDown" ? 1 : -1) + matches.length) %
+          matches.length,
+      );
+      return true;
+    }
+    if (e.key === "Tab" && selectedCommand && !busy) {
+      e.preventDefault();
+      e.stopPropagation();
+      selectCommand(selectedCommand);
+      return true;
+    }
+    return false;
   };
 
   const busy = submissionPending || uploadCount > 0;
@@ -271,7 +420,7 @@ export function TerminalComposer({
                     <button
                       type="button"
                       aria-label={`Send ${option?.label ?? shortcut.label}`}
-                      onPointerDown={keepTextareaFocus}
+                      onMouseDown={keepTextareaFocus}
                       disabled={!!shortcutDisabledReason?.(shortcut)}
                       title={
                         shortcutDisabledReason?.(shortcut) ??
@@ -289,6 +438,100 @@ export function TerminalComposer({
             ))}
           </div>
         ) : null}
+        {pickerOpen ? (
+          <section
+            ref={commandPickerRef}
+            className="terminal-composer-commands"
+            role="group"
+            tabIndex={-1}
+            aria-label="Agent commands"
+            aria-activedescendant={
+              !replacement && selectedCommand
+                ? `${pickerId}-${activeCommand}`
+                : undefined
+            }
+            onKeyDown={commandKeyDown}
+          >
+            <div className="terminal-composer-command-heading">
+              <span>Commands</span>
+              <button
+                type="button"
+                aria-label="Dismiss commands"
+                onMouseDown={keepTextareaFocus}
+                onClick={closeCommandPicker}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {replacement ? (
+              <div
+                className="terminal-composer-command-confirm"
+                role="group"
+                aria-label="Confirm draft replacement"
+              >
+                <p role="status">
+                  Replace the entire draft with {replacement.command.name}?
+                  Nothing will be sent.
+                </p>
+                <button
+                  type="button"
+                  onMouseDown={keepTextareaFocus}
+                  onClick={() => {
+                    setReplacement(null);
+                    focusPickerWithoutKeyboard();
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || composing}
+                  onMouseDown={keepTextareaFocus}
+                  onClick={() => selectCommand(replacement.command, true)}
+                >
+                  Replace draft
+                </button>
+              </div>
+            ) : (
+              <>
+                <div
+                  id={pickerId}
+                  ref={commandListRef}
+                  role="listbox"
+                  aria-label="Agent commands"
+                  className="terminal-composer-command-list"
+                >
+                  {matches.map((command, index) => (
+                    <button
+                      type="button"
+                      role="option"
+                      id={`${pickerId}-${index}`}
+                      key={command.name}
+                      tabIndex={-1}
+                      aria-selected={index === activeCommand}
+                      disabled={busy || composing}
+                      onMouseDown={keepTextareaFocus}
+                      onClick={() => selectCommand(command)}
+                    >
+                      <span>
+                        <strong>{command.name}</strong> {command.arguments}
+                      </span>
+                      <span>{command.description}</span>
+                    </button>
+                  ))}
+                </div>
+                {matches.length === 0 ? (
+                  <span
+                    className="terminal-composer-command-note"
+                    role="status"
+                  >
+                    No matching commands. You can still type and send your own.
+                  </span>
+                ) : null}
+              </>
+            )}
+          </section>
+        ) : null}
         <textarea
           ref={textareaRef}
           className="terminal-composer-input"
@@ -297,14 +540,33 @@ export function TerminalComposer({
           placeholder="Compose input for the terminal…"
           autoComplete="off"
           aria-label="Terminal input draft"
+          role="combobox"
+          aria-expanded={pickerOpen && !replacement}
+          aria-controls={pickerOpen && !replacement ? pickerId : undefined}
+          aria-autocomplete="list"
+          aria-activedescendant={
+            pickerOpen && !replacement && selectedCommand
+              ? `${pickerId}-${activeCommand}`
+              : undefined
+          }
           onChange={(e) => updateText(e.currentTarget)}
-          onSelect={(e) =>
+          onSelect={(e) => {
+            const textarea = e.currentTarget;
             writeTerminalComposerSelection(
               draftKey,
-              e.currentTarget.selectionStart,
-              e.currentTarget.selectionEnd,
+              textarea.selectionStart,
+              textarea.selectionEnd,
+            );
+            if (
+              pickerMode === "inline" &&
+              composerCommandPrefix(
+                textarea.value,
+                textarea.selectionStart,
+                textarea.selectionEnd,
+              ) === null
             )
-          }
+              dismissCommands();
+          }}
           onCompositionStart={() => {
             composingRef.current = true;
             setComposing(true);
@@ -328,13 +590,17 @@ export function TerminalComposer({
           }}
           onKeyDown={(e) => {
             if (
-              !e.nativeEvent.isComposing &&
-              !composingRef.current &&
-              shortcutMatches(e.nativeEvent, "composer.send")
-            ) {
+              e.nativeEvent.isComposing ||
+              composingRef.current ||
+              e.keyCode === 229
+            )
+              return;
+            if (shortcutMatches(e.nativeEvent, "composer.send")) {
               e.preventDefault();
               void submit(true);
+              return;
             }
+            commandKeyDown(e);
           }}
         />
         <input
@@ -356,7 +622,7 @@ export function TerminalComposer({
             className="terminal-composer-close"
             title="Close composer"
             aria-label="Close composer"
-            onPointerDown={keepTextareaFocus}
+            onMouseDown={keepTextareaFocus}
             onClick={onClose}
           >
             <X size={15} />
@@ -374,7 +640,7 @@ export function TerminalComposer({
                   : "Show terminal shortcuts"
               }
               aria-expanded={shortcutsOpen}
-              onPointerDown={keepTextareaFocus}
+              onMouseDown={keepTextareaFocus}
               onClick={() => {
                 const open = !shortcutsOpen;
                 roamgateLocalStorage.setItem(
@@ -393,7 +659,7 @@ export function TerminalComposer({
             title="Add an image"
             aria-label="Add an image"
             disabled={busy}
-            onPointerDown={keepTextareaFocus}
+            onMouseDown={keepTextareaFocus}
             onClick={() => fileInputRef.current?.click()}
           >
             <ImagePlus size={15} />
@@ -405,10 +671,37 @@ export function TerminalComposer({
             aria-label="About Input Composer"
             aria-haspopup="dialog"
             aria-expanded={helpOpen}
-            onPointerDown={keepTextareaFocus}
+            onMouseDown={keepTextareaFocus}
             onClick={() => setHelpOpen(true)}
           >
             <CircleHelp size={15} />
+          </button>
+          <button
+            type="button"
+            className="terminal-composer-commands-toggle"
+            aria-label="Commands"
+            ref={commandsButtonRef}
+            aria-expanded={pickerOpen}
+            aria-controls={pickerOpen && !replacement ? pickerId : undefined}
+            disabled={commands.length === 0 || busy || composing}
+            title={
+              commands.length
+                ? "Browse agent commands"
+                : "No built-in commands for this agent; type any command in the draft"
+            }
+            onMouseDown={keepTextareaFocus}
+            onClick={() => {
+              flushSync(() => {
+                setPickerMode("browse");
+                setActiveCommand(0);
+                setReplacement(null);
+              });
+              // Keep an open editor keyboard. Otherwise focus the non-editable
+              // picker so external keys work without summoning a soft keyboard.
+              focusPickerWithoutKeyboard();
+            }}
+          >
+            <SquareTerminal size={17} aria-hidden="true" />
           </button>
           <span className="terminal-composer-hint">
             {uploadCount > 0
@@ -423,7 +716,7 @@ export function TerminalComposer({
             title="Insert into the terminal without executing"
             aria-label="Insert draft into the terminal"
             disabled={submitDisabled}
-            onPointerDown={keepTextareaFocus}
+            onMouseDown={keepTextareaFocus}
             onClick={() => void submit(false)}
           >
             <CornerDownRight size={14} />
@@ -438,7 +731,7 @@ export function TerminalComposer({
             )}
             aria-label="Send draft to the terminal"
             disabled={submitDisabled}
-            onPointerDown={keepTextareaFocus}
+            onMouseDown={keepTextareaFocus}
             onClick={() => void submit(true)}
           >
             <CornerDownLeft size={14} />
