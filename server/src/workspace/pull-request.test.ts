@@ -125,6 +125,21 @@ function fixture(
 }
 
 describe("PR/MR status", () => {
+  test("authentication checks the active GitHub account without passing GitHub-only flags to GitLab", async () => {
+    for (const provider of ["github", "gitlab"] as const) {
+      const result = await fixture(provider, {
+        override: (command) => {
+          if (!command.includes("'auth' 'status' '--hostname'")) return;
+          // GitHub's inactive account is expired; glab rejects --active.
+          return command.includes("'--active'") === (provider === "github")
+            ? ok("")
+            : fail;
+        },
+      }).read();
+      expect(result.state).toBe("ready");
+    }
+  });
+
   test("parses network remotes without disclosing credentials or accepting local paths", () => {
     expect(
       parseReviewRemote(

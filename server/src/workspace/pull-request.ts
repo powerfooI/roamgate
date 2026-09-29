@@ -225,6 +225,7 @@ export async function readPullRequestStatus(
       "status",
       "--hostname",
       selected.host,
+      ...(provider === "github" ? ["--active"] : []),
     ]);
     if (auth.code !== 0)
       return finish(
