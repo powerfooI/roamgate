@@ -1,3 +1,11 @@
+import {
+  ArrowRight,
+  ArrowUpRight,
+  ChevronRight,
+  CircleDot,
+  GitPullRequest,
+  RefreshCw,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { PullRequestStatus } from "../../../shared/pullRequest";
 import type { ConnectionClient } from "../api";
@@ -51,13 +59,6 @@ export function PullRequestCard({
   }, [client, workspaceId, branch, remote, match, refresh]);
 
   const current = client.isCurrent() ? status : null;
-  const pr = current?.state === "ready" ? current.request : undefined;
-  const provider =
-    current?.provider === "github"
-      ? "GitHub"
-      : current?.provider === "gitlab"
-        ? "GitLab"
-        : "PR/MR";
   const loading = !status && !error;
   const reset = () => {
     sequence.current++;
@@ -66,88 +67,233 @@ export function PullRequestCard({
     setFinishedAt("");
   };
   return (
-    <details className="pull-request-card">
-      <summary>
-        {provider}
-        {pr
-          ? ` #${pr.number}: ${pr.title} (${pr.state}${pr.draft ? ", draft" : ""})`
-          : " status"}
-      </summary>
-      <div className="pull-request-card-content">
-        <div className="pull-request-card-actions">
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => {
-              reset();
-              setRefresh((value) => value + 1);
-            }}
-          >
-            Refresh PR/MR
-          </button>
+    <PullRequestCardView
+      current={current}
+      loading={loading}
+      error={
+        client.isCurrent()
+          ? error
+          : "Connection changed. Reopen Inspector to refresh."
+      }
+      finishedAt={finishedAt}
+      onRefresh={() => {
+        reset();
+        setRefresh((value) => value + 1);
+      }}
+      onRemoteChange={(value) => {
+        reset();
+        setRemote(value);
+        setMatch("");
+      }}
+      onMatchChange={(value) => {
+        reset();
+        setMatch(value);
+      }}
+    />
+  );
+}
+
+export function PullRequestCardView({
+  current,
+  loading,
+  error,
+  finishedAt,
+  onRefresh,
+  onRemoteChange,
+  onMatchChange,
+}: {
+  current: PullRequestStatus | null;
+  loading: boolean;
+  error: string;
+  finishedAt: string;
+  onRefresh: () => void;
+  onRemoteChange: (value: string) => void;
+  onMatchChange: (value: string) => void;
+}) {
+  const pr = current?.state === "ready" ? current.request : undefined;
+  const provider =
+    current?.provider === "github"
+      ? "GitHub"
+      : current?.provider === "gitlab"
+        ? "GitLab"
+        : "PR/MR";
+  const label = error
+    ? "Status unavailable"
+    : loading
+      ? "Checking this branch..."
+      : current
+        ? {
+            ready: "Request found",
+            select_remote: "Choose a source remote",
+            select_match: "Choose a request",
+            unsupported: "Provider not configured",
+            missing_cli: "CLI setup needed",
+            unauthenticated: "Authentication needed",
+            no_match: "No linked request",
+            detached: "No branch selected",
+            error: "Status unavailable",
+          }[current.state]
+        : "Status unavailable";
+  const needsAttention =
+    !!error ||
+    ["error", "missing_cli", "unauthenticated"].includes(current?.state ?? "");
+  const message = error || current?.message;
+  return (
+    <section
+      className="pull-request-card"
+      aria-label="Pull or merge request status"
+      data-attention={needsAttention || undefined}
+    >
+      <details className="pull-request-card-disclosure">
+        <summary className="pull-request-card-summary">
+          <span className="pull-request-card-icon">
+            <GitPullRequest size={17} aria-hidden="true" />
+          </span>
+          <span className="pull-request-card-heading">
+            <span className="pull-request-card-eyebrow">
+              {pr ? (
+                <a
+                  className="pull-request-card-link"
+                  href={pr.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`Open ${provider} #${pr.number} in a new tab`}
+                  title={`Open on ${provider}`}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  {provider} #{pr.number}
+                  <ArrowUpRight size={13} aria-hidden="true" />
+                </a>
+              ) : (
+                `${provider} status`
+              )}
+            </span>
+            <span
+              className="pull-request-card-title"
+              role="status"
+              aria-live="polite"
+            >
+              {pr?.title ?? label}
+            </span>
+          </span>
           {pr ? (
-            <a href={pr.url} target="_blank" rel="noopener noreferrer">
-              Open on {provider}
-            </a>
+            <span
+              className="pull-request-card-badge"
+              data-state={pr.draft ? "draft" : pr.state}
+            >
+              {pr.draft ? `Draft / ${pr.state}` : pr.state}
+            </span>
+          ) : null}
+          <ChevronRight
+            className="pull-request-card-chevron"
+            size={14}
+            aria-hidden="true"
+          />
+        </summary>
+        <div className="pull-request-card-content">
+          {current ? (
+            <PullRequestSelectors
+              current={current}
+              onRemoteChange={onRemoteChange}
+              onMatchChange={onMatchChange}
+            />
+          ) : null}
+          {pr ? (
+            <div className="pull-request-card-signals">
+              <div
+                className="pull-request-card-route"
+                aria-label="Source and target branches"
+              >
+                <code>{pr.source}</code>
+                <ArrowRight size={13} aria-hidden="true" />
+                <code>{pr.target}</code>
+              </div>
+              <dl>
+                <div>
+                  <dt>
+                    <CircleDot size={12} aria-hidden="true" />
+                    {current?.provider === "github" ? "Checks" : "Pipeline"}
+                  </dt>
+                  <dd>{current?.ci ?? "Unavailable"}</dd>
+                </div>
+                <div>
+                  <dt>
+                    <CircleDot size={12} aria-hidden="true" />
+                    {current?.provider === "github"
+                      ? "Review decision"
+                      : "Approvals"}
+                  </dt>
+                  <dd>{current?.review ?? "Unavailable"}</dd>
+                </div>
+              </dl>
+            </div>
+          ) : null}
+          {!loading || error ? (
+            <details className="pull-request-card-context">
+              <summary>
+                <ChevronRight size={12} aria-hidden="true" />
+                {message ? "Details & troubleshooting" : "Checkout details"}
+              </summary>
+              {message ? (
+                <p className="pull-request-card-message">{message}</p>
+              ) : null}
+              <dl>
+                {pr ? (
+                  <div>
+                    <dt>Author</dt>
+                    <dd>{pr.author}</dd>
+                  </div>
+                ) : null}
+                {current?.remotes.map((remote) => (
+                  <div key={remote.name}>
+                    <dt>Remote / {remote.name}</dt>
+                    <dd>
+                      {remote.host}/{remote.repository}
+                    </dd>
+                  </div>
+                ))}
+                {current ? (
+                  <>
+                    <div>
+                      <dt>Checkout</dt>
+                      <dd>
+                        <code>{current.root}</code>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Branch</dt>
+                      <dd>
+                        <code>{current.branch || "Detached HEAD"}</code>
+                      </dd>
+                    </div>
+                  </>
+                ) : null}
+                {finishedAt ? (
+                  <div>
+                    <dt>Last refreshed</dt>
+                    <dd>
+                      <time dateTime={finishedAt}>
+                        {new Date(finishedAt).toLocaleString()}
+                      </time>
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+            </details>
           ) : null}
         </div>
-        <div role="status" aria-live="polite">
-          {loading ? "Loading PR/MR status..." : error || current?.message}
-          {!client.isCurrent()
-            ? "Connection changed. Reopen Inspector to refresh."
-            : null}
-        </div>
-        {current ? (
-          <div className="pull-request-card-identity">
-            {current.root} {current.branch ? `(${current.branch})` : ""}
-          </div>
-        ) : null}
-        {current ? (
-          <PullRequestSelectors
-            current={current}
-            onRemoteChange={(value) => {
-              reset();
-              setRemote(value);
-              setMatch("");
-            }}
-            onMatchChange={(value) => {
-              reset();
-              setMatch(value);
-            }}
-          />
-        ) : null}
-        {pr ? (
-          <>
-            <div>
-              #{pr.number} {pr.title}
-            </div>
-            <div>
-              {pr.state}
-              {pr.draft ? " / Draft" : ""} &middot; Author: {pr.author}
-            </div>
-            <div>
-              {pr.source} &rarr; {pr.target}
-            </div>
-            <div>
-              {provider === "GitHub" ? "Checks" : "Pipeline"}:{" "}
-              {current?.ci ?? "Unavailable"}
-            </div>
-            <div>
-              {provider === "GitHub" ? "Review decision" : "Approvals"}:{" "}
-              {current?.review ?? "Unavailable"}
-            </div>
-          </>
-        ) : null}
-        {finishedAt ? (
-          <div className="pull-request-card-time">
-            Last refresh:{" "}
-            <time dateTime={finishedAt}>
-              {new Date(finishedAt).toLocaleString()}
-            </time>
-          </div>
-        ) : null}
-      </div>
-    </details>
+      </details>
+      <button
+        className="pull-request-card-refresh"
+        type="button"
+        title="Refresh PR/MR status"
+        aria-label="Refresh PR/MR status"
+        disabled={loading}
+        onClick={onRefresh}
+      >
+        <RefreshCw size={14} aria-hidden="true" />
+      </button>
+    </section>
   );
 }
 
@@ -182,10 +328,6 @@ export function PullRequestSelectors({
             ))}
           </select>
         </label>
-      ) : current?.remotes[0] ? (
-        <div>
-          {current.remotes[0].host}/{current.remotes[0].repository}
-        </div>
       ) : null}
       {current.matches &&
       (current.matches.length > 1 || current.state === "select_match") ? (
