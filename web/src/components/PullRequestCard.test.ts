@@ -26,8 +26,9 @@ function render(current: PullRequestStatus) {
 test("a removed selection can be replaced even when only one remote remains", () => {
   const markup = render(base);
   expect(markup).toContain("Source remote");
-  expect(markup).toContain("<select>");
-  expect(markup).toContain('<option value="remaining">');
+  expect(markup).toContain("Select remote");
+  expect(markup).toContain('aria-label="Source remote"');
+  expect(markup).not.toContain("<select");
 });
 
 test("a disappeared PR can be replaced even when only one match remains", () => {

@@ -178,9 +178,8 @@ export async function readPullRequestStatus(
     const selected =
       typeof params.remote === "string"
         ? result.remotes.find((r) => r.name === params.remote)
-        : result.remotes.length === 1
-          ? result.remotes[0]
-          : undefined;
+        : (result.remotes.find((r) => r.name === "origin") ??
+          (result.remotes.length === 1 ? result.remotes[0] : undefined));
     if (!selected)
       return finish(
         "select_remote",

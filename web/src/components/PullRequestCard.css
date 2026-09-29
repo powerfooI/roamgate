@@ -279,6 +279,14 @@
   min-height: 36px;
 }
 
+.pull-request-card .pull-request-card-remote-select {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-color: var(--viewer-border);
+  background: var(--viewer-content-bg);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pull-request-card-chevron,
   .pull-request-card-context summary svg {

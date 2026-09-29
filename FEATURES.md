@@ -93,9 +93,10 @@ keyboard shortcuts, or workspace/agent menus.
   sibling files. Directory previews can prefill **New workspace**.
 - The expandable **PR/MR status** card shows the current branch's GitHub pull
   request or GitLab merge request, including draft/state, author, branches,
-  checks/pipeline and provider-reported review/approval status. Select a source
-  remote or matching request when ambiguous; **Refresh PR/MR** shows its last
-  refresh time, and **Open on GitHub/GitLab** opens the provider. Missing status
+  checks/pipeline and provider-reported review/approval status. `origin` is the
+  default source remote when available; select another remote or a matching
+  request when needed. **Refresh PR/MR** shows its last refresh time, and the
+  linked PR/MR number opens the provider. Missing status
   is shown as unavailable. This card performs no remote mutations.
   Install and authenticate `gh` or `glab` on the checkout host (the SSH host for
   SSH connections); configured self-hosted instances are detected through the

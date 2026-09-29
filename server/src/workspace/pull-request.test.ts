@@ -380,15 +380,29 @@ describe("PR/MR status", () => {
     });
   }
 
-  test("multiple remotes require a source selection; unknown remotes are never executed", async () => {
+  test("origin is the default among multiple remotes; explicit and unknown choices stay distinct", async () => {
     const f = fixture("github", {
       remoteOutput:
-        "origin\tgit@github.com:alice/project.git (fetch)\nupstream\thttps://github.com/team/project.git (fetch)\n",
+        "origin\tgit@github.com:alice/project.git (fetch)\nbackup\thttps://github.com/alice/project.git (fetch)\n",
     });
-    expect((await f.read()).state).toBe("select_remote");
+    const automatic = await f.read();
+    expect(automatic.state).toBe("ready");
+    expect(automatic.remote).toBe("origin");
+    expect(automatic.remotes).toHaveLength(2);
+    expect((await f.read({ remote: "backup" })).remote).toBe("backup");
+    const beforeInvalid = f.commands.length;
     expect((await f.read({ remote: "'; bad" })).state).toBe("select_remote");
-    expect(f.commands.every((argv) => argv[0] === "git")).toBe(true);
-    expect((await f.read({ remote: "origin" })).state).toBe("ready");
+    expect(
+      f.commands.slice(beforeInvalid).every((argv) => argv[0] === "git"),
+    ).toBe(true);
+    expect(
+      (
+        await fixture("github", {
+          remoteOutput:
+            "backup\tgit@github.com:alice/project.git (fetch)\nupstream\tgit@github.com:alice/project.git (fetch)\n",
+        }).read()
+      ).state,
+    ).toBe("select_remote");
   });
   test("unsupported hosts and detached HEAD have explicit states", async () => {
     expect(

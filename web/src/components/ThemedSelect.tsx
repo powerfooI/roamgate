@@ -22,6 +22,7 @@ export function ThemedSelect({
   align = "start",
   "aria-label": ariaLabel,
   title,
+  placeholder,
 }: {
   value: string;
   options: ThemedSelectOption[];
@@ -31,6 +32,7 @@ export function ThemedSelect({
   align?: "start" | "center" | "end";
   "aria-label"?: string;
   title?: string;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(value);
@@ -53,7 +55,7 @@ export function ThemedSelect({
           {icon ?? (
             <>
               <span className="themed-select-value">
-                {current?.label ?? value}
+                {current?.label ?? placeholder ?? value}
               </span>
               <ChevronDown size={13} aria-hidden="true" />
             </>

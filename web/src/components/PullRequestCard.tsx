@@ -9,6 +9,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { PullRequestStatus } from "../../../shared/pullRequest";
 import type { ConnectionClient } from "../api";
+import { ThemedSelect } from "./ThemedSelect";
 import "./PullRequestCard.css";
 
 export function PullRequestCard({
@@ -312,21 +313,17 @@ export function PullRequestSelectors({
       {current.remotes.length > 1 || current.state === "select_remote" ? (
         <label>
           Source remote
-          <select
+          <ThemedSelect
+            className="pull-request-card-remote-select"
+            aria-label="Source remote"
             value={current.remote ?? ""}
-            onChange={(event) => {
-              onRemoteChange(event.target.value);
-            }}
-          >
-            <option value="" disabled>
-              Select remote
-            </option>
-            {current.remotes.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.name}: {item.host}/{item.repository}
-              </option>
-            ))}
-          </select>
+            placeholder="Select remote"
+            options={current.remotes.map((item) => ({
+              value: item.name,
+              label: `${item.name}: ${item.host}/${item.repository}`,
+            }))}
+            onChange={onRemoteChange}
+          />
         </label>
       ) : null}
       {current.matches &&
