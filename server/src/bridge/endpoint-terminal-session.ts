@@ -188,6 +188,7 @@ export class EndpointTerminalSession extends EventEmitter {
       if (!isCurrent()) return;
       if (!this.paneId) throw new Error("Endpoint terminal is not ready");
       await this.client.callEndpoint("pane.focus", { pane_id: this.paneId });
+      if (!isCurrent()) return;
       // Reclaim the viewport only when this viewer focuses the tab again.
       // Passive surfaces from other viewers must not restart fitting.
       this.fitAttempts = SURFACE_FIT_MAX_ATTEMPTS;

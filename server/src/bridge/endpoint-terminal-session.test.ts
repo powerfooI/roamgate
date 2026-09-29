@@ -667,6 +667,51 @@ describe("EndpointTerminalSession", () => {
     }
   });
 
+  test("does not refit after a focus intent is superseded", async () => {
+    const original = splitSurface(19, 5);
+    const foreign = splitSurface(9, 5);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const resizes: Array<[number, number]> = [];
+    let publish!: (frame: FrameData, panes: TestPane[]) => void;
+    let blockFocus = false;
+    const socketPath = await startSessionServer({
+      initialSurface: original,
+      onConnection: (send) => {
+        publish = (frame, panes) => send(panes, frame);
+      },
+      onRequest: async (method) => {
+        if (method === "pane.focus" && blockFocus) {
+          entered.resolve();
+          await release.promise;
+        }
+      },
+      onResize: (cols, rows) => resizes.push([cols, rows]),
+    });
+    const session = new EndpointTerminalSession(
+      socketPath,
+      "terminal",
+      async () => "w1:p1",
+    );
+    try {
+      await session.connect(6, 3, { cols: 19, rows: 5 });
+      blockFocus = true;
+      let current = true;
+      const focus = session.focus(() => current);
+      await entered.promise;
+      const foreignFrame = once(session, "terminal");
+      publish(foreign.frame, foreign.panes);
+      await foreignFrame;
+      current = false;
+      release.resolve();
+      await focus;
+      expect(resizes).toEqual([]);
+    } finally {
+      release.resolve();
+      session.close();
+    }
+  });
+
   test("retries a foreign resize at the deadline without another surface", async () => {
     const original = splitSurface(134, 69);
     const foreign = splitSurface(100, 69);
