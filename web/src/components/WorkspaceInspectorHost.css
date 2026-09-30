@@ -200,14 +200,6 @@
   outline: none;
 }
 
-.workspace-inspector-resource.is-detail-collapsed {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.workspace-inspector-resource.is-detail-collapsed .workspace-inspector-detail {
-  display: none;
-}
-
 .workspace-inspector-resource.is-hidden {
   display: none;
 }

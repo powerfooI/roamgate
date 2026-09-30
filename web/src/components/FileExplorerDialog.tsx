@@ -1802,7 +1802,6 @@ function FileExplorerContent({
                         void loadDirectory(path, true);
                       }
                       void loadGitStatus(true);
-                      if (previewEntry) void loadPreview(previewEntry);
                     }}
                   >
                     <RefreshCw

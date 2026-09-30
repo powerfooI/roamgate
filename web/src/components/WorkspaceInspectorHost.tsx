@@ -278,9 +278,6 @@ export function WorkspaceInspectorHost({
     commits: false,
     history: false,
   }));
-  // Closing the preview hands the whole resource to the file list until the
-  // next file is opened; the default empty detail pane is left unchanged.
-  const [filePreviewCollapsed, setFilePreviewCollapsed] = useState(false);
   const resourceKey = resourceOwnerKey(state.scope);
   const contentResourceKey = resourceStateKey(state.scope);
   const [commitsVisitedKey, setCommitsVisitedKey] = useState("");
@@ -369,8 +366,6 @@ export function WorkspaceInspectorHost({
         ? !!diffSelection.entry
         : false;
   const hasDetail = detailAvailable && drillInByView[state.view];
-  const filesDetailCollapsed =
-    !compact && filePreviewCollapsed && !fileSelection.entry;
   const fileChangesEntries = fileSelection.entry
     ? fileDiffEntries.filter(
         (entry) => entry.path === fileSelection.entry?.path,
@@ -390,12 +385,10 @@ export function WorkspaceInspectorHost({
   useEffect(() => {
     if (state.view !== "files" || !fileSelection.entry) return;
     setDrillInByView((current) => ({ ...current, files: true }));
-    setFilePreviewCollapsed(false);
   }, [fileSelection.entry, state.view]);
 
   const closeFilePreview = () => {
     setDrillInByView((current) => ({ ...current, files: false }));
-    setFilePreviewCollapsed(true);
     onBack();
     hostRef.current
       ?.querySelector<HTMLElement>(
@@ -627,14 +620,8 @@ export function WorkspaceInspectorHost({
           <div
             className={`workspace-inspector-resource inspector-files-resource ${
               state.view === "files" ? "" : "is-hidden"
-            } ${splitEnabled && !filesDetailCollapsed ? "has-split-resizer" : ""} ${
-              filesDetailCollapsed ? "is-detail-collapsed" : ""
-            }`}
-            style={
-              splitEnabled && !filesDetailCollapsed
-                ? splitStyle("files")
-                : undefined
-            }
+            } ${splitEnabled ? "has-split-resizer" : ""}`}
+            style={splitEnabled ? splitStyle("files") : undefined}
           >
             <div
               id={navigationIds.files}
@@ -663,7 +650,7 @@ export function WorkspaceInspectorHost({
                 onActiveDiffEntriesChange={setFileDiffEntries}
               />
             </div>
-            {splitEnabled && !filesDetailCollapsed ? (
+            {splitEnabled ? (
               <InspectorSplitResizer
                 ratio={navigationRatios.files}
                 resetRatio={defaultNavigationRatio}
