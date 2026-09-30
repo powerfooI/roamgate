@@ -9,10 +9,10 @@
 .overlay-scrollbar-thumb {
   position: absolute;
   padding: 0;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 999px;
   background: var(--overlay-scrollbar-thumb);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--panel) 32%, transparent);
+  background-clip: padding-box;
   opacity: 0;
   pointer-events: none;
   touch-action: none;
