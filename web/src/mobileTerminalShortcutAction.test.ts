@@ -8,6 +8,10 @@ describe("mobile terminal shortcut execution", () => {
       type: "input",
       bytes: [0x03],
     });
+    expect(mobileTerminalShortcutExecution("ctrl-x")).toEqual({
+      type: "input",
+      bytes: [0x18],
+    });
     expect(mobileTerminalShortcutExecution("alt-up")).toEqual({
       type: "input",
       bytes: [0x1b, 0x5b, 0x31, 0x3b, 0x33, 0x41],

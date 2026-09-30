@@ -114,6 +114,13 @@ export const MOBILE_TERMINAL_SHORTCUT_OPTIONS = [
     bytes: [0x17],
   },
   {
+    id: "ctrl-x",
+    label: "Ctrl+X",
+    defaultButtonLabel: "C-x",
+    group: "Control",
+    bytes: [0x18],
+  },
+  {
     id: "ctrl-z",
     label: "Ctrl+Z",
     defaultButtonLabel: "C-z",
