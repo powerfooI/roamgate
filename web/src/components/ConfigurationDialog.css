@@ -165,6 +165,10 @@
 }
 
 :where(html[data-layout="mobile"]) {
+  .configuration-modal .modal-actions {
+    display: none;
+  }
+
   .configuration-backdrop {
     padding: calc(12px + env(safe-area-inset-top, 0px)) 0 0;
   }
