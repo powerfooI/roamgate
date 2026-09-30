@@ -109,3 +109,50 @@ describe("terminal image upload responses", () => {
     );
   });
 });
+
+describe("native file upload connection lifetime", () => {
+  test("does not upload through an already stale client", async () => {
+    let fetched = false;
+    globalThis.fetch = (async () => {
+      fetched = true;
+      return Response.json({ text: "/tmp/file.txt" });
+    }) as unknown as typeof fetch;
+    await expect(
+      uploadTerminalFile({ ...client, isCurrent: () => false }, image),
+    ).rejects.toThrow("connection changed during upload");
+    expect(fetched).toBe(false);
+  });
+
+  test.each([200, 409])(
+    "discards a response after reconnect (HTTP %s)",
+    async (status) => {
+      let current = true;
+      globalThis.fetch = (async () => {
+        current = false;
+        return Response.json(
+          status === 200
+            ? { text: "/tmp/old-host.txt" }
+            : { error: "old error" },
+          { status },
+        );
+      }) as unknown as typeof fetch;
+      await expect(
+        uploadTerminalFile({ ...client, isCurrent: () => current }, image),
+      ).rejects.toThrow("connection changed during upload");
+    },
+  );
+
+  test("discards a response if the connection changes while decoding it", async () => {
+    let current = true;
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => {
+        current = false;
+        return { text: "/tmp/old-host.txt" };
+      },
+    })) as unknown as typeof fetch;
+    await expect(
+      uploadTerminalFile({ ...client, isCurrent: () => current }, image),
+    ).rejects.toThrow("connection changed during upload");
+  });
+});

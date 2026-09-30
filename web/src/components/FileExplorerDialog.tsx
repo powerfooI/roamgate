@@ -14,6 +14,8 @@ import {
   ChevronDown,
   ChevronRight,
   Ellipsis,
+  Eye,
+  EyeOff,
   File,
   Folder,
   FolderOpen,
@@ -49,10 +51,12 @@ import type {
   FileExplorerEntry,
   FileExplorerList,
   FilePreview,
+  FileSearchResponse,
   GitDiffEntry,
 } from "../types";
 import { CloseButton } from "./CloseButton";
 import { ConfirmDialog } from "./ModalDialogs";
+import { ThemedSelect } from "./ThemedSelect";
 import {
   focusTreeItem,
   keyboardContextMenuPoint,
@@ -403,6 +407,18 @@ function FileExplorerContent({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewFragment, setPreviewFragment] = useState<string>();
+  const [previewLine, setPreviewLine] = useState<number>();
+  const [previewSnippet, setPreviewSnippet] = useState<string>();
+  const [searchMode, setSearchMode] = useState<"files" | "content" | "loaded">(
+    "files",
+  );
+  const [searchRevision, setSearchRevision] = useState(0);
+  const [projectSearch, setProjectSearch] = useState<{
+    key: string;
+    loading: boolean;
+    error: string | null;
+    response: FileSearchResponse | null;
+  }>({ key: "", loading: false, error: null, response: null });
   const [focusedTreePath, setFocusedTreePath] = useState<string | null>(
     activePath ?? null,
   );
@@ -815,23 +831,88 @@ function FileExplorerContent({
     workspace?.workspace_id,
   ]);
 
-  const query = search.trim().toLowerCase();
+  const query = search.trim();
   const loadedEntries = useMemo(
     () =>
-      Object.values(children)
-        .flat()
-        .filter((entry, index, all) => {
-          const firstIndex = all.findIndex(
-            (candidate) => candidate.path === entry.path,
-          );
-          return firstIndex === index;
-        }),
+      Array.from(
+        new Map(
+          Object.values(children)
+            .flat()
+            .map((entry) => [entry.path, entry]),
+        ).values(),
+      ),
     [children],
   );
-  const searchEntries = useMemo(
-    () => (query ? loadedEntries.filter(createFileSearchMatcher(query)) : []),
-    [loadedEntries, query],
+  const loadedMatches = useMemo(
+    () =>
+      query && searchMode === "loaded"
+        ? loadedEntries.filter(createFileSearchMatcher(query))
+        : [],
+    [loadedEntries, query, searchMode],
   );
+  const searchKey = JSON.stringify([
+    runtimeContext,
+    initialWorkspacePath(workspace),
+    query,
+    searchMode,
+    showHidden,
+    searchRevision,
+  ]);
+  const searchState =
+    projectSearch.key === searchKey
+      ? projectSearch
+      : { key: searchKey, loading: !!query, error: null, response: null };
+
+  useEffect(() => {
+    if (!query || searchMode === "loaded" || !workspace?.workspace_id) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setProjectSearch({
+        key: searchKey,
+        loading: true,
+        error: null,
+        response: null,
+      });
+      void connectionClient
+        .call("file.search", {
+          workspace_id: workspace.workspace_id,
+          query,
+          mode: searchMode,
+          show_hidden: showHidden,
+        })
+        .then((response) => {
+          if (!cancelled && connectionClient.isCurrent()) {
+            setProjectSearch({
+              key: searchKey,
+              loading: false,
+              error: null,
+              response: response as FileSearchResponse,
+            });
+          }
+        })
+        .catch((error) => {
+          if (!cancelled && connectionClient.isCurrent()) {
+            setProjectSearch({
+              key: searchKey,
+              loading: false,
+              error: (error as Error).message,
+              response: null,
+            });
+          }
+        });
+    }, 180);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    connectionClient,
+    query,
+    searchKey,
+    searchMode,
+    showHidden,
+    workspace?.workspace_id,
+  ]);
 
   useEffect(() => {
     if (!activePath || !isWorkspaceRelativePath(activePath)) return;
@@ -867,7 +948,7 @@ function FileExplorerContent({
     const next =
       items.find((item) => item.dataset.filePath === activePath) ?? items[0];
     setFocusedTreePath(next?.dataset.filePath ?? null);
-  }, [activePath, children, expanded, focusedTreePath, query, searchEntries]);
+  }, [activePath, children, expanded, focusedTreePath, query]);
 
   useEffect(() => {
     if (!keyboardActive) {
@@ -914,6 +995,8 @@ function FileExplorerContent({
     entry: FileExplorerEntry,
     fragment?: string,
     refresh = false,
+    line?: number,
+    snippet?: string,
   ) => {
     if (!workspace?.workspace_id || entry.type === "directory") return;
     onActiveDiffEntriesChange?.(
@@ -932,20 +1015,38 @@ function FileExplorerContent({
       previewRequestKeyRef.current === requestKey;
     setPreviewEntry(entry);
     setPreviewFragment(fragment);
+    setPreviewLine(line);
+    setPreviewSnippet(snippet);
     setPreviewError(null);
     const cached = refresh ? null : readCachedPreview(key);
     if (cached) {
       setPreview(cached);
       setPreviewLoading(false);
       emitPreviewChange(
-        { entry, fragment, preview: cached, loading: false, error: null },
+        {
+          entry,
+          fragment,
+          line,
+          snippet,
+          preview: cached,
+          loading: false,
+          error: null,
+        },
         { userInitiated: true },
       );
     } else {
       setPreview(null);
       setPreviewLoading(true);
       emitPreviewChange(
-        { entry, fragment, preview: null, loading: true, error: null },
+        {
+          entry,
+          fragment,
+          line,
+          snippet,
+          preview: null,
+          loading: true,
+          error: null,
+        },
         { userInitiated: true },
       );
     }
@@ -957,7 +1058,15 @@ function FileExplorerContent({
       if (requestIsCurrent()) {
         setPreview(next);
         emitPreviewChange(
-          { entry, fragment, preview: next, loading: false, error: null },
+          {
+            entry,
+            fragment,
+            line,
+            snippet,
+            preview: next,
+            loading: false,
+            error: null,
+          },
           { userInitiated: true },
         );
       }
@@ -966,7 +1075,15 @@ function FileExplorerContent({
         const message = (e as Error).message;
         setPreviewError(message);
         emitPreviewChange(
-          { entry, fragment, preview: null, loading: false, error: message },
+          {
+            entry,
+            fragment,
+            line,
+            snippet,
+            preview: null,
+            loading: false,
+            error: message,
+          },
           { userInitiated: true },
         );
       }
@@ -1663,55 +1780,82 @@ function FileExplorerContent({
                     onChange={(e) =>
                       updateCache({ search: e.currentTarget.value })
                     }
-                    placeholder="Search loaded files"
-                    aria-label="Search loaded files"
-                    title="Search loaded names or paths. Globs: r*md, ?.txt, **/*.md, *.{md,txt}"
+                    placeholder="Search checkout"
+                    aria-label="Search checkout"
                     maxLength={512}
                   />
                 </label>
-                <label className="file-hidden-toggle">
-                  <input
-                    type="checkbox"
-                    checked={showHidden}
-                    onChange={(e) => setShowHidden(e.currentTarget.checked)}
-                  />
+                <ThemedSelect
+                  className="file-search-mode"
+                  aria-label="Search type"
+                  title="Loaded searches include only expanded directories and support globs"
+                  value={searchMode}
+                  options={[
+                    { value: "files", label: "Files" },
+                    { value: "content", label: "Content" },
+                    { value: "loaded", label: "Loaded" },
+                  ]}
+                  onChange={(value) =>
+                    setSearchMode(value as "files" | "content" | "loaded")
+                  }
+                />
+                <button
+                  type="button"
+                  className="file-hidden-toggle"
+                  aria-pressed={showHidden}
+                  title="Show hidden files"
+                  onClick={() => {
+                    writeExplorerCache(
+                      connectionClient,
+                      cacheWorkspaceId,
+                      !showHidden,
+                      { search },
+                      cacheResourceKey,
+                    );
+                    setShowHidden(!showHidden);
+                  }}
+                >
+                  {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
                   Hidden
-                </label>
-                <button
-                  type="button"
-                  className="ghost file-action"
-                  aria-label="Browse filesystem"
-                  title="Browse filesystem: allow navigation outside this workspace"
-                  disabled={!workspace}
-                  onClick={() => {
-                    setEntryMenu(null);
-                    setPendingDeleteEntry(null);
-                    setFilesystemContext(runtimeContext);
-                  }}
-                >
-                  <FolderOpen size={15} />
                 </button>
-                <button
-                  type="button"
-                  className="ghost file-action"
-                  title="Refresh"
-                  disabled={!workspace}
-                  onClick={() => {
-                    const pathsToRefresh = Array.from(expanded);
-                    if (!pathsToRefresh.includes(""))
-                      pathsToRefresh.unshift("");
-                    for (const path of pathsToRefresh) {
-                      void loadDirectory(path, true);
-                    }
-                    void loadGitStatus(true);
-                    if (previewEntry) void loadPreview(previewEntry);
-                  }}
-                >
-                  <RefreshCw
-                    className={gitSummaryState.loading ? "is-spinning" : ""}
-                    size={15}
-                  />
-                </button>
+                <span className="file-toolbar-end">
+                  <button
+                    type="button"
+                    className="file-toolbar-icon"
+                    aria-label="Browse filesystem"
+                    title="Browse filesystem: allow navigation outside this workspace"
+                    disabled={!workspace}
+                    onClick={() => {
+                      setEntryMenu(null);
+                      setPendingDeleteEntry(null);
+                      setFilesystemContext(runtimeContext);
+                    }}
+                  >
+                    <FolderOpen size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    className="file-toolbar-icon"
+                    aria-label="Refresh files"
+                    title="Refresh"
+                    disabled={!workspace}
+                    onClick={() => {
+                      setSearchRevision((value) => value + 1);
+                      const pathsToRefresh = Array.from(expanded);
+                      if (!pathsToRefresh.includes(""))
+                        pathsToRefresh.unshift("");
+                      for (const path of pathsToRefresh) {
+                        void loadDirectory(path, true);
+                      }
+                      void loadGitStatus(true);
+                    }}
+                  >
+                    <RefreshCw
+                      className={gitSummaryState.loading ? "is-spinning" : ""}
+                      size={15}
+                    />
+                  </button>
+                </span>
               </div>
 
               {error ? <p className="modal-error">{error}</p> : null}
@@ -1724,7 +1868,7 @@ function FileExplorerContent({
               <div
                 ref={fileTreeRef}
                 className={`file-tree ${dropTargetPath === "" ? "is-drop-target" : ""}`}
-                role="tree"
+                role={query && searchMode !== "loaded" ? undefined : "tree"}
                 onFocusCapture={() => setTreeHasFocus(true)}
                 onBlurCapture={(event) => {
                   if (
@@ -1754,9 +1898,9 @@ function FileExplorerContent({
                     Drop files to upload to workspace root
                   </div>
                 ) : null}
-                {query ? (
-                  searchEntries.length ? (
-                    searchEntries.map((entry, index) =>
+                {query && searchMode === "loaded" ? (
+                  loadedMatches.length ? (
+                    loadedMatches.map((entry, index) =>
                       renderEntry(entry, 0, index === 0),
                     )
                   ) : (
@@ -1764,6 +1908,70 @@ function FileExplorerContent({
                       No loaded files match.
                     </div>
                   )
+                ) : query ? (
+                  <div className="file-search-results">
+                    {searchState.loading ? (
+                      <div className="file-row file-row-muted" role="status">
+                        Searching checkout...
+                      </div>
+                    ) : searchState.error ? (
+                      <div className="file-row file-row-muted" role="alert">
+                        Search failed: {searchState.error}
+                      </div>
+                    ) : searchState.response?.results.length ? (
+                      <>
+                        <div className="file-row file-row-muted" role="status">
+                          {searchState.response.results.length} matches
+                        </div>
+                        {searchState.response.results.map((result, index) => (
+                          <button
+                            key={`${result.path}:${result.line ?? 0}:${index}`}
+                            type="button"
+                            className="file-search-result"
+                            onClick={() =>
+                              void loadPreview(
+                                {
+                                  name:
+                                    result.path.split("/").pop() ?? result.path,
+                                  path: result.path,
+                                  type: "file",
+                                  size: 0,
+                                  mtime_ms: 0,
+                                  hidden: false,
+                                },
+                                undefined,
+                                false,
+                                result.line,
+                                result.snippet,
+                              )
+                            }
+                          >
+                            <span className="file-search-result-path">
+                              {result.path}
+                              {result.line ? `:${result.line}` : ""}
+                            </span>
+                            {result.snippet ? (
+                              <span className="file-search-result-snippet">
+                                {result.snippet}
+                              </span>
+                            ) : null}
+                          </button>
+                        ))}
+                        {searchState.response.truncated ? (
+                          <div
+                            className="file-row file-row-muted"
+                            role="status"
+                          >
+                            Results truncated at 100. Refine the search.
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <div className="file-row file-row-muted" role="status">
+                        No matches in this checkout.
+                      </div>
+                    )}
+                  </div>
                 ) : !children[""] && loadingPaths.has("") ? (
                   renderInitialLoading()
                 ) : (
@@ -1785,6 +1993,8 @@ function FileExplorerContent({
                   void loadPreview(previewEntry, previewFragment, true);
               }}
               fragment={previewFragment}
+              line={previewLine}
+              snippet={previewSnippet}
               onOpenFile={(path, fragment) =>
                 void loadPreview(
                   {

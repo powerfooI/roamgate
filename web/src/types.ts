@@ -170,6 +170,13 @@ export interface FilePreview {
   resource_revision?: number;
 }
 
+export interface FileSearchResponse {
+  workspace_id: string;
+  root: string;
+  results: { path: string; line?: number; snippet?: string }[];
+  truncated: boolean;
+}
+
 export type GitDiffKind =
   | "staged"
   | "unstaged"

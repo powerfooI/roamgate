@@ -81,6 +81,10 @@ import { LEGACY_DEFAULT_CONNECTION_ID } from "./connections/types";
 import { createAuthHandlers, unauthenticatedLoginRedirect } from "./http/auth";
 import { serveStatic } from "./http/static-files";
 import {
+  TERMINAL_UPLOAD_TIMEOUT_MS,
+  terminalUploadRequestBodyLimit,
+} from "./http/terminal-upload";
+import {
   createUpdateHandlers,
   UPDATE_HTTP_IDLE_TIMEOUT_SECONDS,
 } from "./http/update";
@@ -814,6 +818,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     listWorkspaceFiles,
     resolveWorkspaceFiles,
     readWorkspaceFile,
+    searchWorkspaceFiles,
     revealWorkspaceFile,
     readGitDiffSummary,
     readWorkspacePullRequest,
@@ -924,6 +929,15 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       sendReply({ id, result }, "file-read");
     } catch (e) {
       sendError("file-read-error", e);
+    }
+    return;
+  }
+  if (method === "file.search") {
+    try {
+      const result = await searchWorkspaceFiles(params ?? {});
+      sendReply({ id, result }, "file-search");
+    } catch (e) {
+      sendError("file-search-error", e);
     }
     return;
   }
@@ -1334,6 +1348,7 @@ function main() {
         port: config.port,
         hostname: config.host,
         tls: config.tls,
+        maxRequestBodySize: terminalUploadRequestBodyLimit(),
         async fetch(req, server) {
           const requestPathname = rawRequestPathname(req.url);
           let url: URL;
@@ -1431,7 +1446,7 @@ function main() {
               connectionRoute.kind === "connection" &&
               connectionRoute.endpoint === "terminal-upload"
             ) {
-              server.timeout(req, 300);
+              server.timeout(req, TERMINAL_UPLOAD_TIMEOUT_MS / 1000);
             }
             if (
               connectionRoute.kind === "connection" &&

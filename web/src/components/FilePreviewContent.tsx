@@ -66,6 +66,8 @@ export type ActiveFilePreviewSelection = {
   loading: boolean;
   error: string | null;
   fragment?: string;
+  line?: number;
+  snippet?: string;
 };
 
 export type FilePreviewSelectionMeta = {
@@ -188,6 +190,8 @@ export function FilePreviewContent({
   loading,
   error,
   fragment,
+  line,
+  snippet,
   changesContent,
   changesKey,
   annotations = [],
@@ -204,6 +208,8 @@ export function FilePreviewContent({
   loading: boolean;
   error: string | null;
   fragment?: string;
+  line?: number;
+  snippet?: string;
   changesContent?: ReactNode;
   changesKey?: string;
   backAction?: { label: string; onClick: () => void };
@@ -233,6 +239,10 @@ export function FilePreviewContent({
     useState<MarkdownSelectionTarget | null>(null);
   const theme = useDocumentTheme();
   const previewText = preview?.text ?? null;
+  const lineBeyondPreview =
+    line !== undefined &&
+    previewText !== null &&
+    line > previewText.split(/\r?\n/).length;
   const previewPath = preview?.path ?? "";
   const markdownDocumentPath = preview
     ? workspaceMarkdownDocumentPath(previewPath, preview.root)
@@ -342,6 +352,10 @@ export function FilePreviewContent({
   useEffect(() => {
     setPreviewMode("rendered");
   }, [entry?.path]);
+
+  useEffect(() => {
+    if (line) setPreviewMode("raw");
+  }, [entry?.path, line]);
 
   useEffect(() => {
     setPendingAnnotation(null);
@@ -705,6 +719,15 @@ export function FilePreviewContent({
               Preview truncated at 512 KB.
             </div>
           ) : null}
+          {!loading && !error && lineBeyondPreview ? (
+            <div className="file-preview-banner" role="status">
+              Match at line {line} is outside this preview. The beginning of the
+              file is shown below.
+              {snippet ? (
+                <code className="file-preview-search-snippet">{snippet}</code>
+              ) : null}
+            </div>
+          ) : null}
           {!loading && !error && hasMarkdownPreview && renderRichPreview ? (
             <MarkdownPreview
               text={previewText}
@@ -733,6 +756,7 @@ export function FilePreviewContent({
             <CodeMirrorPreview
               text={previewText}
               path={previewPath}
+              line={line}
               theme={theme}
               annotations={lineAnnotations}
               editorViewRef={editorViewRef}
@@ -936,6 +960,7 @@ function codeMirrorAnnotationExtensions(
 function CodeMirrorPreview({
   text,
   path,
+  line,
   theme,
   annotations,
   editorViewRef,
@@ -943,6 +968,7 @@ function CodeMirrorPreview({
 }: {
   text: string;
   path: string;
+  line?: number;
   theme: AppTheme;
   annotations: readonly FileLineReviewAnnotation[];
   editorViewRef: MutableRefObject<CodeMirrorEditorView | null>;
@@ -952,8 +978,25 @@ function CodeMirrorPreview({
   const annotationRuntimeRef = useRef<CodeMirrorAnnotationRuntime | null>(null);
   const annotationsRef = useRef(annotations);
   const requestAnnotationRef = useRef(onRequestAnnotation);
+  const lineRef = useRef(line);
   annotationsRef.current = annotations;
   requestAnnotationRef.current = onRequestAnnotation;
+  lineRef.current = line;
+
+  const scrollToLine = (
+    deps: CodeMirrorPreviewDeps,
+    view: CodeMirrorEditorView,
+    target: number,
+  ) => {
+    if (target > view.state.doc.lines) return;
+    const position = view.state.doc.line(
+      Math.min(view.state.doc.lines, Math.max(1, target)),
+    ).from;
+    view.dispatch({
+      selection: { anchor: position },
+      effects: deps.EditorView.scrollIntoView(position, { y: "center" }),
+    });
+  };
 
   useEffect(() => {
     const parent = containerRef.current;
@@ -1141,6 +1184,7 @@ function CodeMirrorPreview({
         compartment: annotationCompartment,
         view,
       };
+      if (lineRef.current) scrollToLine(deps, view, lineRef.current);
       const activeView = view;
 
       void highlightCodeTokens(text, path)
@@ -1172,6 +1216,11 @@ function CodeMirrorPreview({
       view?.destroy();
     };
   }, [editorViewRef, path, text, theme]);
+
+  useEffect(() => {
+    const runtime = annotationRuntimeRef.current;
+    if (runtime && line) scrollToLine(runtime.deps, runtime.view, line);
+  }, [line]);
 
   useEffect(() => {
     const runtime = annotationRuntimeRef.current;

@@ -8,10 +8,19 @@ import { terminalPathText } from "./terminal-path-text";
 
 const DEFAULT_MAX_BYTES = 100 * 1024 * 1024;
 const DEFAULT_RETENTION_HOURS = 24;
+export const TERMINAL_UPLOAD_TIMEOUT_MS = 300_000;
 
 function positiveInteger(value: string | undefined, fallback: number) {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function terminalUploadMaxBytes() {
+  return positiveInteger(roamgateEnv("UPLOAD_MAX_BYTES"), DEFAULT_MAX_BYTES);
+}
+
+export function terminalUploadRequestBodyLimit() {
+  return Math.max(128 * 1024 * 1024, terminalUploadMaxBytes());
 }
 
 export function sanitizeTerminalUploadName(
@@ -74,12 +83,12 @@ export function createTerminalUploadHandler(args: {
   maxBytes?: number;
   retentionHours?: number;
   rejectEmpty?: boolean;
+  /** Test seam for the bounded SSH transfer deadline. */
+  uploadTimeoutMs?: number;
   onCleanupError?: (error: unknown) => void;
 }) {
   const platform = args.platform ?? process.platform;
-  const maxBytes =
-    args.maxBytes ??
-    positiveInteger(roamgateEnv("UPLOAD_MAX_BYTES"), DEFAULT_MAX_BYTES);
+  const maxBytes = args.maxBytes ?? terminalUploadMaxBytes();
   const retentionHours =
     args.retentionHours ??
     positiveInteger(
@@ -187,12 +196,20 @@ export function createTerminalUploadHandler(args: {
       }
       const host = args.sshHost();
       if (host) {
+        req.signal.throwIfAborted();
         const proc = Bun.spawn(
           sshCommandArgv(
             host,
             `sh -c ${shQuote(remoteTerminalUploadScript(name, retentionHours * 60))}`,
           ),
-          { stdin: Bun.file(localPath), stdout: "pipe", stderr: "pipe" },
+          {
+            stdin: Bun.file(localPath),
+            stdout: "pipe",
+            stderr: "pipe",
+            signal: req.signal,
+            timeout: args.uploadTimeoutMs ?? TERMINAL_UPLOAD_TIMEOUT_MS,
+            killSignal: "SIGKILL",
+          },
         );
         const [code, path, stderr] = await Promise.all([
           proc.exited,

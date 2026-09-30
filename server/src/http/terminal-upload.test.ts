@@ -1,4 +1,4 @@
-import { afterEach, expect, jest, test } from "bun:test";
+import { afterEach, expect, jest, spyOn, test } from "bun:test";
 import {
   mkdtemp,
   readdir,
@@ -16,6 +16,7 @@ import {
   remoteTerminalCleanupScript,
   remoteTerminalUploadScript,
   sanitizeTerminalUploadName,
+  terminalUploadRequestBodyLimit,
 } from "./terminal-upload";
 
 const roots: string[] = [];
@@ -223,5 +224,115 @@ test.skipIf(process.platform === "win32")(
     });
     expect(await cleanup.exited).toBe(0);
     expect(await Bun.file(path).exists()).toBe(false);
+  },
+);
+
+test("a failed request stream removes the partial upload", async () => {
+  const temp = await root();
+  const handle = createTerminalUploadHandler({
+    sshHost: () => undefined,
+    tempRoot: () => temp,
+  });
+  let pulls = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (pulls++ === 0)
+        controller.enqueue(new TextEncoder().encode("partial"));
+      else controller.error(new Error("client disconnected"));
+    },
+  });
+  const response = await handle(request(stream), "interrupted.txt");
+  expect(response.status).toBe(500);
+  expect(
+    await readdir(
+      join(temp, `roamgate-uploads-${process.getuid?.() ?? "user"}`),
+    ),
+  ).toEqual([]);
+});
+
+test("HTTP uploads honor a configured cap above Bun's default body limit", async () => {
+  const previous = process.env.ROAMGATE_UPLOAD_MAX_BYTES;
+  process.env.ROAMGATE_UPLOAD_MAX_BYTES = String(140 * 1024 * 1024);
+  const temp = await root();
+  const handle = createTerminalUploadHandler({
+    sshHost: () => undefined,
+    tempRoot: () => temp,
+  });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    maxRequestBodySize: terminalUploadRequestBodyLimit(),
+    fetch: (req) => handle(req, "large.bin"),
+  });
+  try {
+    const response = await fetch(server.url, {
+      method: "POST",
+      body: new Uint8Array(129 * 1024 * 1024),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { path: string };
+    expect((await stat(body.path)).size).toBe(129 * 1024 * 1024);
+    process.env.ROAMGATE_UPLOAD_MAX_BYTES = "1";
+    expect(terminalUploadRequestBodyLimit()).toBe(128 * 1024 * 1024);
+  } finally {
+    server.stop(true);
+    if (previous === undefined) delete process.env.ROAMGATE_UPLOAD_MAX_BYTES;
+    else process.env.ROAMGATE_UPLOAD_MAX_BYTES = previous;
+  }
+});
+
+test.each(["abort", "timeout"] as const)(
+  "SSH upload %s terminates the process and removes local staging",
+  async (reason) => {
+    const temp = await root();
+    const originalSpawn = Bun.spawn;
+    let processStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      processStarted = resolve;
+    });
+    let child: Bun.Subprocess | undefined;
+    type SpawnOptions = NonNullable<Parameters<typeof Bun.spawn>[1]>;
+    const spawn = spyOn(Bun, "spawn").mockImplementation(((
+      command: string[] | (SpawnOptions & { cmd: string[] }),
+      options?: SpawnOptions,
+    ) => {
+      const argv = Array.isArray(command) ? command : command.cmd;
+      expect(argv[0]).toBe("ssh");
+      child = originalSpawn(
+        [process.execPath, "-e", "setInterval(() => {}, 1000)"],
+        Array.isArray(command) ? options : command,
+      );
+      processStarted();
+      return child;
+    }) as typeof Bun.spawn);
+    const controller = new AbortController();
+    const handle = createTerminalUploadHandler({
+      sshHost: () => "test-host",
+      tempRoot: () => temp,
+      uploadTimeoutMs: reason === "timeout" ? 25 : 5_000,
+    });
+    try {
+      const pending = handle(
+        new Request("http://localhost/api/terminal-upload", {
+          method: "POST",
+          body: "partial transfer",
+          signal: controller.signal,
+        }),
+        "file.txt",
+      );
+      await started;
+      if (reason === "abort") controller.abort();
+      expect((await pending).status).toBe(502);
+      expect(child?.signalCode).toBe("SIGKILL");
+      expect(
+        await readdir(
+          join(temp, `roamgate-uploads-${process.getuid?.() ?? "user"}`),
+        ),
+      ).toEqual([]);
+    } finally {
+      child?.kill();
+      if (child) await child.exited;
+      spawn.mockRestore();
+    }
   },
 );

@@ -20,6 +20,13 @@
   background: var(--viewer-content-bg);
 }
 
+.file-preview-search-snippet {
+  display: block;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .file-explorer-side .file-preview {
   flex: 1 1 42%;
   min-height: 180px;

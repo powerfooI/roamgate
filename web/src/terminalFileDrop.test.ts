@@ -42,3 +42,36 @@ test("accepts multiple files, rejects directories, and joins paths", () => {
     "/tmp/a /tmp/b ",
   );
 });
+
+test("ignores text and explorer drops even if they contain file items", () => {
+  const data = {
+    types: [WORKSPACE_PATH_DRAG_TYPE, "Files"],
+    files: [file] as unknown as FileList,
+    items: [] as unknown as DataTransferItemList,
+  };
+  expect(filesFromTerminalDrop(data)).toBeNull();
+  expect(filesFromTerminalDrop({ ...data, types: ["text/plain"] })).toBeNull();
+});
+
+test("uses the file list when drag items are unavailable", () => {
+  expect(
+    filesFromTerminalDrop({
+      types: ["Files"],
+      files: [file] as unknown as FileList,
+      items: [] as unknown as DataTransferItemList,
+    }),
+  ).toEqual([file]);
+});
+
+test("rejects the whole drop when a later file item is a directory", () => {
+  expect(
+    filesFromTerminalDrop({
+      types: ["Files"],
+      files: [file] as unknown as FileList,
+      items: [
+        { kind: "file", getAsFile: () => file },
+        { kind: "file", getAsFile: () => null },
+      ] as unknown as DataTransferItemList,
+    }),
+  ).toBe("directory");
+});

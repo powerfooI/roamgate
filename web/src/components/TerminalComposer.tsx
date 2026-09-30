@@ -754,7 +754,7 @@ export function TerminalComposer({
           </button>
           <span className="terminal-composer-hint">
             {uploadCount > 0
-              ? "Uploading image…"
+              ? "Uploading file…"
               : submissionPending
                 ? "Sending…"
                 : ""}
