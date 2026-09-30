@@ -569,33 +569,62 @@ describe("file preview tabs", () => {
     expect(readResourceFileTabs(storage, scope)).toEqual({
       paths: ["src/index.ts"],
       activePath: "src/index.ts",
+      previewPath: null,
     });
     writeResourceFileSelection(storage, scope, "README.md");
     expect(JSON.parse(storage.getItem(key)!)).toEqual({
-      version: 1,
+      version: 2,
       paths: ["src/index.ts", "README.md"],
       activePath: "README.md",
+      previewPath: "README.md",
     });
   });
 
-  test("deduplicates open paths and closes active tabs to the right then left", () => {
-    let tabs: ResourceFileTabs = { paths: [], activePath: null };
-    for (const path of ["a", "b", "c", "b"])
-      tabs = openResourceFileTab(tabs, path);
-    expect(tabs).toEqual({ paths: ["a", "b", "c"], activePath: "b" });
-    expect(closeResourceFileTab(tabs, "a")).toEqual({
-      paths: ["b", "c"],
-      activePath: "b",
-    });
-    tabs = closeResourceFileTab(tabs, "b");
-    expect(tabs).toEqual({ paths: ["a", "c"], activePath: "c" });
-    tabs = closeResourceFileTab(tabs, "c");
-    expect(tabs.activePath).toBe("a");
-    expect(closeResourceFileTab(tabs, "absent")).toBe(tabs);
-    expect(closeResourceFileTab(tabs, "a")).toEqual({
+  test("reuses one preview, keeps pinned tabs, and closes neighbors", () => {
+    let tabs: ResourceFileTabs = {
       paths: [],
       activePath: null,
+      previewPath: null,
+    };
+    tabs = openResourceFileTab(tabs, "a");
+    tabs = openResourceFileTab(tabs, "b");
+    expect(tabs).toEqual({
+      paths: ["b"],
+      activePath: "b",
+      previewPath: "b",
     });
+    tabs = { ...tabs, previewPath: null };
+    tabs = openResourceFileTab(tabs, "c");
+    tabs = openResourceFileTab(tabs, "b");
+    expect(tabs).toEqual({
+      paths: ["b", "c"],
+      activePath: "b",
+      previewPath: "c",
+    });
+    tabs = openResourceFileTab(tabs, "d");
+    expect(tabs).toEqual({
+      paths: ["b", "d"],
+      activePath: "d",
+      previewPath: "d",
+    });
+    tabs = closeResourceFileTab(tabs, "d");
+    expect(tabs).toEqual({
+      paths: ["b"],
+      activePath: "b",
+      previewPath: null,
+    });
+    expect(closeResourceFileTab(tabs, "absent")).toBe(tabs);
+    expect(closeResourceFileTab(tabs, "b")).toEqual({
+      paths: [],
+      activePath: null,
+      previewPath: null,
+    });
+    expect(
+      closeResourceFileTab(
+        { paths: ["a", "b", "c"], activePath: "b", previewPath: null },
+        "b",
+      ).activePath,
+    ).toBe("c");
   });
 
   test("restores empty, ordered tabs and active selection across reopen", () => {
@@ -611,15 +640,22 @@ describe("file preview tabs", () => {
     writeResourceFileTabs(storage, scope, {
       paths: ["b", "a"],
       activePath: "a",
+      previewPath: "a",
     });
     expect(readResourceFileTabs(storage, reopened)).toEqual({
       paths: ["b", "a"],
       activePath: "a",
+      previewPath: "a",
     });
-    writeResourceFileTabs(storage, reopened, { paths: [], activePath: null });
+    writeResourceFileTabs(storage, reopened, {
+      paths: [],
+      activePath: null,
+      previewPath: null,
+    });
     expect(readResourceFileTabs(storage, scope)).toEqual({
       paths: [],
       activePath: null,
+      previewPath: null,
     });
     expect(readResourceFileSelection(storage, scope)).toBeUndefined();
   });
@@ -637,12 +673,14 @@ describe("file preview tabs", () => {
       writeResourceFileTabs(storage, scope, {
         paths: [`file-${index}`, "shared.ts"],
         activePath: `file-${index}`,
+        previewPath: null,
       }),
     );
     scopes.forEach((scope, index) =>
       expect(readResourceFileTabs(storage, scope)).toEqual({
         paths: [`file-${index}`, "shared.ts"],
         activePath: `file-${index}`,
+        previewPath: null,
       }),
     );
   });
@@ -656,26 +694,31 @@ describe("file preview tabs", () => {
     const key = "workspaceInspectorFile:workspace:plain";
     for (const raw of [
       "{",
-      '{"version":2,"paths":["a"]}',
+      '{"version":3,"paths":["a"]}',
       '{"version":1,"paths":null}',
     ]) {
       storage.setItem(key, raw);
       expect(readResourceFileTabs(storage, scope)).toEqual({
         paths: [],
         activePath: null,
+        previewPath: null,
       });
     }
     storage.setItem(
       key,
       JSON.stringify({
-        version: 1,
+        version: 2,
         paths: ["a", "a", 3, null, "", "b"],
         activePath: "missing",
+        previewPath: "b",
       }),
     );
     expect(readResourceFileTabs(storage, scope)).toEqual({
       paths: ["a", "b"],
       activePath: "a",
+      previewPath: "b",
     });
+    storage.setItem(key, '{"version":1,"paths":["a"],"activePath":"a"}');
+    expect(readResourceFileTabs(storage, scope).previewPath).toBeNull();
   });
 });

@@ -146,6 +146,7 @@ export function FileExplorerPanel({
   keyboardActive = false,
   onClose,
   onPreviewChange,
+  onPinFileTab,
   onActiveDiffEntriesChange,
 }: {
   open: boolean;
@@ -160,6 +161,7 @@ export function FileExplorerPanel({
     selection: ActiveFilePreviewSelection,
     meta?: FilePreviewSelectionMeta,
   ) => void;
+  onPinFileTab?: (path: string) => void;
   onActiveDiffEntriesChange?: (entries: GitDiffEntry[]) => void;
 }) {
   if (!open) return null;
@@ -178,6 +180,7 @@ export function FileExplorerPanel({
         previewRequestRef={previewRequestRef}
         keyboardActive={keyboardActive}
         onPreviewChange={onPreviewChange}
+        onPinFileTab={onPinFileTab}
         onActiveDiffEntriesChange={onActiveDiffEntriesChange}
       />
     </aside>
@@ -343,6 +346,7 @@ function FileExplorerContent({
   activePath,
   keyboardActive = false,
   onPreviewChange,
+  onPinFileTab,
   onActiveDiffEntriesChange,
 }: {
   open: boolean;
@@ -359,6 +363,7 @@ function FileExplorerContent({
     selection: ActiveFilePreviewSelection,
     meta?: FilePreviewSelectionMeta,
   ) => void;
+  onPinFileTab?: (path: string) => void;
   onActiveDiffEntriesChange?: (entries: GitDiffEntry[]) => void;
 }) {
   const workspaces = useStoreSelector((state) => state.workspaces);
@@ -1582,6 +1587,16 @@ function FileExplorerContent({
             }
             activateEntry(entry);
           }}
+          onDoubleClick={(event) => {
+            if (
+              entry.type !== "directory" &&
+              !(
+                event.target instanceof Element &&
+                event.target.closest("button")
+              )
+            )
+              onPinFileTab?.(entry.path);
+          }}
         >
           <button
             type="button"
@@ -1764,6 +1779,7 @@ function FileExplorerContent({
               onSelect={(entry) => {
                 void loadPreview(entry);
               }}
+              onPinFile={onPinFileTab}
               onMenu={openEntryMenu}
               onExit={() => {
                 setEntryMenu(null);

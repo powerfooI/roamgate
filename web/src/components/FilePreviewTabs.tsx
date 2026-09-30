@@ -7,12 +7,14 @@ export function FilePreviewTabs({
   tabs,
   panelId,
   onSelect,
+  onPin,
   onClose,
   onEmptyFocus,
 }: {
   tabs: ResourceFileTabs;
   panelId: string;
   onSelect: (path: string) => void;
+  onPin: (path: string) => void;
   onClose: (path: string) => void;
   onEmptyFocus: () => void;
 }) {
@@ -57,9 +59,10 @@ export function FilePreviewTabs({
         );
         const parent = path.slice(0, -(name.length + 1));
         const active = path === tabs.activePath;
+        const preview = path === tabs.previewPath;
         return (
           <div
-            className={`file-preview-tab ${active ? "is-active" : ""}`}
+            className={`file-preview-tab ${active ? "is-active" : ""} ${preview ? "is-preview" : ""}`}
             key={path}
             role="presentation"
             data-file-preview-tab=""
@@ -79,10 +82,16 @@ export function FilePreviewTabs({
               aria-controls={panelId}
               aria-selected={active}
               aria-label={path}
-              title={path}
+              title={preview ? `${path} · Double-click to keep open` : path}
+              aria-description={
+                preview
+                  ? "Temporary preview. Press Enter to keep open."
+                  : undefined
+              }
               tabIndex={active ? 0 : -1}
               className="file-preview-tab-select"
               onClick={() => onSelect(path)}
+              onDoubleClick={() => onPin(path)}
               onKeyDown={(event) => {
                 const nextIndex =
                   event.key === "ArrowRight"
@@ -104,6 +113,10 @@ export function FilePreviewTabs({
                   event.preventDefault();
                   event.stopPropagation();
                   close(path, true);
+                } else if (event.key === "Enter" && preview) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onPin(path);
                 }
               }}
             >

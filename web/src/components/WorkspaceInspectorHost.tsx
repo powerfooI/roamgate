@@ -289,6 +289,13 @@ export function WorkspaceInspectorHost({
         error: null,
       });
   };
+  const onPinFileTab = (path: string) => {
+    const current = readResourceFileTabs(roamgateLocalStorage, state.scope);
+    if (current.previewPath !== path) return;
+    const tabs = { ...current, previewPath: null };
+    writeResourceFileTabs(roamgateLocalStorage, state.scope, tabs);
+    setFileTabs(tabs);
+  };
 
   useLayoutEffect(() => {
     onReady?.();
@@ -682,6 +689,7 @@ export function WorkspaceInspectorHost({
                   }
                   onFileSelectionChange?.(selection, meta);
                 }}
+                onPinFileTab={onPinFileTab}
                 onActiveDiffEntriesChange={setFileDiffEntries}
               />
             </div>
@@ -709,6 +717,7 @@ export function WorkspaceInspectorHost({
                   setDrillInByView((current) => ({ ...current, files: true }));
                   onSelectFileTab(path);
                 }}
+                onPin={onPinFileTab}
                 onClose={onCloseFileTab}
                 onEmptyFocus={() =>
                   (

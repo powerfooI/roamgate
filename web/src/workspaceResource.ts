@@ -366,15 +366,21 @@ function fileSelectionStorageKey(scope: ResourceScope): string {
 export interface ResourceFileTabs {
   paths: string[];
   activePath: string | null;
+  previewPath: string | null;
 }
 
 export function openResourceFileTab(
   tabs: ResourceFileTabs,
   path: string,
 ): ResourceFileTabs {
+  if (tabs.paths.includes(path)) return { ...tabs, activePath: path };
   return {
-    paths: tabs.paths.includes(path) ? tabs.paths : [...tabs.paths, path],
+    paths: [
+      ...tabs.paths.filter((candidate) => candidate !== tabs.previewPath),
+      path,
+    ],
     activePath: path,
+    previewPath: path,
   };
 }
 
@@ -391,6 +397,7 @@ export function closeResourceFileTab(
       tabs.activePath === path
         ? (paths[Math.min(index, paths.length - 1)] ?? null)
         : tabs.activePath,
+    previewPath: tabs.previewPath === path ? null : tabs.previewPath,
   };
 }
 
@@ -398,14 +405,18 @@ export function readResourceFileTabs(
   storage: Pick<Storage, "getItem">,
   scope: ResourceScope,
 ): ResourceFileTabs {
-  const empty = { paths: [], activePath: null };
+  const empty = { paths: [], activePath: null, previewPath: null };
   const raw = storage.getItem(fileSelectionStorageKey(scope));
   if (!raw) return empty;
   if (!raw.trimStart().startsWith("{"))
-    return { paths: [raw], activePath: raw };
+    return { paths: [raw], activePath: raw, previewPath: null };
   try {
     const value = JSON.parse(raw);
-    if (value.version !== 1 || !Array.isArray(value.paths)) return empty;
+    if (
+      (value.version !== 1 && value.version !== 2) ||
+      !Array.isArray(value.paths)
+    )
+      return empty;
     const paths = [
       ...new Set<string>(
         value.paths.filter(
@@ -418,6 +429,7 @@ export function readResourceFileTabs(
       activePath: paths.includes(value.activePath)
         ? value.activePath
         : (paths[0] ?? null),
+      previewPath: paths.includes(value.previewPath) ? value.previewPath : null,
     };
   } catch {
     return empty;
@@ -431,7 +443,7 @@ export function writeResourceFileTabs(
 ): void {
   storage.setItem(
     fileSelectionStorageKey(scope),
-    JSON.stringify({ version: 1, ...tabs }),
+    JSON.stringify({ version: 2, ...tabs }),
   );
 }
 
@@ -452,6 +464,6 @@ export function writeResourceFileSelection(
     scope,
     path
       ? openResourceFileTab(readResourceFileTabs(storage, scope), path)
-      : { paths: [], activePath: null },
+      : { paths: [], activePath: null, previewPath: null },
   );
 }

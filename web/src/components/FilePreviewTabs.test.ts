@@ -100,16 +100,29 @@ function registerDomTests() {
       `[role="tab"][aria-label="${path}"]`,
     )!;
   }
-  function Harness({ onEmptyFocus = () => {} }: { onEmptyFocus?: () => void }) {
+  function Harness({
+    onEmptyFocus = () => {},
+    previewPath = null,
+  }: {
+    onEmptyFocus?: () => void;
+    previewPath?: string | null;
+  }) {
     const [tabs, setTabs] = useState<ResourceFileTabs>({
       paths: ["src/index.ts", "test/index.ts", "README.md"],
       activePath: "src/index.ts",
+      previewPath,
     });
     return createElement(FilePreviewTabs, {
       tabs,
       panelId: "preview",
       onSelect: (activePath) =>
         setTabs((current) => ({ ...current, activePath })),
+      onPin: (path) =>
+        setTabs((current) =>
+          current.previewPath === path
+            ? { ...current, previewPath: null }
+            : current,
+        ),
       onClose: (path) =>
         setTabs((current) => closeResourceFileTab(current, path)),
       onEmptyFocus,
@@ -117,6 +130,32 @@ function registerDomTests() {
   }
 
   describe("file preview tab interactions", () => {
+    test("double-click or Enter keeps a temporary preview open", async () => {
+      await mount(createElement(Harness, { previewPath: "src/index.ts" }));
+      expect(
+        tab("src/index.ts").closest(".file-preview-tab")?.className,
+      ).toContain("is-preview");
+      await act(async () =>
+        tab("src/index.ts").dispatchEvent(
+          new browser.MouseEvent("dblclick", {
+            bubbles: true,
+          }) as unknown as MouseEvent,
+        ),
+      );
+      expect(
+        tab("src/index.ts").closest(".file-preview-tab")?.className,
+      ).not.toContain("is-preview");
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      await act(async () =>
+        root.render(createElement(Harness, { previewPath: "src/index.ts" })),
+      );
+      await act(async () => key(tab("src/index.ts"), "Enter"));
+      expect(
+        tab("src/index.ts").closest(".file-preview-tab")?.className,
+      ).not.toContain("is-preview");
+    });
+
     test("disambiguates paths, exposes selection and supports roving keyboard navigation", async () => {
       await mount(createElement(Harness));
       expect(container.textContent).toContain("src");
@@ -247,6 +286,7 @@ function registerDomTests() {
     writeResourceFileTabs(roamgateLocalStorage, scope, {
       paths: ["a.ts", "b.ts"],
       activePath: "a.ts",
+      previewPath: null,
     });
     const request = { current: 4 };
     const selections: string[] = [];
@@ -353,16 +393,19 @@ function registerDomTests() {
     expect(readResourceFileTabs(roamgateLocalStorage, scope)).toEqual({
       paths: ["b.ts"],
       activePath: "b.ts",
+      previewPath: null,
     });
     await act(async () => key(tab("b.ts"), "Delete"));
     expect(readResourceFileTabs(roamgateLocalStorage, scope)).toEqual({
       paths: [],
       activePath: null,
+      previewPath: null,
     });
     expect(selections).toEqual(["a.ts", "b.ts"]);
     writeResourceFileTabs(roamgateLocalStorage, scope, {
       paths: ["a.ts"],
       activePath: "a.ts",
+      previewPath: null,
     });
     await act(async () =>
       root.render(
