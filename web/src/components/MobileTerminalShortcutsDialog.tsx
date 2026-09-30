@@ -33,7 +33,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import "./MobileTerminalShortcutsDialog.css";
 
 const OPTION_GROUPS = ["Control", "Basic", "Navigation", "Modified"] as const;
-const US_KEY_ROWS = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm"];
+const US_KEY_ROWS = [
+  "1234567890",
+  "qwertyuiop",
+  "asdfghjkl",
+  "zxcvbnm",
+  "`-=[]\\",
+  ";',./",
+];
 const BASIC_KEYS = ["Escape", "Tab", "Backspace", "Enter", "Space"];
 let nextShortcutId = 1;
 
@@ -268,13 +275,6 @@ function CustomKeyPicker({
       </div>
       <details className="mobile-shortcut-more-keys">
         <summary>More keys</summary>
-        <div
-          className="mobile-shortcut-extra-keys"
-          role="group"
-          aria-label="Symbol keys"
-        >
-          {Array.from("`-=[]\\;',./", keyButton)}
-        </div>
         <div
           className="mobile-shortcut-extra-keys"
           role="group"

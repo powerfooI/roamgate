@@ -99,8 +99,14 @@ if (process.env.ROAMGATE_SHORTCUT_PICKER_DOM_TEST !== "1") {
       await click("Custom keyboard");
       for (const key of "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
         expect(button(`Key ${key}`)).toBeDefined();
+      for (const key of "`-=[]\\;',./")
+        expect(
+          button(`Key ${key}`).closest(".mobile-shortcut-keyboard"),
+        ).not.toBeNull();
       await click("Alt");
       await click("Shift");
+      await click("Key /");
+      expect(button("Key /").textContent).toBe("?");
       await click("Key Tab");
       expect(button("Save shortcuts").disabled).toBe(true);
       await click("Key Y");
@@ -117,6 +123,8 @@ if (process.env.ROAMGATE_SHORTCUT_PICKER_DOM_TEST !== "1") {
       await click("Shift");
       await click("Key 2");
       expect(button("Key 2").textContent).toBe("@");
+      await click("Key [");
+      expect(button("Key [").textContent).toBe("{");
       await click("Save shortcuts");
       expect(savedRows[0][4]?.action).toEqual({
         key: "y",
@@ -129,13 +137,13 @@ if (process.env.ROAMGATE_SHORTCUT_PICKER_DOM_TEST !== "1") {
         0x1b, 0x19,
       ]);
       expect(savedSide[0]?.action).toEqual({
-        key: "2",
+        key: "[",
         ctrl: false,
         alt: true,
         shift: true,
       });
       expect(mobileTerminalShortcutBytes(savedSide[0]!.action)).toEqual([
-        0x1b, 0x40,
+        0x1b, 0x7b,
       ]);
     } finally {
       await act(async () => root.unmount());
