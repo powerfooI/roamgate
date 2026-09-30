@@ -13,6 +13,9 @@ test("searches unloaded checkout files and content while respecting ignores and 
     await mkdir(join(root, "deep"));
     await mkdir(join(root, "ignored"));
     await writeFile(join(root, ".gitignore"), "ignored/\n");
+    await writeFile(join(root, ".secret"), "needle hidden\n");
+    await mkdir(join(root, ".private"));
+    await writeFile(join(root, ".private", "target.txt"), "needle hidden\n");
     await writeFile(join(root, "deep", "target.txt"), "first\nneedle here\n");
     await writeFile(join(root, "ignored", "target.txt"), "needle hidden\n");
     await writeFile(
@@ -24,6 +27,7 @@ test("searches unloaded checkout files and content while respecting ignores and 
       root,
       query: "target",
       mode: "files",
+      showHidden: false,
       shQuote,
     });
     expect(files).toEqual({
@@ -35,12 +39,47 @@ test("searches unloaded checkout files and content while respecting ignores and 
       root,
       query: "NEEDLE",
       mode: "content",
+      showHidden: false,
       shQuote,
     });
     expect(content).toEqual({
       results: [{ path: "deep/target.txt", line: 2, snippet: "needle here" }],
       truncated: false,
     });
+
+    const hidden = await searchWorkspaceFiles({
+      root,
+      query: "needle",
+      mode: "content",
+      showHidden: true,
+      shQuote,
+    });
+    expect(hidden.results.map((result) => result.path)).toEqual([
+      ".private/target.txt",
+      ".secret",
+      "deep/target.txt",
+    ]);
+
+    await writeFile(join(root, "tracked.log"), "needle tracked\n");
+    expect(
+      Bun.spawnSync(["git", "-C", root, "add", "tracked.log"]).exitCode,
+    ).toBe(0);
+    await writeFile(join(root, ".gitignore"), "ignored/\n*.log\n");
+    const tracked = await searchWorkspaceFiles({
+      root,
+      query: "needle",
+      mode: "content",
+      showHidden: false,
+      shQuote,
+    });
+    expect(tracked.results).toContainEqual({
+      path: "tracked.log",
+      line: 1,
+      snippet: "needle tracked",
+    });
+    expect(
+      tracked.results.filter((result) => result.path === "deep/target.txt"),
+    ).toHaveLength(1);
 
     for (let index = 0; index < 101; index++) {
       await writeFile(join(root, `match-${index}.txt`), "needle\n");
@@ -49,6 +88,7 @@ test("searches unloaded checkout files and content while respecting ignores and 
       root,
       query: "match-",
       mode: "files",
+      showHidden: false,
       shQuote,
     });
     expect(bounded.results).toHaveLength(100);

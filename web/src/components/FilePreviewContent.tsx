@@ -67,6 +67,7 @@ export type ActiveFilePreviewSelection = {
   error: string | null;
   fragment?: string;
   line?: number;
+  snippet?: string;
 };
 
 export type FilePreviewSelectionMeta = {
@@ -190,6 +191,7 @@ export function FilePreviewContent({
   error,
   fragment,
   line,
+  snippet,
   changesContent,
   changesKey,
   annotations = [],
@@ -207,6 +209,7 @@ export function FilePreviewContent({
   error: string | null;
   fragment?: string;
   line?: number;
+  snippet?: string;
   changesContent?: ReactNode;
   changesKey?: string;
   backAction?: { label: string; onClick: () => void };
@@ -236,6 +239,10 @@ export function FilePreviewContent({
     useState<MarkdownSelectionTarget | null>(null);
   const theme = useDocumentTheme();
   const previewText = preview?.text ?? null;
+  const lineBeyondPreview =
+    line !== undefined &&
+    previewText !== null &&
+    line > previewText.split(/\r?\n/).length;
   const previewPath = preview?.path ?? "";
   const markdownDocumentPath = preview
     ? workspaceMarkdownDocumentPath(previewPath, preview.root)
@@ -712,6 +719,15 @@ export function FilePreviewContent({
               Preview truncated at 512 KB.
             </div>
           ) : null}
+          {!loading && !error && lineBeyondPreview ? (
+            <div className="file-preview-banner" role="status">
+              Match at line {line} is outside this preview. The beginning of the
+              file is shown below.
+              {snippet ? (
+                <code className="file-preview-search-snippet">{snippet}</code>
+              ) : null}
+            </div>
+          ) : null}
           {!loading && !error && hasMarkdownPreview && renderRichPreview ? (
             <MarkdownPreview
               text={previewText}
@@ -972,6 +988,7 @@ function CodeMirrorPreview({
     view: CodeMirrorEditorView,
     target: number,
   ) => {
+    if (target > view.state.doc.lines) return;
     const position = view.state.doc.line(
       Math.min(view.state.doc.lines, Math.max(1, target)),
     ).from;

@@ -408,6 +408,7 @@ function FileExplorerContent({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewFragment, setPreviewFragment] = useState<string>();
   const [previewLine, setPreviewLine] = useState<number>();
+  const [previewSnippet, setPreviewSnippet] = useState<string>();
   const [searchMode, setSearchMode] = useState<"files" | "content" | "loaded">(
     "files",
   );
@@ -854,6 +855,7 @@ function FileExplorerContent({
     initialWorkspacePath(workspace),
     query,
     searchMode,
+    showHidden,
     searchRevision,
   ]);
   const searchState =
@@ -876,6 +878,7 @@ function FileExplorerContent({
           workspace_id: workspace.workspace_id,
           query,
           mode: searchMode,
+          show_hidden: showHidden,
         })
         .then((response) => {
           if (!cancelled && connectionClient.isCurrent()) {
@@ -902,7 +905,14 @@ function FileExplorerContent({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [connectionClient, query, searchKey, searchMode, workspace?.workspace_id]);
+  }, [
+    connectionClient,
+    query,
+    searchKey,
+    searchMode,
+    showHidden,
+    workspace?.workspace_id,
+  ]);
 
   useEffect(() => {
     if (!activePath || !isWorkspaceRelativePath(activePath)) return;
@@ -986,6 +996,7 @@ function FileExplorerContent({
     fragment?: string,
     refresh = false,
     line?: number,
+    snippet?: string,
   ) => {
     if (!workspace?.workspace_id || entry.type === "directory") return;
     onActiveDiffEntriesChange?.(
@@ -1005,20 +1016,37 @@ function FileExplorerContent({
     setPreviewEntry(entry);
     setPreviewFragment(fragment);
     setPreviewLine(line);
+    setPreviewSnippet(snippet);
     setPreviewError(null);
     const cached = refresh ? null : readCachedPreview(key);
     if (cached) {
       setPreview(cached);
       setPreviewLoading(false);
       emitPreviewChange(
-        { entry, fragment, line, preview: cached, loading: false, error: null },
+        {
+          entry,
+          fragment,
+          line,
+          snippet,
+          preview: cached,
+          loading: false,
+          error: null,
+        },
         { userInitiated: true },
       );
     } else {
       setPreview(null);
       setPreviewLoading(true);
       emitPreviewChange(
-        { entry, fragment, line, preview: null, loading: true, error: null },
+        {
+          entry,
+          fragment,
+          line,
+          snippet,
+          preview: null,
+          loading: true,
+          error: null,
+        },
         { userInitiated: true },
       );
     }
@@ -1030,7 +1058,15 @@ function FileExplorerContent({
       if (requestIsCurrent()) {
         setPreview(next);
         emitPreviewChange(
-          { entry, fragment, line, preview: next, loading: false, error: null },
+          {
+            entry,
+            fragment,
+            line,
+            snippet,
+            preview: next,
+            loading: false,
+            error: null,
+          },
           { userInitiated: true },
         );
       }
@@ -1043,6 +1079,7 @@ function FileExplorerContent({
             entry,
             fragment,
             line,
+            snippet,
             preview: null,
             loading: false,
             error: message,
@@ -1767,7 +1804,16 @@ function FileExplorerContent({
                   className="file-hidden-toggle"
                   aria-pressed={showHidden}
                   title="Show hidden files"
-                  onClick={() => setShowHidden((value) => !value)}
+                  onClick={() => {
+                    writeExplorerCache(
+                      connectionClient,
+                      cacheWorkspaceId,
+                      !showHidden,
+                      { search },
+                      cacheResourceKey,
+                    );
+                    setShowHidden(!showHidden);
+                  }}
                 >
                   {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
                   Hidden
@@ -1896,6 +1942,7 @@ function FileExplorerContent({
                                 undefined,
                                 false,
                                 result.line,
+                                result.snippet,
                               )
                             }
                           >
@@ -1947,6 +1994,7 @@ function FileExplorerContent({
               }}
               fragment={previewFragment}
               line={previewLine}
+              snippet={previewSnippet}
               onOpenFile={(path, fragment) =>
                 void loadPreview(
                   {

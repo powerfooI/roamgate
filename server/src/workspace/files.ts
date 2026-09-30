@@ -249,6 +249,7 @@ export function createFileHandlers({
       host: sshHost(),
       query: params.query.trim(),
       mode: params.mode,
+      showHidden: params.show_hidden === true,
       shQuote,
     });
     return { ...result, workspace_id: workspaceId, root };

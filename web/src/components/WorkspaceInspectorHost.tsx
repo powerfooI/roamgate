@@ -668,6 +668,7 @@ export function WorkspaceInspectorHost({
                 error={fileSelection.error}
                 fragment={fileSelection.fragment}
                 line={fileSelection.line}
+                snippet={fileSelection.snippet}
                 onOpenFile={onOpenDocument}
                 onRefresh={onRefreshFile}
                 onClosePreview={compact ? undefined : closeFilePreview}
