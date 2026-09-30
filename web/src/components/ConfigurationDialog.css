@@ -122,6 +122,7 @@
   display: block;
 }
 
+.configuration-modal .config-menu-item .config-item-copy,
 .configuration-modal .config-item-copy {
   text-align: left;
   gap: 3px;
