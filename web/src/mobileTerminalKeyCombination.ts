@@ -104,14 +104,17 @@ export function mobileTerminalKeyCombinationBytes(value: unknown): number[] {
   return Array.from(sequence, (character) => character.charCodeAt(0));
 }
 
-export function mobileTerminalKeyCombinationLabel(
-  action: MobileTerminalKeyCombination,
-): string {
+export function mobileTerminalKeyCombinationLabel({
+  key,
+  ctrl,
+  alt,
+  shift,
+}: MobileTerminalKeyCombination): string {
   return [
-    action.ctrl && "Ctrl",
-    action.alt && "Alt",
-    action.shift && "Shift",
-    action.key.length === 1 ? action.key.toUpperCase() : action.key,
+    ctrl && "Ctrl",
+    alt && "Alt",
+    shift && "Shift",
+    key.length === 1 && (ctrl || shift) ? key.toUpperCase() : key,
   ]
     .filter(Boolean)
     .join("+");

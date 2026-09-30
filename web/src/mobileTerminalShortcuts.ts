@@ -352,7 +352,13 @@ export function mobileTerminalShortcutOption(
   return {
     id: "custom",
     label,
-    defaultButtonLabel: clipLabel(label),
+    defaultButtonLabel: clipLabel(
+      label
+        .replace(/(trl|lt|hift)\+/g, "-")
+        .replace("Arrow", "")
+        .replace("Page", "Pg")
+        .replace("Down", "Dn"),
+    ),
     group: "Modified",
     bytes,
   };

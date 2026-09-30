@@ -7,6 +7,7 @@ import {
   defaultMobileTerminalSideShortcuts,
   mobileTerminalShortcutBytes,
   mobileTerminalShortcutCount,
+  mobileTerminalShortcutOption,
   mobileTerminalShortcutScroll,
   normalizeMobileTerminalShortcutRows,
   parseMobileTerminalShortcutRows,
@@ -16,6 +17,44 @@ import {
 } from "./mobileTerminalShortcuts";
 
 describe("mobile terminal shortcuts", () => {
+  test("keeps case-sensitive character labels consistent with sent bytes", () => {
+    for (const key of ["x", "X"]) {
+      for (const alt of [false, true]) {
+        const action = { key, ctrl: false, alt, shift: false };
+        expect(mobileTerminalShortcutOption(action)?.label).toBe(
+          `${alt ? "Alt+" : ""}${key}`,
+        );
+        expect(mobileTerminalShortcutBytes(action)).toEqual([
+          ...(alt ? [0x1b] : []),
+          key.charCodeAt(0),
+        ]);
+      }
+    }
+  });
+
+  test("keeps the key visible in default labels with multiple modifiers", () => {
+    for (const [key, expected] of [
+      ["x", "C-A-S-X"],
+      ["y", "C-A-S-Y"],
+      ["ArrowLeft", "C-A-S-Left"],
+      ["ArrowRight", "C-A-S-Righ"],
+      ["PageUp", "C-A-S-PgUp"],
+      ["PageDown", "C-A-S-PgDn"],
+    ]) {
+      const action = { key, ctrl: true, alt: true, shift: true };
+      expect(mobileTerminalShortcutOption(action)?.defaultButtonLabel).toBe(
+        expected,
+      );
+      const shortcut = { id: "custom", label: "", action };
+      expect(
+        normalizeMobileTerminalShortcutRows([[shortcut], []])[0][0]?.label,
+      ).toBe(expected);
+      expect(
+        parseMobileTerminalSideShortcuts(JSON.stringify([shortcut]))[0]?.label,
+      ).toBe(expected);
+    }
+  });
+
   test.each([
     ["x", true, false, false, "\x18"],
     ["j", true, false, false, "\n"],
