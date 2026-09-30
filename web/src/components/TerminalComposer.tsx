@@ -8,7 +8,7 @@ import {
   CircleHelp,
   CornerDownLeft,
   CornerDownRight,
-  ImagePlus,
+  Paperclip,
   Keyboard,
   SquareTerminal,
   X,
@@ -44,10 +44,19 @@ import {
   terminalComposerCommands,
 } from "../terminalComposerCommands";
 import { MessageDialog } from "./ModalDialogs";
+import {
+  filesFromTerminalDrop,
+  isNativeFileDrag,
+  terminalUploadedPathsText,
+} from "../terminalFileDrop";
+import {
+  isWorkspacePathDrag,
+  workspacePathFromDrag,
+} from "../workspacePathDrag";
 import "./TerminalComposer.css";
 
 const TERMINAL_COMPOSER_HELP =
-  "Input Composer uses your phone’s native editor for reliable IME, dictation, multiline text, and cursor editing before anything is sent to the terminal. Adding an image opens the system file picker, which takes focus from the composer and may dismiss the keyboard. After you choose an image, its uploaded path is inserted into the draft; tap the text area to reopen the keyboard if needed.";
+  "Input Composer uses your phone’s native editor for reliable IME, dictation, multiline text, and cursor editing before anything is sent to the terminal. Adding a file opens the system file picker, which takes focus from the composer and may dismiss the keyboard. After you choose a file, its uploaded path is inserted into the draft; tap the text area to reopen the keyboard if needed.";
 const TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY =
   "terminalComposerShortcutsOpen";
 
@@ -64,7 +73,7 @@ const TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY =
  * focus when the user taps it, so opening the composer does not unexpectedly
  * summon the virtual keyboard or hide other mobile controls.
  *
- * Images arrive through clipboard paste or the file picker, upload once, and
+ * Files arrive through clipboard paste, drop, or the file picker, upload once, and
  * land in the draft as plain paths at the caret; they reach the terminal only
  * through an explicit Insert or Send like any other text.
  */
@@ -77,6 +86,7 @@ export function TerminalComposer({
   onClose,
   onSubmit,
   onUploadImage,
+  onUploadFile,
   onError,
 }: {
   draftKey: string;
@@ -87,6 +97,7 @@ export function TerminalComposer({
   onClose: () => void;
   onSubmit: (text: string, submit: boolean) => Promise<void>;
   onUploadImage: (file: File) => Promise<string>;
+  onUploadFile: (file: File) => Promise<string>;
   onError: (message: string) => void;
 }) {
   useShortcutPreferences();
@@ -228,20 +239,19 @@ export function TerminalComposer({
     );
   };
 
-  const uploadAndInsert = async (files: File[]) => {
-    const images = files.filter(
-      (file) => file.type === "" || file.type.startsWith("image/"),
-    );
-    if (images.length === 0) return;
+  const uploadAndInsert = async (
+    files: File[],
+    upload: (file: File) => Promise<string>,
+  ) => {
+    if (files.length === 0) return;
     const uploadDraftKey = draftKey;
     if (!beginTerminalComposerUpload(uploadDraftKey)) return;
     try {
-      for (const file of images) {
-        const path = await onUploadImage(file);
-        insertAtCaret(uploadDraftKey, path);
-      }
+      const paths: string[] = [];
+      for (const file of files) paths.push(await upload(file));
+      insertAtCaret(uploadDraftKey, terminalUploadedPathsText(paths));
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Image upload failed");
+      onError(error instanceof Error ? error.message : "File upload failed");
     } finally {
       finishTerminalComposerUpload(uploadDraftKey);
     }
@@ -601,7 +611,32 @@ export function TerminalComposer({
             // No image on the clipboard: let the native text paste proceed.
             if (images.length === 0) return;
             e.preventDefault();
-            void uploadAndInsert(images);
+            void uploadAndInsert(images, onUploadImage);
+          }}
+          onDragOver={(e) => {
+            if (
+              !isWorkspacePathDrag(e.dataTransfer) &&
+              !isNativeFileDrag(e.dataTransfer)
+            )
+              return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }}
+          onDrop={(e) => {
+            if (isWorkspacePathDrag(e.dataTransfer)) {
+              e.preventDefault();
+              const path = workspacePathFromDrag(e.dataTransfer);
+              if (path) insertAtCaret(draftKey, path);
+              return;
+            }
+            if (!isNativeFileDrag(e.dataTransfer)) return;
+            e.preventDefault();
+            const files = filesFromTerminalDrop(e.dataTransfer);
+            if (files === "directory") {
+              onError("Drop files only; directories are not supported.");
+            } else if (files?.length) {
+              void uploadAndInsert(files, onUploadFile);
+            }
           }}
           onKeyDown={(e) => {
             if (
@@ -621,14 +656,13 @@ export function TerminalComposer({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
           multiple
           hidden
           onChange={(e) => {
             const files = Array.from(e.target.files ?? []);
             // Reset so picking the same file again still fires change.
             e.target.value = "";
-            if (files.length > 0) void uploadAndInsert(files);
+            if (files.length > 0) void uploadAndInsert(files, onUploadFile);
           }}
         />
         <div className="terminal-composer-actions">
@@ -671,13 +705,13 @@ export function TerminalComposer({
           <button
             type="button"
             className="terminal-composer-attach"
-            title="Add an image"
-            aria-label="Add an image"
+            title="Add a file"
+            aria-label="Add a file"
             disabled={busy}
             onMouseDown={keepTextareaFocus}
             onClick={() => fileInputRef.current?.click()}
           >
-            <ImagePlus size={15} />
+            <Paperclip size={15} />
           </button>
           <button
             type="button"

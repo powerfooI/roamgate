@@ -11,6 +11,7 @@ import {
 export type ConnectionHttpEndpoint =
   | "herdr-info"
   | "upload-image"
+  | "terminal-upload"
   | "agent-session-download"
   | "agent-session-atif"
   | "file-download"
@@ -36,6 +37,12 @@ const ENDPOINTS: EndpointDefinition[] = [
     suffix: "/upload-image",
     method: "POST",
     legacyPath: "/api/upload-image",
+  },
+  {
+    endpoint: "terminal-upload",
+    suffix: "/terminal-upload",
+    method: "POST",
+    legacyPath: "/api/terminal-upload",
   },
   {
     endpoint: "agent-session-download",

@@ -187,6 +187,7 @@ test.each(["claude", "grok-build", "agy"])(
             onClose() {},
             onSubmit,
             onUploadImage: async () => "/tmp/image.png",
+            onUploadFile: async () => "/tmp/file.txt",
             onError() {},
           }),
         );

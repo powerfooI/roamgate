@@ -231,6 +231,10 @@ if (!args.includes("-L") && (args.at(-1) || "").includes("printf %s")) {
   console.log(process.env.HERDR_GUI_FAKE_SSH_HOME || "");
   process.exit(0);
 }
+// Background upload cleanup is a one-shot SSH command, not a tunnel.
+if (!args.includes("-L") && (args.at(-1) || "").includes("roamgate-uploads-")) {
+  process.exit(0);
+}
 appendFileSync(join(stateDir, destination + ".attempts"), String(process.pid) + "\\n");
 if (destination === "auth-fail") {
   console.error("Permission denied (publickey).");

@@ -34,6 +34,7 @@ import { dropCoalescedMessage } from "../bridge/websocket-send";
 import { createTerminalBridge } from "../bridge/terminal-bridge";
 import { createHerdrInfoHandler } from "../http/herdr-info";
 import { createImageUploadHandler } from "../http/image-upload";
+import { createTerminalUploadHandler } from "../http/terminal-upload";
 import {
   createRecoveryReporter,
   type Logger,
@@ -192,6 +193,15 @@ export function createLegacyConnectionRuntime(args: {
     shQuote,
   });
   const handleImageUpload = createImageUploadHandler({ sshHost });
+  const onUploadCleanupError = (error: unknown) =>
+    logger.warn("terminal upload cleanup failed", {
+      connection: identity.id,
+      error: sanitizeConnectionError(error),
+    });
+  const handleTerminalUpload = createTerminalUploadHandler({
+    sshHost,
+    onCleanupError: onUploadCleanupError,
+  });
   const sshTunnel = createSshTunnelManager({
     connectionId: identity.id,
     logger: logger.child("ssh"),
@@ -559,6 +569,7 @@ export function createLegacyConnectionRuntime(args: {
     if (disposed) throw new Error("connection runtime is disposed");
     if (backgroundStarted) return;
     backgroundStarted = true;
+    void handleTerminalUpload.startCleanup().catch(onUploadCleanupError);
     workspaceAutoSync.start();
     subscriptionLoop.start();
     agentStatusSubscriptions.start();
@@ -570,6 +581,7 @@ export function createLegacyConnectionRuntime(args: {
     if (disposed) return Promise.resolve();
     disposed = true;
     backgroundStarted = false;
+    handleTerminalUpload.stopCleanup();
     herdr.off("event", onHerdrEvent);
     herdr.off("error", onHerdrError);
     taskEvents.stop();
@@ -605,6 +617,7 @@ export function createLegacyConnectionRuntime(args: {
     worktreeParents,
     handleHerdrInfo,
     handleImageUpload,
+    handleTerminalUpload,
     handleSettingsRpc,
     files,
     status,

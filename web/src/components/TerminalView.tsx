@@ -96,7 +96,15 @@ import {
   terminalPointerShouldBlurInput,
   terminalTouchShouldDismissInput,
 } from "../terminalFocus";
-import { uploadTerminalImage } from "../terminalImageUpload";
+import {
+  uploadTerminalFile,
+  uploadTerminalImage,
+} from "../terminalImageUpload";
+import {
+  filesFromTerminalDrop,
+  isNativeFileDrag,
+  terminalUploadedPathsText,
+} from "../terminalFileDrop";
 import {
   isTerminalImeCommittedInputType,
   TerminalImeCommitGuard,
@@ -433,6 +441,16 @@ export function TerminalView({
     (el: HTMLDivElement | null) => setContainer(el),
     [],
   );
+  useEffect(() => {
+    const guardFileDrop = (event: DragEvent) => {
+      if (event.dataTransfer && isNativeFileDrag(event.dataTransfer)) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("drop", guardFileDrop, { capture: true });
+    return () =>
+      window.removeEventListener("drop", guardFileDrop, { capture: true });
+  }, []);
   const termRef = useRef<Terminal | null>(null);
   const endpointPresentationRef = useRef<TerminalEndpointPresentation | null>(
     null,
@@ -1300,10 +1318,11 @@ export function TerminalView({
       text: string,
       destinationPaneId: string | null = paneIdRef.current ?? null,
       inputSession = inputSessionRef.current,
+      fromDrop = false,
     ) => {
       if (
         !text ||
-        !acceptsInput() ||
+        !(fromDrop ? acceptsEndpointInput() : acceptsInput()) ||
         inputSession !== inputSessionRef.current ||
         destinationPaneId !== (paneIdRef.current ?? null)
       )
@@ -1864,30 +1883,74 @@ export function TerminalView({
     container.addEventListener("paste", onPaste);
     document.addEventListener("paste", onPaste, { capture: true });
 
-    // A path dragged from the file explorer is typed like a paste, so agents
-    // and shells receive it at the cursor of the active pane.
-    const onPathDragOver = (e: DragEvent) => {
-      if (!e.dataTransfer || !isWorkspacePathDrag(e.dataTransfer)) return;
-      if (!acceptsInput()) return;
+    const onTerminalDragOver = (e: DragEvent) => {
+      if (
+        !e.dataTransfer ||
+        (!isWorkspacePathDrag(e.dataTransfer) &&
+          !isNativeFileDrag(e.dataTransfer))
+      )
+        return;
+      if (!acceptsEndpointInput()) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "copy";
     };
-    const onPathDrop = (e: DragEvent) => {
-      if (!e.dataTransfer || !isWorkspacePathDrag(e.dataTransfer)) return;
+    const onTerminalDrop = (e: DragEvent) => {
+      if (
+        !e.dataTransfer ||
+        (!isWorkspacePathDrag(e.dataTransfer) &&
+          !isNativeFileDrag(e.dataTransfer))
+      )
+        return;
       e.preventDefault();
       e.stopPropagation();
-      const path = workspacePathFromDrag(e.dataTransfer);
-      if (!path || !acceptsInput()) return;
+      if (!acceptsEndpointInput()) return;
       const destinationPaneId = paneIdRef.current ?? null;
-      term.focus();
-      void runPasteOperation(() => pasteText(path, destinationPaneId)).catch(
-        (err) => {
+      const inputSession = inputSessionRef.current;
+      const activePaneAtDrop = activePaneIdForSnapshot(store.get());
+      if (isWorkspacePathDrag(e.dataTransfer)) {
+        const path = workspacePathFromDrag(e.dataTransfer);
+        if (!path) return;
+        void runPasteOperation(() =>
+          pasteText(path, destinationPaneId, inputSession, true),
+        ).catch((err) => {
           setUploadError(`Path paste failed: ${(err as Error).message}`);
-        },
-      );
+        });
+        return;
+      }
+      const files = filesFromTerminalDrop(e.dataTransfer);
+      if (files === "directory") {
+        setUploadError("Drop files only; directories are not supported.");
+        return;
+      }
+      if (!files?.length) return;
+      let paneSwitched = false;
+      const stopWatchingPane = store.subscribe(() => {
+        if (activePaneIdForSnapshot(store.get()) !== activePaneAtDrop)
+          paneSwitched = true;
+      });
+      void runPasteOperation(async () => {
+        const paths: string[] = [];
+        for (const file of files) {
+          if (paneSwitched) return;
+          paths.push(await uploadTerminalFile(connectionClient, file));
+        }
+        if (paneSwitched) return;
+        await pasteText(
+          terminalUploadedPathsText(paths),
+          destinationPaneId,
+          inputSession,
+          true,
+        );
+      })
+        .catch((err) => {
+          setUploadError(`File upload failed: ${(err as Error).message}`);
+        })
+        .finally(stopWatchingPane);
     };
-    container.addEventListener("dragover", onPathDragOver, { capture: true });
-    container.addEventListener("drop", onPathDrop, { capture: true });
+    container.addEventListener("dragover", onTerminalDragOver, {
+      capture: true,
+    });
+    container.addEventListener("drop", onTerminalDrop, { capture: true });
 
     const onCopy = (e: ClipboardEvent) => {
       if (
@@ -2584,10 +2647,10 @@ export function TerminalView({
       });
       container.removeEventListener("paste", onPaste);
       document.removeEventListener("paste", onPaste, { capture: true });
-      container.removeEventListener("dragover", onPathDragOver, {
+      container.removeEventListener("dragover", onTerminalDragOver, {
         capture: true,
       });
-      container.removeEventListener("drop", onPathDrop, { capture: true });
+      container.removeEventListener("drop", onTerminalDrop, { capture: true });
       container.removeEventListener("copy", onCopy, { capture: true });
       container.removeEventListener("click", onClick);
       container.removeEventListener("mousedown", onTerminalMouseDown, {
@@ -2940,6 +3003,8 @@ export function TerminalView({
   };
   const uploadComposerImage = (file: File) =>
     uploadTerminalImage(connectionClient, file);
+  const uploadComposerFile = (file: File) =>
+    uploadTerminalFile(connectionClient, file);
   const notifyComposerError = (message: string) => {
     store.notify({
       kind: "error",
@@ -3453,6 +3518,7 @@ export function TerminalView({
             onClose={() => setComposerOpen(false)}
             onSubmit={submitTerminalComposer}
             onUploadImage={uploadComposerImage}
+            onUploadFile={uploadComposerFile}
             onError={notifyComposerError}
           />
         ) : null}

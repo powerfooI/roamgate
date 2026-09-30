@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ConnectionClient } from "./api";
-import { uploadTerminalImage } from "./terminalImageUpload";
+import { uploadTerminalFile, uploadTerminalImage } from "./terminalImageUpload";
 
 const originalFetch = globalThis.fetch;
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
@@ -31,6 +31,20 @@ afterEach(() => {
 });
 
 describe("terminal image upload responses", () => {
+  test("uploads native files to the scoped terminal route", async () => {
+    let requested = "";
+    globalThis.fetch = (async (url: URL) => {
+      requested = url.toString();
+      return Response.json({ text: "/tmp/a_file.txt" });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      uploadTerminalFile(client, new File(["hello"], "a file.txt")),
+    ).resolves.toBe("/tmp/a_file.txt");
+    expect(requested).toContain(
+      "/api/connections/conn-a/terminal-upload?connection_generation=3&filename=a+file.txt",
+    );
+  });
   test("returns a validated path", async () => {
     globalThis.fetch = (async () =>
       Response.json({ path: "/tmp/image.png" })) as unknown as typeof fetch;
@@ -91,7 +105,7 @@ describe("terminal image upload responses", () => {
       Response.json({})) as unknown as typeof fetch;
 
     await expect(uploadTerminalImage(client, image)).rejects.toThrow(
-      "image upload response did not include a path",
+      "upload response did not include a path",
     );
   });
 });

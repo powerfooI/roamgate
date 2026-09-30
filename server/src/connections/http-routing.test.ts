@@ -57,6 +57,12 @@ const endpointCases: Array<{
     method: "POST",
   },
   {
+    endpoint: "terminal-upload",
+    suffix: "/terminal-upload",
+    legacyPath: "/api/terminal-upload",
+    method: "POST",
+  },
+  {
     endpoint: "agent-session-download",
     suffix: "/agent-session/download",
     legacyPath: "/api/agent-session/download",

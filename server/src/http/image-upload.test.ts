@@ -11,10 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import {
-  createImageUploadHandler,
-  IMAGE_UPLOAD_DIRECTORY_PREFIX,
-} from "./image-upload";
+import { createImageUploadHandler } from "./image-upload";
 import { terminalPathText } from "./terminal-path-text";
 
 const isWindows = process.platform === "win32";
@@ -67,10 +64,8 @@ test("local pastes are written to a private folder under the temp root", async (
 
   expect(body.remote).toBe(false);
   expect(isAbsolute(body.path)).toBe(true);
-  expect(dirname(dirname(body.path))).toBe(root);
-  expect(basename(dirname(body.path))).toStartWith(
-    IMAGE_UPLOAD_DIRECTORY_PREFIX,
-  );
+  expect(dirname(dirname(dirname(body.path)))).toBe(root);
+  expect(basename(dirname(body.path))).toStartWith("upload-");
   expect(basename(body.path)).toMatch(/^img-\d+-[a-z0-9]+\.png$/);
   expect(body.text).toBe(terminalPathText(body.path, process.platform));
   expect([...(await readFile(body.path))]).toEqual(bytes);
@@ -88,7 +83,7 @@ test.skipIf(isWindows)(
   },
 );
 
-test("each server gets its own folder, reused across uploads", async () => {
+test("each image gets a separate upload folder", async () => {
   const root = await tempRoot();
   const first = localHandler(root);
   const second = localHandler(root);
@@ -97,7 +92,7 @@ test("each server gets its own folder, reused across uploads", async () => {
   const b = await uploadOk(first);
   const c = await uploadOk(second);
 
-  expect(dirname(b.path)).toBe(dirname(a.path));
+  expect(dirname(b.path)).not.toBe(dirname(a.path));
   expect(dirname(c.path)).not.toBe(dirname(a.path));
 });
 
@@ -129,15 +124,13 @@ test("a folder swapped for a link is not followed", async () => {
 });
 
 test.skipIf(isWindows)(
-  "a folder whose permissions were loosened is not reused",
+  "a staging root whose permissions were loosened is refused",
   async () => {
     const handle = localHandler(await tempRoot());
     const first = await uploadOk(handle);
-    await chmod(dirname(first.path), 0o777);
+    await chmod(dirname(dirname(first.path)), 0o777);
 
-    const second = await uploadOk(handle);
-
-    expect(dirname(second.path)).not.toBe(dirname(first.path));
+    expect((await handle(upload([1]))).status).toBe(500);
   },
 );
 
@@ -146,15 +139,15 @@ test("unsafe extension characters are dropped from the file name", async () => {
 
   const body = await uploadOk(localHandler(root), [1], "../j.p-g");
 
-  expect(dirname(dirname(body.path))).toBe(root);
+  expect(dirname(dirname(dirname(body.path)))).toBe(root);
   expect(basename(body.path)).toMatch(/^img-\d+-[a-z0-9]+\.jpg$/);
 });
 
-test("empty uploads are rejected without creating a folder", async () => {
+test("empty image uploads are rejected without retaining a folder", async () => {
   const root = await tempRoot();
 
   const response = await localHandler(root)(upload([]));
 
   expect(response.status).toBe(400);
-  expect(await readdir(root)).toEqual([]);
+  expect(await readdir(join(root, (await readdir(root))[0]))).toEqual([]);
 });

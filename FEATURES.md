@@ -57,12 +57,15 @@ the first pane a jump can reach.
   with Option-drag (macOS) or Shift-drag (elsewhere); ordinary output needs no
   modifier. Selection freezes presentation until cleared. Desktop edge-drag
   captures offscreen rows; release, blur, or changed content stops scrolling.
-- Paste images to upload them to the connected host and insert their paths.
-  Local connections store them in a private `roamgate-images-*` folder under the
-  OS temp directory, created per server process; SSH connections use the remote
-  `/tmp`. Inserted paths are absolute and quoted when needed. POSIX hosts use
-  POSIX shell quoting; Windows uses forward slashes and quoting for PowerShell
-  and common Git Bash paths. Windows paths containing an apostrophe together
+- Paste images or drop files from the desktop onto a terminal pane to upload
+  them to that pane's host and insert their paths without sending Enter. Drop
+  explorer rows to insert paths without uploading. The Input Composer accepts
+  any file through its picker or drop target and inserts paths into its draft.
+  Uploads are stored in private per-user temporary folders. Expired folders
+  are swept when the connection starts and hourly after 24 hours by default.
+  Inserted paths are absolute and quoted when needed. POSIX hosts use POSIX
+  shell quoting; Windows uses forward slashes and quoting for PowerShell and
+  common Git Bash paths. Windows paths containing an apostrophe together
   with `$` or a backtick require PowerShell; that combination is not supported
   in Git Bash. Windows `cmd.exe` built-ins are not supported by this path format.
   OSC 52 clipboard writes follow Herdr's foreground recipient, not proven source

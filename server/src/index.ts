@@ -1259,6 +1259,11 @@ async function handleConnectionHttpRequest(
       response = await connection.handleHerdrInfo();
     } else if (endpoint === "upload-image") {
       response = await connection.handleImageUpload(req);
+    } else if (endpoint === "terminal-upload") {
+      response = await connection.handleTerminalUpload(
+        req,
+        url.searchParams.get("filename"),
+      );
     } else if (endpoint === "agent-session-download") {
       response = await connection.agentSessions.downloadFile({
         pane_id: url.searchParams.get("pane_id"),
@@ -1422,6 +1427,12 @@ function main() {
             req.method,
           );
           if (connectionRoute) {
+            if (
+              connectionRoute.kind === "connection" &&
+              connectionRoute.endpoint === "terminal-upload"
+            ) {
+              server.timeout(req, 300);
+            }
             if (
               connectionRoute.kind === "connection" &&
               connectionRoute.endpoint === "file-download" &&

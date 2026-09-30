@@ -285,6 +285,8 @@ explicit connection registry paths remain authoritative, including empty values.
 | `ROAMGATE_RESTART_SUPERVISOR=0\|1` | Override external supervisor detection |
 | `ROAMGATE_DISABLE_ENDPOINT=1` | Legacy terminal fallback; see compatibility |
 | `ROAMGATE_ALLOW_FILE_REVEAL=1` | Opt into [host file reveal](#host-file-reveal); disabled by default |
+| `ROAMGATE_UPLOAD_MAX_BYTES` | Maximum size of a terminal file upload; default 100 MiB |
+| `ROAMGATE_UPLOAD_RETENTION_HOURS` | Staged terminal file retention; default 24 hours |
 
 Update mirrors need platform archives, `.sha256` files, and
 `roamgate-<platform>.update.json` with `name: "roamgate"`. Missing/legacy manifests
