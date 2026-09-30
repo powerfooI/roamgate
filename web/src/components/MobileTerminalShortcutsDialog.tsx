@@ -42,6 +42,14 @@ const US_KEY_ROWS = [
   ";',./",
 ];
 const BASIC_KEYS = ["Escape", "Tab", "Backspace", "Enter", "Space"];
+const EXTRA_KEY_GROUPS = {
+  "Navigation keys": MOBILE_TERMINAL_CUSTOM_SPECIAL_KEYS.filter(
+    (key) => !BASIC_KEYS.includes(key) && !/^F\d+$/.test(key),
+  ),
+  "Function keys": MOBILE_TERMINAL_CUSTOM_SPECIAL_KEYS.filter((key) =>
+    /^F\d+$/.test(key),
+  ),
+};
 let nextShortcutId = 1;
 
 type SelectedSlot =
@@ -275,15 +283,18 @@ function CustomKeyPicker({
       </div>
       <details className="mobile-shortcut-more-keys">
         <summary>More keys</summary>
-        <div
-          className="mobile-shortcut-extra-keys"
-          role="group"
-          aria-label="Navigation and function keys"
-        >
-          {MOBILE_TERMINAL_CUSTOM_SPECIAL_KEYS.filter(
-            (key) => !BASIC_KEYS.includes(key),
-          ).map(keyButton)}
-        </div>
+        {Object.entries(EXTRA_KEY_GROUPS).map(([group, keys]) => (
+          <div className="mobile-shortcut-key-group" key={group}>
+            <div className="mobile-shortcut-keyboard-head">{group}</div>
+            <div
+              className="mobile-shortcut-extra-keys"
+              role="group"
+              aria-label={group}
+            >
+              {keys.map(keyButton)}
+            </div>
+          </div>
+        ))}
       </details>
     </div>
   );
@@ -431,11 +442,23 @@ export function MobileTerminalShortcutsDialog({
     selectedShortcut && typeof selectedShortcut.action === "object"
       ? selectedShortcut.action
       : null;
-  const hasInvalidCombination = [...draft.flat(), ...sideDraft].some(
-    (shortcut) =>
-      shortcut &&
-      typeof shortcut.action === "object" &&
-      !mobileTerminalKeyCombinationBytes(shortcut.action).length,
+  const invalidCombinations = [
+    ...draft.flatMap((row, rowIndex) =>
+      row.map(
+        (shortcut, slotIndex) =>
+          [shortcut, `Row ${rowIndex + 1}, slot ${slotIndex + 1}`] as const,
+      ),
+    ),
+    ...sideDraft.map(
+      (shortcut, slotIndex) =>
+        [shortcut, `Right-side slot ${slotIndex + 1}`] as const,
+    ),
+  ].flatMap(([shortcut, location]) =>
+    shortcut &&
+    typeof shortcut.action === "object" &&
+    !mobileTerminalKeyCombinationBytes(shortcut.action).length
+      ? [`${location}: ${mobileTerminalShortcutOption(shortcut.action)?.label}`]
+      : [],
   );
 
   return (
@@ -678,11 +701,15 @@ export function MobileTerminalShortcutsDialog({
           )}
         </section>
 
-        {hasInvalidCombination ? (
-          <p className="mobile-shortcut-error" role="alert">
-            A custom combination is unsupported. Change its key or modifiers
-            before saving.
-          </p>
+        {invalidCombinations.length > 0 ? (
+          <div className="mobile-shortcut-error" role="alert">
+            {invalidCombinations.map((combination) => (
+              <p key={combination}>
+                {combination} cannot be sent with the current terminal encoding.
+              </p>
+            ))}
+            <p>Change the key or modifiers before saving.</p>
+          </div>
         ) : null}
         <details className="mobile-shortcut-help">
           <summary>How shortcuts work</summary>
@@ -693,8 +720,10 @@ export function MobileTerminalShortcutsDialog({
             prefix. Modified Enter needs application support. Custom
             PageUp/PageDown sends keys to the application; the presets scroll
             history. Buttons bypass browser keyboard shortcuts, but the terminal
-            application decides how to handle them. Cmd/Meta, text macros, and
-            multi-step sequences are not supported.
+            application decides how to handle them. Some Ctrl+number/symbol
+            combinations, Ctrl/Alt+Tab, Ctrl/Shift+Escape, and Shift+Backspace
+            cannot be encoded. Cmd/Meta, text macros, and multi-step sequences
+            are not supported.
           </p>
         </details>
 
@@ -717,7 +746,7 @@ export function MobileTerminalShortcutsDialog({
           </button>
           <button
             type="button"
-            disabled={hasInvalidCombination}
+            disabled={invalidCombinations.length > 0}
             onClick={() => {
               onChange(normalizeMobileTerminalShortcutRows(draft));
               onSideChange(normalizeMobileTerminalSideShortcuts(sideDraft));

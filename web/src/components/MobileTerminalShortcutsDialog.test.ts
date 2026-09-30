@@ -103,12 +103,39 @@ if (process.env.ROAMGATE_SHORTCUT_PICKER_DOM_TEST !== "1") {
         expect(
           button(`Key ${key}`).closest(".mobile-shortcut-keyboard"),
         ).not.toBeNull();
+      expect(
+        Array.from(
+          container.querySelectorAll('[aria-label="Function keys"] button'),
+          (key) => key.textContent,
+        ),
+      ).toEqual(Array.from({ length: 12 }, (_, index) => `F${index + 1}`));
+      expect(
+        container.querySelector(
+          '[aria-label="Navigation keys"] button[aria-label="Key F1"]',
+        ),
+      ).toBeNull();
+      await click("Key 1");
+      expect(button("Save shortcuts").disabled).toBe(true);
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+        "Row 1, slot 5: Ctrl+1 cannot be sent with the current terminal encoding.",
+      );
+      await click("Edit row 1 slot 1, C-c, Ctrl+C");
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+        "Row 1, slot 5: Ctrl+1",
+      );
+      expect(button("Save shortcuts").disabled).toBe(true);
+      await click("Edit row 1 slot 5, C-1, Ctrl+1");
+      await click("Key X");
+      expect(container.querySelector('[role="alert"]')).toBeNull();
       await click("Alt");
       await click("Shift");
       await click("Key /");
       expect(button("Key /").textContent).toBe("?");
       await click("Key Tab");
       expect(button("Save shortcuts").disabled).toBe(true);
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+        "Ctrl+Alt+Shift+Tab",
+      );
       await click("Key Y");
       expect(button("Key X").getAttribute("aria-pressed")).toBe("false");
       expect(button("Key Y").getAttribute("aria-pressed")).toBe("true");

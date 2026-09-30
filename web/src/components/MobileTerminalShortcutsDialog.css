@@ -336,6 +336,10 @@ html:has(.mobile-shortcuts-modal) {
   margin-top: 6px;
 }
 
+.mobile-shortcut-key-group {
+  margin-top: 8px;
+}
+
 .mobile-shortcut-more-keys summary,
 .mobile-shortcut-help summary {
   padding: 8px 0;
@@ -344,7 +348,8 @@ html:has(.mobile-shortcuts-modal) {
   font-size: 12px;
 }
 
-.mobile-shortcut-help p {
+.mobile-shortcut-help p,
+.mobile-shortcut-error p {
   margin: 0 0 4px;
 }
 
