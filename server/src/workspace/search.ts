@@ -28,9 +28,24 @@ export async function searchWorkspaceFiles({
     mode === "files"
       ? [["ls-files", "--cached", "--others", "--exclude-standard", "-z"]]
       : [
-          ["grep", "-n", "-z", "-I", "-i", "-F", "-e", query, "--", "."],
           [
             "grep",
+            "--no-color",
+            "--no-column",
+            "-n",
+            "-z",
+            "-I",
+            "-i",
+            "-F",
+            "-e",
+            query,
+            "--",
+            ".",
+          ],
+          [
+            "grep",
+            "--no-color",
+            "--no-column",
             "-n",
             "-z",
             "-I",

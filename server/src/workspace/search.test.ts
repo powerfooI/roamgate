@@ -5,6 +5,52 @@ import { join } from "node:path";
 import { shQuote } from "../utils/process-utils";
 import { searchWorkspaceFiles } from "./search";
 
+for (const [color, column] of [
+  ["always", "false"],
+  ["never", "true"],
+  ["always", "true"],
+]) {
+  test(`ignores git grep output settings color=${color} column=${column}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "roamgate-search-config-"));
+    try {
+      expect(Bun.spawnSync(["git", "init", "-q", root]).exitCode).toBe(0);
+      for (const [key, value] of [
+        ["color.grep", color],
+        ["grep.column", column],
+      ]) {
+        expect(
+          Bun.spawnSync(["git", "-C", root, "config", key, value]).exitCode,
+        ).toBe(0);
+      }
+      await writeFile(join(root, "tracked.txt"), "first\ntracked needle\n");
+      await writeFile(join(root, ".tracked"), "needle hidden tracked\n");
+      expect(
+        Bun.spawnSync(["git", "-C", root, "add", "tracked.txt", ".tracked"])
+          .exitCode,
+      ).toBe(0);
+      await writeFile(join(root, "untracked.txt"), "first\nuntracked needle\n");
+      await writeFile(join(root, ".untracked"), "needle hidden untracked\n");
+
+      const content = await searchWorkspaceFiles({
+        root,
+        query: "needle",
+        mode: "content",
+        showHidden: false,
+        shQuote,
+      });
+      expect(content).toEqual({
+        results: [
+          { path: "tracked.txt", line: 2, snippet: "tracked needle" },
+          { path: "untracked.txt", line: 2, snippet: "untracked needle" },
+        ],
+        truncated: false,
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test("searches unloaded checkout files and content while respecting ignores and binary files", async () => {
   const root = await mkdtemp(join(tmpdir(), "roamgate-search-"));
   try {
