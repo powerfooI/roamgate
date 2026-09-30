@@ -432,6 +432,18 @@ function emptyActiveDiffSelection(): ActiveDiffSelection {
   };
 }
 
+function inspectorFileEntry(path: string): FileExplorerEntry {
+  const name = path.split("/").filter(Boolean).pop() ?? path;
+  return {
+    name,
+    path,
+    type: "file",
+    size: 0,
+    mtime_ms: 0,
+    hidden: name.startsWith("."),
+  };
+}
+
 function emptyActiveFilePreviewSelection(): ActiveFilePreviewSelection {
   return {
     entry: null,
@@ -1409,8 +1421,22 @@ export default function App() {
   const [activeDiff, setActiveDiff] = useState<ActiveDiffSelection>(
     emptyActiveDiffSelection,
   );
-  const [activeFilePreview, setActiveFilePreview] =
+  const [activeFilePreview, setActiveFilePreviewState] =
     useState<ActiveFilePreviewSelection>(emptyActiveFilePreviewSelection);
+  const setActiveFilePreview = useCallback(
+    (selection: ActiveFilePreviewSelection) => {
+      const scope = inspectorStateRef.current?.scope;
+      if (scope && selection.entry) {
+        writeResourceFileSelection(
+          roamgateLocalStorage,
+          scope,
+          selection.entry.path,
+        );
+      }
+      setActiveFilePreviewState(selection);
+    },
+    [],
+  );
   const fileQuickOpenRequestRef = useRef(0);
   const resourceRuntimeKeyRef = useRef(resourceUiKey);
   const focusedWorkspace = s.workspaces.find((w) => w.focused);
@@ -1505,9 +1531,6 @@ export default function App() {
     inspectorWorkspace?.workspace_id
       ? inspectorHistoryPaneCandidate
       : undefined;
-  const inspectorResourceStateKey = inspectorState
-    ? resourceStateKey(inspectorState.scope)
-    : null;
   const annotationStorageKey = annotationScope
     ? annotationDraftStorageKey(annotationScope)
     : null;
@@ -1660,7 +1683,7 @@ export default function App() {
           });
         });
     },
-    [connectionClient],
+    [connectionClient, setActiveFilePreview],
   );
   const openInspector = useCallback(
     (
@@ -1777,18 +1800,7 @@ export default function App() {
         setActiveFilePreview(emptyActiveFilePreviewSelection());
       }
       if (view !== "files" || !selectedPath) return;
-      const entry =
-        options.entry ??
-        ({
-          name: selectedPath.split("/").filter(Boolean).pop() ?? selectedPath,
-          path: selectedPath,
-          type: "file",
-          size: 0,
-          mtime_ms: 0,
-          hidden:
-            selectedPath.split("/").filter(Boolean).pop()?.startsWith(".") ??
-            false,
-        } satisfies FileExplorerEntry);
+      const entry = options.entry ?? inspectorFileEntry(selectedPath);
       loadInspectorFilePreview(workspace.workspace_id, entry, options.fragment);
     },
     [
@@ -1796,6 +1808,7 @@ export default function App() {
       connectionClient.connectionId,
       finishInspectorFocus,
       loadInspectorFilePreview,
+      setActiveFilePreview,
       mobile,
       annotationsOpen,
       annotationScopeRef,
@@ -2228,7 +2241,7 @@ export default function App() {
       if (!current || resourceStateKey(current.scope) !== stateKey) return;
       setActiveFilePreview(selection);
     },
-    [],
+    [setActiveFilePreview],
   );
   const openDiffFileInExplorer = useCallback(
     (entry: ActiveDiffSelection["entry"]) => {
@@ -2239,15 +2252,10 @@ export default function App() {
         store.get().workspaces,
       );
       if (!workspace) return;
-      const name = entry.path.split("/").filter(Boolean).pop() ?? entry.path;
-      openFileExplorerFile(workspace.workspace_id, {
-        name,
-        path: entry.path,
-        type: "file",
-        size: 0,
-        mtime_ms: 0,
-        hidden: name.startsWith("."),
-      });
+      openFileExplorerFile(
+        workspace.workspace_id,
+        inspectorFileEntry(entry.path),
+      );
     },
     [openFileExplorerFile],
   );
@@ -2286,18 +2294,9 @@ export default function App() {
       ) {
         return;
       }
-      const name =
-        request.path.split("/").filter(Boolean).pop() ?? request.path;
       openFileExplorerFile(
         request.workspaceId,
-        {
-          name,
-          path: request.path,
-          type: "file",
-          size: 0,
-          mtime_ms: 0,
-          hidden: name.startsWith("."),
-        },
+        inspectorFileEntry(request.path),
         request.paneId,
       );
     },
@@ -2538,7 +2537,7 @@ export default function App() {
     window.addEventListener(WORKTREE_REMOVED_EVENT, handleWorktreeRemoved);
     return () =>
       window.removeEventListener(WORKTREE_REMOVED_EVENT, handleWorktreeRemoved);
-  }, [commitInspectorState, connectionClient]);
+  }, [commitInspectorState, connectionClient, setActiveFilePreview]);
   const closePaneJump = useCallback((restoreFocus = false) => {
     const target = paneJumpReturnFocusRef.current;
     const source = document.activeElement;
@@ -2624,7 +2623,7 @@ export default function App() {
     setPaneJumpIndex(0);
     setPaneJumpSearch(null);
     setMobileView("session");
-  }, [commitInspectorState, resourceUiKey]);
+  }, [commitInspectorState, resourceUiKey, setActiveFilePreview]);
 
   useEffect(() => {
     store.init();
@@ -2795,19 +2794,11 @@ export default function App() {
     commitInspectorState,
     connectionClient,
     loadInspectorFilePreview,
+    setActiveFilePreview,
     s.lastRefresh,
     s.status,
     s.workspaces,
   ]);
-  useEffect(() => {
-    const current = inspectorStateRef.current;
-    if (!current || !activeFilePreview.entry?.path) return;
-    writeResourceFileSelection(
-      roamgateLocalStorage,
-      current.scope,
-      activeFilePreview.entry.path,
-    );
-  }, [activeFilePreview.entry?.path, inspectorResourceStateKey]);
   useEffect(() => {
     if (!focusedWorkspace) return;
     const scope = resourceScopeForWorkspace(
@@ -3372,10 +3363,7 @@ export default function App() {
   };
   const clearInspectorDetail = () => {
     const current = inspectorStateRef.current;
-    if (current?.view === "files") {
-      fileQuickOpenRequestRef.current += 1;
-      setActiveFilePreview(emptyActiveFilePreviewSelection());
-    } else {
+    if (current?.view !== "files") {
       setActiveDiff(emptyActiveDiffSelection());
     }
   };
@@ -3992,6 +3980,13 @@ export default function App() {
                       workspace={inspectorWorkspace}
                       historyPane={inspectorHistoryPane}
                       fileSelection={activeFilePreview}
+                      onSelectFileTab={(path) => {
+                        if (inspectorWorkspace)
+                          loadInspectorFilePreview(
+                            inspectorWorkspace.workspace_id,
+                            inspectorFileEntry(path),
+                          );
+                      }}
                       previewRequestRef={fileQuickOpenRequestRef}
                       diffSelection={activeDiff}
                       connectionClient={connectionClient}
@@ -4020,14 +4015,7 @@ export default function App() {
                         if (inspectorWorkspace)
                           openFileExplorerFile(
                             inspectorWorkspace.workspace_id,
-                            {
-                              name: path.split("/").pop() ?? path,
-                              path,
-                              type: "file",
-                              size: 0,
-                              mtime_ms: 0,
-                              hidden: false,
-                            },
+                            inspectorFileEntry(path),
                             undefined,
                             fragment,
                           );

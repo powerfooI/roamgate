@@ -356,3 +356,10 @@
     display: none;
   }
 }
+
+.workspace-inspector-file-detail {
+  flex-direction: column;
+}
+.workspace-inspector-file-detail > .file-preview-tabs {
+  flex: 0 0 auto;
+}

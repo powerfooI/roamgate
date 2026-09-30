@@ -233,8 +233,28 @@ export function FilePreviewContent({
   );
   const [detailTab, setDetailTab] = useState<"file" | "changes">("file");
   const [workspaceDialogOpen, setWorkspaceDialogOpen] = useState(false);
-  const [pendingAnnotation, setPendingAnnotation] =
-    useState<PendingFileAnnotation | null>(null);
+  // Keep unfinished comments attached to their file while switching tabs.
+  // The Inspector is keyed by connection/checkout, so this map cannot cross scopes.
+  const draftPath = entry?.path ?? "";
+  const [fileDrafts, setFileDrafts] = useState<
+    Record<string, { pending: PendingFileAnnotation | null; comment: string }>
+  >({});
+  const pendingAnnotation = fileDrafts[draftPath]?.pending ?? null;
+  const setPendingAnnotation = useCallback(
+    (pending: PendingFileAnnotation | null) => {
+      setFileDrafts((current) => ({
+        ...current,
+        [draftPath]: { pending, comment: "" },
+      }));
+    },
+    [draftPath],
+  );
+  const setDraftComment = (comment: string) => {
+    setFileDrafts((current) => ({
+      ...current,
+      [draftPath]: { pending: current[draftPath]?.pending ?? null, comment },
+    }));
+  };
   const [markdownSelection, setMarkdownSelection] =
     useState<MarkdownSelectionTarget | null>(null);
   const theme = useDocumentTheme();
@@ -358,7 +378,6 @@ export function FilePreviewContent({
   }, [entry?.path, line]);
 
   useEffect(() => {
-    setPendingAnnotation(null);
     setMarkdownSelection(null);
   }, [previewPath]);
 
@@ -421,7 +440,7 @@ export function FilePreviewContent({
 
   const closeAnnotationComposer = useCallback(() => {
     setPendingAnnotation(null);
-  }, []);
+  }, [setPendingAnnotation]);
 
   const saveAnnotation = useCallback(
     (comment: string) => {
@@ -453,7 +472,7 @@ export function FilePreviewContent({
       setMarkdownSelection(null);
       window.getSelection()?.removeAllRanges();
     },
-    [onCreateAnnotation, pendingAnnotation],
+    [onCreateAnnotation, pendingAnnotation, setPendingAnnotation],
   );
 
   const copyPreviewText = async () => {
@@ -817,6 +836,9 @@ export function FilePreviewContent({
         : null}
       <AnnotationComposerPopover
         draft={annotationComposerDraft}
+        commentValue={fileDrafts[draftPath]?.comment ?? ""}
+        onCommentChange={setDraftComment}
+        suspendOnFileTabNavigation
         onSave={saveAnnotation}
         onClose={closeAnnotationComposer}
       />

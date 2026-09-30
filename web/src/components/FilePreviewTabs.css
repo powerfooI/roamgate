@@ -1,0 +1,84 @@
+.file-preview-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  padding: 5px 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+.file-preview-tab {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  max-width: 260px;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  color: var(--muted);
+}
+.file-preview-tab.is-active {
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--border);
+  border-bottom-color: var(--accent);
+}
+.file-preview-tab:hover {
+  background: var(--panel-2);
+}
+.file-preview-tab button {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+  min-height: 34px;
+}
+.file-preview-tab button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.file-preview-tab-select {
+  min-width: 0;
+  gap: 6px;
+  padding: 5px 6px 5px 9px;
+  font-size: 12px;
+}
+.file-preview-tab-select svg {
+  flex-shrink: 0;
+}
+.file-preview-tab-name,
+.file-preview-tab-parent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-preview-tab-name {
+  flex-shrink: 0;
+  max-width: 150px;
+}
+.file-preview-tab-parent {
+  color: var(--muted);
+  font-size: 10px;
+}
+.file-preview-tab-close {
+  flex-shrink: 0;
+  padding: 5px 8px;
+  border-radius: 4px;
+}
+.file-preview-tab-close:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+@media (pointer: coarse) {
+  .file-preview-tab button {
+    min-height: 44px;
+  }
+  .file-preview-tab-close {
+    min-width: 44px;
+    justify-content: center;
+  }
+}

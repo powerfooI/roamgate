@@ -18,10 +18,16 @@ export function AnnotationComposerPopover({
   draft,
   onSave,
   onClose,
+  commentValue,
+  onCommentChange,
+  suspendOnFileTabNavigation = false,
 }: {
   draft: AnnotationComposerDraft | null;
   onSave: (comment: string) => void;
   onClose: () => void;
+  commentValue?: string;
+  onCommentChange?: (comment: string) => void;
+  suspendOnFileTabNavigation?: boolean;
 }) {
   useShortcutPreferences();
   const onCloseRef = useRef(onClose);
@@ -29,7 +35,9 @@ export function AnnotationComposerPopover({
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const [comment, setComment] = useState("");
+  const [internalComment, setInternalComment] = useState("");
+  const comment = commentValue ?? internalComment;
+  const setComment = onCommentChange ?? setInternalComment;
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const draftX = draft?.x;
   const draftY = draft?.y;
@@ -51,7 +59,7 @@ export function AnnotationComposerPopover({
         : null;
     returnFocusRef.current = returnFocus;
     const form = formRef.current;
-    setComment("");
+    setInternalComment("");
     setPosition({ x: draftX, y: draftY });
     const frame = requestAnimationFrame(() => {
       const form = formRef.current;
@@ -73,6 +81,14 @@ export function AnnotationComposerPopover({
     const closeOnPointerDown = (event: PointerEvent) => {
       const target = event.target instanceof Node ? event.target : null;
       if (target && formRef.current?.contains(target)) return;
+      if (
+        suspendOnFileTabNavigation &&
+        target instanceof Element &&
+        target.closest(
+          "[data-file-preview-tab], .inspector-files-resource .workspace-inspector-navigation",
+        )
+      )
+        return;
       onCloseRef.current();
     };
     window.addEventListener("pointerdown", closeOnPointerDown, {
@@ -86,7 +102,7 @@ export function AnnotationComposerPopover({
         capture: true,
       });
     };
-  }, [draftQuote, draftTitle, draftX, draftY]);
+  }, [draftQuote, draftTitle, draftX, draftY, suspendOnFileTabNavigation]);
 
   if (!draft) return null;
 

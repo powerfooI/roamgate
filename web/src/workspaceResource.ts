@@ -363,20 +363,95 @@ function fileSelectionStorageKey(scope: ResourceScope): string {
   );
 }
 
+export interface ResourceFileTabs {
+  paths: string[];
+  activePath: string | null;
+}
+
+export function openResourceFileTab(
+  tabs: ResourceFileTabs,
+  path: string,
+): ResourceFileTabs {
+  return {
+    paths: tabs.paths.includes(path) ? tabs.paths : [...tabs.paths, path],
+    activePath: path,
+  };
+}
+
+export function closeResourceFileTab(
+  tabs: ResourceFileTabs,
+  path: string,
+): ResourceFileTabs {
+  const index = tabs.paths.indexOf(path);
+  if (index < 0) return tabs;
+  const paths = tabs.paths.filter((candidate) => candidate !== path);
+  return {
+    paths,
+    activePath:
+      tabs.activePath === path
+        ? (paths[Math.min(index, paths.length - 1)] ?? null)
+        : tabs.activePath,
+  };
+}
+
+export function readResourceFileTabs(
+  storage: Pick<Storage, "getItem">,
+  scope: ResourceScope,
+): ResourceFileTabs {
+  const empty = { paths: [], activePath: null };
+  const raw = storage.getItem(fileSelectionStorageKey(scope));
+  if (!raw) return empty;
+  if (!raw.trimStart().startsWith("{"))
+    return { paths: [raw], activePath: raw };
+  try {
+    const value = JSON.parse(raw);
+    if (value.version !== 1 || !Array.isArray(value.paths)) return empty;
+    const paths = [
+      ...new Set<string>(
+        value.paths.filter(
+          (path: unknown) => typeof path === "string" && path.length > 0,
+        ),
+      ),
+    ];
+    return {
+      paths,
+      activePath: paths.includes(value.activePath)
+        ? value.activePath
+        : (paths[0] ?? null),
+    };
+  } catch {
+    return empty;
+  }
+}
+
+export function writeResourceFileTabs(
+  storage: Pick<Storage, "setItem">,
+  scope: ResourceScope,
+  tabs: ResourceFileTabs,
+): void {
+  storage.setItem(
+    fileSelectionStorageKey(scope),
+    JSON.stringify({ version: 1, ...tabs }),
+  );
+}
+
 export function readResourceFileSelection(
   storage: Pick<Storage, "getItem">,
   scope: ResourceScope,
 ): string | undefined {
-  const path = storage.getItem(fileSelectionStorageKey(scope))?.trim();
-  return path || undefined;
+  return readResourceFileTabs(storage, scope).activePath ?? undefined;
 }
 
 export function writeResourceFileSelection(
-  storage: Pick<Storage, "setItem" | "removeItem">,
+  storage: Pick<Storage, "getItem" | "setItem" | "removeItem">,
   scope: ResourceScope,
   path?: string | null,
 ): void {
-  const key = fileSelectionStorageKey(scope);
-  if (path) storage.setItem(key, path);
-  else storage.removeItem(key);
+  writeResourceFileTabs(
+    storage,
+    scope,
+    path
+      ? openResourceFileTab(readResourceFileTabs(storage, scope), path)
+      : { paths: [], activePath: null },
+  );
 }
