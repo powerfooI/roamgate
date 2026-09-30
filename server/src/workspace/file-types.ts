@@ -76,6 +76,7 @@ export type GitDiffEntry = {
   status: string;
   additions?: number;
   deletions?: number;
+  binary?: boolean;
   generated?: boolean;
   mtime_ms?: number;
   size?: number;

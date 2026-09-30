@@ -79,7 +79,7 @@ metadata. See [link contracts](docs/ARCHITECTURE.md#links).
 
 ## Workspace Inspector
 
-Open **Files**, **Changes**, or **Agent History** from the Inspector button,
+Open **Files**, **Changes**, **Commits**, or **Agent History** from the Inspector button,
 keyboard shortcuts, or workspace/agent menus.
 
 - Dock right/bottom, resize, or expand without unmounting terminals. Narrow
@@ -89,6 +89,9 @@ keyboard shortcuts, or workspace/agent menus.
   the originating tab if it still exists.
 - Agent browsing starts at its cwd only inside the checkout. Terminal links use
   their pane's workspace. Changes describe the checkout, not agent ownership.
+- Commits browses the current branch in pages. Select a commit to see its
+  metadata, changed files, diffs, and historical file previews. Merge commits
+  compare with their first parent; shallow history boundaries are labeled.
 - Closed worktrees must open before browsing; missing ones offer cleanup, never
   sibling files. Directory previews can prefill **New workspace**.
 - The expandable **PR/MR status** card shows the current branch's GitHub pull

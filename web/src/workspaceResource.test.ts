@@ -527,4 +527,27 @@ describe("workspace resource scope", () => {
       changesNavigationRatio: 0.4,
     });
   });
+
+  test("restores the commits tab only for its checkout", () => {
+    const storage = memoryStorage();
+    const scope = resourceScopeForWorkspace(
+      "local",
+      workspace("w1", "/repo", "repo"),
+    );
+    writeInspectorPreferences(storage, {
+      scope,
+      open: true,
+      view: "commits",
+      dock: "right",
+      size: 520,
+      expanded: false,
+    });
+    expect(readInspectorPreferences(storage, scope).view).toBe("commits");
+    expect(
+      readInspectorPreferences(
+        storage,
+        resourceScopeForWorkspace("remote", workspace("w1", "/repo", "repo")),
+      ).view,
+    ).toBe("files");
+  });
 });

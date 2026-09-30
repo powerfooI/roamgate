@@ -217,6 +217,14 @@
   padding: 8px;
 }
 
+.workspace-inspector-resource.inspector-commits-resource {
+  display: flex;
+}
+
+.workspace-inspector-resource.inspector-commits-resource.is-hidden {
+  display: none;
+}
+
 .workspace-inspector-resource.inspector-history-resource.is-hidden {
   display: none;
 }
@@ -349,7 +357,7 @@
     display: none;
   }
 
-  /* The bottom mobile nav already switches between Files/Changes/History
+  /* The bottom mobile nav already switches between Files/Changes/Commits/History
      and highlights the active view, so the in-inspector tab bar only costs
      vertical space on phones. */
   .workspace-inspector-tabs {

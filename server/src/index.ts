@@ -173,6 +173,8 @@ const IMPORTANT_RPC_METHODS = new Set([
   "agent_session.get",
   "file.read",
   "git.diff_file",
+  "git.commit_file",
+  "git.commit_preview",
   "git.file_action",
   "git.pull",
   "git.repo_action",
@@ -816,6 +818,10 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     readGitDiffSummary,
     readWorkspacePullRequest,
     readGitDiffFile,
+    readGitCommits,
+    readGitCommit,
+    readGitCommitFile,
+    readGitCommitPreview,
     runGitPull,
     runWorkspaceGitFileAction,
     runWorkspaceGitRepoAction,
@@ -958,6 +964,27 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       sendReply({ id, result }, "git-diff-file");
     } catch (e) {
       sendError("git-diff-file-error", e);
+    }
+    return;
+  }
+  if (
+    method === "git.commits" ||
+    method === "git.commit" ||
+    method === "git.commit_file" ||
+    method === "git.commit_preview"
+  ) {
+    try {
+      const result =
+        method === "git.commits"
+          ? await readGitCommits(params ?? {})
+          : method === "git.commit"
+            ? await readGitCommit(params ?? {})
+            : method === "git.commit_file"
+              ? await readGitCommitFile(params ?? {})
+              : await readGitCommitPreview(params ?? {});
+      sendReply({ id, result }, method);
+    } catch (e) {
+      sendError(`${method}-error`, e);
     }
     return;
   }

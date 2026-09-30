@@ -38,6 +38,12 @@ import {
   type LastStepBaselineStore,
 } from "./git-diff";
 import { runGitFileAction, runGitRepoAction } from "./git-actions";
+import {
+  listCommits,
+  readCommit,
+  readCommitFile,
+  readCommitPreview,
+} from "./git-history";
 import { readPullRequestStatus } from "./pull-request";
 import { collectIgnoredNames } from "./git-ignore";
 import { GIT_DIFF_TIMEOUT_MS } from "./file-constants";
@@ -549,6 +555,45 @@ export function createFileHandlers({
     });
   }
 
+  async function gitHistoryContext(params: Record<string, unknown>) {
+    const { workspaceId, root } = await workspaceAndGitRoot(
+      params,
+      "git history",
+    );
+    return {
+      workspaceId,
+      context: { root, host: sshHost(), shQuote, runProcessWithCodeTimeout },
+    };
+  }
+
+  async function readGitCommits(params: Record<string, unknown>) {
+    const { context } = await gitHistoryContext(params);
+    return listCommits(context, params);
+  }
+
+  async function readGitCommit(params: Record<string, unknown>) {
+    const { context } = await gitHistoryContext(params);
+    return readCommit(context, params.sha);
+  }
+
+  async function readGitCommitFile(params: Record<string, unknown>) {
+    const { workspaceId, context } = await gitHistoryContext(params);
+    return {
+      workspace_id: workspaceId,
+      root: context.root,
+      ...(await readCommitFile(context, params)),
+    };
+  }
+
+  async function readGitCommitPreview(params: Record<string, unknown>) {
+    const { workspaceId, context } = await gitHistoryContext(params);
+    return {
+      workspace_id: workspaceId,
+      root: context.root,
+      ...(await readCommitPreview(context, params)),
+    };
+  }
+
   async function runGitPull(params: Record<string, unknown>) {
     const { workspaceId, root } = await workspaceAndGitRoot(params);
     return pullGit({
@@ -595,6 +640,10 @@ export function createFileHandlers({
     readGitDiffSummary,
     readWorkspacePullRequest,
     readGitDiffFile,
+    readGitCommits,
+    readGitCommit,
+    readGitCommitFile,
+    readGitCommitPreview,
     runGitPull,
     runWorkspaceGitFileAction,
     runWorkspaceGitRepoAction,

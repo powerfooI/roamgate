@@ -204,7 +204,7 @@ dispatched timeouts report uncertain completion, requiring inspection before ret
 
 ## Workspace resource ownership
 
-A **checkout** owns Files/Changes; a workspace supplies routing, a tab a return
+A **checkout** owns Files/Changes/Commits; a workspace supplies routing, a tab a return
 location, and a pane optional path/session context. Repository groups are not
 merged working trees. Changes and Last step snapshots do not prove agent ownership.
 

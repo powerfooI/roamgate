@@ -35,6 +35,7 @@ import {
   CircleAlert,
   FileDiff,
   FolderTree,
+  GitCommitHorizontal,
   History,
   Info,
   LoaderCircle,
@@ -1681,7 +1682,9 @@ export default function App() {
               ? "Files"
               : view === "changes"
                 ? "Changes"
-                : "History"
+                : view === "commits"
+                  ? "Commits"
+                  : "History"
           }`,
           detail: "The target workspace is no longer open.",
         });
@@ -3605,6 +3608,17 @@ export default function App() {
         >
           <FileDiff size={16} />
           <span className="mobile-nav-label">Changes</span>
+        </button>
+        <button
+          type="button"
+          className={mobileView === "commits" ? "active" : ""}
+          title="Commits"
+          aria-label="Show commit history"
+          tabIndex={mobileControlsCollapsed ? -1 : 0}
+          onClick={() => openInspector("commits")}
+        >
+          <GitCommitHorizontal size={16} />
+          <span className="mobile-nav-label">Commits</span>
         </button>
         <button
           type="button"

@@ -138,11 +138,16 @@ function startImagePreviewRequest(
   client: ConnectionClient,
   isCurrent: () => boolean,
   onComplete: (key: string, state: ImagePreviewState) => void,
+  loadPreview?: (path: string) => Promise<FilePreview>,
 ) {
-  void requestFilePreview(target.file.workspace_id, target.file.path, {
-    client,
-    refresh: true,
-  })
+  void (
+    loadPreview
+      ? loadPreview(target.file.path)
+      : requestFilePreview(target.file.workspace_id, target.file.path, {
+          client,
+          refresh: true,
+        })
+  )
     .then((preview) => {
       if (!isCurrent()) return;
       onComplete(target.key, { preview, loading: false, error: null });
@@ -452,6 +457,7 @@ type DiffFileSectionProps = {
   onToggle: (key: string, collapsed: boolean) => void;
   onSelectFile?: (entry: GitDiffEntry) => void;
   onOpenFile?: (entry: GitDiffEntry) => void;
+  openFileLabel?: string;
   onRequestAnnotation?: (request: DiffAnnotationRequest) => void;
   onEditAnnotation?: (id: string) => void;
 };
@@ -469,6 +475,7 @@ const DiffFileSection = memo(function DiffFileSection({
   onToggle,
   onSelectFile,
   onOpenFile,
+  openFileLabel = "Open in Files",
   onRequestAnnotation,
   onEditAnnotation,
 }: DiffFileSectionProps) {
@@ -620,7 +627,7 @@ const DiffFileSection = memo(function DiffFileSection({
             disabled={!onOpenFile}
           >
             <FolderOpen size={14} />
-            <span>Open in Files</span>
+            <span>{openFileLabel}</span>
           </button>
         </header>
       )}
@@ -741,6 +748,7 @@ function areDiffFileSectionPropsEqual(
     previous.onToggle === next.onToggle &&
     previous.onSelectFile === next.onSelectFile &&
     previous.onOpenFile === next.onOpenFile &&
+    previous.openFileLabel === next.openFileLabel &&
     previous.onRequestAnnotation === next.onRequestAnnotation &&
     previous.onEditAnnotation === next.onEditAnnotation
   );
@@ -762,6 +770,8 @@ export function DiffContentView({
   annotations = [],
   onSelectFile,
   onOpenFile,
+  openFileLabel = "Open in Files",
+  loadImagePreview,
   onCreateAnnotation,
   onReanchorAnnotations,
   onEditAnnotation,
@@ -783,6 +793,8 @@ export function DiffContentView({
   annotations?: readonly ReviewAnnotation[];
   onSelectFile?: (entry: GitDiffEntry) => void;
   onOpenFile?: (entry: GitDiffEntry) => void;
+  openFileLabel?: string;
+  loadImagePreview?: (path: string) => Promise<FilePreview>;
   onCreateAnnotation?: (annotation: NewReviewAnnotation) => void;
   onReanchorAnnotations?: (
     path: string,
@@ -1153,9 +1165,15 @@ export function DiffContentView({
           connectionClient.isCurrent() &&
           imagePreviewRequestByKeyRef.current.get(target.key) === requestSeq,
         completeImagePreview,
+        loadImagePreview,
       );
     }
-  }, [completeImagePreview, connectionClient, imagePreviewTargets]);
+  }, [
+    completeImagePreview,
+    connectionClient,
+    imagePreviewTargets,
+    loadImagePreview,
+  ]);
 
   useEffect(() => {
     if (!activeEntryKey || !sectionRef.current) return;
@@ -1271,6 +1289,7 @@ export function DiffContentView({
           onToggle={toggleSectionCollapsed}
           onSelectFile={onSelectFile ? handleSelectFile : undefined}
           onOpenFile={onOpenFile ? handleOpenFile : undefined}
+          openFileLabel={openFileLabel}
           onRequestAnnotation={
             onCreateAnnotation ? handleRequestAnnotation : undefined
           }

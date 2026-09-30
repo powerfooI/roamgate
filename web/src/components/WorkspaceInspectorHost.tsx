@@ -2,6 +2,7 @@ import {
   FileDiff,
   FolderTree,
   GitFork,
+  GitCommitHorizontal,
   History,
   Maximize2,
   Minimize2,
@@ -63,6 +64,11 @@ import "./WorkspaceInspectorHost.css";
 const DiffContentView = lazyWithReload("diff-content-view", () =>
   import("./DiffContentView").then((module) => ({
     default: module.DiffContentView,
+  })),
+);
+const GitCommitHistory = lazyWithReload("git-commit-history", () =>
+  import("./GitCommitHistory").then((module) => ({
+    default: module.GitCommitHistory,
   })),
 );
 
@@ -255,6 +261,7 @@ export function WorkspaceInspectorHost({
   }, [onReady]);
   const filesTabRef = useRef<HTMLButtonElement | null>(null);
   const changesTabRef = useRef<HTMLButtonElement | null>(null);
+  const commitsTabRef = useRef<HTMLButtonElement | null>(null);
   const historyTabRef = useRef<HTMLButtonElement | null>(null);
   const diffViewerRef = useRef<DiffViewerPanelHandle | null>(null);
   const splitId = useId();
@@ -268,6 +275,7 @@ export function WorkspaceInspectorHost({
   >(() => ({
     files: state.view === "files" && !!fileSelection.entry,
     changes: false,
+    commits: false,
     history: false,
   }));
   // Closing the preview hands the whole resource to the file list until the
@@ -275,6 +283,10 @@ export function WorkspaceInspectorHost({
   const [filePreviewCollapsed, setFilePreviewCollapsed] = useState(false);
   const resourceKey = resourceOwnerKey(state.scope);
   const contentResourceKey = resourceStateKey(state.scope);
+  const [commitsVisitedKey, setCommitsVisitedKey] = useState("");
+  useEffect(() => {
+    if (state.view === "commits") setCommitsVisitedKey(contentResourceKey);
+  }, [contentResourceKey, state.view]);
   const fileDiffEntries =
     fileDiffState.resourceKey === contentResourceKey
       ? fileDiffState.entries
@@ -405,8 +417,8 @@ export function WorkspaceInspectorHost({
       return;
     }
     const views: InspectorView[] = historyAvailable
-      ? ["files", "changes", "history"]
-      : ["files", "changes"];
+      ? ["files", "changes", "commits", "history"]
+      : ["files", "changes", "commits"];
     const currentIndex = Math.max(0, views.indexOf(state.view));
     const nextView: InspectorView | undefined =
       event.key === "Home"
@@ -424,6 +436,7 @@ export function WorkspaceInspectorHost({
     const refs = {
       files: filesTabRef,
       changes: changesTabRef,
+      commits: commitsTabRef,
       history: historyTabRef,
     };
     refs[nextView].current?.focus();
@@ -505,6 +518,18 @@ export function WorkspaceInspectorHost({
             {changeCount > 0 ? (
               <span className="workspace-inspector-count">{changeCount}</span>
             ) : null}
+          </button>
+          <button
+            ref={commitsTabRef}
+            type="button"
+            role="tab"
+            aria-selected={state.view === "commits"}
+            tabIndex={state.view === "commits" ? 0 : -1}
+            className={state.view === "commits" ? "is-active" : ""}
+            onClick={() => onViewChange("commits")}
+            onKeyDown={handleTabKeyDown}
+          >
+            <GitCommitHorizontal size={14} /> Commits
           </button>
           <button
             ref={historyTabRef}
@@ -825,6 +850,37 @@ export function WorkspaceInspectorHost({
                 </Suspense>
               ) : null}
             </div>
+          </div>
+          <div
+            className={`workspace-inspector-resource inspector-commits-resource ${state.view === "commits" ? "" : "is-hidden"}`}
+          >
+            {state.view === "commits" ||
+            commitsVisitedKey === contentResourceKey ? (
+              <Suspense
+                fallback={
+                  <div className="workspace-inspector-unavailable">
+                    Loading commits
+                  </div>
+                }
+              >
+                <GitCommitHistory
+                  key={connectionClientScopeKey(
+                    connectionClient,
+                    connectionClient.serverRuntimeGeneration,
+                    contentResourceKey,
+                    workspace.workspace_id,
+                    workspace.worktree?.checkout_path,
+                    workspace.cwd,
+                    workspace.worktree?.git_status?.branch,
+                  )}
+                  client={connectionClient}
+                  workspaceId={workspace.workspace_id}
+                  resourceKey={contentResourceKey}
+                  compact={compact}
+                  active={visible && state.open && state.view === "commits"}
+                />
+              </Suspense>
+            ) : null}
           </div>
           <div
             className={`workspace-inspector-resource inspector-history-resource ${
