@@ -14,6 +14,8 @@ import {
   ChevronDown,
   ChevronRight,
   Ellipsis,
+  Eye,
+  EyeOff,
   File,
   Folder,
   FolderOpen,
@@ -54,6 +56,7 @@ import type {
 } from "../types";
 import { CloseButton } from "./CloseButton";
 import { ConfirmDialog } from "./ModalDialogs";
+import { ThemedSelect } from "./ThemedSelect";
 import {
   focusTreeItem,
   keyboardContextMenuPoint,
@@ -1745,68 +1748,69 @@ function FileExplorerContent({
                     maxLength={512}
                   />
                 </label>
-                <select
+                <ThemedSelect
                   className="file-search-mode"
                   aria-label="Search type"
                   title="Loaded searches include only expanded directories and support globs"
                   value={searchMode}
-                  onChange={(event) =>
-                    setSearchMode(
-                      event.currentTarget.value as
-                        | "files"
-                        | "content"
-                        | "loaded",
-                    )
+                  options={[
+                    { value: "files", label: "Files" },
+                    { value: "content", label: "Content" },
+                    { value: "loaded", label: "Loaded" },
+                  ]}
+                  onChange={(value) =>
+                    setSearchMode(value as "files" | "content" | "loaded")
                   }
+                />
+                <button
+                  type="button"
+                  className="file-hidden-toggle"
+                  aria-pressed={showHidden}
+                  title="Show hidden files"
+                  onClick={() => setShowHidden((value) => !value)}
                 >
-                  <option value="files">Files</option>
-                  <option value="content">Content</option>
-                  <option value="loaded">Loaded</option>
-                </select>
-                <label className="file-hidden-toggle">
-                  <input
-                    type="checkbox"
-                    checked={showHidden}
-                    onChange={(e) => setShowHidden(e.currentTarget.checked)}
-                  />
+                  {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
                   Hidden
-                </label>
-                <button
-                  type="button"
-                  className="ghost file-action"
-                  aria-label="Browse filesystem"
-                  title="Browse filesystem: allow navigation outside this workspace"
-                  disabled={!workspace}
-                  onClick={() => {
-                    setEntryMenu(null);
-                    setPendingDeleteEntry(null);
-                    setFilesystemContext(runtimeContext);
-                  }}
-                >
-                  <FolderOpen size={15} />
                 </button>
-                <button
-                  type="button"
-                  className="ghost file-action"
-                  title="Refresh"
-                  disabled={!workspace}
-                  onClick={() => {
-                    setSearchRevision((value) => value + 1);
-                    const pathsToRefresh = Array.from(expanded);
-                    if (!pathsToRefresh.includes(""))
-                      pathsToRefresh.unshift("");
-                    for (const path of pathsToRefresh) {
-                      void loadDirectory(path, true);
-                    }
-                    void loadGitStatus(true);
-                    if (previewEntry) void loadPreview(previewEntry);
-                  }}
-                >
-                  <RefreshCw
-                    className={gitSummaryState.loading ? "is-spinning" : ""}
-                    size={15}
-                  />
-                </button>
+                <span className="file-toolbar-end">
+                  <button
+                    type="button"
+                    className="file-toolbar-icon"
+                    aria-label="Browse filesystem"
+                    title="Browse filesystem: allow navigation outside this workspace"
+                    disabled={!workspace}
+                    onClick={() => {
+                      setEntryMenu(null);
+                      setPendingDeleteEntry(null);
+                      setFilesystemContext(runtimeContext);
+                    }}
+                  >
+                    <FolderOpen size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    className="file-toolbar-icon"
+                    aria-label="Refresh files"
+                    title="Refresh"
+                    disabled={!workspace}
+                    onClick={() => {
+                      setSearchRevision((value) => value + 1);
+                      const pathsToRefresh = Array.from(expanded);
+                      if (!pathsToRefresh.includes(""))
+                        pathsToRefresh.unshift("");
+                      for (const path of pathsToRefresh) {
+                        void loadDirectory(path, true);
+                      }
+                      void loadGitStatus(true);
+                      if (previewEntry) void loadPreview(previewEntry);
+                    }}
+                  >
+                    <RefreshCw
+                      className={gitSummaryState.loading ? "is-spinning" : ""}
+                      size={15}
+                    />
+                  </button>
+                </span>
               </div>
 
               {error ? <p className="modal-error">{error}</p> : null}

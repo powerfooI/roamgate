@@ -81,14 +81,15 @@
   flex-basis: 100%;
 }
 
-.file-search-mode {
-  min-width: 82px;
+.file-search-mode.themed-select-trigger {
+  min-width: 90px;
   height: 34px;
-  padding: 0 6px;
+  padding: 0 9px;
   border: 1px solid var(--viewer-border);
   border-radius: 8px;
   background: var(--viewer-content-bg);
   color: var(--text);
+  font-size: 12px;
 }
 
 .file-search-results {

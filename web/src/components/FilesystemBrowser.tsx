@@ -4,6 +4,8 @@ import {
   ArrowRight,
   ArrowUp,
   Ellipsis,
+  Eye,
+  EyeOff,
   File,
   Folder,
   RefreshCw,
@@ -165,25 +167,27 @@ export function FilesystemBrowser({
             title="Search loaded names or paths. Globs: r*md, ?.txt, **/*.md, *.{md,txt}"
           />
         </label>
-        <label className="file-hidden-toggle">
-          <input
-            type="checkbox"
-            checked={showHidden}
-            onChange={(event) =>
-              onShowHiddenChange(event.currentTarget.checked)
-            }
-          />{" "}
-          Hidden
-        </label>
         <button
           type="button"
-          className="ghost file-action"
-          title="Refresh"
-          aria-label="Refresh files"
-          onClick={() => setRefresh((value) => value + 1)}
+          className="file-hidden-toggle"
+          aria-pressed={showHidden}
+          title="Show hidden files"
+          onClick={() => onShowHiddenChange(!showHidden)}
         >
-          <RefreshCw size={15} className={loading ? "is-spinning" : ""} />
+          {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
+          Hidden
         </button>
+        <span className="file-toolbar-end">
+          <button
+            type="button"
+            className="file-toolbar-icon"
+            title="Refresh"
+            aria-label="Refresh files"
+            onClick={() => setRefresh((value) => value + 1)}
+          >
+            <RefreshCw size={15} className={loading ? "is-spinning" : ""} />
+          </button>
+        </span>
       </div>
       {error ? (
         <p className="modal-error" role="alert">

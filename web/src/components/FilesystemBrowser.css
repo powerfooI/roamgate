@@ -91,16 +91,19 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--viewer-border);
+  background: var(--viewer-content-bg);
   color: var(--muted);
   font-size: 12px;
   white-space: nowrap;
 }
 
-.file-hidden-toggle input {
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  padding: 0;
+.file-hidden-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .file-tree {
@@ -281,4 +284,23 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 10px;
+}
+
+.file-toolbar-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.file-toolbar-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-color: var(--viewer-border);
+  background: var(--viewer-content-bg);
+  color: var(--muted);
 }
