@@ -72,6 +72,7 @@ export type ActiveFilePreviewSelection = {
 
 export type FilePreviewSelectionMeta = {
   userInitiated?: boolean;
+  deletedEntry?: Pick<FileExplorerEntry, "path" | "type">;
 };
 
 type AppTheme = "dark" | "light";

@@ -387,17 +387,20 @@ export function openResourceFileTab(
 export function closeResourceFileTab(
   tabs: ResourceFileTabs,
   path: string,
+  directory = false,
 ): ResourceFileTabs {
-  const index = tabs.paths.indexOf(path);
+  const matches = (candidate: string | null) =>
+    candidate === path ||
+    (directory && candidate?.startsWith(`${path}/`) === true);
+  const index = tabs.paths.findIndex(matches);
   if (index < 0) return tabs;
-  const paths = tabs.paths.filter((candidate) => candidate !== path);
+  const paths = tabs.paths.filter((candidate) => !matches(candidate));
   return {
     paths,
-    activePath:
-      tabs.activePath === path
-        ? (paths[Math.min(index, paths.length - 1)] ?? null)
-        : tabs.activePath,
-    previewPath: tabs.previewPath === path ? null : tabs.previewPath,
+    activePath: matches(tabs.activePath)
+      ? (paths[Math.min(index, paths.length - 1)] ?? null)
+      : tabs.activePath,
+    previewPath: matches(tabs.previewPath) ? null : tabs.previewPath,
   };
 }
 

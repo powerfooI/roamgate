@@ -408,6 +408,8 @@ function FileExplorerContent({
   const [previewEntry, setPreviewEntry] = useState<FileExplorerEntry | null>(
     null,
   );
+  const previewEntryRef = useRef(previewEntry);
+  previewEntryRef.current = previewEntry;
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -1205,7 +1207,7 @@ function FileExplorerContent({
 
   const clearDeletedPreview = (entry: FileExplorerEntry) => {
     if (!workspace?.workspace_id) return;
-    const selectedPath = previewEntry?.path;
+    const selectedPath = previewEntryRef.current?.path;
     const deletedSelection =
       selectedPath === entry.path ||
       (entry.type === "directory" &&
@@ -1216,15 +1218,16 @@ function FileExplorerContent({
       entry.path,
       entry.type === "directory",
     );
-    if (!deletedSelection) return;
-    navigationRequestRef.current += 1;
-    setPreviewEntry(null);
-    setPreview(null);
-    setPreviewLoading(false);
-    setPreviewError(null);
+    if (deletedSelection) {
+      navigationRequestRef.current += 1;
+      setPreviewEntry(null);
+      setPreview(null);
+      setPreviewLoading(false);
+      setPreviewError(null);
+    }
     emitPreviewChange(
       { entry: null, preview: null, loading: false, error: null },
-      { userInitiated: true },
+      { userInitiated: true, deletedEntry: entry },
     );
   };
 

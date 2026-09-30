@@ -274,11 +274,12 @@ export function WorkspaceInspectorHost({
     if (state.view === "files" && !fileSelection.entry && fileTabs.activePath)
       onSelectFileTab(fileTabs.activePath);
   }, [state.view, fileSelection.entry, fileTabs.activePath, onSelectFileTab]);
-  const onCloseFileTab = (path: string) => {
-    const tabs = closeResourceFileTab(fileTabs, path);
+  const onCloseFileTab = (path: string, directory = false) => {
+    const current = readResourceFileTabs(roamgateLocalStorage, state.scope);
+    const tabs = closeResourceFileTab(current, path, directory);
     writeResourceFileTabs(roamgateLocalStorage, state.scope, tabs);
     setFileTabs(tabs);
-    if (fileTabs.activePath !== path) return;
+    if (current.activePath === tabs.activePath) return;
     previewRequestRef.current += 1;
     if (tabs.activePath) onSelectFileTab(tabs.activePath);
     else
@@ -681,6 +682,13 @@ export function WorkspaceInspectorHost({
                 }
                 onClose={onClose}
                 onPreviewChange={(selection, meta) => {
+                  if (meta?.deletedEntry) {
+                    onCloseFileTab(
+                      meta.deletedEntry.path,
+                      meta.deletedEntry.type === "directory",
+                    );
+                    return;
+                  }
                   if (selection.entry && meta?.userInitiated) {
                     setDrillInByView((current) => ({
                       ...current,

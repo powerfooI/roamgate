@@ -558,6 +558,26 @@ describe("workspace resource scope", () => {
 });
 
 describe("file preview tabs", () => {
+  test("deleting a directory closes its tabs without reopening deleted files", () => {
+    const tabs: ResourceFileTabs = {
+      paths: ["src/a.ts", "src/b.ts", "src-other/c.ts", "README.md"],
+      activePath: "src/b.ts",
+      previewPath: "src/a.ts",
+    };
+    expect(closeResourceFileTab(tabs, "src", true)).toEqual({
+      paths: ["src-other/c.ts", "README.md"],
+      activePath: "src-other/c.ts",
+      previewPath: null,
+    });
+    expect(
+      closeResourceFileTab({ ...tabs, activePath: "README.md" }, "src", true),
+    ).toEqual({
+      paths: ["src-other/c.ts", "README.md"],
+      activePath: "README.md",
+      previewPath: null,
+    });
+  });
+
   test("migrates a legacy selected path and preserves the existing storage key", () => {
     const storage = memoryStorage();
     const scope = resourceScopeForWorkspace(

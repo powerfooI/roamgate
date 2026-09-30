@@ -4,6 +4,7 @@ import {
   beforeAll,
   describe,
   expect,
+  mock,
   test,
 } from "bun:test";
 import { Window } from "happy-dom";
@@ -270,7 +271,28 @@ function registerDomTests() {
     });
   });
 
-  test("Inspector restores Files after another view and invalidates a closed loading tab", async () => {
+  test("Inspector restores Files and preserves a newer selection during deletion", async () => {
+    let deleteFixture = () => {};
+    mock.module("./FileExplorerDialog", () => ({
+      FileExplorerPanel: ({
+        onPreviewChange,
+      }: Parameters<
+        typeof import("./FileExplorerDialog").FileExplorerPanel
+      >[0]) => {
+        deleteFixture = () =>
+          onPreviewChange?.(
+            { entry: null, preview: null, loading: false, error: null },
+            { deletedEntry: { path: "a.ts", type: "file" } },
+          );
+        return createElement(
+          "button",
+          {
+            onClick: deleteFixture,
+          },
+          "Delete fixture a.ts",
+        );
+      },
+    }));
     const { WorkspaceInspectorHost } = await import("./WorkspaceInspectorHost");
     const { roamgateLocalStorage } = await import("../browserStorage");
     const {
@@ -386,9 +408,11 @@ function registerDomTests() {
         .click(),
     );
     expect(selections).toEqual(["a.ts"]);
+    const pendingDelete = deleteFixture;
+    await act(async () => key(tab("a.ts"), "ArrowRight"));
     const pendingRequest = request.current;
-    await act(async () => key(tab("a.ts"), "Delete"));
-    expect(request.current).toBeGreaterThan(pendingRequest);
+    await act(async () => pendingDelete());
+    expect(request.current).toBe(pendingRequest);
     expect(selections).toEqual(["a.ts", "b.ts"]);
     expect(readResourceFileTabs(roamgateLocalStorage, scope)).toEqual({
       paths: ["b.ts"],
@@ -396,6 +420,7 @@ function registerDomTests() {
       previewPath: null,
     });
     await act(async () => key(tab("b.ts"), "Delete"));
+    expect(request.current).toBeGreaterThan(pendingRequest);
     expect(readResourceFileTabs(roamgateLocalStorage, scope)).toEqual({
       paths: [],
       activePath: null,
