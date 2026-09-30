@@ -280,8 +280,9 @@ separate for desktop/mobile. Jump from a diff to its file preview.
 - Customize the floating `2×8` grid and up to four side buttons under
   **Configuration > Behavior > Mobile terminal shortcuts**. The Tabs sheet and
   pane controls work when the tab strip is hidden.
-  Choose a preset or **Custom combination** to set an ASCII key, navigation key,
-  or F1-F12 with Ctrl, Alt, and Shift, plus a label. Edit or clear individual slots;
+  Choose **Preset** or **Custom keyboard**. The US keyboard lets you toggle Ctrl,
+  Alt, and Shift and pick one letter, number, or basic key; expand **More keys**
+  for symbols, arrows, and F1-F12. Set a label and edit or clear individual slots;
   defaults stay available. Buttons send only that combination, with no extra
   Enter. Shift uses US symbols; Ctrl letters ignore case and can share bytes with
   other keys, while Alt sends an Escape prefix. Modified Enter requires application

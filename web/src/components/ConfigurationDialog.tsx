@@ -43,7 +43,6 @@ import {
 import { AgentIntegrationsSettings } from "./AgentIntegrationsSettings";
 import { AutoSyncRepositoriesDialog } from "./AutoSyncRepositoriesDialog";
 import { CloseButton } from "./CloseButton";
-import { MobileTerminalShortcutsDialog } from "./MobileTerminalShortcutsDialog";
 import { TerminalTransportSettings } from "./TerminalTransportSettings";
 import { ConfigurationLoadingDialog } from "./ConfigurationLoadingDialog";
 import { MobileSheetHandle } from "./MobileSheetHandle";
@@ -63,6 +62,11 @@ const TerminalThemeDialog = lazyWithReload("terminal-theme", () =>
 const MobileLayoutDialog = lazyWithReload("mobile-layout", () =>
   import("./MobileLayoutDialog").then((module) => ({
     default: module.MobileLayoutDialog,
+  })),
+);
+const MobileTerminalShortcutsDialog = lazyWithReload("mobile-shortcuts", () =>
+  import("./MobileTerminalShortcutsDialog").then((module) => ({
+    default: module.MobileTerminalShortcutsDialog,
   })),
 );
 
@@ -645,15 +649,17 @@ export function ConfigurationDialog({
         {detail === "layout" ? (
           <MobileLayoutDialog open onClose={() => setDetail(null)} />
         ) : null}
+        {detail === "mobile" ? (
+          <MobileTerminalShortcutsDialog
+            open
+            rows={props.mobileTerminalShortcuts}
+            sideShortcuts={props.mobileTerminalSideShortcuts}
+            onChange={props.onMobileTerminalShortcutsChange}
+            onSideChange={props.onMobileTerminalSideShortcutsChange}
+            onClose={() => setDetail(null)}
+          />
+        ) : null}
       </Suspense>
-      <MobileTerminalShortcutsDialog
-        open={detail === "mobile"}
-        rows={props.mobileTerminalShortcuts}
-        sideShortcuts={props.mobileTerminalSideShortcuts}
-        onChange={props.onMobileTerminalShortcutsChange}
-        onSideChange={props.onMobileTerminalSideShortcutsChange}
-        onClose={() => setDetail(null)}
-      />
       <AutoSyncRepositoriesDialog
         open={detail === "sync"}
         onClose={() => setDetail(null)}
