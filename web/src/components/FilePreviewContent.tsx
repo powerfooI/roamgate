@@ -66,6 +66,7 @@ export type ActiveFilePreviewSelection = {
   loading: boolean;
   error: string | null;
   fragment?: string;
+  line?: number;
 };
 
 export type FilePreviewSelectionMeta = {
@@ -188,6 +189,7 @@ export function FilePreviewContent({
   loading,
   error,
   fragment,
+  line,
   changesContent,
   changesKey,
   annotations = [],
@@ -204,6 +206,7 @@ export function FilePreviewContent({
   loading: boolean;
   error: string | null;
   fragment?: string;
+  line?: number;
   changesContent?: ReactNode;
   changesKey?: string;
   backAction?: { label: string; onClick: () => void };
@@ -342,6 +345,10 @@ export function FilePreviewContent({
   useEffect(() => {
     setPreviewMode("rendered");
   }, [entry?.path]);
+
+  useEffect(() => {
+    if (line) setPreviewMode("raw");
+  }, [entry?.path, line]);
 
   useEffect(() => {
     setPendingAnnotation(null);
@@ -733,6 +740,7 @@ export function FilePreviewContent({
             <CodeMirrorPreview
               text={previewText}
               path={previewPath}
+              line={line}
               theme={theme}
               annotations={lineAnnotations}
               editorViewRef={editorViewRef}
@@ -936,6 +944,7 @@ function codeMirrorAnnotationExtensions(
 function CodeMirrorPreview({
   text,
   path,
+  line,
   theme,
   annotations,
   editorViewRef,
@@ -943,6 +952,7 @@ function CodeMirrorPreview({
 }: {
   text: string;
   path: string;
+  line?: number;
   theme: AppTheme;
   annotations: readonly FileLineReviewAnnotation[];
   editorViewRef: MutableRefObject<CodeMirrorEditorView | null>;
@@ -952,8 +962,24 @@ function CodeMirrorPreview({
   const annotationRuntimeRef = useRef<CodeMirrorAnnotationRuntime | null>(null);
   const annotationsRef = useRef(annotations);
   const requestAnnotationRef = useRef(onRequestAnnotation);
+  const lineRef = useRef(line);
   annotationsRef.current = annotations;
   requestAnnotationRef.current = onRequestAnnotation;
+  lineRef.current = line;
+
+  const scrollToLine = (
+    deps: CodeMirrorPreviewDeps,
+    view: CodeMirrorEditorView,
+    target: number,
+  ) => {
+    const position = view.state.doc.line(
+      Math.min(view.state.doc.lines, Math.max(1, target)),
+    ).from;
+    view.dispatch({
+      selection: { anchor: position },
+      effects: deps.EditorView.scrollIntoView(position, { y: "center" }),
+    });
+  };
 
   useEffect(() => {
     const parent = containerRef.current;
@@ -1141,6 +1167,7 @@ function CodeMirrorPreview({
         compartment: annotationCompartment,
         view,
       };
+      if (lineRef.current) scrollToLine(deps, view, lineRef.current);
       const activeView = view;
 
       void highlightCodeTokens(text, path)
@@ -1172,6 +1199,11 @@ function CodeMirrorPreview({
       view?.destroy();
     };
   }, [editorViewRef, path, text, theme]);
+
+  useEffect(() => {
+    const runtime = annotationRuntimeRef.current;
+    if (runtime && line) scrollToLine(runtime.deps, runtime.view, line);
+  }, [line]);
 
   useEffect(() => {
     const runtime = annotationRuntimeRef.current;

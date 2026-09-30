@@ -89,6 +89,9 @@ keyboard shortcuts, or workspace/agent menus.
   the originating tab if it still exists.
 - Agent browsing starts at its cwd only inside the checkout. Terminal links use
   their pane's workspace. Changes describe the checkout, not agent ownership.
+- Files searches names/paths or text across the selected checkout, including
+  unopened directories. Content results open the preview at the matching line.
+  Git ignore rules and binary files are respected; results stop at 100.
 - Commits browses the current branch in pages. Select a commit to see its
   metadata, changed files, diffs, and historical file previews. Merge commits
   compare with their first parent; shallow history boundaries are labeled.

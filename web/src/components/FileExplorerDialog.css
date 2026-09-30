@@ -73,6 +73,66 @@
   flex: 1 1 58%;
 }
 
+.file-explorer-side .file-explorer-toolbar {
+  flex-wrap: wrap;
+}
+
+.file-explorer-side .file-search {
+  flex-basis: 100%;
+}
+
+.file-search-mode {
+  min-width: 82px;
+  height: 34px;
+  padding: 0 6px;
+  border: 1px solid var(--viewer-border);
+  border-radius: 8px;
+  background: var(--viewer-content-bg);
+  color: var(--text);
+}
+
+.file-search-results {
+  display: flex;
+  flex-direction: column;
+}
+
+.file-search-result {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-search-result:hover,
+.file-search-result:focus-visible {
+  background: var(--accent-soft);
+}
+
+.file-search-result-path,
+.file-search-result-snippet {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-search-result-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.file-search-result-snippet {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 /* Keep mobile styling in sync with the saved layout and URL override. */
 :where(html[data-layout="mobile"]) {
   .file-explorer-side {

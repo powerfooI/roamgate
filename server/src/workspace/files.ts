@@ -55,6 +55,7 @@ import {
 } from "../../../shared/filePreview";
 import { HtmlPreviewError, readHtmlPreviewFile } from "./html-preview-files";
 import { HTML_PREVIEW_CSP, renderHtmlPreview } from "./html-preview";
+import { searchWorkspaceFiles } from "./search";
 
 const MAX_FILE_RESOLUTION_CANDIDATES = 32;
 const MAX_FILE_RESOLUTION_PATH_LENGTH = 4096;
@@ -224,6 +225,33 @@ export function createFileHandlers({
       repo_name: workspace?.worktree?.repo_name ?? workspace?.label ?? "",
       checkout_path: checkoutPath,
     };
+  }
+
+  async function searchFiles(params: Record<string, unknown>) {
+    const workspaceId = String(params.workspace_id ?? "");
+    if (!workspaceId) throw new Error("file.search requires workspace_id");
+    if (params.mode !== "files" && params.mode !== "content") {
+      throw new Error("invalid file.search mode");
+    }
+    if (
+      typeof params.query !== "string" ||
+      !params.query.trim() ||
+      params.query.length > 512 ||
+      /[\x00-\x1f\x7f]/.test(params.query)
+    ) {
+      throw new Error("invalid file.search query");
+    }
+    const workspace = await getWorkspace(workspaceId);
+    const root = await explorerRoot(workspaceId, workspace);
+    if (!root) throw new Error("workspace has no directory path");
+    const result = await searchWorkspaceFiles({
+      root,
+      host: sshHost(),
+      query: params.query.trim(),
+      mode: params.mode,
+      shQuote,
+    });
+    return { ...result, workspace_id: workspaceId, root };
   }
 
   async function revealFile(
@@ -633,6 +661,7 @@ export function createFileHandlers({
     listWorkspaceFiles: listFiles,
     resolveWorkspaceFiles: resolveFiles,
     readWorkspaceFile: readFile,
+    searchWorkspaceFiles: searchFiles,
     revealWorkspaceFile: revealFile,
     downloadWorkspaceFile: downloadFile,
     uploadWorkspaceFile: uploadFile,

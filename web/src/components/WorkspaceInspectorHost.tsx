@@ -680,6 +680,7 @@ export function WorkspaceInspectorHost({
                 loading={fileSelection.loading}
                 error={fileSelection.error}
                 fragment={fileSelection.fragment}
+                line={fileSelection.line}
                 onOpenFile={onOpenDocument}
                 onRefresh={onRefreshFile}
                 onClosePreview={compact ? undefined : closeFilePreview}

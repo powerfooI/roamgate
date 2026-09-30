@@ -814,6 +814,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     listWorkspaceFiles,
     resolveWorkspaceFiles,
     readWorkspaceFile,
+    searchWorkspaceFiles,
     revealWorkspaceFile,
     readGitDiffSummary,
     readWorkspacePullRequest,
@@ -924,6 +925,15 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       sendReply({ id, result }, "file-read");
     } catch (e) {
       sendError("file-read-error", e);
+    }
+    return;
+  }
+  if (method === "file.search") {
+    try {
+      const result = await searchWorkspaceFiles(params ?? {});
+      sendReply({ id, result }, "file-search");
+    } catch (e) {
+      sendError("file-search-error", e);
     }
     return;
   }
