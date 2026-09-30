@@ -1,7 +1,7 @@
 {
   "name": "roamgate-web",
   "private": true,
-  "version": "0.7.11",
+  "version": "0.7.12",
   "license": "MIT",
   "type": "module",
   "scripts": {
