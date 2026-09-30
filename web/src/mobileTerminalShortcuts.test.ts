@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { mobileTerminalKeyCombinationBytes } from "./mobileTerminalKeyCombination";
+import { mobileTerminalShortcutExecution } from "./mobileTerminalShortcutAction";
 import {
   MAX_MOBILE_TERMINAL_SHORTCUTS_PER_ROW,
   defaultMobileTerminalShortcutRows,
@@ -14,6 +16,94 @@ import {
 } from "./mobileTerminalShortcuts";
 
 describe("mobile terminal shortcuts", () => {
+  test.each([
+    ["x", true, false, false, "\x18"],
+    ["j", true, false, false, "\n"],
+    ["x", false, true, false, "\x1bx"],
+    ["x", true, true, false, "\x1b\x18"],
+    ["x", false, false, true, "X"],
+    ["2", false, true, true, "\x1b@"],
+    ["6", true, false, true, "\x1e"],
+    ["[", true, false, false, "\x1b"],
+    ["/", true, false, false, "\x1f"],
+    ["/", true, true, false, "\x1b\x1f"],
+    ["Space", true, false, false, "\x00"],
+    ["3", true, false, false, "\x1b"],
+    ["8", true, false, false, "\x7f"],
+    ["Tab", false, false, true, "\x1b[Z"],
+    ["Escape", false, true, false, "\x1b\x1b"],
+    ["Backspace", true, true, false, "\x1b\b"],
+    ["ArrowUp", false, false, false, "\x1b[A"],
+    ["ArrowLeft", true, true, true, "\x1b[1;8D"],
+    ["Home", true, false, false, "\x1b[1;5H"],
+    ["F1", false, false, false, "\x1bOP"],
+    ["F4", false, true, false, "\x1b[1;3S"],
+    ["F12", true, false, false, "\x1b[24;5~"],
+    ["Delete", false, false, true, "\x1b[3;2~"],
+    ["PageUp", false, false, false, "\x1b[5~"],
+    ["PageDown", false, true, false, "\x1b[6;3~"],
+    ["Enter", false, false, false, "\r"],
+    ["Enter", true, false, false, "\x1b[13;5u"],
+    ["Enter", false, false, true, "\x1b[13;2u"],
+  ] as const)(
+    "sends custom %s (Ctrl=%s Alt=%s Shift=%s) with no extra Enter",
+    (key, ctrl, alt, shift, sequence) => {
+      const action = { key, ctrl, alt, shift };
+      const bytes = Array.from(sequence, (character) =>
+        character.charCodeAt(0),
+      );
+      expect(mobileTerminalKeyCombinationBytes(action)).toEqual(bytes);
+      expect(mobileTerminalShortcutExecution(action)).toEqual({
+        type: "input",
+        bytes,
+      });
+    },
+  );
+
+  test("round-trips custom panel and side buttons while rejecting unsupported stored actions", () => {
+    const rows = defaultMobileTerminalShortcutRows();
+    const action = { key: "o", ctrl: true, alt: true, shift: false };
+    const shortcut = { id: "custom-o", label: "Open", action };
+    rows[0][4] = shortcut;
+    expect(
+      parseMobileTerminalShortcutRows(
+        serializeMobileTerminalShortcutRows(rows),
+      ),
+    ).toEqual(rows);
+    expect(
+      parseMobileTerminalSideShortcuts(
+        serializeMobileTerminalSideShortcuts([null, shortcut, null, null]),
+      ),
+    ).toEqual([null, shortcut, null, null]);
+    const invalidActions = [
+      { ...action, key: "hello" },
+      { ...action, key: "\x1b" },
+      { ...action, key: "你" },
+      { ...action, key: "constructor" },
+      { ...action, key: "toString" },
+      { ...action, key: "1" },
+      { ...action, key: "Tab" },
+      { ...action, key: "Escape" },
+      { ...action, key: "Backspace", shift: true },
+      { ...action, ctrl: "true" },
+      { key: "x" },
+      { ...action, meta: true },
+      { ...action, bytes: [0x0d] },
+      null,
+      [],
+    ];
+    for (const action of invalidActions) {
+      expect(mobileTerminalKeyCombinationBytes(action)).toEqual([]);
+      const candidate = { ...shortcut, action };
+      expect(
+        normalizeMobileTerminalShortcutRows([[null, candidate], []])[0][1],
+      ).toBeNull();
+      expect(
+        parseMobileTerminalSideShortcuts(JSON.stringify([null, candidate]))[1],
+      ).toBeNull();
+    }
+  });
+
   test("uses the terminal controls across at most two aligned default rows", () => {
     const rows = defaultMobileTerminalShortcutRows();
 

@@ -220,6 +220,7 @@
 }
 
 .mobile-shortcut-slot-editor-fields input,
+.mobile-shortcut-slot-editor-fields select,
 .mobile-shortcut-key-trigger {
   width: 100%;
   min-width: 0;
@@ -232,8 +233,46 @@
   font: 12px / 1.2 inherit;
 }
 
-.mobile-shortcut-slot-editor-fields input {
+.mobile-shortcut-slot-editor-fields input,
+.mobile-shortcut-slot-editor-fields select {
   padding: 0 8px;
+}
+
+.mobile-shortcut-custom-fields {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+}
+
+.mobile-shortcut-modifiers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.mobile-shortcut-modifiers label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  text-transform: none;
+}
+
+.mobile-shortcut-modifiers input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.mobile-shortcut-help,
+.mobile-shortcut-error {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mobile-shortcut-error {
+  color: var(--danger-text);
 }
 
 .mobile-shortcut-slot-editor-empty {
