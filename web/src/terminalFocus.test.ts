@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   terminalFocusBlockedByOverlay,
   terminalPointerShouldBlurInput,
-  terminalTouchShouldDismissInput,
+  terminalTouchInputAction,
 } from "./terminalFocus";
 
 function docWithOpenPopper(open: boolean) {
@@ -67,10 +67,23 @@ describe("terminal pointer focus", () => {
     expect(terminalPointerShouldBlurInput(false, false, false)).toBe(false);
   });
 
-  test("only a completed light tap dismisses active input", () => {
-    expect(terminalTouchShouldDismissInput(true, false, true)).toBe(true);
-    expect(terminalTouchShouldDismissInput(true, true, true)).toBe(false);
-    expect(terminalTouchShouldDismissInput(true, false, false)).toBe(false);
-    expect(terminalTouchShouldDismissInput(false, false, true)).toBe(false);
+  test("Direct taps focus input without dismissing an open keyboard", () => {
+    expect(terminalTouchInputAction(true, false, true, false, false)).toBe(
+      "focus",
+    );
+    expect(terminalTouchInputAction(true, false, true, true, false)).toBe(
+      "focus",
+    );
+    expect(terminalTouchInputAction(true, false, false, true, false)).toBe(
+      "dismiss",
+    );
+    expect(terminalTouchInputAction(true, false, false, false, false)).toBe(
+      null,
+    );
+    expect(terminalTouchInputAction(true, true, true, false, false)).toBe(null);
+    expect(terminalTouchInputAction(false, false, true, false, false)).toBe(
+      null,
+    );
+    expect(terminalTouchInputAction(true, false, true, false, true)).toBe(null);
   });
 });

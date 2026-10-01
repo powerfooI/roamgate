@@ -1,4 +1,3 @@
-import { roamgateLocalStorage } from "../browserStorage";
 import {
   shortcutMatches,
   shortcutTitle,
@@ -8,8 +7,8 @@ import {
   CircleHelp,
   CornerDownLeft,
   CornerDownRight,
+  Grid2X2,
   Paperclip,
-  Keyboard,
   SquareTerminal,
   X,
 } from "lucide-react";
@@ -56,9 +55,9 @@ import {
 import "./TerminalComposer.css";
 
 const TERMINAL_COMPOSER_HELP =
-  "Input Composer uses your phone’s native editor for reliable IME, dictation, multiline text, and cursor editing before anything is sent to the terminal. Adding a file opens the system file picker, which takes focus from the composer and may dismiss the keyboard. After you choose a file, its uploaded path is inserted into the draft; tap the text area to reopen the keyboard if needed.";
-const TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY =
-  "terminalComposerShortcutsOpen";
+  "Composer uses your phone’s native editor for IME, dictation, multiline text, and cursor editing. Insert pastes the draft; Send also sends Enter. In Direct, tap the terminal to open the keyboard and send keys immediately. Switching modes preserves the draft. Shortcut keys always act on the terminal. Adding a file opens the system picker and inserts its uploaded path into the draft; tap the editor to reopen the keyboard if needed.";
+
+export type TerminalInputMode = "composer" | "direct";
 
 /**
  * Bottom-docked mobile terminal composer. A plain textarea owns all editing
@@ -69,9 +68,8 @@ const TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY =
  * virtual-keyboard resizes never lose text.
  *
  * The configurable mobile shortcut keys live at the top of the dock so the
- * composer is the single mobile control surface. The textarea only receives
- * focus when the user taps it, so opening the composer does not unexpectedly
- * summon the virtual keyboard or hide other mobile controls.
+ * composer is the single mobile input control surface. Direct mode reuses
+ * xterm's input channel; the native editor stays mounted to preserve its caret.
  *
  * Files arrive through clipboard paste, drop, or the file picker, upload once, and
  * land in the draft as plain paths at the caret; they reach the terminal only
@@ -79,6 +77,10 @@ const TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY =
  */
 export function TerminalComposer({
   draftKey,
+  mode,
+  onModeChange,
+  onFocusDirect,
+  directDisabled,
   agent,
   shortcutRows,
   onRunShortcut,
@@ -90,6 +92,10 @@ export function TerminalComposer({
   onError,
 }: {
   draftKey: string;
+  mode: TerminalInputMode;
+  onModeChange: (mode: TerminalInputMode) => void;
+  onFocusDirect: () => void;
+  directDisabled: boolean;
   agent?: string;
   shortcutRows: (MobileTerminalShortcut | null)[][];
   onRunShortcut: (shortcut: MobileTerminalShortcut) => void;
@@ -110,6 +116,7 @@ export function TerminalComposer({
   );
   const [composing, setComposing] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(true);
   const [pickerMode, setPickerMode] = useState<"browse" | "inline" | null>(
     null,
   );
@@ -150,18 +157,14 @@ export function TerminalComposer({
   useEffect(() => {
     if (replacement && replacement.draft !== text) setReplacement(null);
   }, [replacement, text]);
-  const [shortcutsOpen, setShortcutsOpen] = useState(
-    () =>
-      roamgateLocalStorage.getItem(
-        TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY,
-      ) !== "false",
-  );
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composingRef = useRef(false);
   const focusSelectionAfterInsertRef = useRef(false);
   const activeDraftKeyRef = useRef(draftKey);
   activeDraftKeyRef.current = draftKey;
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
 
   // Load the incoming pane's draft and subscribe to updates from async work
   // that may outlive an earlier composer mount for this pane.
@@ -184,10 +187,10 @@ export function TerminalComposer({
   // Autosize within the CSS max-height.
   useEffect(() => {
     const textarea = textareaRef.current;
-    if (!textarea) return;
+    if (!textarea || mode !== "composer") return;
     textarea.style.height = "0px";
     textarea.style.height = `${textarea.scrollHeight}px`;
-  }, [text]);
+  }, [text, mode]);
 
   // Restore the shared selection after a programmatic insertion. The shared
   // value belongs to the draft key, so an upload started by an older mount can
@@ -197,10 +200,10 @@ export function TerminalComposer({
     const selection = readTerminalComposerSelection(draftKey);
     const shouldFocus = focusSelectionAfterInsertRef.current;
     focusSelectionAfterInsertRef.current = false;
-    if (!textarea || !selection) return;
+    if (!textarea || !selection || mode !== "composer") return;
     if (shouldFocus && !helpOpen) textarea.focus({ preventScroll: true });
     textarea.setSelectionRange(selection.start, selection.end);
-  }, [draftKey, helpOpen, text]);
+  }, [draftKey, helpOpen, text, mode]);
 
   // No visualViewport lift here: App.tsx owns keyboard geometry and exposes
   // the measured inset through shared CSS variables.
@@ -293,7 +296,11 @@ export function TerminalComposer({
       onError(error instanceof Error ? error.message : "Failed to send input");
     } finally {
       finishTerminalComposerSubmission(submittedDraftKey);
-      textareaRef.current?.focus({ preventScroll: true });
+      if (
+        modeRef.current === "composer" &&
+        activeDraftKeyRef.current === submittedDraftKey
+      )
+        textareaRef.current?.focus({ preventScroll: true });
     }
   };
 
@@ -409,12 +416,117 @@ export function TerminalComposer({
     <>
       <div
         className="terminal-composer"
+        data-input-mode={mode}
         role="dialog"
-        aria-label="Terminal composer"
+        aria-label="Terminal input"
       >
-        {hasShortcuts && shortcutsOpen ? (
+        <div className="terminal-composer-toolbar">
+          <fieldset className="terminal-composer-mode" aria-label="Input mode">
+            <legend>Input mode</legend>
+            {(["composer", "direct"] as const).map((nextMode) => (
+              <label key={nextMode}>
+                <input
+                  type="radio"
+                  name={`${pickerId}-input-mode`}
+                  value={nextMode}
+                  checked={mode === nextMode}
+                  disabled={
+                    composing || (nextMode === "direct" && directDisabled)
+                  }
+                  onChange={(e) => {
+                    if (composingRef.current) return;
+                    const focusInput = (e.nativeEvent as MouseEvent).detail > 0;
+                    flushSync(() => {
+                      dismissCommands();
+                      onModeChange(nextMode);
+                    });
+                    if (focusInput) {
+                      if (nextMode === "composer")
+                        textareaRef.current?.focus({ preventScroll: true });
+                      else onFocusDirect();
+                    }
+                  }}
+                />
+                <span>{nextMode === "composer" ? "Composer" : "Direct"}</span>
+              </label>
+            ))}
+          </fieldset>
+          {hasShortcuts ? (
+            <button
+              type="button"
+              className="terminal-composer-shortcuts-toggle"
+              aria-label={
+                shortcutsOpen
+                  ? "Hide terminal shortcuts"
+                  : "Show terminal shortcuts"
+              }
+              title={
+                shortcutsOpen
+                  ? "Hide terminal shortcuts"
+                  : "Show terminal shortcuts"
+              }
+              aria-expanded={shortcutsOpen}
+              aria-controls={`${pickerId}-shortcuts`}
+              onMouseDown={keepTextareaFocus}
+              onClick={() => setShortcutsOpen((open) => !open)}
+            >
+              <Grid2X2 size={17} aria-hidden="true" />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="terminal-composer-commands-toggle"
+            aria-label="Commands"
+            ref={commandsButtonRef}
+            aria-expanded={pickerOpen}
+            aria-controls={pickerOpen && !replacement ? pickerId : undefined}
+            disabled={commands.length === 0 || busy || composing}
+            title={
+              commands.length
+                ? "Browse agent commands"
+                : "No built-in commands for this agent; type any command in the draft"
+            }
+            onMouseDown={keepTextareaFocus}
+            onClick={() => {
+              flushSync(() => {
+                if (mode === "direct") onModeChange("composer");
+                setPickerMode("browse");
+                setActiveCommand(0);
+                setReplacement(null);
+              });
+              focusPickerWithoutKeyboard();
+            }}
+          >
+            <SquareTerminal size={17} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="terminal-composer-help"
+            title="About terminal input"
+            aria-label="About terminal input"
+            aria-haspopup="dialog"
+            aria-expanded={helpOpen}
+            onMouseDown={keepTextareaFocus}
+            onClick={() => setHelpOpen(true)}
+          >
+            <CircleHelp size={15} />
+          </button>
+          <button
+            type="button"
+            className="terminal-composer-close"
+            title="Close terminal input"
+            aria-label="Close terminal input"
+            onMouseDown={keepTextareaFocus}
+            onClick={onClose}
+          >
+            <X size={15} />
+          </button>
+        </div>
+        {hasShortcuts ? (
           <div
             className="terminal-composer-shortcuts"
+            id={`${pickerId}-shortcuts`}
+            hidden={!shortcutsOpen}
             style={
               {
                 "--mobile-shortcut-columns": shortcutColumns,
@@ -443,13 +555,17 @@ export function TerminalComposer({
                       type="button"
                       aria-label={`Send ${option?.label ?? shortcut.label}`}
                       onMouseDown={keepTextareaFocus}
-                      disabled={!!shortcutDisabledReason?.(shortcut)}
+                      disabled={
+                        composing || !!shortcutDisabledReason?.(shortcut)
+                      }
                       title={
                         shortcutDisabledReason?.(shortcut) ??
                         option?.label ??
                         shortcut.label
                       }
-                      onClick={() => onRunShortcut(shortcut)}
+                      onClick={() => {
+                        if (!composingRef.current) onRunShortcut(shortcut);
+                      }}
                       key={shortcut.id}
                     >
                       {shortcut.label}
@@ -560,6 +676,7 @@ export function TerminalComposer({
         <textarea
           ref={textareaRef}
           className="terminal-composer-input"
+          hidden={mode !== "composer"}
           value={text}
           rows={1}
           placeholder="Compose input for the terminal…"
@@ -665,43 +782,10 @@ export function TerminalComposer({
             if (files.length > 0) void uploadAndInsert(files, onUploadFile);
           }}
         />
-        <div className="terminal-composer-actions">
-          <button
-            type="button"
-            className="terminal-composer-close"
-            title="Close composer"
-            aria-label="Close composer"
-            onMouseDown={keepTextareaFocus}
-            onClick={onClose}
-          >
-            <X size={15} />
-          </button>
-          {hasShortcuts ? (
-            <button
-              type="button"
-              className={`terminal-composer-shortcuts-toggle ${
-                shortcutsOpen ? "is-open" : ""
-              }`}
-              title={shortcutsOpen ? "Hide shortcuts" : "Show shortcuts"}
-              aria-label={
-                shortcutsOpen
-                  ? "Hide terminal shortcuts"
-                  : "Show terminal shortcuts"
-              }
-              aria-expanded={shortcutsOpen}
-              onMouseDown={keepTextareaFocus}
-              onClick={() => {
-                const open = !shortcutsOpen;
-                roamgateLocalStorage.setItem(
-                  TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY,
-                  String(open),
-                );
-                setShortcutsOpen(open);
-              }}
-            >
-              <Keyboard size={15} />
-            </button>
-          ) : null}
+        <div className="terminal-composer-direct" hidden={mode !== "direct"}>
+          Tap the terminal to type directly. Your Composer draft is saved.
+        </div>
+        <div className="terminal-composer-actions" hidden={mode !== "composer"}>
           <button
             type="button"
             className="terminal-composer-attach"
@@ -712,45 +796,6 @@ export function TerminalComposer({
             onClick={() => fileInputRef.current?.click()}
           >
             <Paperclip size={15} />
-          </button>
-          <button
-            type="button"
-            className="terminal-composer-help"
-            title="About Input Composer"
-            aria-label="About Input Composer"
-            aria-haspopup="dialog"
-            aria-expanded={helpOpen}
-            onMouseDown={keepTextareaFocus}
-            onClick={() => setHelpOpen(true)}
-          >
-            <CircleHelp size={15} />
-          </button>
-          <button
-            type="button"
-            className="terminal-composer-commands-toggle"
-            aria-label="Commands"
-            ref={commandsButtonRef}
-            aria-expanded={pickerOpen}
-            aria-controls={pickerOpen && !replacement ? pickerId : undefined}
-            disabled={commands.length === 0 || busy || composing}
-            title={
-              commands.length
-                ? "Browse agent commands"
-                : "No built-in commands for this agent; type any command in the draft"
-            }
-            onMouseDown={keepTextareaFocus}
-            onClick={() => {
-              flushSync(() => {
-                setPickerMode("browse");
-                setActiveCommand(0);
-                setReplacement(null);
-              });
-              // Keep an open editor keyboard. Otherwise focus the non-editable
-              // picker so external keys work without summoning a soft keyboard.
-              focusPickerWithoutKeyboard();
-            }}
-          >
-            <SquareTerminal size={17} aria-hidden="true" />
           </button>
           <span className="terminal-composer-hint">
             {uploadCount > 0
@@ -792,7 +837,7 @@ export function TerminalComposer({
         ? createPortal(
             <MessageDialog
               open
-              title="About Input Composer"
+              title="About terminal input"
               message={TERMINAL_COMPOSER_HELP}
               onClose={() => setHelpOpen(false)}
             />,

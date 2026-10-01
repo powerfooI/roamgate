@@ -15,7 +15,7 @@ import {
 
 /** The fixed elements that make up the floating mobile control stack. */
 const STACK_SELECTOR =
-  ".mobile-workspace-shortcut, .mobile-terminal-controls, .mobile-nav:not(.mobile-terminal-tools)";
+  ".mobile-terminal-controls, .mobile-nav:not(.mobile-terminal-tools)";
 /** Chrome along the top that the stack must not cover. */
 const HEADER_SELECTOR = ".topbar, .main > .tabbar";
 /** Controls pinned to the top right of the terminal, clear of a right-edge stack. */

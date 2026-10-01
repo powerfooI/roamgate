@@ -43,6 +43,85 @@
     border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
   }
 
+  .terminal-composer [hidden] {
+    display: none;
+  }
+
+  .terminal-composer-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .terminal-composer-mode {
+    display: flex;
+    flex-shrink: 0;
+    min-width: 0;
+    margin: 0 auto 0 0;
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--panel-2);
+  }
+
+  .terminal-composer-mode label {
+    position: relative;
+    cursor: pointer;
+  }
+
+  .terminal-composer-mode legend {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .terminal-composer-mode input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+  }
+
+  .terminal-composer-mode span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 24px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 15px;
+    touch-action: manipulation;
+  }
+
+  .terminal-composer-mode input:checked + span {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text-strong);
+  }
+
+  .terminal-composer-mode input:focus-visible + span {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .terminal-composer-mode input:disabled + span {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .terminal-composer-direct {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
   .terminal-composer-actions {
     display: flex;
     flex-wrap: wrap;
@@ -61,7 +140,8 @@
     white-space: nowrap;
   }
 
-  .terminal-composer-actions button {
+  .terminal-composer-actions button,
+  .terminal-composer-toolbar button {
     height: 30px;
     display: inline-flex;
     align-items: center;
@@ -80,13 +160,14 @@
     -webkit-tap-highlight-color: transparent;
   }
 
-  .terminal-composer-actions button:disabled {
+  .terminal-composer-actions button:disabled,
+  .terminal-composer-toolbar button:disabled {
     opacity: 0.45;
   }
 
   .terminal-composer-close,
-  .terminal-composer-shortcuts-toggle,
   .terminal-composer-attach,
+  .terminal-composer-shortcuts-toggle,
   .terminal-composer-commands-toggle,
   .terminal-composer-help {
     width: 30px;
@@ -99,18 +180,19 @@
     flex: 0 0 auto;
   }
 
-  .terminal-composer-actions .terminal-composer-commands-toggle:not(:disabled) {
+  .terminal-composer-commands-toggle:not(:disabled) {
     color: var(--accent);
   }
 
   .terminal-composer-submit.is-primary,
-  .terminal-composer-commands-toggle[aria-expanded="true"],
-  .terminal-composer-shortcuts-toggle.is-open {
+  .terminal-composer-shortcuts-toggle[aria-expanded="true"],
+  .terminal-composer-commands-toggle[aria-expanded="true"] {
     border-color: var(--accent);
     background: var(--accent-soft);
   }
 
-  .terminal-composer-actions button:active:not(:disabled) {
+  .terminal-composer-actions button:active:not(:disabled),
+  .terminal-composer-toolbar button:active:not(:disabled) {
     border-color: var(--accent);
     background: var(--accent-soft);
   }
@@ -216,7 +298,8 @@
   }
 
   .terminal-composer-shortcut-spacer {
-    width: 48px;
+    width: 100%;
+    max-width: 48px;
     height: 28px;
     pointer-events: none;
   }

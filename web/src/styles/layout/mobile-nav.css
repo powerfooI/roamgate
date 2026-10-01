@@ -6,6 +6,9 @@
 /* Keep mobile styling in sync with the saved layout and URL override. */
 :where(html[data-layout="mobile"]) {
   .mobile-nav {
+    /* Collapse toward the toggle center, 21px inside the dock edge. */
+    --mobile-controls-origin-x: calc(100% - 21px);
+    --mobile-controls-origin-y: calc(50% - 48px);
     position: fixed;
     right: calc(10px + env(safe-area-inset-right, 0px));
     bottom: calc(
@@ -23,7 +26,8 @@
     background: color-mix(in srgb, var(--panel) 76%, transparent);
     box-shadow: var(--shadow-lg);
     transform: translate3d(0, 0, 0) scale(1);
-    transform-origin: right bottom;
+    transform-origin: var(--mobile-controls-origin-x)
+      var(--mobile-controls-origin-y);
     /* Dragging the controls toggle moves the whole stack; see
        useMobileControlsDrag. `translate` composes with `transform`. */
     translate: var(--mobile-controls-drag-x, 0px)
@@ -34,6 +38,17 @@
       transform 180ms ease;
     -webkit-backdrop-filter: blur(14px);
     backdrop-filter: blur(14px);
+  }
+
+  .mobile-workspace-tools {
+    --mobile-controls-origin-y: calc(50% + 50px);
+    bottom: calc(
+      156px +
+      var(--mobile-floating-controls-lift, 0px) +
+      var(--mobile-controls-offset-y, 0px) +
+      env(safe-area-inset-bottom, 0px)
+    );
+    z-index: 73;
   }
 
   .mobile-nav button {
@@ -105,16 +120,41 @@
   .mobile-controls-collapsed .mobile-nav:not(.mobile-terminal-tools) {
     opacity: 0;
     pointer-events: none;
-    transform: translate3d(0, -46px, 0) scale(0.72);
+    transform: translate3d(0, 0, 0) scale(0);
   }
 }
 
-.mobile-terminal-controls {
+.mobile-terminal-controls,
+.mobile-composer-shortcut {
   display: none;
 }
 
 /* Keep mobile styling in sync with the saved layout and URL override. */
 :where(html[data-layout="mobile"]) {
+  .mobile-composer-shortcut {
+    position: fixed;
+    right: calc(10px + env(safe-area-inset-right, 0px));
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    z-index: 74;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--panel);
+    color: var(--text-strong);
+    box-shadow: var(--shadow-lg);
+    touch-action: manipulation;
+  }
+
+  .mobile-composer-shortcut:active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
   .mobile-terminal-controls {
     position: fixed;
     right: calc(10px + env(safe-area-inset-right, 0px));
@@ -152,7 +192,7 @@
     right: auto;
     bottom: auto;
     z-index: auto;
-    max-width: 75px;
+    max-width: 102px;
     padding: 0;
     overflow: visible;
     border: 0;
@@ -186,6 +226,7 @@
      mobile browsers do not expose Composer keyboard geometry, so its focused
      textarea is the direct fallback signal. */
   .keyboard-open .mobile-terminal-controls,
+  .keyboard-open .mobile-composer-shortcut,
   .app:has(.terminal-composer-input:focus) .mobile-terminal-controls {
     opacity: 0;
     pointer-events: none;
@@ -204,17 +245,23 @@
     transform: translate3d(10px, 0, 0) scale(0.72);
   }
 
-  /* Left edge: mirror the stack so the toggle hugs the edge and pills open
-     towards the screen. */
+  /* Keep the toggle at the dock edge as the tools expand inward. */
   .mobile-controls-left .mobile-nav:not(.mobile-terminal-tools),
   .mobile-controls-left .mobile-terminal-controls {
     right: auto;
     left: calc(10px + env(safe-area-inset-left, 0px));
-    transform-origin: left bottom;
+  }
+
+  .mobile-controls-left .mobile-nav:not(.mobile-terminal-tools) {
+    --mobile-controls-origin-x: 21px;
   }
 
   .mobile-controls-left .mobile-terminal-controls {
-    flex-direction: row-reverse;
+    transform-origin: left bottom;
+  }
+
+  .mobile-controls-left .mobile-controls-toggle {
+    order: -1;
   }
 
   .mobile-controls-left .mobile-nav.mobile-terminal-tools {

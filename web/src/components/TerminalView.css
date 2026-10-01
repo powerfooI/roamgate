@@ -151,6 +151,15 @@
     position: absolute;
     top: 10px;
     right: calc(8px + env(safe-area-inset-right, 0px));
+    width: min(
+      448px,
+      calc(
+        100% -
+        16px -
+        env(safe-area-inset-left, 0px) -
+        env(safe-area-inset-right, 0px)
+      )
+    );
     z-index: 7;
     display: flex;
     flex-direction: row-reverse;
@@ -171,6 +180,7 @@
   .terminal-mobile-keys-toggle {
     width: 36px;
     height: 36px;
+    flex: 0 0 36px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -186,7 +196,7 @@
   }
 
   .terminal-mobile-key-spacer {
-    width: 48px;
+    width: 100%;
     height: 28px;
     pointer-events: none;
   }
@@ -198,12 +208,11 @@
   }
 
   .terminal-mobile-keys-panel {
-    max-width: calc(100vw - 62px - env(safe-area-inset-right, 0px));
+    flex: 1;
+    min-width: 0;
+    container-type: inline-size;
     padding: 3px;
-    overflow-x: auto;
-    /* Anchor overflow at the right edge so the directional and page keys stay
-       visible on narrow screens. The nested grid resets item order to LTR. */
-    direction: rtl;
+    overflow: hidden;
     border-radius: 12px;
     opacity: 0;
     pointer-events: none;
@@ -212,18 +221,15 @@
     transition:
       opacity 140ms ease,
       transform 160ms ease;
-    scrollbar-width: none;
-  }
-
-  .terminal-mobile-keys-panel::-webkit-scrollbar {
-    display: none;
   }
 
   .terminal-mobile-keys-grid {
-    width: max-content;
+    width: 100%;
     display: grid;
-    grid-template-columns: repeat(var(--mobile-shortcut-columns), 48px);
-    direction: ltr;
+    grid-template-columns: repeat(
+        var(--mobile-shortcut-columns),
+        minmax(0, 1fr)
+      );
     gap: 2px;
   }
 
@@ -231,7 +237,10 @@
     width: 100%;
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: repeat(var(--mobile-shortcut-columns), 48px);
+    grid-template-columns: repeat(
+        var(--mobile-shortcut-columns),
+        minmax(0, 1fr)
+      );
     gap: 2px;
   }
 
@@ -242,21 +251,20 @@
   }
 
   .terminal-mobile-keys-panel button {
-    width: 48px;
+    width: 100%;
     min-width: 0;
     height: 28px;
-    flex: 0 0 48px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0 4px;
+    padding: 0;
     border: 1px solid color-mix(in srgb, var(--border) 72%, var(--text) 28%);
     border-radius: 6px;
     background: color-mix(in srgb, var(--panel-2) 76%, transparent);
     color: var(--text-strong);
     overflow: hidden;
     font:
-      700 11px / 1 ui-monospace,
+      700 clamp(8px, 3.5cqi, 11px) / 1 ui-monospace,
       SFMono-Regular,
       Menlo,
       Consolas,
@@ -402,7 +410,6 @@
   right: calc(8px + env(safe-area-inset-right, 0px));
   bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   z-index: 6;
-  gap: 8px;
 }
 
 .terminal-mobile-input-actions button,
@@ -422,15 +429,6 @@
   justify-content: center;
   padding: 0;
   box-shadow: var(--shadow-lg);
-}
-
-.terminal-mobile-input-actions button[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-:where(html[data-layout="mobile"]) .terminal-mobile-input-actions {
-  display: flex;
 }
 
 @media (any-pointer: coarse) {

@@ -53,7 +53,7 @@ for (const scale of [1, 1.25, 1.5]) {
       offsetWidth: 320,
       getBoundingClientRect: () => ({ width: 320 * scale, bottom: appBottom }),
       querySelectorAll: (selector: string) =>
-        selector.includes("mobile-workspace-shortcut")
+        selector.includes("mobile-terminal-controls")
           ? [element]
           : selector.includes("terminal-mobile-keys-toggle")
             ? [header, shortcut]

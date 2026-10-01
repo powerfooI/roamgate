@@ -1,4 +1,4 @@
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { listenForTaskNotificationActivation } from "./taskNotifications";
 import { useReviewAnnotationDraft } from "./useReviewAnnotationDraft";
 import {
@@ -3564,41 +3564,6 @@ export default function App() {
       >
         <button
           type="button"
-          className={
-            mobileView === "session" && !agentHistoryOpen ? "active" : ""
-          }
-          title="Session"
-          aria-label="Show terminal session"
-          tabIndex={mobileControlsCollapsed ? -1 : 0}
-          onClick={activateTerminalSurface}
-        >
-          <SquareTerminal size={16} />
-          <span className="mobile-nav-label">Session</span>
-        </button>
-        <button
-          type="button"
-          className={mobileView === "files" ? "active" : ""}
-          title={shortcutTitle("Files", "files.toggle")}
-          aria-label="Show workspace files"
-          tabIndex={mobileControlsCollapsed ? -1 : 0}
-          onClick={() => openFileExplorer()}
-        >
-          <FolderTree size={16} />
-          <span className="mobile-nav-label">Files</span>
-        </button>
-        <button
-          type="button"
-          className={mobileView === "changes" ? "active" : ""}
-          title={shortcutTitle("Changes", "diff.toggle")}
-          aria-label="Show workspace changes"
-          tabIndex={mobileControlsCollapsed ? -1 : 0}
-          onClick={() => openDiffViewer()}
-        >
-          <FileDiff size={16} />
-          <span className="mobile-nav-label">Changes</span>
-        </button>
-        <button
-          type="button"
           className={mobileView === "commits" ? "active" : ""}
           title="Commits"
           aria-label="Show commit history"
@@ -3651,90 +3616,91 @@ export default function App() {
         onClose={() => setMobileTabSheetOpen(false)}
         onShowSession={activateTerminalSurface}
       />
-      <button
-        type="button"
-        className={`mobile-workspace-shortcut ${
-          mobileView === "workspaces" ? "is-active" : ""
-        }`}
-        title={shortcutTitle("Workspaces", "workspaces.open")}
-        aria-label={
-          mobileView === "workspaces" ? "Hide workspaces" : "Show workspaces"
-        }
-        aria-pressed={mobileView === "workspaces"}
+      <nav
+        className="mobile-nav mobile-workspace-tools"
+        aria-label="Workspaces and tabs"
         aria-hidden={mobileControlsCollapsed}
-        tabIndex={mobileControlsCollapsed ? -1 : 0}
-        onPointerDown={blurActiveInput}
-        onClick={
-          mobileView === "workspaces" ? activateTerminalSurface : openWorkspaces
-        }
       >
-        <PanelTop size={17} />
-      </button>
+        <button
+          type="button"
+          className={mobileTabSheetOpen ? "active" : ""}
+          title="Tabs"
+          aria-label="Show tabs"
+          aria-pressed={mobileTabSheetOpen}
+          tabIndex={mobileControlsCollapsed ? -1 : 0}
+          disabled={!focusedWorkspace}
+          onPointerDown={blurActiveInput}
+          onClick={() => setMobileTabSheetOpen((open) => !open)}
+        >
+          <SquareStack size={16} />
+          {focusedWorkspaceTabCount > 0 ? (
+            <span className="mobile-nav-badge" aria-hidden="true">
+              {focusedWorkspaceTabCount}
+            </span>
+          ) : null}
+          <span className="mobile-nav-label">Tabs</span>
+        </button>
+        <button
+          type="button"
+          className={mobileView === "workspaces" ? "active" : ""}
+          title={shortcutTitle("Workspaces", "workspaces.open")}
+          aria-label={
+            mobileView === "workspaces" ? "Hide workspaces" : "Show workspaces"
+          }
+          aria-pressed={mobileView === "workspaces"}
+          tabIndex={mobileControlsCollapsed ? -1 : 0}
+          onPointerDown={blurActiveInput}
+          onClick={
+            mobileView === "workspaces"
+              ? activateTerminalSurface
+              : openWorkspaces
+          }
+        >
+          <PanelTop size={17} />
+          <span className="mobile-nav-label">Workspaces</span>
+        </button>
+      </nav>
       <div className="mobile-terminal-controls">
         <nav
           className="mobile-nav mobile-terminal-tools"
-          aria-label={
-            activeTerminalComposerDraftKey
-              ? "Tabs and terminal composer"
-              : "Tabs"
-          }
+          aria-label="Terminal, files, and changes"
           aria-hidden={mobileControlsCollapsed}
         >
           <button
             type="button"
-            className={mobileTabSheetOpen ? "active" : ""}
-            title="Tabs"
-            aria-label="Show tabs"
-            aria-pressed={mobileTabSheetOpen}
+            className={
+              mobileView === "session" && !agentHistoryOpen ? "active" : ""
+            }
+            title="Terminal"
+            aria-label="Show terminal session"
             tabIndex={mobileControlsCollapsed ? -1 : 0}
-            disabled={!focusedWorkspace}
-            onPointerDown={blurActiveInput}
-            onClick={() => setMobileTabSheetOpen((open) => !open)}
+            onClick={activateTerminalSurface}
           >
-            <SquareStack size={16} />
-            {focusedWorkspaceTabCount > 0 ? (
-              <span className="mobile-nav-badge" aria-hidden="true">
-                {focusedWorkspaceTabCount}
-              </span>
-            ) : null}
-            <span className="mobile-nav-label">Tabs</span>
+            <SquareTerminal size={16} />
+            <span className="mobile-nav-label">Terminal</span>
           </button>
-          {activeTerminalComposerDraftKey ? (
-            <button
-              type="button"
-              className={terminalComposerOpen ? "active" : ""}
-              title={
-                terminalComposerOpen
-                  ? "Close terminal composer"
-                  : "Open terminal composer"
-              }
-              aria-label={`${
-                terminalComposerOpen
-                  ? "Close terminal composer"
-                  : "Open terminal composer"
-              }${terminalComposerHasDraft ? ", unsent draft" : ""}`}
-              aria-pressed={terminalComposerOpen}
-              tabIndex={mobileControlsCollapsed ? -1 : 0}
-              onPointerDown={blurActiveInput}
-              onClick={() => {
-                const open = !terminalComposerOpen;
-                if (open) {
-                  setMobileTabSheetOpen(false);
-                  activateTerminalSurface();
-                }
-                setTerminalComposerOpen(open);
-              }}
-            >
-              <SquarePen size={16} />
-              {terminalComposerHasDraft && !terminalComposerOpen ? (
-                <span
-                  className="mobile-composer-draft-dot"
-                  aria-hidden="true"
-                />
-              ) : null}
-              <span className="mobile-nav-label">Composer</span>
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className={mobileView === "files" ? "active" : ""}
+            title={shortcutTitle("Files", "files.toggle")}
+            aria-label="Show workspace files"
+            tabIndex={mobileControlsCollapsed ? -1 : 0}
+            onClick={() => openFileExplorer()}
+          >
+            <FolderTree size={16} />
+            <span className="mobile-nav-label">Files</span>
+          </button>
+          <button
+            type="button"
+            className={mobileView === "changes" ? "active" : ""}
+            title={shortcutTitle("Changes", "diff.toggle")}
+            aria-label="Show workspace changes"
+            tabIndex={mobileControlsCollapsed ? -1 : 0}
+            onClick={() => openDiffViewer()}
+          >
+            <FileDiff size={16} />
+            <span className="mobile-nav-label">Changes</span>
+          </button>
         </nav>
         <button
           ref={mobileControlsToggleRef}
@@ -3762,6 +3728,36 @@ export default function App() {
           )}
         </button>
       </div>
+
+      {activeTerminalComposerDraftKey && !terminalComposerOpen ? (
+        <button
+          type="button"
+          className="mobile-composer-shortcut"
+          title="Open terminal input"
+          aria-label={`Open terminal input${terminalComposerHasDraft ? ", unsent draft" : ""}`}
+          aria-haspopup="dialog"
+          onPointerDown={blurActiveInput}
+          onClick={() => {
+            flushSync(() => {
+              setMobileTabSheetOpen(false);
+              activateTerminalSurface();
+              setTerminalComposerOpen(true);
+            });
+            // Focus inside the tap gesture so iOS can open its IME keyboard.
+            document
+              .querySelector<HTMLTextAreaElement>(
+                ".terminal-composer-input:not([hidden])",
+              )
+              ?.focus({ preventScroll: true });
+          }}
+        >
+          <SquarePen size={20} />
+          {terminalComposerHasDraft ? (
+            <span className="mobile-composer-draft-dot" aria-hidden="true" />
+          ) : null}
+          <span className="mobile-nav-label">Type</span>
+        </button>
+      ) : null}
 
       {s.updateInfo?.update_available || s.notice
         ? createPortal(

@@ -272,8 +272,8 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   Automatic defaults to 768 CSS px (adjustable 320–2560); `?layout=mobile`,
   `desktop`, or `auto` overrides saved mode until a menu choice clears it.
   Agent/workspace panel order is saved separately for each layout.
-- Touch reads output without opening the keyboard. Use **Open device keyboard**
-  to type; a light terminal tap dismisses it without input. Long-press selects
+- Touch reads output without opening the keyboard. In Direct mode, a light
+  terminal tap opens the device keyboard. Long-press selects
   text for **Copy**, **Add comment**, or link actions; **Done**/Esc exits.
   Scroll first to select older output. Selection freezes the displayed frame,
   not the connection; legacy streams resume at a 1 MiB buffered UTF-16 limit.
@@ -294,9 +294,16 @@ separate for desktop/mobile. Jump from a diff to its file preview.
 - Drag the `⋯` controls button to move the floating controls; release snaps
   them to the nearer side edge at that height, mirrored on the left. The
   position is kept per browser and stays clear of the header and tab strip.
-- The composer supports IME, dictation, multiline text, and images. **Insert**
+- The bottom-right **Type** button opens one input dock with a
+  **Composer / Direct** mode switch and the configured two shortcut rows.
+  The grid button shows or hides both rows in either mode.
+  Composer supports IME, dictation,
+  multiline text, and images. Tap its editor to open the device keyboard. **Insert**
   does not execute; **Send** adds one Enter. Drafts are in-memory per
   connection/pane; closing their pane/tab/workspace asks before discarding.
+  Direct sends keys immediately through the terminal's keyboard input and
+  preserves the Composer draft. Reopening input or switching panes/connections
+  starts in Composer. Shortcut keys act on the terminal in either mode.
 - In the mobile composer, the **terminal command icon (`>_`)** opens a floating
   command picker above the input without shrinking the editor or terminal.
   It browses built-in catalogs for Claude Code, Codex, Pi, Kimi Code, Grok Build,

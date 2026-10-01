@@ -3,8 +3,9 @@ import { SquareTerminal } from "lucide-react";
 import * as React from "react";
 import * as ReactDOM from "react-dom";
 import * as drafts from "../terminalComposer";
+import { defaultMobileTerminalShortcutRows } from "../mobileTerminalShortcuts";
 import { terminalComposerCommands } from "../terminalComposerCommands";
-import { TerminalComposer } from "./TerminalComposer";
+import { TerminalComposer, type TerminalInputMode } from "./TerminalComposer";
 
 type Element = React.ReactElement<Record<string, unknown>>;
 type Host = {
@@ -22,12 +23,22 @@ type Host = {
 // repository's hook-spy pattern. Browser focus/IME behavior is checked separately.
 test.each(["claude", "grok-build", "agy"])(
   "%s commands own focus, preserve drafts until confirmed, and never send",
-  (agent) => {
+  async (agent) => {
     let currentAgent: string | undefined = agent;
+    let mode: TerminalInputMode = "composer";
+    let directDisabled = false;
     let draft = "keep this draft";
     let listener: ((text: string) => void) | undefined;
-    const onSubmit = mock(async () => {});
+    const onSubmit = mock<(text: string, submit: boolean) => Promise<void>>(
+      async () => {},
+    );
     const onRunShortcut = mock(() => {});
+    const directInput = {};
+    const onFocusDirect = mock(() => {
+      activeElement = directInput;
+    });
+    const onError = mock(() => {});
+    const shortcutRows = defaultMobileTerminalShortcutRows();
     const nodes = new Map<string, Host>();
     let activeElement: Host | object = {};
     const previousDocument = Object.getOwnPropertyDescriptor(
@@ -181,14 +192,21 @@ test.each(["claude", "grok-build", "agy"])(
         visit(
           TerminalComposer({
             draftKey: "command-interaction",
+            mode,
+            onModeChange(next) {
+              mode = next;
+              dirty = true;
+            },
+            onFocusDirect,
+            directDisabled,
             agent: currentAgent,
-            shortcutRows: [],
+            shortcutRows,
             onRunShortcut,
             onClose() {},
             onSubmit,
             onUploadImage: async () => "/tmp/image.png",
             onUploadFile: async () => "/tmp/file.txt",
-            onError() {},
+            onError,
           }),
         );
         const previous = effects;
@@ -237,6 +255,10 @@ test.each(["claude", "grok-build", "agy"])(
     const commands = () =>
       find("className", "terminal-composer-commands-toggle");
     const editor = () => find("aria-label", "Terminal input draft");
+    const shortcutToggle = () =>
+      find("className", "terminal-composer-shortcuts-toggle");
+    const shortcutPanel = () =>
+      find("className", "terminal-composer-shortcuts");
     const picker = () => find("className", "terminal-composer-commands");
     const option = () => find("role", "option");
     try {
@@ -302,7 +324,9 @@ test.each(["claude", "grok-build", "agy"])(
       expect(
         elements.some(
           (element) =>
-            element.type === "input" && element.props.type !== "file",
+            element.type === "input" &&
+            element.props.type !== "file" &&
+            element.props.type !== "radio",
         ),
       ).toBe(false);
       expect(
@@ -373,6 +397,118 @@ test.each(["claude", "grok-build", "agy"])(
       ).toBe(terminalComposerCommands("codex").length);
       expect(onSubmit).not.toHaveBeenCalled();
       expect(onRunShortcut).not.toHaveBeenCalled();
+
+      // Native radio switches keep the draft/caret and own touch input focus.
+      const changeMode = (next: TerminalInputMode, detail = 1) =>
+        invoke(find("value", next), "onChange", { nativeEvent: { detail } });
+      textarea.setSelectionRange(2, 5);
+      // Hiding both shortcut rows preserves the draft, caret, and native focus.
+      expect(shortcutPanel().props.hidden).toBe(false);
+      expect(shortcutToggle().props["aria-controls"]).toBe(
+        shortcutPanel().props.id,
+      );
+      const togglePointer = { preventDefault: mock(() => {}) };
+      invoke(shortcutToggle(), "onMouseDown", togglePointer);
+      expect(togglePointer.preventDefault).toHaveBeenCalledTimes(1);
+      invoke(shortcutToggle(), "onClick");
+      expect(shortcutToggle().props["aria-expanded"]).toBe(false);
+      expect(shortcutPanel().props.hidden).toBe(true);
+      expect(activeElement).toBe(textarea);
+      expect(draft).toBe("new upload or edit");
+      expect(textarea.selectionStart).toBe(2);
+      expect(textarea.selectionEnd).toBe(5);
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(onRunShortcut).not.toHaveBeenCalled();
+      changeMode("direct");
+      expect(find("value", "direct").props.checked).toBe(true);
+      expect(editor().props.hidden).toBe(true);
+      expect(activeElement).toBe(directInput);
+      expect(draft).toBe("new upload or edit");
+      expect(shortcutPanel().props.hidden).toBe(true);
+      invoke(shortcutToggle(), "onClick");
+      expect(shortcutToggle().props["aria-expanded"]).toBe(true);
+      expect(shortcutPanel().props.hidden).toBe(false);
+      expect(activeElement).toBe(directInput);
+      expect(elements.some((element) => element.props.role === "option")).toBe(
+        false,
+      );
+      expect(
+        elements.filter(
+          (element) =>
+            element.props.className === "terminal-composer-shortcut-row",
+        ),
+      ).toHaveLength(2);
+      expect(
+        elements.filter(
+          (element) =>
+            element.props.className === "terminal-composer-shortcut-spacer",
+        ),
+      ).toHaveLength(shortcutRows.flat().filter((slot) => !slot).length);
+      changeMode("composer");
+      expect(activeElement).toBe(textarea);
+      expect(textarea.selectionStart).toBe(2);
+      expect(textarea.selectionEnd).toBe(5);
+      expect(draft).toBe("new upload or edit");
+      // Keyboard navigation stays on the radio; native arrows need no custom keys.
+      activeElement = {};
+      const radioFocus = activeElement;
+      changeMode("direct", 0);
+      expect(activeElement).toBe(radioFocus);
+      expect(
+        elements.some(
+          (element) =>
+            element.props.className === "terminal-composer-direct-focus",
+        ),
+      ).toBe(false);
+      invoke(commands(), "onClick");
+      expect(mode).toBe("composer");
+      expect(picker()).toBeDefined();
+      expect(draft).toBe("new upload or edit");
+      key(picker(), "Escape");
+
+      // An IME confirmation cannot switch modes or send terminal Enter.
+      textarea.focus();
+      invoke(editor(), "onCompositionStart");
+      expect(find("value", "direct").props.disabled).toBe(true);
+      expect(find("aria-label", "Send Enter").props.disabled).toBe(true);
+      changeMode("direct");
+      invoke(find("aria-label", "Send Enter"), "onClick");
+      expect(mode).toBe("composer");
+      expect(onRunShortcut).not.toHaveBeenCalled();
+      invoke(editor(), "onCompositionEnd");
+      invoke(find("aria-label", "Send Enter"), "onClick");
+      expect(onRunShortcut).toHaveBeenCalledTimes(1);
+      expect(draft).toBe("new upload or edit");
+      directDisabled = true;
+      render();
+      expect(find("value", "direct").props.disabled).toBe(true);
+      directDisabled = false;
+      render();
+
+      // Failure restores the draft while a new Direct session retains focus.
+      let rejectSubmission: (error: Error) => void = () => {};
+      onSubmit.mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectSubmission = reject;
+          }),
+      );
+      invoke(find("aria-label", "Insert draft into the terminal"), "onClick");
+      expect(onSubmit).toHaveBeenCalledWith("new upload or edit", false);
+      expect(draft).toBe("");
+      changeMode("direct");
+      rejectSubmission(new Error("Disconnected"));
+      await Promise.resolve();
+      render();
+      expect(draft).toBe("new upload or edit");
+      expect(activeElement).toBe(directInput);
+      expect(onError).toHaveBeenCalledTimes(1);
+      changeMode("composer");
+      invoke(find("aria-label", "Send draft to the terminal"), "onClick");
+      await Promise.resolve();
+      render();
+      expect(onSubmit).toHaveBeenLastCalledWith("new upload or edit", true);
+      expect(draft).toBe("");
     } finally {
       for (const effect of effects) effect.cleanup?.();
       for (const spy of spies.reverse()) spy.mockRestore();
