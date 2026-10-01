@@ -18,6 +18,13 @@ updates:
           syntax-highlighting:
               patterns: ["@shikijs/*", "shiki"]
               update-types: [minor, patch]
+          diff-highlighting:
+              patterns: ["diff2html", "highlight.js"]
+              update-types: [minor, patch]
+          radix-ui:
+              # cmdk shares Radix primitives with the popover runtime.
+              patterns: ["@radix-ui/*", "cmdk"]
+              update-types: [minor, patch]
           react:
               patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
               update-types: [minor, patch]

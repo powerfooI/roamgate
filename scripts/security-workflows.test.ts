@@ -179,5 +179,18 @@ test("Dependabot uses weekly family groups with an explicit xterm beta-pair exce
     "@xterm/xterm",
     "@xterm/addon-fit",
   ]);
+  expect(config.updates[0].groups.codemirror.patterns).toEqual([
+    "@codemirror/*",
+    "@lezer/*",
+    "codemirror",
+  ]);
+  expect(config.updates[0].groups["radix-ui"].patterns).toEqual([
+    "@radix-ui/*",
+    "cmdk",
+  ]);
+  expect(config.updates[0].groups["diff-highlighting"].patterns).toEqual([
+    "diff2html",
+    "highlight.js",
+  ]);
   expect(config.updates[1].groups.actions.patterns).toEqual(["*"]);
 });

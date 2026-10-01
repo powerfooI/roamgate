@@ -104,6 +104,21 @@ nothing auto-merges. Bun version updates do not provide Dependabot security
 updates, so retain the scheduled audit for newly published advisories against an
 unchanged lockfile.
 
+Coupled runtime packages must be reviewed as a resolved graph, not just direct
+manifest bumps. CodeMirror/Lezer, diff2html/highlight.js, and Radix/cmdk have
+separate minor/patch groups. Groups collect eligible updates; they do not force
+transitive upgrades or override exact upstream pins. After a grouped update,
+inspect the lockfile for duplicate runtime copies and run the highlighting and
+overlay regression tests. Use a targeted `bun update '@lezer/highlight' --filter
+roamgate-web` or `bun update '@radix-ui/*' --filter roamgate-web` when compatible
+transitive dependencies need refreshing, then review the resulting diff. Do not
+refresh unrelated packages or raise asset limits to make an update pass.
+
+Major build-tool upgrades remain individually reviewed migrations. Preserve the
+browser target and lazy-loading boundaries, validate worker initialization and
+the built asset graph, and keep the existing size/count budgets. A failing CI
+check is a signal to repair or review the update, not to disable the check.
+
 The root highlight.js override keeps diff2html's optional, exact-pinned runtime
 aligned with the directly imported extra grammar. Update it together with
 `web/package.json` and validate the syntax tests; remove the override when
