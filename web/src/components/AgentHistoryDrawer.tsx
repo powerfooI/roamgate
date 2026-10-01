@@ -78,7 +78,7 @@ function AgentHistoryMinimap({
 }: {
   entries: { message: AgentHistoryEntry; sequence: number }[];
   visibleRange: MessageMinimapVisibleRange | null;
-  indicatorRef: RefObject<HTMLDivElement>;
+  indicatorRef: RefObject<HTMLDivElement | null>;
   onSelect: (sequence: number) => void;
 }) {
   const stripRef = useRef<HTMLDivElement>(null);

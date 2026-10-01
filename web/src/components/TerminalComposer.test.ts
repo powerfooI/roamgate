@@ -56,7 +56,7 @@ test.each(["claude", "grok-build", "agy"])(
     });
 
     const states: unknown[] = [];
-    const refs: React.MutableRefObject<unknown>[] = [];
+    const refs: React.RefObject<unknown>[] = [];
     type Effect = {
       run: React.EffectCallback;
       deps?: React.DependencyList;
@@ -68,7 +68,7 @@ test.each(["claude", "grok-build", "agy"])(
     let refIndex = 0;
     let dirty = false;
     let elements: Element[] = [];
-    let boundRefs: React.MutableRefObject<unknown>[] = [];
+    let boundRefs: React.RefObject<unknown>[] = [];
     const spies = [
       spyOn(React, "useSyncExternalStore").mockImplementation(
         (_subscribe, snapshot) => snapshot(),
@@ -143,9 +143,7 @@ test.each(["claude", "grok-build", "agy"])(
       React.Children.forEach(node, (child) => {
         if (!React.isValidElement<Record<string, unknown>>(child)) return;
         elements.push(child);
-        const ref = (
-          child as Element & { ref?: React.MutableRefObject<unknown> }
-        ).ref;
+        const ref = child.props.ref as React.RefObject<unknown> | undefined;
         if (ref && typeof ref === "object") {
           const key = String(
             child.props.className ??
