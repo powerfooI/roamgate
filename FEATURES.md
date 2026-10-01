@@ -11,7 +11,8 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
 - Pinned tabs lead the tab strip and cannot be closed from Roamgate; their
   panes still close while another pane remains. Herdr keeps tab ids across
   restarts, so pins persist until the tab closes elsewhere, such as in the TUI.
-- Split right/down, resize, focus neighbors, zoom, or close panes.
+- Split right/down, resize, focus neighbors, move panes to swap with a
+  neighbor, zoom, or close panes.
 - Search workspaces, worktrees, files, tabs, panes, and agents in the command
   menu. Enter a relative/absolute path to open a file.
 - Desktop **Zen mode** hides app chrome and runs the terminal flush to every
@@ -378,6 +379,7 @@ Common defaults (Linux/Android exceptions follow):
 | Create / close tab or pane | `Cmd+T` / `Cmd+W` | `Ctrl+Alt+T` / `Ctrl+Alt+W` |
 | Previous / next tab | `Cmd+Option+Left/Right` | `Alt+Shift+Left/Right` |
 | Focus neighboring pane | `Cmd+Ctrl+Arrow` | `Ctrl+Shift+Arrow` |
+| Move pane (swap with neighbor) | `Cmd+Ctrl+Shift+Arrow` | `Ctrl+Alt+Shift+Arrow` |
 | Split right / down | `Cmd+D` / `Cmd+Shift+D` | `Ctrl+Alt+D` / `Ctrl+Alt+Shift+D` |
 | Zoom / restore pane | `Cmd+Shift+Enter` | `Ctrl+Alt+Enter` |
 | Numbered tab | `Ctrl+1…9` | `Ctrl+Alt+1…9` |

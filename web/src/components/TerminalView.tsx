@@ -16,6 +16,7 @@ import {
 import { isMobileLayout, LAYOUT_CHANGE_EVENT } from "../layoutPreferences";
 import { terminalFontOptions } from "../appearance";
 import { detectShortcutPlatform } from "../shortcutBindings";
+import { PaneMoveMenu } from "./PaneMoveMenu";
 import {
   getShortcutSnapshot,
   shortcutMatches,
@@ -3620,6 +3621,11 @@ export function TerminalView({
               >
                 <Rows2 size={14} />
               </button>
+              <PaneMoveMenu
+                paneId={pane.pane_id}
+                layout={s.layout}
+                onPointerDown={preventPaneActionFocus}
+              />
             </>
           ) : null}
           {canClosePane || paneZoomed ? (
