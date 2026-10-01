@@ -35,7 +35,7 @@
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.13",
     "@lezer/highlight": "^1.2.5",
-    "@lobehub/icons-static-svg": "^1.91.0",
+    "@lobehub/icons-static-svg": "^1.95.1",
     "@pierre/diffs": "^1.5.1",
     "@radix-ui/react-popover": "^1.1.23",
     "@shikijs/core": "^4.4.3",
