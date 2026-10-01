@@ -101,9 +101,31 @@ describe("pane shortcuts", () => {
           key: "ArrowLeft",
           metaKey: true,
           ctrlKey: true,
+          altKey: true,
           shiftKey: true,
         }),
       ),
     ).toBeNull();
+  });
+
+  test("maps Shift-extended pane focus chords to pane moves", () => {
+    for (const [key, direction] of [
+      ["ArrowLeft", "left"],
+      ["ArrowRight", "right"],
+      ["ArrowUp", "up"],
+      ["ArrowDown", "down"],
+    ] as const) {
+      expect(
+        paneShortcutAction(
+          keyEvent({ key, metaKey: true, ctrlKey: true, shiftKey: true }),
+        ),
+      ).toEqual({ type: "move", direction });
+      expect(
+        resolveShortcut(
+          keyEvent({ key, ctrlKey: true, altKey: true, shiftKey: true }),
+          defaultShortcutBindings("windows"),
+        ),
+      ).toEqual({ type: "move", direction });
+    }
   });
 });

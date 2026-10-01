@@ -30,9 +30,9 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             {
-              // Keep startup icons together without eagerly loading feature-only icons.
-              name: "ui-icons",
-              test: /node_modules[\\/]lucide-react[\\/]/,
+              // Share startup React and icons without loading feature-only icons.
+              name: "ui-runtime",
+              test: /node_modules[\\/](?:lucide-react|react|react-dom|scheduler)[\\/]/,
               tags: ["$initial"],
             },
             {

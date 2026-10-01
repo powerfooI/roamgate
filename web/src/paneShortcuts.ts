@@ -4,6 +4,7 @@ export type PaneShortcutDirection = "left" | "right" | "up" | "down";
 
 export type PaneShortcutAction =
   | { type: "focus"; direction: PaneShortcutDirection }
+  | { type: "move"; direction: PaneShortcutDirection }
   | { type: "split"; direction: "right" | "down" }
   | { type: "zoom" };
 
@@ -21,6 +22,15 @@ export function paneShortcutAction(
   for (const direction of ["left", "right", "up", "down"] as const) {
     if (matchesShortcut(event, `pane.${direction}`, bindings))
       return { type: "focus", direction };
+  }
+  for (const [id, direction] of [
+    ["pane.moveLeft", "left"],
+    ["pane.moveRight", "right"],
+    ["pane.moveUp", "up"],
+    ["pane.moveDown", "down"],
+  ] as const) {
+    if (matchesShortcut(event, id, bindings))
+      return { type: "move", direction };
   }
   if (matchesShortcut(event, "pane.splitRight", bindings))
     return { type: "split", direction: "right" };

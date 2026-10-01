@@ -3068,6 +3068,8 @@ export default function App() {
           void store.splitPane(activePane.pane_id, paneAction.direction);
         } else if (paneAction.type === "zoom") {
           void store.zoomPane(activePane.pane_id);
+        } else if (paneAction.type === "move") {
+          void store.movePane(activePane.pane_id, paneAction.direction);
         } else {
           void store.focusPaneDirection(
             activePane.pane_id,
