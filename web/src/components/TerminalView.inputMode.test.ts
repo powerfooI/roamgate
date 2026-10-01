@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { Root } from "react-dom/client";
+import type { TerminalPush } from "../api";
 import type { TerminalInputMode } from "../terminalInputMode";
 
 // Real React commits are essential here: the safety and restore layout effects
@@ -111,10 +112,13 @@ async function registerDomTests() {
   let state = initialState();
   const calls: { method: string; params: Record<string, unknown> }[] = [];
   const clients = new Map<string, object>();
+  const terminalListeners = new Set<(push: TerminalPush) => void>();
+  let scrollDisabledReason: string | null = null;
+  const scrollReason = mock(() => scrollDisabledReason);
   mock.module("../store", () => ({
     store: {
       get: () => state,
-      terminalScrollReason: () => null,
+      terminalScrollReason: scrollReason,
       setTerminalEndpoint: noop,
       notify: noop,
       clearNotice: noop,
@@ -146,7 +150,10 @@ async function registerDomTests() {
         }
         return clients.get(key);
       },
-      onTerminal: () => noop,
+      onTerminal(callback: (push: TerminalPush) => void) {
+        terminalListeners.add(callback);
+        return () => terminalListeners.delete(callback);
+      },
       onTerminalClipboard: () => noop,
       onTerminalClosed: () => noop,
     },
@@ -231,10 +238,13 @@ async function registerDomTests() {
     reset = noop;
     clearSelection = noop;
     attachCustomKeyEventHandler = noop;
-    hasSelection = () => false;
+    selection = false;
+    hasSelection = () => this.selection;
     getSelection = () => "";
     getSelectionPosition = () => undefined;
-    write(_text: string, parsed?: () => void) {
+    writes: string[] = [];
+    write(text: string, parsed?: () => void) {
+      this.writes.push(text);
       parsed?.();
     }
     dispose() {
@@ -248,6 +258,12 @@ async function registerDomTests() {
     "../terminalInputMode"
   );
   const { roamgateLocalStorage } = await import("../browserStorage");
+  const {
+    clearTerminalComposerDraft,
+    readTerminalComposerDraft,
+    terminalComposerDraftKey,
+  } = await import("../terminalComposer");
+  const draftKey = terminalComposerDraftKey("connection-a", 1, "pane-a");
   const storageKey = `roamgate:${TERMINAL_INPUT_MODE_STORAGE_KEY}`;
   let root: Root | null = null;
   let container: HTMLDivElement;
@@ -259,6 +275,9 @@ async function registerDomTests() {
     calls.length = 0;
     terminals.length = 0;
     clients.clear();
+    terminalListeners.clear();
+    scrollDisabledReason = null;
+    scrollReason.mockClear();
     localStorage.clear();
     sessionStorage.clear();
     open = false;
@@ -268,6 +287,7 @@ async function registerDomTests() {
   afterEach(async () => {
     if (root) await act(async () => root?.unmount());
     root = null;
+    clearTerminalComposerDraft(draftKey);
     document.body.replaceChildren();
     await browser.happyDOM.whenAsyncComplete();
   });
@@ -365,6 +385,252 @@ async function registerDomTests() {
       }
     });
   }
+
+  const scrollCalls = () =>
+    calls
+      .filter((call) => call.method === "terminal.scroll")
+      .map((call) => call.params);
+  async function frame(mouseReporting?: boolean, text = "terminal output") {
+    await act(async () => {
+      for (const listener of terminalListeners)
+        listener({
+          connection_id: state.activeConnectionId,
+          connection_generation: 1,
+          terminal_id: "terminal-a",
+          width: 80,
+          height: 24,
+          full: true,
+          bytes: btoa(text),
+          mouse_reporting: mouseReporting,
+        });
+    });
+    // Happy DOM has no layout. Supply the public geometry used for routing.
+    currentTerminal().element.getBoundingClientRect = () =>
+      new browser.DOMRect(10, 20, 800, 480) as unknown as DOMRect;
+  }
+  function touch(
+    target: HTMLElement,
+    type: "touchstart" | "touchmove" | "touchend" | "touchcancel",
+    y: number,
+    count = type === "touchend" || type === "touchcancel" ? 0 : 1,
+  ) {
+    const event = new browser.Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "touches", {
+      value: Array.from({ length: count }, (_, identifier) => ({
+        identifier,
+        clientX: 50,
+        clientY: y,
+      })),
+    });
+    act(() => target.dispatchEvent(event as unknown as Event));
+    return event;
+  }
+  function swipe(
+    target: HTMLElement = currentTerminal().element,
+    from = 100,
+    to = 148,
+  ) {
+    act(() =>
+      target.dispatchEvent(
+        new browser.PointerEvent("pointerdown", {
+          bubbles: true,
+          pointerType: "touch",
+        }) as unknown as PointerEvent,
+      ),
+    );
+    touch(target, "touchstart", from);
+    const move = touch(target, "touchmove", to);
+    const end = touch(target, "touchend", to);
+    return { move, end };
+  }
+
+  for (const mode of ["composer", "direct", "closed"] as const) {
+    test.each([undefined, false, true])(
+      `${mode} terminal touch scroll preserves routing and keyboard state (mouse reporting %s)`,
+      async (mouseReporting) => {
+        await mount();
+        if (mode !== "closed") await typeGesture();
+        if (mode === "direct") await choose("direct");
+        await frame(mouseReporting);
+        const term = currentTerminal();
+        term.modes.mouseTrackingMode = mouseReporting ? "drag" : "none";
+        const focused = document.activeElement;
+        const focusCount = term.focusCount;
+        const { move, end } = swipe();
+        expect(move.defaultPrevented).toBe(true);
+        expect(end.defaultPrevented).toBe(true);
+        expect(scrollCalls()).toEqual([
+          {
+            terminal_id: "terminal-a",
+            direction: "up",
+            lines: 2,
+            source: "wheel",
+            column: 4,
+            row: 6,
+          },
+        ]);
+        swipe(term.element, 148, 100);
+        expect(scrollCalls()[1]).toEqual({
+          terminal_id: "terminal-a",
+          direction: "down",
+          lines: 2,
+          source: "wheel",
+          column: 4,
+          row: 4,
+        });
+        expect(scrollReason).toHaveBeenLastCalledWith(
+          "terminal-a",
+          mouseReporting,
+        );
+        expect(document.activeElement).toBe(focused);
+        expect(term.focusCount).toBe(focusCount);
+        expect(calls.some((call) => call.method === "terminal.input")).toBe(
+          false,
+        );
+        if (mode === "direct") {
+          expect(term.options.disableStdin).toBe(false);
+          expect(term.textarea.readOnly).toBe(false);
+          act(() => term.onDataCallback("still direct"));
+          expect(
+            calls.filter((call) => call.method === "terminal.input"),
+          ).toHaveLength(1);
+        } else expectInputBlocked();
+      },
+    );
+  }
+
+  test("Composer draft gestures remain native while terminal swipes and output preserve editing", async () => {
+    await mount();
+    await typeGesture();
+    await frame(false);
+    const editor = container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Terminal input draft"]',
+    )!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        browser.HTMLTextAreaElement.prototype,
+        "value",
+      )!.set!.call(editor, "draft line one\nline two\nline three");
+      editor.dispatchEvent(
+        new browser.Event("input", { bubbles: true }) as unknown as Event,
+      );
+    });
+    editor.setSelectionRange(2, 5);
+    editor.scrollTop = 17;
+    act(() =>
+      editor.dispatchEvent(
+        new browser.CompositionEvent("compositionstart", {
+          bubbles: true,
+        }) as unknown as CompositionEvent,
+      ),
+    );
+    const { move, end } = swipe(editor);
+    expect(move.defaultPrevented).toBe(false);
+    expect(end.defaultPrevented).toBe(false);
+    expect(scrollCalls()).toEqual([]);
+    swipe();
+    const term = currentTerminal();
+    const writesBeforeUpdate = term.writes.length;
+    // A changed repaint must reach xterm; identical frames are deduplicated.
+    await frame(false, "updated terminal output");
+    expect(term.writes).toHaveLength(writesBeforeUpdate + 1);
+    expect(term.writes[term.writes.length - 1]).toBe("updated terminal output");
+    expect(scrollCalls()).toHaveLength(1);
+    expect(document.activeElement).toBe(editor);
+    expect(editor.value).toBe("draft line one\nline two\nline three");
+    expect(readTerminalComposerDraft(draftKey)).toBe(editor.value);
+    expect([
+      editor.selectionStart,
+      editor.selectionEnd,
+      editor.scrollTop,
+    ]).toEqual([2, 5, 17]);
+    expect(currentTerminal().focusCount).toBe(0);
+    expectInputBlocked();
+    expect(
+      container.querySelector<HTMLInputElement>('input[value="direct"]')!
+        .disabled,
+    ).toBe(true);
+    act(() =>
+      editor.dispatchEvent(
+        new browser.CompositionEvent("compositionend", {
+          bubbles: true,
+        }) as unknown as CompositionEvent,
+      ),
+    );
+    expect(
+      container.querySelector<HTMLInputElement>('input[value="direct"]')!
+        .disabled,
+    ).toBe(false);
+  });
+
+  test.each([false, true])(
+    "Composer swipes still respect endpoint selection and scroll availability (%s)",
+    async (mouseReporting) => {
+      await mount(true);
+      await frame(mouseReporting);
+      const term = currentTerminal();
+      term.selection = true;
+      expect(swipe().move.defaultPrevented).toBe(true);
+      expect(scrollCalls()).toEqual([]);
+      term.selection = false;
+      scrollDisabledReason = "Scroll is unavailable";
+      swipe();
+      expect(scrollCalls()).toEqual([]);
+      expect(scrollReason).toHaveBeenLastCalledWith(
+        "terminal-a",
+        mouseReporting,
+      );
+      scrollDisabledReason = null;
+      swipe();
+      expect(scrollCalls()).toHaveLength(1);
+      expectInputBlocked();
+    },
+  );
+
+  test("Composer swipes retain line accumulation, per-move bounds, and cancellation", async () => {
+    await mount(true);
+    await frame(false);
+    const target = currentTerminal().element;
+    touch(target, "touchstart", 100);
+    touch(target, "touchmove", 108);
+    touch(target, "touchmove", 116);
+    expect(scrollCalls()).toEqual([]);
+    touch(target, "touchmove", 124);
+    expect(scrollCalls().map((call) => call.lines)).toEqual([1]);
+    touch(target, "touchmove", 132);
+    touch(target, "touchcancel", 132);
+    touch(target, "touchmove", 100);
+    expect(scrollCalls()).toHaveLength(1);
+    touch(target, "touchstart", 100);
+    touch(target, "touchmove", 116);
+    expect(scrollCalls()).toHaveLength(1);
+    touch(target, "touchmove", 124, 2);
+    expect(scrollCalls()).toHaveLength(1);
+    touch(target, "touchcancel", 124);
+    swipe(target, 100, 1100);
+    expect(scrollCalls()[1]!.lines).toBe(currentTerminal().rows);
+    expectInputBlocked();
+  });
+
+  test.each(["composer", "direct", "closed"] as const)(
+    "%s terminal taps keep their existing focus behavior",
+    async (mode) => {
+      await mount(mode !== "closed");
+      if (mode === "direct") {
+        await choose("direct");
+        act(() => currentTerminal().textarea.blur());
+      }
+      await frame(false);
+      const term = currentTerminal();
+      const before = term.focusCount;
+      touch(term.element, "touchstart", 100);
+      touch(term.element, "touchend", 100);
+      expect(scrollCalls()).toEqual([]);
+      expect(term.focusCount).toBe(before + (mode === "direct" ? 1 : 0));
+      if (mode === "direct") expect(document.activeElement).toBe(term.textarea);
+      else expectInputBlocked();
+    },
+  );
 
   test.each([null, "", "DIRECT", "invalid", "composer"])(
     "opening defaults safely to Composer for stored %s",

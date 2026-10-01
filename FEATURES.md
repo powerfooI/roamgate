@@ -298,7 +298,9 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   position is kept per browser and stays clear of the header and tab strip.
 - The bottom-right **Type** button opens one input dock with a
   **Composer / Direct** mode switch and the configured two shortcut rows.
-  The keyboard button shows or hides both rows in either mode.
+  The keyboard button shows or hides both rows in either mode. Swipe the
+  terminal up or down to scroll with the dock open in either mode; gestures
+  inside the Composer editor keep their native text-editing behavior.
   Composer supports IME, dictation,
   multiline text, and images. Tap its editor to open the device keyboard. **Insert**
   does not execute; **Send** adds one Enter. Drafts are in-memory per

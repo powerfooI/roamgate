@@ -2491,11 +2491,11 @@ export function TerminalView({
         touchMoved = true;
         if (!touchSelection.active) endpointPresentation.cancelSelection();
       }
+      // Swiping output uses terminal.scroll independently of keyboard input.
+      // Keep Composer's stdin/focus lock, but only selection blocks this gesture.
       if (
         endpointPresentation.mouseReporting !== undefined &&
-        (term.hasSelection() ||
-          endpointPresentation.selectionDrag ||
-          composerEditingRef.current)
+        (term.hasSelection() || endpointPresentation.selectionDrag)
       ) {
         e.preventDefault();
         e.stopPropagation();
