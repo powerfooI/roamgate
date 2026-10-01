@@ -1,0 +1,55 @@
+version: 2
+
+updates:
+    - package-ecosystem: bun
+      directory: /
+      schedule:
+          interval: weekly
+          day: monday
+          time: "06:00"
+          timezone: Etc/UTC
+      open-pull-requests-limit: 5
+      # Bun groups use package patterns, not unsupported dependency-type filters.
+      # Major upgrades remain individual PRs except for the coupled xterm pair.
+      groups:
+          codemirror:
+              patterns: ["@codemirror/*", "@lezer/*", "codemirror"]
+              update-types: [minor, patch]
+          syntax-highlighting:
+              patterns: ["@shikijs/*", "shiki"]
+              update-types: [minor, patch]
+          react:
+              patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+              update-types: [minor, patch]
+          xterm-core-fit:
+              # No update-types filter: same-core beta bumps are neither minor
+              # nor patch to Dependabot. Review this coupled pair together,
+              # including any future major upgrades; never auto-merge it.
+              patterns: ["@xterm/xterm", "@xterm/addon-fit"]
+          xterm-addons:
+              patterns: ["@xterm/*"]
+              exclude-patterns: ["@xterm/xterm", "@xterm/addon-fit"]
+              update-types: [minor, patch]
+          tooling:
+              patterns:
+                  - "@biomejs/*"
+                  - "@vitejs/*"
+                  - "bun-types"
+                  - "happy-dom"
+                  - "oxlint"
+                  - "typescript"
+                  - "vite"
+              update-types: [minor, patch]
+
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: weekly
+          day: monday
+          time: "06:30"
+          timezone: Etc/UTC
+      open-pull-requests-limit: 3
+      groups:
+          actions:
+              patterns: ["*"]
+              update-types: [minor, patch]

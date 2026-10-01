@@ -70,6 +70,40 @@ Releases must package/inspect every supported archive/checksum; see
 [builds](docs/DEPLOYMENT.md#build-a-standalone-executable) and
 [release policy](AGENTS.md#release-notes).
 
+## Security Checks and Dependency Updates
+
+CodeQL runs the default JavaScript/TypeScript and GitHub Actions query suites on
+PRs targeting `main`, pushes to `main`, weekly, and by manual dispatch. It reads
+source without building the app or installing dependencies. Only the analysis
+job can upload code-scanning results; checkout credentials are not persisted.
+Use the `pull_request` event for fork and Dependabot analysis, never
+`pull_request_target` with untrusted code. If GitHub's CodeQL default setup is
+already enabled, a maintainer must resolve the
+[default/advanced setup conflict](https://docs.github.com/en/code-security/reference/code-scanning/sarif-files/troubleshoot-sarif-uploads/default-setup-enabled)
+before this workflow can upload results.
+
+Dependency Audit runs on dependency/config changes in PRs, weekly on the default
+branch, and by manual dispatch. Run the same check locally with `bun run audit`.
+It audits the root `bun.lock`, including development dependencies, without
+installing packages, executing lifecycle scripts, or changing dependencies.
+The JSON log includes all reported severities; high/critical findings and
+registry request failures return a failing exit code. Review lower-severity
+findings too. Fix findings in a reviewed PR; do not hide them with ignored
+advisories or a blanket successful exit. This path-filtered workflow is not an
+always-running required check for unrelated PRs.
+
+Dependabot checks the Bun workspace and SHA-pinned GitHub Actions weekly with
+small open-PR limits. Minor/patch updates are grouped by package family; major
+upgrades remain separate except for the coupled `@xterm/xterm` and
+`@xterm/addon-fit` pair. This pair has its own unfiltered group because
+Dependabot's minor/patch filters do not match same-core beta increments. Review
+all updates to this pair together, including future major upgrades, and check
+terminal rendering, sizing, input, and touch scrolling. Other xterm addons keep
+the usual minor/patch grouping. Update PRs require normal review and validation;
+nothing auto-merges. Bun version updates do not provide Dependabot security
+updates, so retain the scheduled audit for newly published advisories against an
+unchanged lockfile.
+
 ## Style Organization
 
 | Path under `web/src/` | Responsibility |

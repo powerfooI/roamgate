@@ -51,6 +51,7 @@
     "format": "biome format --write",
     "format:check": "biome format",
     "lint": "oxlint .",
+    "audit": "bun audit --json --audit-level=high",
     "test": "bun test",
     "test:quick": "bun test --parallel=4",
     "typecheck": "tsc --noEmit && bun run --filter roamgate-web typecheck && bun run --filter roamgate-server typecheck",
