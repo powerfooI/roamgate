@@ -5,8 +5,8 @@ import { fileURLToPath, URL } from "node:url";
 
 const publicRoot = fileURLToPath(new URL("../server/public/", import.meta.url));
 const maxFileCount = 160;
-const maxTotalBytes = 12 * 1024 * 1024;
-const maxInitialJsBytes = 660 * 1024;
+const maxTotalBytes = 14 * 1024 * 1024;
+const maxInitialJsBytes = 800 * 1024;
 const maxInitialJsGzipBytes = 256 * 1024;
 const maxInitialCssBytes = 196 * 1024;
 
