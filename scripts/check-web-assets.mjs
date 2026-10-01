@@ -54,6 +54,25 @@ export function assertLazyGrammarAssets(manifest) {
   }
 }
 
+export function assertLazyEditorAssets(manifest) {
+  const editor = Object.values(manifest).find(
+    (chunk) => chunk.name === "code-preview",
+  );
+  if (!editor) throw new Error("Missing lazy code-preview chunk");
+  const entries = Object.keys(manifest).filter(
+    (key) =>
+      manifest[key].isEntry ||
+      ["ConfigurationDialog", "WorkspaceInspectorHost"].includes(
+        manifest[key].name,
+      ),
+  );
+  for (const key of entries) {
+    if (initialAssetFiles(manifest, [key]).includes(editor.file)) {
+      throw new Error(`${key} eagerly loads the code editor`);
+    }
+  }
+}
+
 async function collectAssetStats(root) {
   const directories = [root];
   let fileCount = 0;
@@ -91,6 +110,7 @@ async function checkAssets() {
     );
   }
   assertLazyGrammarAssets(manifest);
+  assertLazyEditorAssets(manifest);
   let jsBytes = 0;
   let jsGzipBytes = 0;
   let cssBytes = 0;

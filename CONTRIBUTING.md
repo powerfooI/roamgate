@@ -104,6 +104,12 @@ nothing auto-merges. Bun version updates do not provide Dependabot security
 updates, so retain the scheduled audit for newly published advisories against an
 unchanged lockfile.
 
+The root highlight.js override keeps diff2html's optional, exact-pinned runtime
+aligned with the directly imported extra grammar. Update it together with
+`web/package.json` and validate the syntax tests; remove the override when
+upstream diff2html accepts the supported version. Do not upgrade only the direct
+manifest entry while leaving the renderer on its old transitive version.
+
 ## Style Organization
 
 | Path under `web/src/` | Responsibility |

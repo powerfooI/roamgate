@@ -25,56 +25,35 @@ export default defineConfig({
     // Build straight into the server's static dir so the backend can serve it.
     outDir: "../server/public",
     emptyOutDir: true,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        // Group small grammars into lazy chunks to keep expanded highlighting
-        // within the embedded server's asset-count budget.
-        manualChunks(id) {
-          const language = id.match(
-            /@shikijs\/langs\/dist\/([^/]+)\.mjs$/,
-          )?.[1];
-          if (!language) return;
-          if (
-            [
-              "awk",
-              "diff",
-              "docker",
-              "ini",
-              "json5",
-              "jsonl",
-              "make",
-              "nginx",
-              "proto",
-              "toml",
-              "xml",
-              "yaml",
-            ].includes(language)
-          ) {
-            return "syntax-config";
-          }
-          if (
-            [
-              "clojure",
-              "crystal",
-              "elixir",
-              "elm",
-              "erlang",
-              "fsharp",
-              "groovy",
-              "haskell",
-              "kotlin",
-              "common-lisp",
-              "lua",
-              "r",
-              "scala",
-            ].includes(language)
-          ) {
-            return "syntax-extra";
-          }
+        codeSplitting: {
+          groups: [
+            {
+              // Shared UI icons are tiny modules; avoid one asset per shared icon.
+              name: "ui-icons",
+              test: /node_modules[\\/]lucide-react[\\/]/,
+            },
+            {
+              // File and code previews load these together. Preserve one lazy editor
+              // boundary instead of a separate chunk for each editor package.
+              name: "code-preview",
+              test: /node_modules[\\/](?:@codemirror|@lezer|codemirror)[\\/]/,
+            },
+            {
+              name: "syntax-config",
+              test: /@shikijs\/langs\/dist\/(awk|diff|docker|ini|json5|jsonl|make|nginx|proto|toml|xml|yaml)\.mjs$/,
+            },
+            {
+              name: "syntax-extra",
+              test: /@shikijs\/langs\/dist\/(clojure|crystal|elixir|elm|erlang|fsharp|groovy|haskell|kotlin|common-lisp|lua|r|scala)\.mjs$/,
+            },
+          ],
         },
       },
     },
   },
+
   server: {
     port: 5173,
     proxy: {
