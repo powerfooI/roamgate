@@ -96,9 +96,9 @@ describe("chooseFileDownloadStrategy", () => {
     }
   });
 
-  test("opens a new context for desktop web apps instead of the share sheet", () => {
-    // macOS "Add to Dock" web apps are standalone and can share files, but
-    // the share sheet is not the expected desktop download path.
+  test("keeps the non-iOS standalone fallback when Mobile layout is forced", () => {
+    // Layout gating is covered by downloadFile.browser.test.ts. This helper
+    // handles device fallbacks only after the app has selected Mobile layout.
     expect(
       chooseFileDownloadStrategy({
         canShareFiles: true,
@@ -108,7 +108,7 @@ describe("chooseFileDownloadStrategy", () => {
     ).toBe("new-context");
   });
 
-  test("keeps the anchor download for regular desktop browsers", () => {
+  test("keeps the anchor fallback for non-iOS mobile browsers", () => {
     expect(
       chooseFileDownloadStrategy({
         canShareFiles: false,
@@ -118,7 +118,7 @@ describe("chooseFileDownloadStrategy", () => {
     ).toBe("anchor");
   });
 
-  test("keeps the anchor download on desktop even when files can be shared", () => {
+  test("does not add sharing to non-iOS browsers in Mobile layout", () => {
     // macOS Safari reports navigator.canShare support for files; the share
     // sheet is still not the expected desktop download path.
     expect(

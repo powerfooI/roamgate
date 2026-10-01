@@ -220,6 +220,8 @@ after fetch, and abort conflicts. They never push.
 - Upload by dragging onto a checkout directory; download files or workspace
   `.tar.gz` directories; copy paths or delete with confirmation via right-click
   or long-press. Upload/delete stay checkout-scoped. Operations work over SSH.
+  Desktop layout downloads directly, including installed web apps. Mobile
+  layout keeps native iOS sharing and its browser fallback behavior.
 - With [host file reveal enabled](docs/DEPLOYMENT.md#host-file-reveal), local
   profiles over loopback offer **Reveal on host** and **Open folder on host**
   in explorer and Changes menus. These open the Roamgate host's desktop, not

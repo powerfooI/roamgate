@@ -231,15 +231,12 @@ export function TerminalComposer({
   };
 
   const insertAtCaret = (targetDraftKey: string, insertion: string) => {
-    const textarea =
-      activeDraftKeyRef.current === targetDraftKey ? textareaRef.current : null;
-    focusSelectionAfterInsertRef.current = textarea !== null;
-    insertIntoTerminalComposerDraft(
-      targetDraftKey,
-      insertion,
-      textarea?.selectionStart,
-      textarea?.selectionEnd,
-    );
+    focusSelectionAfterInsertRef.current =
+      activeDraftKeyRef.current === targetDraftKey;
+    // The shared caret advances synchronously with each insertion. The DOM
+    // can still have the previous selection until React commits, or move to
+    // the end when a hidden Direct-mode textarea receives its new value.
+    insertIntoTerminalComposerDraft(targetDraftKey, insertion);
   };
 
   const uploadAndInsert = async (
@@ -694,6 +691,13 @@ export function TerminalComposer({
           onChange={(e) => updateText(e.currentTarget)}
           onSelect={(e) => {
             const textarea = e.currentTarget;
+            // Ignore hidden or not-yet-committed DOM selections. They belong
+            // to an older draft, not the caret advanced by an async insertion.
+            if (
+              mode !== "composer" ||
+              textarea.value !== readTerminalComposerDraft(draftKey)
+            )
+              return;
             writeTerminalComposerSelection(
               draftKey,
               textarea.selectionStart,

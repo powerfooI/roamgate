@@ -1,10 +1,12 @@
+import { isMobileLayout } from "./layoutPreferences";
+
 /**
  * Download strategy for file URLs. Plain anchor downloads navigate the
  * current browsing context, which iOS replaces with the system document
  * handler; in a PWA there is no way back without force-quitting the app.
- * Prefer the native share sheet on iOS when available, open a new browsing
- * context on iOS/standalone (the in-app browser offers a way back), and keep
- * the classic anchor download everywhere else.
+ * Mobile layout prefers the native share sheet on iOS when available and
+ * opens a new context on iOS/standalone so the in-app browser offers a way
+ * back. Desktop layout always uses a classic anchor download.
  */
 export type FileDownloadStrategy = "share" | "new-context" | "anchor";
 
@@ -33,6 +35,7 @@ export function isStandaloneDisplay(
   return matchesStandaloneMedia || navigatorStandalone === true;
 }
 
+/** Device fallback policy for Mobile layout; Desktop bypasses it. */
 export function chooseFileDownloadStrategy(
   env: FileDownloadEnvironment,
 ): FileDownloadStrategy {
@@ -116,7 +119,11 @@ export async function downloadFileFromUrl(args: {
   /** Fallback name; the server's Content-Disposition name wins when present. */
   filename: string;
 }): Promise<"shared" | "opened" | "anchored"> {
-  const strategy = chooseFileDownloadStrategy(currentDownloadEnvironment());
+  // Use the app's resolved layout, including explicit preferences and URL
+  // overrides. Sharing support or standalone display does not imply Mobile.
+  const strategy = isMobileLayout()
+    ? chooseFileDownloadStrategy(currentDownloadEnvironment())
+    : "anchor";
   if (strategy === "share") {
     try {
       const response = await fetch(args.url, { credentials: "same-origin" });

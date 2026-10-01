@@ -221,20 +221,17 @@ export function activateTerminalComposerDraftScope(
   }
 }
 
-/** Inserts into the latest shared draft so async completions cannot overwrite it. */
+/** Atomically inserts into the latest shared draft and advances its caret. */
 export function insertIntoTerminalComposerDraft(
   key: string,
   insertion: string,
-  selectionStart?: number,
-  selectionEnd?: number,
 ): { text: string; caret: number } {
   const current = readTerminalComposerDraft(key);
   if (!terminalComposerDraftKeyIsActive(key)) {
     return { text: current, caret: current.length };
   }
-  const storedSelection = readTerminalComposerSelection(key);
-  const start = selectionStart ?? storedSelection?.start ?? current.length;
-  const end = selectionEnd ?? storedSelection?.end ?? start;
+  const { start = current.length, end = start } =
+    readTerminalComposerSelection(key) ?? {};
   const next = terminalComposerInsertAtCaret(current, start, end, insertion);
   // Publish the selection before the draft notification so a remounted
   // subscriber restores this caret when it renders the inserted path.
