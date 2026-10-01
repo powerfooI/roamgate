@@ -28,6 +28,16 @@ date, disables inherited Git configuration/templates, and creates no remote.
 The review patch is a prepared example implementation; it carries no claim that
 an agent produced it. Agent history and live agent status require a real run.
 
+For desktop sidebar shots, prepare three additional directories from the same
+public fixture. They are separate Git repositories, not labels for personal
+projects:
+
+```sh
+bun run demo:prepare --scene base --dir /tmp/roamgate-demo/documentation
+bun run demo:prepare --scene base --dir /tmp/roamgate-demo/release-qa
+bun run demo:prepare --scene base --dir /tmp/roamgate-demo/ui-preview
+```
+
 Run the board and tests from the prepared directory:
 
 ```sh
@@ -88,11 +98,34 @@ bun run demo:herdr server
 In a second terminal:
 
 ```sh
+bun run demo:herdr workspace create --cwd /tmp/roamgate-demo/documentation --label Documentation
+```
+
+Record Documentation's returned `.result.root_pane.pane_id` as
+`demo_docs_pane_id`. Create Release QA:
+
+```sh
+bun run demo:herdr workspace create --cwd /tmp/roamgate-demo/release-qa --label "Release QA"
+```
+
+Record its `.result.workspace.workspace_id` as `demo_qa_workspace_id`, then add
+its Tests tab:
+
+```sh
+bun run demo:herdr tab create --workspace "$demo_qa_workspace_id" --cwd /tmp/roamgate-demo/release-qa --label Tests --no-focus
+```
+
+Record that tab's `.result.root_pane.pane_id` as `demo_qa_pane_id`. Create UI
+Preview, then focus Northstar:
+
+```sh
+bun run demo:herdr workspace create --cwd /tmp/roamgate-demo/ui-preview --label "UI Preview"
 bun run demo:herdr workspace create --cwd /tmp/roamgate-demo/northstar --label Northstar --focus
 ```
 
-Record the returned `.result.tab.tab_id` and `.result.root_pane.pane_id` as
-`demo_tab_id` and `demo_pane_id` in this terminal. Rename and split the real panes:
+Record Northstar's returned `.result.tab.tab_id` and `.result.root_pane.pane_id`
+as `demo_tab_id` and `demo_pane_id` in this terminal. Rename and split the real
+panes:
 
 ```sh
 bun run demo:herdr tab rename "$demo_tab_id" Implementation
@@ -107,11 +140,43 @@ bun run demo:herdr pane rename "$demo_checks_id" Checks
 bun run demo:herdr pane run "$demo_checks_id" "bun test"
 ```
 
-For the desktop overview, show the Task section and `git --no-pager diff --stat`
-in Implementation. For a narrow mobile terminal, run `git status --short && bun
-test --dots` in Checks; the dots reporter keeps the genuine test summary compact.
-Run commands again after switching viewport sizes so terminal output uses the
-current geometry. Keep only one capture client attached while doing this.
+For the desktop overview, install Pi normally in the capture account and use its
+official Herdr integration. Keep Pi's standard package entry point so Herdr can
+identify the real process. Use a dedicated writable profile for the integration
+and all three interactive sessions:
+
+```sh
+XDG_CONFIG_HOME=/tmp/roamgate-demo/config \
+  PI_CODING_AGENT_DIR=/tmp/roamgate-demo/pi-agent \
+  herdr --session roamgate-demo integration install pi
+bun run demo:herdr pane run "$demo_pane_id" "PI_CODING_AGENT_DIR=/tmp/roamgate-demo/pi-agent PI_OFFLINE=1 PI_TELEMETRY=0 pi"
+bun run demo:herdr pane run "$demo_docs_pane_id" "PI_CODING_AGENT_DIR=/tmp/roamgate-demo/pi-agent PI_OFFLINE=1 PI_TELEMETRY=0 pi"
+bun run demo:herdr pane run "$demo_qa_pane_id" "PI_CODING_AGENT_DIR=/tmp/roamgate-demo/pi-agent PI_OFFLINE=1 PI_TELEMETRY=0 pi"
+```
+
+The native install command preserves `PI_CODING_AGENT_DIR`, which the
+`demo:herdr` wrapper's allowlist does not forward. Keep the Pi processes running,
+with the genuine Pi TUI in Implementation and real test output in Checks. Wait
+for Herdr to report `agent=pi` and session source `herdr:pi`; these idle sessions
+are waiting for input without submitting a model prompt or calling a model.
+They do not claim to have produced the review patch, completed a task, or created
+task history. Done/history shots require a matching real completed turn as
+described below. Show the sidebar in **Nested** mode and expand the demo workspaces.
+
+In the current Implementation pane, enter `/new`, then
+`!git --no-pager diff --stat`, pressing Enter after each. Pi remains active:
+`/new` starts a clean session, and its Bash mode runs the genuine Git command
+without a model request. The review fixture shows five changed files, 102
+insertions, and five deletions. Keep this Pi TUI and command output above Checks,
+whose real `bun test` run reports four passing tests and no failures. This output
+describes the prepared patch; it does not attribute the patch to Pi.
+
+For an optional shell overview, show the Task section and `git --no-pager diff
+--stat` in Implementation after exiting Pi. For a narrow mobile terminal, run
+`git status --short && bun test --dots` in Checks; the dots reporter keeps the
+genuine test summary compact. Run commands again after switching viewport sizes
+so terminal output uses the current geometry. Keep only one capture client
+attached while doing this.
 
 Build Roamgate's web assets and start its actual bridge in another terminal:
 
@@ -194,9 +259,9 @@ Pin the review panel and keep the comment as a draft.
 
 | Asset stem | Layout and selection | Ready condition |
 | --- | --- | --- |
-| `roamgate-desktop-changes` | Sidebar, Implementation/Checks split, Inspector right at about 55%; Working tree, `tasks.ts` | Connected; five review files loaded; real tests finished. |
-| `roamgate-desktop-files` | Expand Inspector; Files; open `index.html` Preview; scroll to Release checklist | Local styles loaded; checklist heading, filters, and all six cards visible. |
-| `roamgate-desktop-annotations` | `tasks.ts` unified diff and the review draft | Correct line anchor and full comment visible. |
+| `roamgate-desktop-changes` | Sidebar visible in Nested mode, genuine Pi TUI in Implementation/Checks split, Inspector right at about 55%; Working tree, `tasks.ts` | Connected; at least three real workspaces and two real Agent rows visible; Pi process registered and running; five review files loaded; real tests finished. |
+| `roamgate-desktop-files` | Sidebar visible in Nested mode; expand Inspector; Files; open `index.html` Preview; scroll to Release checklist | At least three real workspaces and two real Agent rows visible; local styles loaded; checklist heading, filters, and all six cards visible. |
+| `roamgate-desktop-annotations` | Sidebar visible in Nested mode; `tasks.ts` unified diff and the review draft | At least three real workspaces and two real Agent rows visible; correct line anchor and full comment visible. |
 | `roamgate-desktop-history` | Genuine Northstar Agent History, User/Agent/Tool enabled | The matching real task and completed test tool call are visible. |
 | `roamgate-mobile-changes` | Mobile; Changes, Working tree, `tasks.ts` | Unified diff loaded; key changed function readable. |
 | `roamgate-mobile-terminal` | Mobile; Checks pane; Composer and terminal shortcuts open | Actual Git status and test summary visible; menus dismissed. |
