@@ -1,8 +1,17 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunProcessWithCodeTimeout } from "./file-types";
+import { GIT_DIFF_MAX_BYTES } from "./file-constants";
+import { LARGE_DIFF_PATCH_BYTES } from "../../../shared/gitDiffLimits";
 import {
   createLastStepBaselineStore,
   parseBranchSummary,
@@ -160,14 +169,25 @@ describe("git diff summary parsing", () => {
       "linguist-generated",
       "unspecified",
       "vendor/schema.ts",
-      "linguist-generated",
+      "gitlab-generated",
       "set",
+      "dist/manual.js",
+      "linguist-generated",
+      "true",
+      "dist/manual.js",
+      "gitlab-generated",
+      "false",
+      "dist/unset.js",
+      "linguist-generated",
+      "unset",
       "",
     ].join("\0");
 
     expect(Array.from(parseGeneratedAttributes(output))).toEqual([
-      "dist/app.js",
-      "vendor/schema.ts",
+      ["dist/app.js", true],
+      ["vendor/schema.ts", true],
+      ["dist/manual.js", false],
+      ["dist/unset.js", false],
     ]);
   });
 
@@ -233,6 +253,199 @@ describe("git diff summary parsing", () => {
     expect(commands.some((command) => command.includes("check-attr -z"))).toBe(
       true,
     );
+  });
+
+  test("lets Git apply nested generated overrides and explicit unmarking", async () => {
+    const root = await initRepository();
+    try {
+      await mkdir(join(root, "dist"));
+      await writeFile(
+        join(root, ".gitattributes"),
+        "*.gen.js linguist-generated=true\n*.lab.js gitlab-generated\n",
+      );
+      await writeFile(
+        join(root, "dist/.gitattributes"),
+        "*.gen.js -linguist-generated\n*.lab.js gitlab-generated=false\n",
+      );
+      for (const path of [
+        "root.gen.js",
+        "root.lab.js",
+        "dist/manual.gen.js",
+        "dist/manual.lab.js",
+        "source.js",
+      ])
+        await writeFile(join(root, path), "export {};\n");
+      const summary = await readDiffSummary({
+        workspaceId: "workspace",
+        workspace: {},
+        root,
+        params: {},
+        shQuote,
+        runProcessWithCodeTimeout,
+      });
+      const generated = new Map(
+        summary.entries.map((entry) => [entry.path, entry.generated]),
+      );
+      expect(generated.get("root.gen.js")).toBe(true);
+      expect(generated.get("root.lab.js")).toBe(true);
+      expect(generated.get("dist/manual.gen.js")).toBe(false);
+      expect(generated.get("dist/manual.lab.js")).toBe(false);
+      expect(generated.get("source.js")).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("measures compared blobs independently of the live file across scopes", async () => {
+    const root = await initRepository();
+    const args = {
+      workspaceId: "workspace",
+      workspace: {},
+      root,
+      shQuote,
+      runProcessWithCodeTimeout,
+    };
+    const baselines = baselineStore();
+    try {
+      await writeFile(join(root, "file.txt"), "initial\n");
+      await git(root, "add", ".");
+      await git(root, "commit", "-m", "initial");
+      await git(root, "branch", "-M", "main");
+      await git(root, "checkout", "-b", "feature");
+      await writeFile(join(root, "file.txt"), `${"x".repeat(1024)}\n`);
+      await git(root, "add", ".");
+      await writeFile(join(root, "file.txt"), "live\n");
+      const working = await readDiffSummary({ ...args, params: {} });
+      expect(working.entries).toMatchObject([
+        { path: "file.txt", kind: "staged", file_size: 1025, size: 5 },
+        { path: "file.txt", kind: "unstaged", file_size: 1025, size: 5 },
+      ]);
+      await git(root, "commit", "-m", "feature");
+      const branch = await readDiffSummary({
+        ...args,
+        params: { mode: "branch-main" },
+      });
+      expect(branch.entries).toMatchObject([
+        { path: "file.txt", file_size: 1025 },
+      ]);
+      await baselines.captureWorkspace("workspace", async () => root);
+      await rm(join(root, "file.txt"));
+      await baselines.completeWorkspace("workspace");
+      const lastStep = await readDiffSummary({
+        ...args,
+        params: { mode: "last-step" },
+        lastStepBaselines: baselines,
+      });
+      expect(lastStep.entries).toMatchObject([
+        { path: "file.txt", status: "deleted", file_size: 5 },
+      ]);
+      const deleted = await readDiffSummary({ ...args, params: {} });
+      expect(deleted.entries).toMatchObject([
+        { path: "file.txt", status: "deleted", file_size: 1025 },
+      ]);
+    } finally {
+      await baselines.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("bounds patch transport and UTF-8 bytes while reporting the full patch size", async () => {
+    const root = await initRepository();
+    let transportedBytes = 0;
+    const runner: RunProcessWithCodeTimeout = async (argv, timeoutMs) => {
+      const result = await runProcessWithCodeTimeout(argv, timeoutMs);
+      transportedBytes = Buffer.byteLength(result.stdout);
+      return result;
+    };
+    try {
+      await writeFile(
+        join(root, "large.txt"),
+        `${"\u4e2d".repeat(GIT_DIFF_MAX_BYTES)}\n`,
+      );
+      const file = await readDiffFile({
+        workspaceId: "workspace",
+        root,
+        params: { path: "large.txt", kind: "untracked" },
+        shQuote,
+        runProcessWithCodeTimeout: runner,
+      });
+      expect(file.truncated).toBe(true);
+      expect(file.patch_size).toBeGreaterThan(GIT_DIFF_MAX_BYTES * 3);
+      expect(Buffer.byteLength(file.diff)).toBeLessThanOrEqual(
+        GIT_DIFF_MAX_BYTES,
+      );
+      expect(file.diff).not.toContain("\ufffd");
+      expect(transportedBytes).toBeLessThanOrEqual(GIT_DIFF_MAX_BYTES + 32);
+      expect(transportedBytes).toBeLessThan(file.patch_size);
+      await expect(
+        readDiffFile({
+          workspaceId: "workspace",
+          root,
+          params: { path: "missing.txt", kind: "untracked" },
+          shQuote,
+          runProcessWithCodeTimeout,
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("defers large automatic patches before transfer while explicit requests return content", async () => {
+    const root = await initRepository();
+    let transportedBytes = 0;
+    const runner: RunProcessWithCodeTimeout = async (argv, timeoutMs) => {
+      const result = await runProcessWithCodeTimeout(argv, timeoutMs);
+      transportedBytes = Buffer.byteLength(result.stdout);
+      return result;
+    };
+    const args = {
+      workspaceId: "workspace",
+      root,
+      shQuote,
+      runProcessWithCodeTimeout: runner,
+    };
+    try {
+      await writeFile(join(root, "long.txt"), `${"x".repeat(200_000)}\n`);
+      await git(root, "add", ".");
+      await git(root, "commit", "-m", "initial");
+      await writeFile(join(root, "long.txt"), `${"y".repeat(200_000)}\n`);
+      const summary = await readDiffSummary({
+        ...args,
+        workspace: {},
+        params: {},
+      });
+      expect(summary.entries).toMatchObject([
+        { file_size: 200_001, additions: 1, deletions: 1 },
+      ]);
+      const automatic = await readDiffFile({
+        ...args,
+        params: { path: "long.txt", automatic: true },
+      });
+      expect(automatic).toMatchObject({
+        diff: "",
+        deferred: true,
+        truncated: false,
+      });
+      expect(automatic.patch_size).toBeGreaterThan(LARGE_DIFF_PATCH_BYTES);
+      expect(transportedBytes).toBeLessThan(32);
+      const explicit = await readDiffFile({
+        ...args,
+        params: { path: "long.txt" },
+      });
+      expect(explicit.deferred).toBeUndefined();
+      expect(explicit.patch_size).toBe(automatic.patch_size);
+      expect(explicit.diff).toContain(`+${"y".repeat(200_000)}`);
+      await writeFile(join(root, "small.txt"), "small\n");
+      const small = await readDiffFile({
+        ...args,
+        params: { path: "small.txt", kind: "untracked", automatic: true },
+      });
+      expect(small.deferred).toBeUndefined();
+      expect(small.diff).toContain("+small");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -407,6 +620,7 @@ describe("last-step worktree snapshots", () => {
           status: "modified",
           additions: 1,
           deletions: 1,
+          file_size: 13,
         },
         {
           path: "untracked.txt",
@@ -415,6 +629,7 @@ describe("last-step worktree snapshots", () => {
           status: "added",
           additions: 1,
           deletions: 0,
+          file_size: 9,
         },
       ]);
 
@@ -756,7 +971,7 @@ describe("last-step worktree snapshots", () => {
         runProcessWithCodeTimeout: runner,
         lastStepBaselines: baselines,
       });
-      expect(catFileCalls).toBe(2);
+      expect(catFileCalls).toBe(3);
 
       catFileCalls = 0;
       const file = await readDiffFile({

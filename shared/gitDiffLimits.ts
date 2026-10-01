@@ -1,0 +1,1 @@
+export const LARGE_DIFF_PATCH_BYTES = 128 * 1024;

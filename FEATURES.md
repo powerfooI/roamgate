@@ -265,8 +265,14 @@ are marked unavailable.
   activity snapshot, not proof of agent ownership). See staged, unstaged,
   untracked, conflict, and branch-diff badges with added/deleted counts.
 - Use side-by-side/unified desktop views; mobile is unified. Search and syntax
-  highlighting work across diffs; images have previews. Large, truncated, and
-  generated diffs start collapsed.
+  highlighting work across loaded diffs; images have previews. Non-SSH
+  connections load nearby diffs as you scroll; SSH loads selected files on
+  demand. The file index jumps to a file without closing other local diffs.
+  Generated files marked by `linguist-generated` or `gitlab-generated`, files
+  of at least 256 KiB, and diffs with at least 1,000 changed lines or 128 KiB of
+  patch content start collapsed with a **View diff** action. Git attribute
+  overrides can unmark generated files. Skipped files remain in change totals;
+  patches exceeding 512 KiB are truncated and labeled.
 - File/folder context menus offer open, copy path, stage, unstage, mark resolved,
   discard unstaged, and delete untracked, plus repository-wide bulk actions.
   Destructive actions require confirmation. Status/content is rechecked to reject

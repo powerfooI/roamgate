@@ -1,6 +1,5 @@
 import { sshCommandArgv } from "../bridge/ssh-command";
 import {
-  GIT_DIFF_MAX_BYTES,
   GIT_DIFF_TIMEOUT_MS,
   PREVIEW_IMAGE_MAX_BYTES,
   PREVIEW_MAX_BYTES,
@@ -8,7 +7,7 @@ import {
 import { sanitizeExplorerPath } from "./file-paths";
 import { decodePreviewBuffer } from "./preview";
 import { imageMimeForPath } from "../../../shared/filePreview";
-import { statusLabel } from "./git-diff";
+import { readGitPatch, statusLabel } from "./git-diff";
 import type { GitDiffEntry, RunProcessWithCodeTimeout } from "./file-types";
 
 type Context = {
@@ -199,16 +198,22 @@ export async function readCommitFile(
   const args = base
     ? `diff --no-ext-diff --find-renames ${context.shQuote(base)} ${context.shQuote(sha)}`
     : `diff-tree --root --no-commit-id -r -p --no-ext-diff --find-renames ${context.shQuote(sha)}`;
-  const output = await git(
-    context,
-    `${args} -- ${paths.map(context.shQuote).join(" ")}`,
-  );
-  const truncated = Buffer.byteLength(output) > GIT_DIFF_MAX_BYTES;
+  const result = await readGitPatch({
+    ...context,
+    command: `${args} -- ${paths.map(context.shQuote).join(" ")}`,
+  });
+  if (result.code !== 0)
+    throw new Error(
+      (result.stderr || result.stdout || `git exited ${result.code}`)
+        .trim()
+        .slice(0, 1000),
+    );
   return {
     path,
     kind: "branch" as const,
-    diff: truncated ? output.slice(0, GIT_DIFF_MAX_BYTES) : output,
-    truncated,
+    diff: result.diff,
+    patch_size: result.patch_size,
+    truncated: result.truncated,
   };
 }
 

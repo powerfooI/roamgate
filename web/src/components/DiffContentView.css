@@ -57,6 +57,56 @@
   white-space: nowrap;
 }
 
+.diff-file-index {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 280px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.diff-file-index select {
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--viewer-border);
+  border-radius: 6px;
+  background: var(--viewer-content-bg);
+  color: var(--text);
+}
+
+.diff-content-view.is-mobile .diff-file-index {
+  flex: 1 1 100%;
+  max-width: 100%;
+  order: 3;
+}
+
+.diff-content-view.is-mobile .diff-file-index select {
+  flex: 1;
+}
+
+.diff-file-placeholder {
+  background: var(--diff-bg);
+}
+
+.pierre-diff-scroll.is-continuous {
+  overflow-anchor: none;
+}
+
+.diff-file-section-title {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.diff-skipped-state {
+  justify-content: space-between;
+  min-height: 48px;
+}
+
 .diff-content-back {
   flex: 0 0 auto;
   display: inline-flex;

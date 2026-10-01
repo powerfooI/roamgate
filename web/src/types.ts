@@ -194,6 +194,7 @@ export interface GitDiffEntry {
   deletions?: number;
   binary?: boolean;
   generated?: boolean;
+  file_size?: number;
   mtime_ms?: number;
   size?: number;
 }
@@ -216,6 +217,8 @@ export interface GitDiffFile {
   path: string;
   kind: GitDiffKind;
   diff: string;
+  patch_size?: number;
+  deferred?: boolean;
   truncated: boolean;
 }
 

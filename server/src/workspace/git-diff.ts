@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { LARGE_DIFF_PATCH_BYTES } from "../../../shared/gitDiffLimits";
 import { worktreeSnapshotCommand } from "./git-snapshot";
 import { sshCommandArgv } from "../bridge/ssh-command";
 import { collectWorktreeFingerprints } from "./git-actions";
@@ -9,6 +10,7 @@ import {
   GIT_UNTRACKED_NUMSTAT_CONCURRENCY,
 } from "./file-constants";
 import { sanitizeExplorerPath } from "./file-paths";
+import { trimIncompleteUtf8Tail } from "./preview";
 import type {
   GitDiffEntry,
   GitDiffKind,
@@ -280,19 +282,23 @@ function parseNumstat(output: string) {
 }
 
 export function parseGeneratedAttributes(output: string) {
-  const generatedPaths = new Set<string>();
+  const generatedPaths = new Map<string, boolean>();
   const fields = output.split("\0");
   for (let index = 0; index + 2 < fields.length; index += 3) {
     const path = fields[index] ?? "";
     const attribute = fields[index + 1] ?? "";
     const value = (fields[index + 2] ?? "").toLowerCase();
     if (
-      path &&
-      attribute === "linguist-generated" &&
-      (value === "set" || value === "true")
-    ) {
-      generatedPaths.add(path);
-    }
+      !path ||
+      !["linguist-generated", "gitlab-generated"].includes(attribute)
+    )
+      continue;
+    if (value === "unset" || value === "false") generatedPaths.set(path, false);
+    else if (
+      (value === "set" || value === "true") &&
+      generatedPaths.get(path) !== false
+    )
+      generatedPaths.set(path, true);
   }
   return generatedPaths;
 }
@@ -358,6 +364,61 @@ function runGitShellCommand({
     host ? sshCommandArgv(host, fullCommand) : ["sh", "-lc", fullCommand],
     timeoutMs,
   );
+}
+
+// Keep full patches out of bridge/SSH memory, including explicitly opened
+// oversized files. mktemp creates a private file and the trap removes it.
+export async function readGitPatch({
+  root,
+  command,
+  host,
+  shQuote,
+  runProcessWithCodeTimeout,
+  automatic = false,
+}: { root: string; command: string; automatic?: boolean } & GitCommandContext) {
+  const script = `
+patch_file=$(mktemp "\${TMPDIR:-/tmp}/roamgate-diff.XXXXXX") || exit 1
+trap 'rm -f "$patch_file"' 0
+trap 'exit 1' HUP INT TERM
+git -C ${shQuote(root)} -c core.quotepath=false ${command} >"$patch_file"
+git_code=$?
+case "$git_code" in 0|1) ;; *) exit "$git_code" ;; esac
+patch_size=$(wc -c <"$patch_file")
+printf '%s\n' "$patch_size"
+if [ ${automatic ? "1" : "0"} -eq 0 ] || [ "$patch_size" -lt ${LARGE_DIFF_PATCH_BYTES} ]; then
+  head -c ${GIT_DIFF_MAX_BYTES + 4} "$patch_file"
+fi
+exit "$git_code"
+`;
+  const result = await runProcessWithCodeTimeout(
+    host ? sshCommandArgv(host, script) : ["sh", "-lc", script],
+    GIT_DIFF_TIMEOUT_MS,
+  );
+  if (result.code !== 0 && result.code !== 1)
+    return {
+      ...result,
+      diff: "",
+      patch_size: 0,
+      truncated: false,
+      deferred: false,
+    };
+  const newline = result.stdout.indexOf("\n");
+  const patchSize = Number(result.stdout.slice(0, newline).trim());
+  if (newline < 0 || !Number.isSafeInteger(patchSize) || patchSize < 0)
+    throw new Error("invalid Git patch size");
+  const truncated = patchSize > GIT_DIFF_MAX_BYTES;
+  const prefix = Buffer.from(result.stdout.slice(newline + 1));
+  return {
+    ...result,
+    diff: truncated
+      ? trimIncompleteUtf8Tail(prefix.subarray(0, GIT_DIFF_MAX_BYTES)).toString(
+          "utf8",
+        )
+      : prefix.toString("utf8"),
+    patch_size: patchSize,
+    truncated,
+    deferred: automatic && patchSize >= LARGE_DIFF_PATCH_BYTES,
+  };
 }
 
 export async function snapshotWorktreeTree({
@@ -621,23 +682,89 @@ async function collectGeneratedPaths({
   shQuote: (value: string) => string;
   runProcessWithCodeTimeout: RunProcessWithCodeTimeout;
 }) {
-  const generatedPaths = new Set<string>();
+  const generatedPaths = new Map<string, boolean>();
   const paths = Array.from(new Set(entries.map((entry) => entry.path)));
   for (let index = 0; index < paths.length; index += GIT_ATTRIBUTE_BATCH_SIZE) {
     const batch = paths.slice(index, index + GIT_ATTRIBUTE_BATCH_SIZE);
     const result = await runGitShellCommand({
       root,
-      command: `check-attr -z linguist-generated -- ${batch.map(shQuote).join(" ")}`,
+      command: `check-attr -z linguist-generated gitlab-generated -- ${batch.map(shQuote).join(" ")}`,
       host,
       shQuote,
       runProcessWithCodeTimeout,
     });
     if (result.code !== 0) continue;
-    for (const path of parseGeneratedAttributes(result.stdout)) {
-      generatedPaths.add(path);
+    for (const [path, generated] of parseGeneratedAttributes(result.stdout)) {
+      generatedPaths.set(path, generated);
     }
   }
   return generatedPaths;
+}
+
+async function collectDiffFileSizes({
+  root,
+  diffs,
+  ...context
+}: {
+  root: string;
+  diffs: { kind: GitDiffKind; command: string }[];
+} & GitCommandContext) {
+  const blobsByEntry = new Map<string, string[]>();
+  await Promise.all(
+    diffs.map(async ({ kind, command }) => {
+      const result = await runGitShellCommand({
+        root,
+        command: `${command} --raw -z --no-abbrev`,
+        ...context,
+      });
+      if (result.code !== 0) return;
+      const fields = result.stdout.split("\0");
+      for (let index = 0; index < fields.length - 1; ) {
+        const header = (fields[index++] ?? "").split(" ");
+        const firstPath = fields[index++] ?? "";
+        const renamed = /^(R|C)/.test(header[4] ?? "");
+        const path = renamed ? (fields[index++] ?? "") : firstPath;
+        const blobs = header
+          .slice(2, 4)
+          .filter(
+            (id) =>
+              /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(id) && !/^0+$/.test(id),
+          );
+        if (!path || !blobs.length) continue;
+        blobsByEntry.set(`${kind}:${path}`, blobs);
+        if (kind === "unstaged") blobsByEntry.set(`conflicted:${path}`, blobs);
+      }
+    }),
+  );
+  const objectSizes = new Map<string, number>();
+  const objects = Array.from(new Set(Array.from(blobsByEntry.values()).flat()));
+  for (
+    let index = 0;
+    index < objects.length;
+    index += GIT_ATTRIBUTE_BATCH_SIZE
+  ) {
+    const batch = objects.slice(index, index + GIT_ATTRIBUTE_BATCH_SIZE);
+    const result = await runGitShellCommand({
+      root,
+      command: `cat-file --batch-check=${context.shQuote("%(objectname) %(objecttype) %(objectsize)")} <<'ROAMGATE_OBJECTS'\n${batch.join("\n")}\nROAMGATE_OBJECTS`,
+      ...context,
+    });
+    if (result.code !== 0) continue;
+    for (const line of result.stdout.split("\n")) {
+      const [id, type, rawSize] = line.trim().split(" ");
+      const size = Number(rawSize);
+      if (id && type === "blob" && Number.isSafeInteger(size) && size >= 0)
+        objectSizes.set(id, size);
+    }
+  }
+  const sizes = new Map<string, number>();
+  for (const [key, objects] of blobsByEntry) {
+    const knownSizes = objects.flatMap((id) =>
+      objectSizes.has(id) ? [objectSizes.get(id)!] : [],
+    );
+    if (knownSizes.length) sizes.set(key, Math.max(...knownSizes));
+  }
+  return sizes;
 }
 
 async function collectStats({
@@ -934,7 +1061,34 @@ export async function readDiffSummary({
           entries.map((entry) => entry.path),
         )
       : Promise.resolve(new Map<string, { size: number; mtime_ms: number }>());
-  const [stats, generatedPaths, fingerprints] = await Promise.all([
+  const sizeDiffs =
+    mode === "working"
+      ? [
+          {
+            kind: "staged" as const,
+            command: "diff --cached --no-ext-diff --find-renames",
+          },
+          {
+            kind: "unstaged" as const,
+            command: "diff --no-ext-diff --find-renames",
+          },
+        ]
+      : mode === "branch-main"
+        ? [
+            {
+              kind: "branch" as const,
+              command: `diff --no-ext-diff --find-renames ${shQuote(base ?? "main")}...HEAD`,
+            },
+          ]
+        : lastStepRange
+          ? [
+              {
+                kind: "last-step" as const,
+                command: `diff --no-ext-diff --find-renames ${shQuote(lastStepRange.baseline)} ${shQuote(lastStepRange.current)}`,
+              },
+            ]
+          : [];
+  const [stats, generatedPaths, fingerprints, fileSizes] = await Promise.all([
     statsTask,
     collectGeneratedPaths({
       root,
@@ -944,18 +1098,33 @@ export async function readDiffSummary({
       runProcessWithCodeTimeout,
     }),
     fingerprintTask,
+    collectDiffFileSizes({
+      root,
+      diffs: sizeDiffs,
+      host,
+      shQuote,
+      runProcessWithCodeTimeout,
+    }),
   ]);
   const entriesWithStats = entries.map((entry) => {
     const fingerprint = fingerprints.get(entry.path);
+    const blobSize = fileSizes.get(entryKeyForStats(entry));
+    const worktreeSize =
+      entry.kind !== "staged" ? fingerprint?.size : undefined;
+    const fileSize =
+      blobSize === undefined && worktreeSize === undefined
+        ? undefined
+        : Math.max(blobSize ?? 0, worktreeSize ?? 0);
     const entryWithStats = {
       ...entry,
       ...(stats.get(entryKeyForStats(entry)) ?? {}),
       ...(fingerprint
         ? { mtime_ms: fingerprint.mtime_ms, size: fingerprint.size }
         : {}),
+      ...(fileSize !== undefined ? { file_size: fileSize } : {}),
     };
     return generatedPaths.has(entry.path)
-      ? { ...entryWithStats, generated: true }
+      ? { ...entryWithStats, generated: generatedPaths.get(entry.path) }
       : entryWithStats;
   });
   const lastStepSnapshotId =
@@ -1056,11 +1225,20 @@ export async function readDiffFile({
     gitCommand = workingDiffFileCommand(kind, path, pathspec, shQuote);
   }
 
-  let result = { code: 0, stdout: "", stderr: "" };
+  let result = {
+    code: 0,
+    stdout: "",
+    stderr: "",
+    diff: "",
+    patch_size: 0,
+    truncated: false,
+    deferred: false,
+  };
   if (gitCommand) {
-    result = await runGitShellCommand({
+    result = await readGitPatch({
       root,
       command: gitCommand,
+      automatic: params.automatic === true,
       host,
       shQuote,
       runProcessWithCodeTimeout,
@@ -1068,7 +1246,8 @@ export async function readDiffFile({
   }
   const diffExitOk =
     kind === "untracked"
-      ? result.code === 0 || result.code === 1
+      ? result.code === 0 ||
+        (result.code === 1 && (result.patch_size > 0 || !result.stderr.trim()))
       : result.code === 0;
   if (!diffExitOk) {
     if (mode === "last-step" && snapshotId && lastStepRange) {
@@ -1099,16 +1278,15 @@ export async function readDiffFile({
         .slice(0, 1000),
     );
   }
-  const truncated = Buffer.byteLength(result.stdout) > GIT_DIFF_MAX_BYTES;
   return {
     workspace_id: workspaceId,
     root,
     path,
     kind,
-    diff: truncated
-      ? result.stdout.slice(0, GIT_DIFF_MAX_BYTES)
-      : result.stdout,
-    truncated,
+    diff: result.diff,
+    patch_size: result.patch_size,
+    truncated: result.truncated,
+    ...(result.deferred ? { deferred: true } : {}),
   };
 }
 

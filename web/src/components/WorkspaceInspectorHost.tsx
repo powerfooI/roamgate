@@ -882,6 +882,7 @@ export function WorkspaceInspectorHost({
                     entries={diffSelection.entries}
                     files={diffSelection.files}
                     fileErrors={diffSelection.fileErrors}
+                    loadingKeys={diffSelection.loadingKeys}
                     summaryLoading={diffSelection.summaryLoading}
                     mobile={compact}
                     resourceKey={contentResourceKey}
@@ -892,6 +893,12 @@ export function WorkspaceInspectorHost({
                     onEditAnnotation={onEditAnnotation}
                     onSelectFile={(target) =>
                       diffViewerRef.current?.selectEntry(target)
+                    }
+                    onNearbyFilesChange={(targets) =>
+                      diffViewerRef.current?.loadNearbyEntries(targets)
+                    }
+                    onVisibleFileChange={(target) =>
+                      diffViewerRef.current?.highlightEntry(target)
                     }
                     onOpenFile={onOpenDiffFile}
                     backAction={

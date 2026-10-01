@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   diffAutoCollapseInfo,
   LARGE_DIFF_CHANGED_LINES,
+  LARGE_DIFF_FILE_BYTES,
+  LARGE_DIFF_PATCH_BYTES,
 } from "./diffAutoCollapse";
 import type { GitDiffEntry, GitDiffFile } from "../types";
 
@@ -52,6 +54,34 @@ describe("diffAutoCollapseInfo", () => {
     });
     expect(
       diffAutoCollapseInfo(entry({ additions: 20, deletions: 10 }), file()),
+    ).toBeNull();
+  });
+
+  test("skips large files and single-line patches before expensive rendering", () => {
+    expect(diffAutoCollapseInfo(entry(), file({ deferred: true }))).toEqual({
+      reason: "large",
+      label: "large diff",
+    });
+    expect(
+      diffAutoCollapseInfo(
+        entry({ additions: 1, file_size: LARGE_DIFF_FILE_BYTES }),
+      ),
+    ).toEqual({ reason: "large", label: "large file" });
+    expect(
+      diffAutoCollapseInfo(
+        entry({ additions: 1 }),
+        file({ patch_size: LARGE_DIFF_PATCH_BYTES }),
+      ),
+    ).toEqual({ reason: "large", label: "large diff" });
+    expect(
+      diffAutoCollapseInfo(
+        entry({ file_size: LARGE_DIFF_FILE_BYTES - 1 }),
+        file({ patch_size: LARGE_DIFF_PATCH_BYTES - 1 }),
+      ),
+    ).toBeNull();
+    // Working-tree size is a fingerprint, not the size of every compared blob.
+    expect(
+      diffAutoCollapseInfo(entry({ size: LARGE_DIFF_FILE_BYTES })),
     ).toBeNull();
   });
 });

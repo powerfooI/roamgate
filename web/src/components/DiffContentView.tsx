@@ -29,6 +29,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -50,6 +51,7 @@ import type {
   GitDiffKind,
 } from "../types";
 import { connectionClientScopeKey } from "../useConnectionClient";
+import { useStoreSelector } from "../store";
 import { gitDiffCode, gitDiffCodeLabel } from "../gitDiffStatus";
 import { requestFilePreview } from "./fileExplorerResources";
 import {
@@ -64,6 +66,9 @@ import {
   readDiffCollapseState,
   writeDiffCollapseState,
   expandDiffEntryOnActivate,
+  diffSectionCollapsed,
+  nearestDiffEntryKeys,
+  visibleDiffEntryKey,
 } from "./diffContentState";
 import { diffSyntaxLanguageForPath } from "./diffSyntaxHighlighting";
 import "./DiffContentView.css";
@@ -299,6 +304,10 @@ export function diffContentEntries(
   return entries.length ? entries : entry ? [entry] : [];
 }
 
+export function diffRenderableFile(file: GitDiffFile | null) {
+  return file?.deferred ? null : file;
+}
+
 export function isImageDiff(path: string, diff: string) {
   return imageMimeForPath(path) !== null && (!diff || isBinaryDiffText(diff));
 }
@@ -447,6 +456,7 @@ function RawPatch({ patch }: { patch: string }) {
 type DiffFileSectionProps = {
   section: DiffSection;
   loading: boolean;
+  nearby: boolean;
   imagePreviewState?: ImagePreviewState;
   options: PierreDiffOptions;
   currentSearchMatch: boolean;
@@ -465,6 +475,7 @@ type DiffFileSectionProps = {
 const DiffFileSection = memo(function DiffFileSection({
   section,
   loading,
+  nearby,
   imagePreviewState,
   options,
   currentSearchMatch,
@@ -479,6 +490,34 @@ const DiffFileSection = memo(function DiffFileSection({
   onRequestAnnotation,
   onEditAnnotation,
 }: DiffFileSectionProps) {
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const measuredHeightRef = useRef<number | null>(null);
+  const placeholderHeight =
+    measuredHeightRef.current ??
+    Math.max(
+      120,
+      ((options.diffStyle === "split"
+        ? Math.max(section.entry.additions ?? 0, section.entry.deletions ?? 0)
+        : (section.entry.additions ?? 0) + (section.entry.deletions ?? 0)) +
+        8) *
+        20,
+    );
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body || !section.file || section.collapsed) return;
+    const measure = () => {
+      if (!body.isConnected) return;
+      const height = body.getBoundingClientRect().height;
+      if (height > 0) measuredHeightRef.current = height;
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    return () => {
+      measure();
+      observer.disconnect();
+    };
+  }, [nearby, section.collapsed, section.file]);
   const pointerPositionRef = useRef({ x: 0, y: 0 });
   const [selectedLines, setSelectedLines] = useState<SelectedLineRange | null>(
     null,
@@ -541,14 +580,10 @@ const DiffFileSection = memo(function DiffFileSection({
     [annotations],
   );
   const toggle = () => {
-    if (section.active) {
-      onToggle(section.key, section.collapsed);
-      return;
-    }
-    onToggle(section.key, true);
-    onSelectFile?.(section.entry);
+    onToggle(section.key, section.collapsed);
+    if (section.collapsed && (!section.file || !section.active))
+      onSelectFile?.(section.entry);
   };
-  const canToggle = section.active || !!onSelectFile;
 
   const statusCode = gitDiffCode(section.entry);
   const metaNote = [
@@ -578,7 +613,6 @@ const DiffFileSection = memo(function DiffFileSection({
               type="button"
               className="diff-file-collapse"
               onClick={toggle}
-              disabled={!section.active && !onSelectFile}
               aria-expanded={!section.collapsed}
               aria-label={`${section.collapsed ? "Expand" : "Collapse"} ${section.entry.path}`}
               title={section.collapsed ? "Expand" : "Collapse"}
@@ -590,22 +624,11 @@ const DiffFileSection = memo(function DiffFileSection({
               )}
             </button>
           )}
-          <div
-            className={`diff-file-section-title ${canToggle ? "is-toggle" : ""}`}
-            onClick={canToggle ? toggle : undefined}
-            role={canToggle ? "button" : undefined}
-            tabIndex={canToggle ? 0 : undefined}
-            aria-expanded={canToggle ? !section.collapsed : undefined}
-            onKeyDown={
-              canToggle
-                ? (e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      toggle();
-                    }
-                  }
-                : undefined
-            }
+          <button
+            type="button"
+            className="diff-file-section-title is-toggle"
+            onClick={toggle}
+            aria-expanded={!section.collapsed}
           >
             <strong>{section.entry.path}</strong>
             <span
@@ -619,10 +642,11 @@ const DiffFileSection = memo(function DiffFileSection({
             {metaNote ? (
               <span className="diff-file-section-meta">{metaNote}</span>
             ) : null}
-          </div>
+          </button>
           <button
             type="button"
             className="diff-file-open"
+            aria-label={openFileLabel}
             onClick={() => onOpenFile?.(section.entry)}
             disabled={!onOpenFile}
           >
@@ -631,8 +655,28 @@ const DiffFileSection = memo(function DiffFileSection({
           </button>
         </header>
       )}
-      {section.collapsed ? null : (
-        <>
+      {section.collapsed && section.autoCollapse ? (
+        <div className="diff-content-state diff-skipped-state">
+          <span>{section.autoCollapse.label}; diff skipped.</span>
+          <button type="button" onClick={toggle}>
+            View diff
+          </button>
+        </div>
+      ) : null}
+      {/* Pierre virtualizes cached text itself; keep its measured row heights. */}
+      {section.collapsed ? null : !nearby &&
+        (!section.file || section.imagePreview) ? (
+        <div
+          className="diff-file-placeholder"
+          style={{ height: placeholderHeight }}
+          aria-hidden="true"
+        />
+      ) : (
+        <div
+          ref={bodyRef}
+          className="diff-file-section-body"
+          style={!section.file ? { minHeight: placeholderHeight } : undefined}
+        >
           {mobile ? (
             <div className="diff-file-path-banner" title={section.entry.path}>
               {section.entry.path}
@@ -716,7 +760,7 @@ const DiffFileSection = memo(function DiffFileSection({
               </DiffRenderBoundary>
             </div>
           ) : null}
-        </>
+        </div>
       )}
     </article>
   );
@@ -738,6 +782,7 @@ function areDiffFileSectionPropsEqual(
       next.section.autoCollapse?.reason &&
     previous.section.autoCollapse?.label === next.section.autoCollapse?.label &&
     previous.loading === next.loading &&
+    previous.nearby === next.nearby &&
     previous.imagePreviewState === next.imagePreviewState &&
     previous.options === next.options &&
     previous.currentSearchMatch === next.currentSearchMatch &&
@@ -763,12 +808,15 @@ export function DiffContentView({
   entries = [],
   files = {},
   fileErrors = {},
+  loadingKeys = [],
   summaryLoading = false,
   mobile = false,
   resourceKey = "default",
   connectionClient,
   annotations = [],
   onSelectFile,
+  onNearbyFilesChange,
+  onVisibleFileChange,
   onOpenFile,
   openFileLabel = "Open in Files",
   loadImagePreview,
@@ -786,12 +834,15 @@ export function DiffContentView({
   entries?: GitDiffEntry[];
   files?: Record<string, GitDiffFile>;
   fileErrors?: Record<string, string>;
+  loadingKeys?: readonly string[];
   summaryLoading?: boolean;
   mobile?: boolean;
   resourceKey?: string;
   connectionClient: ConnectionClient;
   annotations?: readonly ReviewAnnotation[];
   onSelectFile?: (entry: GitDiffEntry) => void;
+  onNearbyFilesChange?: (entries: GitDiffEntry[]) => void;
+  onVisibleFileChange?: (entry: GitDiffEntry | null) => void;
   onOpenFile?: (entry: GitDiffEntry) => void;
   openFileLabel?: string;
   loadImagePreview?: (path: string) => Promise<FilePreview>;
@@ -809,6 +860,57 @@ export function DiffContentView({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const selectFileRef = useRef(onSelectFile);
   const openFileRef = useRef(onOpenFile);
+  const nearbyFilesChangeRef = useRef(onNearbyFilesChange);
+  nearbyFilesChangeRef.current = onNearbyFilesChange;
+  const visibleFileChangeRef = useRef(onVisibleFileChange);
+  visibleFileChangeRef.current = onVisibleFileChange;
+  const lastVisibleEntryKeyRef = useRef<string | null>(null);
+  const connectionType = useStoreSelector(
+    (state) =>
+      state.connections.find(
+        (connection) => connection.id === connectionClient.connectionId,
+      )?.type,
+  );
+  const continuous = !embedded && connectionType !== "ssh";
+  const [nearbyKeys, setNearbyKeys] = useState<readonly string[]>([]);
+  const updateNearbyRef = useRef<(() => void) | null>(null);
+  const scrollAnchorRef = useRef<{
+    key: string;
+    offset: number;
+    top: number;
+  } | null>(null);
+  const userScrollUntilRef = useRef(0);
+  const scrollbarPointerActiveRef = useRef(false);
+  const lastNavigationRef = useRef<{ key: string; revision: number } | null>(
+    null,
+  );
+  const lastActivationRef = useRef<{ key: string; revision: number } | null>(
+    null,
+  );
+  const restoreScrollAnchor = useCallback(() => {
+    const anchor = scrollAnchorRef.current;
+    if (!continuous || !anchor || scrollbarPointerActiveRef.current) return;
+    const scroller = sectionRef.current?.querySelector<HTMLElement>(
+      ".pierre-diff-scroll",
+    );
+    const article = Array.from(
+      scroller?.querySelectorAll<HTMLElement>("[data-diff-entry-key]") ?? [],
+    ).find((candidate) => candidate.dataset.diffEntryKey === anchor.key);
+    if (scroller && article) {
+      const top =
+        article.getBoundingClientRect().top -
+        scroller.getBoundingClientRect().top +
+        scroller.scrollTop;
+      const userScrolling = performance.now() <= userScrollUntilRef.current;
+      // During a gesture compensate only layout changes, preserving native movement.
+      const adjustment = userScrolling
+        ? top - anchor.top
+        : top - scroller.scrollTop + anchor.offset;
+      if (userScrolling) anchor.offset = scroller.scrollTop - anchor.top;
+      anchor.top = top;
+      if (Math.abs(adjustment) > 0.5) scroller.scrollTop += adjustment;
+    }
+  }, [continuous]);
   const [viewMode, setViewMode] = useState<DiffViewMode>(() =>
     loadDiffViewMode(),
   );
@@ -837,12 +939,29 @@ export function DiffContentView({
   const activeEntryKey = entry ? diffEntryKey(entry) : "";
   useEffect(() => {
     if (!activeEntryKey) return;
+    const previous = lastActivationRef.current;
+    if (
+      previous?.key === activeEntryKey &&
+      previous.revision === selectionRevision
+    )
+      return;
+    lastActivationRef.current = {
+      key: activeEntryKey,
+      revision: selectionRevision,
+    };
+    const explicit = selectionRevision > (previous?.revision ?? 0);
     setManualCollapseStates((current) => {
-      const next = expandDiffEntryOnActivate(current, activeEntryKey);
+      if (!explicit) return current;
+      const next = expandDiffEntryOnActivate(
+        current,
+        activeEntryKey,
+        diffAutoCollapseInfo(entry!, file) !== null,
+        explicit,
+      );
       if (next !== current) writeDiffCollapseState(resourceKey, next);
       return next;
     });
-  }, [activeEntryKey, resourceKey, selectionRevision]);
+  }, [activeEntryKey, entry, file, resourceKey, selectionRevision]);
   const filesByKey = useMemo(() => {
     const merged = { ...files };
     if (entry && file) merged[diffEntryKey(entry)] = file;
@@ -869,8 +988,10 @@ export function DiffContentView({
       visibleEntries.map((visibleEntry) => {
         const key = diffEntryKey(visibleEntry);
         const diffFile = filesByKey[key] ?? null;
+        const renderableFile = diffRenderableFile(diffFile);
         const imagePreview =
-          !!diffFile && isImageDiff(visibleEntry.path, diffFile.diff);
+          !!renderableFile &&
+          isImageDiff(visibleEntry.path, renderableFile.diff);
         const autoCollapse = diffAutoCollapseInfo(visibleEntry, diffFile);
         const defaultCollapsed = autoCollapse !== null;
         const active = key === activeEntryKey;
@@ -878,17 +999,22 @@ export function DiffContentView({
           key,
           active,
           entry: visibleEntry,
-          file: diffFile,
+          file: renderableFile,
           imagePreview,
           autoCollapse,
-          collapsed:
-            !embedded &&
-            (!active || (manualCollapseStates.get(key) ?? defaultCollapsed)),
+          collapsed: diffSectionCollapsed({
+            continuous,
+            embedded,
+            active,
+            manual: manualCollapseStates.get(key),
+            autoCollapsed: defaultCollapsed,
+          }),
           error: fileErrors[key] ?? null,
         };
       }),
     [
       activeEntryKey,
+      continuous,
       embedded,
       fileErrors,
       filesByKey,
@@ -896,16 +1022,16 @@ export function DiffContentView({
       visibleEntries,
     ],
   );
-  const activeSection = renderedSections.find((section) => section.active);
-  const renderedKey = `${activeEntryKey}:${activeSection?.file?.diff.length ?? 0}:${renderedSections.length}`;
-  const hasExpandedTextDiff = renderedSections.some(
-    (section) =>
-      !section.collapsed && !!section.file?.diff && !section.imagePreview,
-  );
+  const renderedSectionsRef = useRef(renderedSections);
+  renderedSectionsRef.current = renderedSections;
+  const nearbyKeySet = useMemo(() => new Set(nearbyKeys), [nearbyKeys]);
   const imagePreviewTargets = useMemo(
     () =>
       renderedSections.flatMap((section) =>
-        !section.collapsed && section.imagePreview && section.file
+        !section.collapsed &&
+        (!continuous || nearbyKeySet.has(section.key)) &&
+        section.imagePreview &&
+        section.file
           ? [
               {
                 key: imagePreviewKey(connectionClient, section.file),
@@ -914,7 +1040,7 @@ export function DiffContentView({
             ]
           : [],
       ),
-    [connectionClient, renderedSections],
+    [connectionClient, continuous, nearbyKeySet, renderedSections],
   );
   const searchResult = useMemo(
     () => diffSearchGroups(visibleEntries, filesByKey, deferredSearchQuery),
@@ -1020,6 +1146,7 @@ export function DiffContentView({
           ? deepQuerySelector(activeArticle, selectors)
           : null;
         if (line) {
+          userScrollUntilRef.current = performance.now() + 150;
           line.scrollIntoView({ behavior: "smooth", block: "center" });
           return;
         }
@@ -1029,6 +1156,7 @@ export function DiffContentView({
             ".pierre-diff-scroll",
           );
           if (scroller) {
+            userScrollUntilRef.current = performance.now() + 150;
             const targetLine = target.newLine ?? target.oldLine ?? 1;
             const maxTargetLine = Math.max(
               1,
@@ -1074,8 +1202,12 @@ export function DiffContentView({
       tokenizeMaxLength: 250_000,
       preferredHighlighter: "shiki-wasm",
       unsafeCSS: DIFF_SELECTION_CSS,
+      onPostRender: () => {
+        if (performance.now() <= userScrollUntilRef.current)
+          restoreScrollAnchor();
+      },
     }),
-    [effectiveViewMode, theme, wrapEnabled],
+    [effectiveViewMode, restoreScrollAnchor, theme, wrapEnabled],
   );
 
   useEffect(() => {
@@ -1176,16 +1308,221 @@ export function DiffContentView({
   ]);
 
   useEffect(() => {
+    if (!continuous || !visibleEntries.length) {
+      setNearbyKeys([]);
+      nearbyFilesChangeRef.current?.([]);
+      lastVisibleEntryKeyRef.current = null;
+      visibleFileChangeRef.current?.(null);
+      return;
+    }
+    const scroller = sectionRef.current?.querySelector<HTMLElement>(
+      ".pierre-diff-scroll",
+    );
+    if (!scroller) return;
+    const candidates = new Set<HTMLElement>();
+    const articles = Array.from(
+      scroller.querySelectorAll<HTMLElement>("[data-diff-entry-key]"),
+    );
+    let frame = 0;
+    const update = () => {
+      if (
+        !scrollbarPointerActiveRef.current &&
+        performance.now() > userScrollUntilRef.current
+      )
+        restoreScrollAnchor();
+      const viewport = scroller.getBoundingClientRect();
+      const sectionsByKey = new Map(
+        renderedSectionsRef.current.map((section) => [section.key, section]),
+      );
+      const positions = [...candidates].flatMap((article) => {
+        const key = article.dataset.diffEntryKey!;
+        const section = sectionsByKey.get(key);
+        if (!section) return [];
+        const bounds = article.getBoundingClientRect();
+        return [{ key, top: bounds.top, bottom: bounds.bottom }];
+      });
+      const visibleKey = visibleDiffEntryKey(positions, viewport);
+      if (lastVisibleEntryKeyRef.current !== visibleKey) {
+        lastVisibleEntryKeyRef.current = visibleKey;
+        visibleFileChangeRef.current?.(
+          visibleKey ? (sectionsByKey.get(visibleKey)?.entry ?? null) : null,
+        );
+      }
+      const keys = nearestDiffEntryKeys(
+        positions.filter(
+          (position) => !sectionsByKey.get(position.key)?.collapsed,
+        ),
+        viewport,
+      );
+      setNearbyKeys((current) =>
+        current.length === keys.length &&
+        current.every((key, index) => key === keys[index])
+          ? current
+          : keys,
+      );
+      nearbyFilesChangeRef.current?.(
+        keys.flatMap((key) => {
+          const section = sectionsByKey.get(key);
+          return section ? [section.entry] : [];
+        }),
+      );
+    };
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        update();
+      });
+    };
+    updateNearbyRef.current = schedule;
+    const observer = new IntersectionObserver(
+      (changes) => {
+        for (const change of changes) {
+          if (change.isIntersecting)
+            candidates.add(change.target as HTMLElement);
+          else candidates.delete(change.target as HTMLElement);
+        }
+        schedule();
+      },
+      { root: scroller, rootMargin: "1000px 0px" },
+    );
+    for (const article of articles) observer.observe(article);
+    const rememberUserScroll = () => {
+      userScrollUntilRef.current = performance.now() + 150;
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target === scroller) {
+        scrollbarPointerActiveRef.current = true;
+        rememberUserScroll();
+      }
+    };
+    const onPointerEnd = () => {
+      if (!scrollbarPointerActiveRef.current) return;
+      scrollbarPointerActiveRef.current = false;
+      rememberUserScroll();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        [
+          "ArrowUp",
+          "ArrowDown",
+          "PageUp",
+          "PageDown",
+          "Home",
+          "End",
+          " ",
+        ].includes(event.key) &&
+        !isEditableSearchTarget(event.target)
+      )
+        rememberUserScroll();
+    };
+    const onScroll = () => {
+      if (
+        scrollAnchorRef.current &&
+        !scrollbarPointerActiveRef.current &&
+        performance.now() > userScrollUntilRef.current
+      ) {
+        // Pierre compensates for line-height changes; keep our file anchor until user input.
+        schedule();
+        return;
+      }
+      rememberUserScroll();
+      const viewport = scroller.getBoundingClientRect();
+      const atViewportTop = (article: HTMLElement) => {
+        const bounds = article.getBoundingClientRect();
+        return bounds.top <= viewport.top && bounds.bottom > viewport.top;
+      };
+      const first =
+        [...candidates].find(atViewportTop) ?? articles.find(atViewportTop);
+      if (first)
+        scrollAnchorRef.current = {
+          key: first.dataset.diffEntryKey!,
+          offset: viewport.top - first.getBoundingClientRect().top,
+          top:
+            first.getBoundingClientRect().top -
+            viewport.top +
+            scroller.scrollTop,
+        };
+      schedule();
+    };
+    const resizeObserver = new ResizeObserver(() => {
+      restoreScrollAnchor();
+      schedule();
+    });
+    const content = scroller.querySelector<HTMLElement>(
+      ".pierre-diff-scroll-content",
+    );
+    if (content) resizeObserver.observe(content);
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    scroller.addEventListener("wheel", rememberUserScroll, { passive: true });
+    scroller.addEventListener("touchmove", rememberUserScroll, {
+      passive: true,
+    });
+    scroller.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointerup", onPointerEnd);
+    window.addEventListener("pointercancel", onPointerEnd);
+    scroller.addEventListener("keydown", onKeyDown);
+    return () => {
+      observer.disconnect();
+      resizeObserver.disconnect();
+      scroller.removeEventListener("scroll", onScroll);
+      scroller.removeEventListener("wheel", rememberUserScroll);
+      scroller.removeEventListener("touchmove", rememberUserScroll);
+      scroller.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointerup", onPointerEnd);
+      window.removeEventListener("pointercancel", onPointerEnd);
+      scrollbarPointerActiveRef.current = false;
+      scroller.removeEventListener("keydown", onKeyDown);
+      if (frame) cancelAnimationFrame(frame);
+      updateNearbyRef.current = null;
+      lastVisibleEntryKeyRef.current = null;
+    };
+  }, [continuous, restoreScrollAnchor, visibleEntries]);
+
+  useEffect(() => {
+    updateNearbyRef.current?.();
+  }, [renderedSections]);
+
+  useLayoutEffect(
+    () => restoreScrollAnchor(),
+    [filesByKey, restoreScrollAnchor],
+  );
+
+  useEffect(() => {
     if (!activeEntryKey || !sectionRef.current) return;
-    requestAnimationFrame(() => {
+    const previous = lastNavigationRef.current;
+    if (
+      previous?.key === activeEntryKey &&
+      previous.revision === selectionRevision
+    )
+      return;
+    lastNavigationRef.current = {
+      key: activeEntryKey,
+      revision: selectionRevision,
+    };
+    scrollAnchorRef.current = null;
+    userScrollUntilRef.current = 0;
+    const frame = requestAnimationFrame(() => {
       const target = Array.from(
         sectionRef.current?.querySelectorAll<HTMLElement>(
           "[data-diff-entry-key]",
         ) ?? [],
       ).find((element) => element.dataset.diffEntryKey === activeEntryKey);
+      const scroller = target?.closest<HTMLElement>(".pierre-diff-scroll");
+      if (target && scroller)
+        scrollAnchorRef.current = {
+          key: activeEntryKey,
+          offset: 0,
+          top:
+            target.getBoundingClientRect().top -
+            scroller.getBoundingClientRect().top +
+            scroller.scrollTop,
+        };
       target?.scrollIntoView({ block: "start" });
+      updateNearbyRef.current?.();
     });
-  }, [activeEntryKey, renderedKey]);
+    return () => cancelAnimationFrame(frame);
+  }, [activeEntryKey, selectionRevision]);
 
   useEffect(() => {
     setSearchIndex(searchMatchCount ? 0 : -1);
@@ -1208,6 +1545,7 @@ export function DiffContentView({
       ).find(
         (element) => element.dataset.diffEntryKey === currentSearchEntryKey,
       );
+      userScrollUntilRef.current = performance.now() + 150;
       target?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
   }, [currentSearchEntryKey, resourceKey]);
@@ -1232,6 +1570,9 @@ export function DiffContentView({
 
   const toggleSectionCollapsed = useCallback(
     (key: string, collapsed: boolean) => {
+      if (!collapsed && scrollAnchorRef.current?.key === key) {
+        scrollAnchorRef.current.offset = 0;
+      }
       setManualCollapseStates((current) => {
         const next = new Map(current);
         next.set(key, !collapsed);
@@ -1262,14 +1603,19 @@ export function DiffContentView({
 
   const diffList = visibleEntries.length ? (
     <Virtualizer
-      className={`pierre-diff-scroll ${mobile ? "is-compact" : ""}`}
+      className={`pierre-diff-scroll ${mobile ? "is-compact" : ""} ${continuous ? "is-continuous" : ""}`}
       contentClassName="pierre-diff-scroll-content"
     >
       {renderedSections.map((section) => (
         <DiffFileSection
           key={section.key}
           section={section}
-          loading={loading && activeEntryKey === section.key && !section.file}
+          loading={
+            !section.file &&
+            (loadingKeys.includes(section.key) ||
+              (loading && activeEntryKey === section.key))
+          }
+          nearby={!continuous || nearbyKeySet.has(section.key)}
           imagePreviewState={
             section.file
               ? imagePreviews[imagePreviewKey(connectionClient, section.file)]
@@ -1343,6 +1689,32 @@ export function DiffContentView({
             </strong>
           </div>
         )}
+        {!embedded && visibleEntries.length > 1 ? (
+          <label className="diff-file-index">
+            <span>File</span>
+            <select
+              aria-label="Jump to changed file"
+              value={activeEntryKey}
+              onChange={(event) => {
+                const target = visibleEntries.find(
+                  (candidate) =>
+                    diffEntryKey(candidate) === event.currentTarget.value,
+                );
+                if (target) handleSelectFile(target);
+              }}
+            >
+              {!activeEntryKey ? <option value="">Choose a file</option> : null}
+              {visibleEntries.map((candidate) => (
+                <option
+                  key={diffEntryKey(candidate)}
+                  value={diffEntryKey(candidate)}
+                >
+                  {candidate.path} ({candidate.kind})
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         {mobile ? (
           <button
             type="button"
@@ -1495,7 +1867,7 @@ export function DiffContentView({
       {!summaryLoading && !error && !visibleEntries.length ? (
         <div className="diff-content-state">No changed files.</div>
       ) : null}
-      {hasExpandedTextDiff && diffList ? (
+      {diffList ? (
         <WorkerPoolContextProvider
           poolOptions={DIFF_WORKER_POOL_OPTIONS}
           highlighterOptions={DIFF_HIGHLIGHTER_OPTIONS}

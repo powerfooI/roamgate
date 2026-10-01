@@ -1,6 +1,10 @@
 import type { GitDiffEntry, GitDiffFile } from "../types";
+import { LARGE_DIFF_PATCH_BYTES } from "../../../shared/gitDiffLimits";
+
+export { LARGE_DIFF_PATCH_BYTES } from "../../../shared/gitDiffLimits";
 
 export const LARGE_DIFF_CHANGED_LINES = 1000;
+export const LARGE_DIFF_FILE_BYTES = 256 * 1024;
 
 export type DiffAutoCollapseInfo = {
   reason: "generated" | "large" | "truncated";
@@ -27,6 +31,12 @@ export function diffAutoCollapseInfo(
       reason: "large",
       label: `${changedLines.toLocaleString("en-US")} changed lines`,
     };
+  }
+  if ((entry.file_size ?? 0) >= LARGE_DIFF_FILE_BYTES) {
+    return { reason: "large", label: "large file" };
+  }
+  if (file?.deferred || (file?.patch_size ?? 0) >= LARGE_DIFF_PATCH_BYTES) {
+    return { reason: "large", label: "large diff" };
   }
   return null;
 }

@@ -78,6 +78,7 @@ export type GitDiffEntry = {
   deletions?: number;
   binary?: boolean;
   generated?: boolean;
+  file_size?: number;
   mtime_ms?: number;
   size?: number;
 };

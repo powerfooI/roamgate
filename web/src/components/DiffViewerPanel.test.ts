@@ -1,6 +1,12 @@
-import { describe, expect, test } from "bun:test";
-import type { ConnectionClient } from "../api";
+import { describe, expect, spyOn, test } from "bun:test";
+import { Window } from "happy-dom";
+import { act, createElement, createRef } from "react";
+import { createRoot } from "react-dom/client";
+import { bridge, type ConnectionClient } from "../api";
+import { store } from "../store";
+import type { GitDiffEntry, GitDiffFile } from "../types";
 import {
+  DiffViewerPanel,
   beginDiffFileSelection,
   buildActiveDiffSelection,
   clearDiffViewerResourceCache,
@@ -12,7 +18,368 @@ import {
   mergeResolvedDiffFile,
   prefetchDiffFilesInBatches,
   prefetchDiffViewerWorkspace,
+  type ActiveDiffSelection,
+  type DiffViewerPanelHandle,
 } from "./DiffViewerPanel";
+
+if (process.env.ROAMGATE_DIFF_PANEL_DOM_TEST !== "1") {
+  test("diff panel refresh regressions in an isolated runtime", async () => {
+    const child = Bun.spawn([process.execPath, "test", import.meta.path], {
+      env: { ...process.env, ROAMGATE_DIFF_PANEL_DOM_TEST: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
+    expect(code).toBe(0);
+  }, 15_000);
+} else {
+  test("refresh retains bounded display while reloading and retires replaced or removed patches", async () => {
+    const browser = new Window({ url: "http://localhost" });
+    const originals = new Map<string, PropertyDescriptor | undefined>();
+    for (const [key, value] of Object.entries({
+      window: browser,
+      document: browser.document,
+      navigator: browser.navigator,
+      HTMLElement: browser.HTMLElement,
+      Element: browser.Element,
+      Node: browser.Node,
+      localStorage: browser.localStorage,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    })) {
+      originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+      Object.defineProperty(globalThis, key, {
+        value,
+        writable: true,
+        configurable: true,
+      });
+    }
+    const entry = {
+      path: "same.ts",
+      kind: "unstaged" as const,
+      status: "modified",
+    };
+    const pending: Array<(file: GitDiffFile) => void> = [];
+    const rejectPending: Array<(error: Error) => void> = [];
+    const requested: Array<{ path: string; automatic: boolean }> = [];
+    let summaryEntries: GitDiffEntry[] = [entry];
+    let summaryCalls = 0;
+    let failSummary = false;
+    const client: ConnectionClient = {
+      connectionId: "ssh-refresh-dom",
+      generation: 1,
+      serverRuntimeGeneration: 1,
+      isCurrent: () => true,
+      acceptsServerGeneration: () => true,
+      call: async (method, params) => {
+        if (method === "git.diff_summary") {
+          summaryCalls += 1;
+          if (failSummary) throw new Error("summary refresh failed");
+          return {
+            workspace_id: "workspace",
+            root: "/repo",
+            entries: summaryEntries.map((entry) => ({
+              ...entry,
+              ...(params?.mode === "branch-main" ? { kind: "branch" } : {}),
+            })),
+            counts: {
+              staged: 0,
+              unstaged: 1,
+              untracked: 0,
+              conflicted: 0,
+              branch: 0,
+              "last-step": 0,
+            },
+          };
+        }
+        if (method !== "git.diff_file")
+          throw new Error(`Unexpected call: ${method}`);
+        requested.push({
+          path: String(params?.path),
+          automatic: params?.automatic === true,
+        });
+        return new Promise<GitDiffFile>((resolve, reject) => {
+          pending.push(resolve);
+          rejectPending.push(reject);
+        });
+      },
+    };
+    let snapshot: ReturnType<typeof store.get> = {
+      ...store.get(),
+      activeConnectionId: client.connectionId,
+      connections: [
+        {
+          id: client.connectionId,
+          label: "SSH",
+          source: "test",
+          is_default: false,
+          state: "ready",
+          generation: 1,
+          type: "ssh",
+        },
+      ],
+      workspaces: [
+        {
+          workspace_id: "workspace",
+          number: 1,
+          label: "Repo",
+          focused: true,
+          pane_count: 0,
+          tab_count: 0,
+          agent_status: "",
+        },
+      ],
+    };
+    const get = spyOn(store, "get").mockImplementation(() => snapshot);
+    const connection = spyOn(bridge, "connection").mockImplementation(
+      () => client,
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const ref = createRef<DiffViewerPanelHandle>();
+    let selection: ActiveDiffSelection | null = null;
+    const file = (diff: string): GitDiffFile => ({
+      workspace_id: "workspace",
+      root: "/repo",
+      path: entry.path,
+      kind: entry.kind,
+      diff,
+      truncated: false,
+    });
+    const render = () =>
+      root.render(
+        createElement(DiffViewerPanel, {
+          ref,
+          workspaceId: "workspace",
+          onSelectionChange: (next) => {
+            selection = next;
+          },
+        }),
+      );
+    const refresh = () =>
+      container
+        .querySelector<HTMLButtonElement>('[aria-label="Refresh changes"]')!
+        .click();
+    const selected = () => selection as ActiveDiffSelection | null;
+    const highlightedName = () =>
+      container.querySelector(
+        '.diff-tree-file[aria-current="true"] .diff-tree-name',
+      )?.textContent;
+    try {
+      await act(async () => render());
+      expect(summaryCalls).toBe(1);
+      expect(pending).toHaveLength(0);
+      await act(async () => ref.current!.selectEntry(entry));
+      expect(pending).toHaveLength(1);
+      await act(async () =>
+        container
+          .querySelector<HTMLButtonElement>('[aria-label="Refresh changes"]')!
+          .click(),
+      );
+      expect(summaryCalls).toBe(2);
+      expect(pending).toHaveLength(2);
+      await act(async () => pending[0](file("stale")));
+      expect((selection as ActiveDiffSelection | null)?.file).toBeNull();
+      await act(async () => pending[1](file("fresh")));
+      expect((selection as ActiveDiffSelection | null)?.file?.diff).toBe(
+        "fresh",
+      );
+
+      // Nearby local sections refresh independently of the selected file.
+      snapshot = {
+        ...snapshot,
+        connections: snapshot.connections.map((connection) => ({
+          ...connection,
+          type: "local",
+        })),
+      };
+      await act(async () => render());
+      const nearby = ["nearby.ts", "error.ts", "removed.ts"].map((path) => ({
+        ...entry,
+        path,
+      }));
+      summaryEntries = [entry, ...nearby];
+      await act(async () => refresh());
+      expect(selected()?.files["unstaged:same.ts"]?.diff).toBe("fresh");
+      expect(pending).toHaveLength(3);
+      await act(async () => pending[2](file("refreshed-selected")));
+      const oldFiles = nearby.map((entry) => ({
+        ...file(`old:${entry.path}`),
+        path: entry.path,
+      }));
+      await act(async () => ref.current!.loadNearbyEntries(nearby.slice(0, 1)));
+      const retiredIndex = requested.length - 1;
+      expect(requested[retiredIndex].path).toBe(nearby[0].path);
+      expect(selected()?.loadingKeys).toEqual(["unstaged:nearby.ts"]);
+      failSummary = true;
+      await act(async () => refresh());
+      expect(selected()?.error).toBe("summary refresh failed");
+      expect(selected()?.loadingKeys).toEqual([]);
+      failSummary = false;
+      await act(async () => ref.current!.loadNearbyEntries(nearby.slice(0, 1)));
+      const retryIndex = requested.length - 1;
+      expect(retryIndex).toBeGreaterThan(retiredIndex);
+      await act(async () => pending[retiredIndex](oldFiles[0]));
+      expect(selected()?.files["unstaged:nearby.ts"]).toBeUndefined();
+      expect(selected()?.loadingKeys).toEqual(["unstaged:nearby.ts"]);
+      await act(async () => pending[retryIndex](oldFiles[0]));
+      expect(selected()?.files["unstaged:nearby.ts"]).toBe(oldFiles[0]);
+      expect(selected()?.loadingKeys).toEqual([]);
+      await act(async () => ref.current!.loadNearbyEntries(nearby));
+      for (const old of oldFiles.slice(1)) {
+        const index = requested.findIndex(
+          (request) => request.path === old.path,
+        );
+        expect(index).toBeGreaterThanOrEqual(0);
+        await act(async () => pending[index](old));
+      }
+      summaryEntries = [entry, ...nearby.slice(0, 2)];
+      await act(async () => refresh());
+      expect(selected()?.files["unstaged:nearby.ts"]).toBe(oldFiles[0]);
+      expect(selected()?.files["unstaged:error.ts"]).toBe(oldFiles[1]);
+      expect(selected()?.files["unstaged:removed.ts"]).toBeUndefined();
+      expect(
+        selected()?.entries.some((entry) => entry.path === "removed.ts"),
+      ).toBe(false);
+      await act(async () => ref.current!.loadNearbyEntries(nearby.slice(0, 2)));
+      const selectedReload = requested
+        .map((request) => request.path)
+        .lastIndexOf("same.ts");
+      await act(async () => pending[selectedReload](file("new-selected")));
+      const deferredIndex = requested
+        .map((request) => request.path)
+        .lastIndexOf("nearby.ts");
+      expect(requested[deferredIndex].automatic).toBe(true);
+      await act(async () =>
+        pending[deferredIndex]({
+          ...file(""),
+          path: "nearby.ts",
+          patch_size: 400_000,
+          deferred: true,
+        }),
+      );
+      expect(selected()?.files["unstaged:nearby.ts"]?.deferred).toBe(true);
+      expect(selected()?.files["unstaged:nearby.ts"]?.diff).toBe("");
+      const errorIndex = requested
+        .map((request) => request.path)
+        .lastIndexOf("error.ts");
+      await act(async () =>
+        rejectPending[errorIndex](new Error("fresh error")),
+      );
+      expect(selected()?.files["unstaged:error.ts"]).toBeUndefined();
+      expect(selected()?.fileErrors["unstaged:error.ts"]).toBe("fresh error");
+
+      const visible = { ...entry, path: "folder/visible.ts" };
+      const stagedVisible = { ...visible, kind: "staged" as const };
+      summaryEntries = [entry, visible, stagedVisible];
+      await act(async () => refresh());
+      await act(async () =>
+        pending[
+          requested.map((request) => request.path).lastIndexOf(entry.path)
+        ](file("highlight-selected")),
+      );
+      await act(async () =>
+        container
+          .querySelector<HTMLButtonElement>(".diff-tree-folder")!
+          .click(),
+      );
+      expect(container.querySelectorAll(".diff-tree-file")).toHaveLength(1);
+      const requestCount = requested.length;
+      const selectionRevision = selected()?.selectionRevision;
+      await act(async () => ref.current!.highlightEntry(stagedVisible));
+      expect(highlightedName()).toBe("visible.ts");
+      expect(selected()?.entry).toEqual(entry);
+      expect(selected()?.selectionRevision).toBe(selectionRevision);
+      expect(requested).toHaveLength(requestCount);
+      summaryEntries = [entry, visible];
+      await act(async () => refresh());
+      expect(highlightedName()).toBe("same.ts");
+      await act(async () =>
+        pending[
+          requested.map((request) => request.path).lastIndexOf(entry.path)
+        ](file("highlight-refreshed")),
+      );
+      await act(async () => ref.current!.highlightEntry(visible));
+      expect(highlightedName()).toBe("visible.ts");
+      await act(async () =>
+        Array.from(
+          container.querySelectorAll<HTMLButtonElement>(".diff-tree-file"),
+        )
+          .find(
+            (row) =>
+              row.querySelector(".diff-tree-name")?.textContent === entry.path,
+          )!
+          .click(),
+      );
+      expect(highlightedName()).toBe("same.ts");
+
+      const early = { ...entry, path: "early.ts" };
+      const late = Array.from({ length: 23 }, (_, index) => ({
+        ...entry,
+        path: `late-${String(index).padStart(2, "0")}.ts`,
+      }));
+      summaryEntries = [entry, early, ...late];
+      await act(async () => refresh());
+      await act(async () =>
+        pending[
+          requested.map((request) => request.path).lastIndexOf("same.ts")
+        ](file("bounded-selected")),
+      );
+      for (let start = 0; start < late.length; start += 12) {
+        const batch = late.slice(start, start + 12);
+        await act(async () => ref.current!.loadNearbyEntries(batch));
+        for (const entry of batch) {
+          const index = requested
+            .map((request) => request.path)
+            .lastIndexOf(entry.path);
+          expect(index).toBeGreaterThanOrEqual(0);
+          await act(async () =>
+            pending[index]({ ...file(`old:${entry.path}`), path: entry.path }),
+          );
+        }
+      }
+      expect(Object.keys(selected()?.files ?? {})).toHaveLength(24);
+      await act(async () => refresh());
+      expect(selected()?.files["unstaged:late-22.ts"]?.diff).toBe(
+        "old:late-22.ts",
+      );
+      await act(async () => ref.current!.loadNearbyEntries([early]));
+      const earlyIndex = requested
+        .map((request) => request.path)
+        .lastIndexOf(early.path);
+      await act(async () =>
+        pending[earlyIndex]({ ...file("fresh-early"), path: early.path }),
+      );
+      expect(selected()?.files["unstaged:early.ts"]?.diff).toBe("fresh-early");
+      expect(Object.keys(selected()?.files ?? {})).toHaveLength(24);
+      await act(async () => ref.current!.highlightEntry(early));
+      expect(highlightedName()).toBe("early.ts");
+      await act(async () =>
+        container
+          .querySelector<HTMLButtonElement>('[aria-label="Against main"]')!
+          .click(),
+      );
+      expect(selected()?.files).toEqual({});
+      expect(selected()?.file).toBeNull();
+      expect(highlightedName()).toBe("same.ts");
+    } finally {
+      for (const resolve of pending) resolve(file("cleanup"));
+      await act(async () => root.unmount());
+      get.mockRestore();
+      connection.mockRestore();
+      await browser.happyDOM.close();
+      for (const [key, descriptor] of originals) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else Reflect.deleteProperty(globalThis, key);
+      }
+    }
+  });
+}
 
 describe("connection-scoped diff identity", () => {
   test("isolates identical workspace IDs in memory and persistence", () => {
@@ -260,6 +627,33 @@ describe("connection-scoped diff identity", () => {
     expect(next.selected).toBe(entry);
     expect(next.fileErrors).toEqual({});
     expect(next.error).toBeNull();
+  });
+
+  test("late automatic metadata cannot replace an explicitly loaded patch", () => {
+    const entry = { path: "long.ts", kind: "unstaged" as const, status: "M" };
+    const file: GitDiffFile = {
+      workspace_id: "workspace",
+      root: "/repo",
+      path: entry.path,
+      kind: entry.kind,
+      diff: "explicit patch",
+      truncated: false,
+    };
+    const current = {
+      summary: null,
+      selected: entry,
+      files: { "unstaged:long.ts": file },
+      fileErrors: {},
+      error: null,
+    };
+    expect(
+      mergeResolvedDiffFile(current, entry, {
+        ...file,
+        diff: "",
+        patch_size: 400_000,
+        deferred: true,
+      }),
+    ).toBe(current);
   });
 
   test("bounds cached patch files by estimated bytes", () => {
