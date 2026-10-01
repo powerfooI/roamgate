@@ -30,8 +30,14 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             {
-              // Shared UI icons are tiny modules; avoid one asset per shared icon.
+              // Keep startup icons together without eagerly loading feature-only icons.
               name: "ui-icons",
+              test: /node_modules[\\/]lucide-react[\\/]/,
+              tags: ["$initial"],
+            },
+            {
+              // The remaining icons belong to lazy features; retain one small asset.
+              name: "feature-icons",
               test: /node_modules[\\/]lucide-react[\\/]/,
             },
             {
