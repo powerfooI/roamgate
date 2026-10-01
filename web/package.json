@@ -49,7 +49,7 @@
     "codemirror": "^6.0.2",
     "diff2html": "^3.4.56",
     "highlight.js": "11.12.0",
-    "lucide-react": "^1.21.0",
+    "lucide-react": "^1.48.0",
     "marked": "^18.0.14",
     "minimatch": "10.2.6",
     "react": "^18.3.1",
