@@ -15,6 +15,7 @@ const PREVIEW_LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
   htmlbars: "handlebars",
   ipython: "python",
   irb: "ruby",
+  ktx: "kotlin",
   objectivec: "objective-c",
   pgsql: "sql",
   pluto: "lua",

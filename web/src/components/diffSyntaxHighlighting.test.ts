@@ -19,6 +19,7 @@ const fixtures = [
   ["app.php", "php", '<?php echo "hello";'],
   ["app.cs", "csharp", 'public class User { string name = "Ada"; }'],
   ["main.kt", "kotlin", 'fun main() { println("hello") }'],
+  ["main.ktx", "kotlin", 'fun main() { println("hello") }'],
   ["build.gradle", "groovy", 'plugins { id "java" }'],
   ["config.xml", "xml", '<user name="Ada" />'],
   ["config.ini", "ini", '[user]\nname = "Ada"'],

@@ -1,10 +1,18 @@
 import { describe, expect, test } from "bun:test";
+import { hljs } from "diff2html/lib-esm/ui/js/highlight.js-slim";
+import directHighlighter from "highlight.js/lib/core";
+import webPackage from "../../package.json";
 import {
   highlightCodeTokens,
   syntaxLanguageHintForPath,
 } from "./syntaxHighlighting";
 
 describe("syntaxLanguageHintForPath", () => {
+  test("uses the requested highlight.js version throughout the diff renderer", () => {
+    expect(hljs).toBe(directHighlighter);
+    expect(hljs.versionString).toBe(webPackage.dependencies["highlight.js"]);
+  });
+
   test("normalizes common code extensions", () => {
     expect(syntaxLanguageHintForPath("src/App.tsx")).toBe("typescript");
     expect(syntaxLanguageHintForPath("config/settings.jsonc")).toBe("json");
