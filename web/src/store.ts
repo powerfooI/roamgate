@@ -2221,6 +2221,29 @@ function notifyPinnedTabClose(reason: string) {
   });
 }
 
+function swapPanePositions(
+  params:
+    | { pane_id: string; direction: "left" | "right" | "up" | "down" }
+    | { source_pane_id: string; target_pane_id: string },
+) {
+  return action(async (lease) => {
+    const result = await lease.client.call("pane.swap", params);
+    const swap = result?.swap ?? result;
+    const layout = swap?.layout as PaneLayout | undefined;
+    // Swapping preserves pane IDs, so keep any newer user selection.
+    rememberTabLayout(lease.connectionId, lease.generation, layout ?? null);
+    if (layout && state.layout?.tab_id === layout.tab_id)
+      setForConnection(lease, {
+        layout:
+          state.navigationMode === "browser-local"
+            ? projectBrowserLayout(layout, state.selectedPaneId)
+            : layout,
+      });
+    await refreshNow(lease);
+    return result;
+  });
+}
+
 export const store = {
   setTerminalEndpoint(
     client: ConnectionClient,
@@ -3664,24 +3687,24 @@ export const store = {
 
   /** Swap a pane with its neighbor in the given direction (Herdr pane.swap). */
   movePane(paneId: string, direction: "left" | "right" | "up" | "down") {
-    return action(async (lease) => {
-      const result = await lease.client.call("pane.swap", {
-        pane_id: paneId,
-        direction,
-      });
-      const swap = result?.swap ?? result;
-      const layout = swap?.layout as PaneLayout | undefined;
-      // Swapping preserves pane IDs, so keep any newer user selection.
-      rememberTabLayout(lease.connectionId, lease.generation, layout ?? null);
-      if (layout && state.layout?.tab_id === layout.tab_id)
-        setForConnection(lease, {
-          layout:
-            state.navigationMode === "browser-local"
-              ? projectBrowserLayout(layout, state.selectedPaneId)
-              : layout,
-        });
-      await refreshNow(lease);
-      return result;
+    return swapPanePositions({ pane_id: paneId, direction });
+  },
+
+  /** Swap two existing panes within the same tab. */
+  swapPanes(sourcePaneId: string, targetPaneId: string) {
+    const source = state.panes.find((pane) => pane.pane_id === sourcePaneId);
+    const target = state.panes.find((pane) => pane.pane_id === targetPaneId);
+    if (
+      !source ||
+      !target ||
+      sourcePaneId === targetPaneId ||
+      source.tab_id !== target.tab_id ||
+      source.workspace_id !== target.workspace_id
+    )
+      return Promise.resolve();
+    return swapPanePositions({
+      source_pane_id: sourcePaneId,
+      target_pane_id: targetPaneId,
     });
   },
 

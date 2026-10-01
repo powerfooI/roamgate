@@ -3,6 +3,175 @@
   display: inline-flex;
 }
 
+.pane-drag-handle {
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  z-index: 7;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--muted);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  pointer-events: none;
+  cursor: grab;
+  touch-action: none;
+  transform: translate(-50%, -2px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    border-color 120ms ease;
+}
+
+/* Keep the small grip easy to grab without enlarging its visible pill. */
+.pane-drag-handle::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+}
+
+.pane-layout-cell .pane-drag-handle {
+  display: inline-flex;
+}
+
+.pane-layout-cell:hover .pane-drag-handle,
+.pane-drag-handle:focus-visible,
+.pane-layout-cell.is-swap-source .pane-drag-handle {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+}
+
+.pane-drag-handle:hover {
+  color: var(--text-strong);
+  border-color: var(--accent);
+}
+
+.pane-drag-handle:active {
+  transform: translate(-50%, 0) scale(0.95);
+}
+
+.pane-layout.is-swapping,
+.pane-layout.is-swapping * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.pane-layout-cell.is-swap-source .pane-drag-handle {
+  background: var(--accent-soft);
+}
+
+.pane-layout-cell.is-swap-source .terminal-main {
+  opacity: 0.55;
+  transition: opacity 120ms ease;
+}
+
+.pane-layout-cell.is-swap-source::after,
+.pane-layout-cell.is-swap-target::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  z-index: 5;
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  pointer-events: none;
+}
+
+.pane-layout-cell.is-swap-source::after {
+  border-style: dashed;
+  background: transparent;
+}
+
+.pane-layout-cell.is-swap-target::after {
+  box-shadow: inset 0 0 24px var(--accent-soft);
+  animation: pane-swap-target-in 140ms ease-out;
+}
+
+.pane-layout-cell.is-swap-target::before {
+  content: "Swap here";
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 6;
+  padding: 4px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text-strong);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.pane-move-preview {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 5001;
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  column-gap: 10px;
+  width: 190px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text-strong);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  pointer-events: none;
+  animation: pane-move-preview-in 120ms ease-out;
+}
+
+.pane-move-preview svg {
+  grid-row: span 2;
+  align-self: center;
+  width: 24px;
+  height: 24px;
+  color: var(--accent);
+}
+
+.pane-move-preview span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.pane-move-preview.is-ready {
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+
+.pane-move-preview.is-ready span {
+  color: var(--accent);
+}
+
+@keyframes pane-move-preview-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pane-swap-target-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .terminal-pane-action.is-active {
   background: var(--accent-soft);
 }
@@ -85,6 +254,24 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .pane-move-preview,
+  .pane-layout-cell.is-swap-target::after {
+    animation: none;
+  }
+
+  .pane-drag-handle,
+  .pane-layout-cell:hover .pane-drag-handle,
+  .pane-drag-handle:focus-visible,
+  .pane-drag-handle:active,
+  .pane-layout-cell.is-swap-source .pane-drag-handle {
+    transform: translate(-50%, 0);
+    transition: none;
+  }
+
+  .pane-layout-cell.is-swap-source .terminal-main {
+    transition: none;
+  }
+
   .pane-move-pad {
     animation-name: pane-move-pad-fade;
   }

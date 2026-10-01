@@ -1184,6 +1184,7 @@ function TerminalPaneLayout({
           <div
             key={mountKeyForPane(layoutPane.pane_id)}
             className={`pane-layout-cell ${isActive ? "is-active" : ""}`}
+            data-pane-id={layoutPane.pane_id}
             style={{
               left: `${rectPercent(rect.x, area.x, areaWidth)}%`,
               top: `${rectPercent(rect.y, area.y, areaHeight)}%`,

@@ -16,7 +16,7 @@ import {
 import { isMobileLayout, LAYOUT_CHANGE_EVENT } from "../layoutPreferences";
 import { terminalFontOptions } from "../appearance";
 import { detectShortcutPlatform } from "../shortcutBindings";
-import { PaneMoveMenu } from "./PaneMoveMenu";
+import { PaneDragHandle, PaneMoveMenu } from "./PaneMoveMenu";
 import {
   getShortcutSnapshot,
   shortcutMatches,
@@ -3426,6 +3426,11 @@ export function TerminalView({
         }}
       />
       <div className="terminal-shell">
+        <PaneDragHandle
+          paneId={pane.pane_id}
+          layout={s.layout}
+          onPointerDown={preventPaneActionFocus}
+        />
         <div className="terminal-main">
           <div ref={containerRef} className="terminal-view" />
           {!isMobileLayout() && touchHandles.length === 0 && isActivePane ? (

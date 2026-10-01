@@ -358,13 +358,17 @@ function renderTerminalSnapshot() {
 
 describe("store browser-local navigation", () => {
   test.each([
-    ["shared", false],
-    ["shared", true],
-    ["browser-local", false],
-    ["browser-local", true],
+    ["shared", false, false],
+    ["shared", true, false],
+    ["browser-local", false, false],
+    ["browser-local", true, false],
+    ["shared", false, true],
+    ["shared", true, true],
+    ["browser-local", false, true],
+    ["browser-local", true, true],
   ] as const)(
-    "%s pane swaps preserve selection and geometry (navigate: %s)",
-    async (mode, navigate) => {
+    "%s pane swaps preserve selection and geometry (navigate: %s, explicit target: %s)",
+    async (mode, navigate, explicitTarget) => {
       await withBrowserStore(async (_calls, topology, control) => {
         control.mode = mode;
         __storeTesting.replaceState({ ...store.get(), navigationMode: mode });
@@ -379,6 +383,11 @@ describe("store browser-local navigation", () => {
             ...client,
             call: async (method, params) => {
               if (method === "pane.swap") {
+                expect(params).toEqual(
+                  explicitTarget
+                    ? { source_pane_id: "a1p", target_pane_id: "a1q" }
+                    : { pane_id: "a1p", direction: "right" },
+                );
                 await pendingSwap.promise;
                 swapped = true;
                 return {
@@ -390,7 +399,9 @@ describe("store browser-local navigation", () => {
             },
           };
         };
-        const moving = store.movePane("a1p", "right");
+        const moving = explicitTarget
+          ? store.swapPanes("a1p", "a1q")
+          : store.movePane("a1p", "right");
         if (navigate) await store.focusPane("a1q");
         const selectedPaneId = navigate ? "a1q" : "a1p";
         expect(store.get().selectedPaneId).toBe(selectedPaneId);
@@ -417,6 +428,20 @@ describe("store browser-local navigation", () => {
       });
     },
   );
+
+  test("explicit swaps ignore self, missing and other-tab targets", async () => {
+    await withBrowserStore(async (calls) => {
+      for (const [source, target] of [
+        ["a1p", "a1p"],
+        ["a1p", "missing"],
+        ["missing", "a1p"],
+        ["a1p", "a2p"],
+        ["a1p", "b1p"],
+      ])
+        await store.swapPanes(source, target);
+      expect(calls.filter((call) => call.method === "pane.swap")).toEqual([]);
+    });
+  });
 
   test.each(["workspace", "tab", "agent"])(
     "%s selection renders the target pane while its layout is deferred",

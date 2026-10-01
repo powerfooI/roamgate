@@ -15,7 +15,10 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
   Escape cancels. The order is saved in Herdr (`tab.move`), and numbered tab
   shortcuts address tab-strip positions.
 - Split right/down, resize, focus neighbors, move panes to swap with a
-  neighbor, zoom, or close panes.
+  neighbor, zoom, or close panes. Hover over a pane to reveal a drag handle at
+  its top center. Drag it onto another pane in the same tab to swap positions;
+  Escape cancels. Focus the handle and use arrow keys for directional moves,
+  or click the toolbar's **Move pane** button.
 - Search workspaces, worktrees, files, tabs, panes, and agents in the command
   menu. Enter a relative/absolute path to open a file.
 - Desktop **Zen mode** hides app chrome and runs the terminal flush to every
