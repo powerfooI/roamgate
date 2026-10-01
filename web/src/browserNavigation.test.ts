@@ -357,6 +357,67 @@ function renderTerminalSnapshot() {
 }
 
 describe("store browser-local navigation", () => {
+  test.each([
+    ["shared", false],
+    ["shared", true],
+    ["browser-local", false],
+    ["browser-local", true],
+  ] as const)(
+    "%s pane swaps preserve selection and geometry (navigate: %s)",
+    async (mode, navigate) => {
+      await withBrowserStore(async (_calls, topology, control) => {
+        control.mode = mode;
+        __storeTesting.replaceState({ ...store.get(), navigationMode: mode });
+        const originalConnection = bridge.connection;
+        const pendingSwap = Promise.withResolvers<void>();
+        const layout = navigationLayout(topology.panes[0], topology.panes);
+        for (const pane of layout.panes) pane.rect.x = 50 - pane.rect.x;
+        let swapped = false;
+        bridge.connection = (connectionId, generation) => {
+          const client = originalConnection(connectionId, generation);
+          return {
+            ...client,
+            call: async (method, params) => {
+              if (method === "pane.swap") {
+                await pendingSwap.promise;
+                swapped = true;
+                return {
+                  swap: { changed: true, focused_pane_id: "a1p", layout },
+                };
+              }
+              if (method === "pane.layout" && swapped) return { layout };
+              return client.call(method, params);
+            },
+          };
+        };
+        const moving = store.movePane("a1p", "right");
+        if (navigate) await store.focusPane("a1q");
+        const selectedPaneId = navigate ? "a1q" : "a1p";
+        expect(store.get().selectedPaneId).toBe(selectedPaneId);
+        const selections: (string | null)[] = [];
+        const unsubscribe = store.subscribe(() => {
+          selections.push(store.get().selectedPaneId);
+        });
+        try {
+          pendingSwap.resolve();
+          await moving;
+          expect(selections.length).toBeGreaterThan(0);
+          expect(selections.every((id) => id === selectedPaneId)).toBe(true);
+          expect(store.get().selectedPaneId).toBe(selectedPaneId);
+          expect(store.get().layout?.panes[0].rect.x).toBe(50);
+          if (mode === "browser-local") {
+            expect(store.get().browserNavigation.paneIds.a1).toBe(
+              selectedPaneId,
+            );
+            expect(store.get().layout?.focused_pane_id).toBe(selectedPaneId);
+          }
+        } finally {
+          unsubscribe();
+        }
+      });
+    },
+  );
+
   test.each(["workspace", "tab", "agent"])(
     "%s selection renders the target pane while its layout is deferred",
     async (route) => {

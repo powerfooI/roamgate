@@ -43,6 +43,10 @@ const LATE_SHORTCUT_IDS: ShortcutId[] = [
   "panes.search",
   "plugin.herdrFloat.toggle",
   "terminal.ctrlEnter",
+  "pane.moveLeft",
+  "pane.moveRight",
+  "pane.moveUp",
+  "pane.moveDown",
 ];
 export function validateShortcutPreset(value: unknown): ShortcutPreset {
   if (!value || typeof value !== "object")
