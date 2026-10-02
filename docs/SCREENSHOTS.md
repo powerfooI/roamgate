@@ -1,44 +1,57 @@
 # Reproducible Product Screenshots
 
-Capture the current Roamgate UI against a real Herdr backend using Northstar,
-a fictional six-task board. Its names, code, tasks, and local SVG are public demo
-content. Use one coherent task across desktop and mobile: add a status filter,
-explain empty results, test it, and review the change.
+Capture the current Roamgate UI against a real Herdr backend using the public
+[Northstar demo](https://github.com/powerfooI/northstar-demo), a fictional six-task
+board maintained in its own repository. Its names, code, tasks, and local SVG are
+public demo content. Use one coherent task across desktop and mobile: add a
+status filter, explain empty results, test it, and review the change.
 
 ## Prepare the Case
 
 Install the root dependencies as described in [Contributing](../CONTRIBUTING.md).
-From the Roamgate checkout, prepare a standalone Git repository outside it:
+Create a fresh independent clone outside the Roamgate checkout:
 
 ```sh
-bun run demo:prepare --scene review --dir /tmp/roamgate-demo/northstar
+mkdir -p /tmp/roamgate-demo
+git clone --branch main https://github.com/powerfooI/northstar-demo.git /tmp/roamgate-demo/northstar
 ```
 
-The default scene is `review`; the default directory is `roamgate-demo/northstar`
-under the OS temporary directory. An explicit `/tmp` path gives short, predictable
-paths on macOS and Linux. The project needs Bun and Git, with no extra packages.
+The public repository is the canonical source; Roamgate does not keep another
+fixture or patch. The project needs Bun and Git, with no extra packages. The
+`main` branch contains the baseline; `codex/status-filter` contains the example
+implementation in [PR #1](https://github.com/powerfooI/northstar-demo/pull/1).
 
 | Scene | Initial state | Use |
 | --- | --- | --- |
-| `base` | Clean baseline on `feat/status-filter` | Give a real agent the task in the project README. |
-| `review` | The same baseline plus five modified files | Repeatable Files, Working tree diff, preview, and annotation shots. |
+| Baseline | Clean `main` clone | Give a real agent the task in the project README. |
+| Review | Baseline plus the five example implementation files | Repeatable Files, Working tree diff, preview, annotation, and linked PR shots. |
 
-Preparation uses a fixed Git author (`Demo <demo@example.invalid>`) and commit
-date, disables inherited Git configuration/templates, and creates no remote.
-The review patch is a prepared example implementation; it carries no claim that
-an agent produced it. Agent history and live agent status require a real run.
-
-For desktop sidebar shots, prepare three additional directories from the same
-public fixture. They are separate Git repositories, not labels for personal
-projects:
+For the review scene, run the following only in the clone just created above:
 
 ```sh
-bun run demo:prepare --scene base --dir /tmp/roamgate-demo/documentation
-bun run demo:prepare --scene base --dir /tmp/roamgate-demo/release-qa
-bun run demo:prepare --scene base --dir /tmp/roamgate-demo/ui-preview
+git -C /tmp/roamgate-demo/northstar switch --track -c codex/status-filter origin/codex/status-filter
+git -C /tmp/roamgate-demo/northstar reset --mixed origin/main
+git -C /tmp/roamgate-demo/northstar diff origin/main --stat
 ```
 
-Run the board and tests from the prepared directory:
+This leaves the feature files as real unstaged changes against `main` while
+preserving the branch's upstream link to PR #1. The diff changes `app.ts`,
+`index.html`, `styles.css`, `tasks.test.ts`, and `tasks.ts`. The PR is a prepared
+example implementation; do not attribute it to an idle agent or a screenshot
+session. Agent history and completed-task status require a matching real run.
+Record both remote commit SHAs with the capture originals so later branch
+updates do not obscure which version was photographed.
+
+For desktop sidebar shots, create three additional independent clones of the
+same public repository:
+
+```sh
+git clone --branch main https://github.com/powerfooI/northstar-demo.git /tmp/roamgate-demo/documentation
+git clone --branch main https://github.com/powerfooI/northstar-demo.git /tmp/roamgate-demo/release-qa
+git clone --branch main https://github.com/powerfooI/northstar-demo.git /tmp/roamgate-demo/ui-preview
+```
+
+Run the board and tests from the Northstar clone:
 
 ```sh
 cd /tmp/roamgate-demo/northstar
@@ -52,28 +65,28 @@ state; **Clear filters** restores all six tasks and focuses the search input.
 Roamgate's static HTML preview shows all six cards with local styles/images;
 its script restrictions mean interactive filtering belongs in the live board.
 
-To repeat a scene, stop its running processes and close its Herdr workspace first:
-
-```sh
-bun run demo:prepare --scene review --dir /tmp/roamgate-demo/northstar --reset
-```
-
-Reset renames the previous directory to a sibling `northstar.saved-*` before
-creating the new one. Keep that backup until any edits have been recovered; delete
-it manually when finished. Only directories bearing the generated demo marker
-can be reset. A failed preparation restores the previous directory when its
-original path is free. If another process has replaced that path, the backup is
-retained and its location is reported. Ordinary directories, symlink destinations,
-and destinations inside this Roamgate checkout are refused.
+Use an unused capture destination; Git refuses a non-empty directory. To repeat
+a scene, stop its processes and close its Herdr workspace, preserve the old
+clone, and choose a new destination. Do not run the reset step on an existing
+user checkout. Update the workspace commands and paths below to match the new
+capture directories.
 
 ## Isolate the Capture Environment
 
 Use a dedicated OS account named `demo` or a clean VM for published screenshots.
 Install Bun, Git, Herdr, and Roamgate there; copy or clone only the public checkout
-and the demo fixture. Keep personal projects, home directories, browser profiles,
-shell configuration, SSH configuration, and agent transcripts outside it. Configure
-only the credentials needed for a real agent, without printing them in commands
-or terminal output. Choose a neutral hostname and a fresh browser profile.
+and the independent Northstar demo repositories. Keep personal projects, home
+directories, browser profiles, shell configuration, SSH configuration, and agent
+transcripts outside it. Configure only the credentials needed for a real agent,
+without printing them in commands or terminal output. Choose a neutral hostname
+and a fresh browser profile.
+
+For the linked PR card, install GitHub CLI and authenticate it on the checkout
+host. Keep authentication details outside the repository and screenshots. Verify
+that PR #1 is open and its Bun test check succeeded; **Provider not configured**,
+missing CLI, or login-required states are not ready for a PR-status shot.
+When running with a cleaned environment, set an absolute `XDG_STATE_HOME`
+outside every demo checkout so CLI runtime state cannot become a review file.
 
 A separate project, named Herdr session, and clean shell environment protect
 against accidental reuse. They do not prevent the same OS user from accessing
@@ -164,17 +177,17 @@ task history. Done/history shots require a matching real completed turn as
 described below. Show the sidebar in **Nested** mode and expand the demo workspaces.
 
 In the current Implementation pane, enter `/new`, then
-`!git --no-pager diff --stat`, pressing Enter after each. Pi remains active:
-`/new` starts a clean session, and its Bash mode runs the genuine Git command
-without a model request. The review fixture shows five changed files, 102
-insertions, and five deletions. Keep this Pi TUI and command output above Checks,
-whose real `bun test` run reports four passing tests and no failures. This output
-describes the prepared patch; it does not attribute the patch to Pi.
+`!git --no-pager diff origin/main --stat`, pressing Enter after each. Pi remains
+active: `/new` starts a clean session, and its Bash mode runs the genuine Git
+command without a model request. The review clone shows the five example implementation
+files. Keep this Pi TUI and command output above Checks, whose real `bun test`
+run reports four passing tests and no failures. This output describes the public
+review implementation; it does not attribute the implementation to Pi.
 
-For an optional shell overview, show the Task section and `git --no-pager diff
---stat` in Implementation after exiting Pi. For a narrow mobile terminal, run
-`git status --short && bun test --dots` in Checks; the dots reporter keeps the
-genuine test summary compact. Run commands again after switching viewport sizes
+For an optional shell overview, show the Status filter demo section and `git --no-pager diff
+origin/main --stat` in Implementation after exiting Pi. For a narrow mobile
+terminal, run `git status --short && bun test --dots` in Checks; the dots reporter
+keeps the genuine test summary compact. Run commands again after switching viewport sizes
 so terminal output uses the current geometry. Keep only one capture client
 attached while doing this.
 
@@ -182,7 +195,8 @@ Build Roamgate's web assets and start its actual bridge in another terminal:
 
 ```sh
 bun run build:web
-bun server/src/index.ts --host 127.0.0.1 --port 8799 \
+mkdir -p /tmp/roamgate-demo/runtime-state
+XDG_STATE_HOME=/tmp/roamgate-demo/runtime-state bun server/src/index.ts --host 127.0.0.1 --port 8799 \
   --socket-path /tmp/roamgate-demo/config/herdr/sessions/roamgate-demo/herdr.sock \
   --client-socket-path /tmp/roamgate-demo/config/herdr/sessions/roamgate-demo/herdr-client.sock
 ```
@@ -208,10 +222,11 @@ useful real session before clearing or rebuilding that account/VM.
 
 ## Run the Agent Scene
 
-Prepare `base` in the isolated environment. Start one supported agent in the
-Implementation pane with its genuine Herdr integration and give it this prompt:
+Use a fresh `main` clone in the isolated environment, skipping the review scene's
+switch/reset steps. Start one supported agent in the Implementation pane with its
+genuine Herdr integration and give it this prompt:
 
-> Read the Task section in README.md. Add All, To do, In progress, and Done
+> Read README.md. Add All, To do, In progress, and Done
 > status filters to Northstar. Combine status with title search. Show an
 > accessible empty result with a Clear filters button. Preserve the static HTML
 > preview, add focused tests, and run them. Leave the changes uncommitted.
@@ -219,14 +234,14 @@ Implementation pane with its genuine Herdr integration and give it this prompt:
 Use the resulting real changes, test output, and transcript together for the
 agent/history shots. Keep the accepted session for later captures using the
 agent's supported resume workflow. Re-running a model can change its wording and
-implementation; the fixed `review` scene is for deterministic file/diff shots.
-Do not combine an unrelated transcript with the prepared patch as if it caused
-the displayed changes.
+implementation; the public review implementation is for deterministic file/diff
+shots. Do not combine an unrelated transcript with PR #1's implementation as if
+it caused the displayed changes.
 
 For a working-agent shot, start an actual follow-up task such as reviewing keyboard
 behavior. Capture only after the integration reports the real status. **Last
-step** also needs a genuine observed task completion; the prepared Git patch
-provides **Working tree**, not an agent-completion snapshot.
+step** also needs a genuine observed task completion; the review clone provides
+**Working tree**, not an agent-completion snapshot.
 
 ## Shot List and Capture Rules
 
@@ -237,6 +252,9 @@ therefore be 3200 x 2000 desktop pixels and 780 x 1688 mobile pixels. Mobile
 viewport emulation is suitable for layout screenshots; real mobile interaction
 claims require a check on a physical phone. Record viewport, scale, app version,
 scene, and browser with the exported originals.
+After switching from desktop to mobile, enable **Wrap** and reload the page if
+the diff retains its desktop width. Reopen Changes and select `tasks.ts` before
+adjusting the scroll position.
 
 Export through Chrome's native screenshot UI:
 
@@ -259,12 +277,12 @@ Pin the review panel and keep the comment as a draft.
 
 | Asset stem | Layout and selection | Ready condition |
 | --- | --- | --- |
-| `roamgate-desktop-changes` | Sidebar visible in Nested mode, genuine Pi TUI in Implementation/Checks split, Inspector right at about 55%; Working tree, `tasks.ts` | Connected; at least three real workspaces and two real Agent rows visible; Pi process registered and running; five review files loaded; real tests finished. |
+| `roamgate-desktop-changes` | Sidebar visible in Nested mode, genuine Pi TUI in Implementation/Checks split, Inspector right at about 55%; Working tree, `tasks.ts` | Connected; at least three real workspaces and two real Agent rows visible; Pi process registered and running; five review files loaded; real tests finished; PR #1 open with successful CI. |
 | `roamgate-desktop-files` | Sidebar visible in Nested mode; expand Inspector; Files; open `index.html` Preview; scroll to Release checklist | At least three real workspaces and two real Agent rows visible; local styles loaded; checklist heading, filters, and all six cards visible. |
 | `roamgate-desktop-annotations` | Sidebar visible in Nested mode; `tasks.ts` unified diff and the review draft | At least three real workspaces and two real Agent rows visible; correct line anchor and full comment visible. |
 | `roamgate-desktop-history` | Genuine Northstar Agent History, User/Agent/Tool enabled | The matching real task and completed test tool call are visible. |
 | `roamgate-mobile-changes` | Mobile; Changes, Working tree, `tasks.ts` | Unified diff loaded; key changed function readable. |
-| `roamgate-mobile-terminal` | Mobile; Checks pane; Composer and terminal shortcuts open | Actual Git status and test summary visible; menus dismissed. |
+| `roamgate-mobile-terminal` | Mobile; Checks pane; Composer and terminal shortcuts open | Actual Git status and test summary visible; unrelated menus dismissed. |
 | `roamgate-mobile-files` | Mobile; Files, `index.html` static Preview | Board heading, filters, and first task card readable. |
 
 Wait for connection, fonts, terminal geometry, and requested content to settle;

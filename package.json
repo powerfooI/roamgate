@@ -23,7 +23,6 @@
   "scripts": {
     "dev:server": "bun run --filter roamgate-server dev",
     "dev:web": "bun run --filter roamgate-web dev",
-    "demo:prepare": "bun scripts/prepare-screenshot-demo.ts",
     "demo:herdr": "sh scripts/screenshot-demo/herdr.sh",
     "build:web": "bun run --filter roamgate-web build",
     "build:site": "bun scripts/build-pages.ts",

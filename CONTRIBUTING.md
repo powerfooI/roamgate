@@ -144,7 +144,8 @@ co-located CSS is valid when static imports cover every rendering path.
 ## Pages Website and Tutorial
 
 For repeatable product images, use the [screenshot workflow](docs/SCREENSHOTS.md)
-and its fictional Northstar case (`bun run demo:prepare`).
+with an independent clone of the public
+[Northstar demo](https://github.com/powerfooI/northstar-demo).
 
 Edit `site/` for the landing page; **only `docs/TUTORIAL.md`** for tutorial text.
 `scripts/build-pages.ts` renders the tutorial template, rewrites references, and
