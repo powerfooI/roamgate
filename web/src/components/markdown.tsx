@@ -389,7 +389,7 @@ export function MarkdownPreview({
               </div>
             }
           >
-            <MermaidDiagram code={code} />
+            <MermaidDiagram code={code} fitToWidth />
           </Suspense>,
           target,
           String(index),

@@ -17,9 +17,11 @@ type MermaidDiagramState =
 export function MermaidDiagram({
   code,
   className = "",
+  fitToWidth = false,
 }: {
   code: string;
   className?: string;
+  fitToWidth?: boolean;
 }) {
   const [state, setState] = useState<MermaidDiagramState>({ kind: "loading" });
 
@@ -104,6 +106,7 @@ export function MermaidDiagram({
       key={code}
       dimensions={state}
       label="Mermaid diagram"
+      fitToWidth={fitToWidth}
       className={`mermaid-diagram ${className}`.trim()}
     >
       <div

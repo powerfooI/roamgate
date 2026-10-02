@@ -22,7 +22,11 @@ export function AgentMessageDialog({
     if (messageId === null) return;
     const cancelFocus = focusDialogElement(dialogRef.current);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (
+        event.key !== "Escape" ||
+        document.querySelector(".visual-preview-fullscreen[open]")
+      )
+        return;
       event.preventDefault();
       event.stopPropagation();
       onClose();

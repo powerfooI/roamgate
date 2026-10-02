@@ -7,13 +7,15 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { Maximize, Minus, Plus } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Expand, Maximize, Minus, Plus, Shrink } from "lucide-react";
 
 export type PreviewDimensions = { width: number; height: number };
 
 export function fitPreviewScale(
   content: PreviewDimensions,
   viewport: PreviewDimensions,
+  fitToWidth = false,
 ) {
   if (content.width <= 0 || content.height <= 0) return 1;
   return Math.max(
@@ -21,7 +23,7 @@ export function fitPreviewScale(
     Math.min(
       1,
       Math.max(1, viewport.width - 32) / content.width,
-      Math.max(1, viewport.height - 32) / content.height,
+      fitToWidth ? 1 : Math.max(1, viewport.height - 32) / content.height,
     ),
   );
 }
@@ -30,20 +32,34 @@ export function ZoomablePreview({
   dimensions,
   label,
   className = "",
+  fitToWidth = false,
   children,
 }: {
   dimensions: PreviewDimensions;
   label: string;
   className?: string;
+  fitToWidth?: boolean;
   children: ReactNode;
 }) {
+  const previewRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const fullscreenButtonRef = useRef<HTMLButtonElement>(null);
+  const inlineHeightRef = useRef(0);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [nativeDialog] = useState(
+    () => typeof document.createElement("dialog").showModal === "function",
+  );
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<PreviewDimensions>({
     width: 0,
     height: 0,
   });
   const [zoom, setZoom] = useState<number | null>(null);
-  const fitted = fitPreviewScale(dimensions, viewport);
+  const fitted = fitPreviewScale(
+    dimensions,
+    viewport,
+    fitToWidth && !fullscreen,
+  );
   const scale = zoom ?? fitted;
   const centerRef = useRef<{ x: number; y: number } | null>(null);
   const scaleRef = useRef(scale);
@@ -70,7 +86,41 @@ export function ZoomablePreview({
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [fullscreen]);
+  useLayoutEffect(() => {
+    // Switching the portal replaces the opener; focus its new inline node.
+    if (!fullscreen && inlineHeightRef.current) {
+      fullscreenButtonRef.current?.focus();
+    }
+    const dialog = dialogRef.current;
+    if (!fullscreen || !dialog) return;
+    if (nativeDialog) dialog.showModal();
+    const background = nativeDialog
+      ? []
+      : Array.from(document.body.children)
+          .filter((element) => element !== dialog)
+          .map((element) => {
+            const hidden = element.getAttribute("aria-hidden");
+            element.setAttribute("aria-hidden", "true");
+            return { element, hidden };
+          });
+    const containFocus = (event: FocusEvent) => {
+      if (!dialog.contains(event.target as Node))
+        fullscreenButtonRef.current?.focus();
+    };
+    if (!nativeDialog) document.addEventListener("focusin", containFocus, true);
+    fullscreenButtonRef.current?.focus();
+    return () => {
+      if (nativeDialog) dialog.close();
+      else {
+        document.removeEventListener("focusin", containFocus, true);
+        for (const { element, hidden } of background) {
+          if (hidden === null) element.removeAttribute("aria-hidden");
+          else element.setAttribute("aria-hidden", hidden);
+        }
+      }
+    };
+  }, [fullscreen, nativeDialog]);
   useLayoutEffect(() => {
     const element = viewportRef.current;
     const center = centerRef.current;
@@ -94,16 +144,17 @@ export function ZoomablePreview({
     };
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [fullscreen]);
 
-  return (
+  const preview = (
     <div
+      ref={previewRef}
       className={`visual-preview ${className}`.trim()}
       role="region"
       aria-label={label}
       style={
         {
-          "--visual-preview-height": `${Math.min(420, dimensions.height + 32)}px`,
+          "--visual-preview-height": `${fitToWidth ? dimensions.height * fitted + 32 : Math.min(420, dimensions.height + 32)}px`,
         } as CSSProperties
       }
     >
@@ -144,6 +195,18 @@ export function ZoomablePreview({
         <button type="button" onClick={() => changeZoom(1)} title="Actual size">
           100%
         </button>
+        <button
+          ref={fullscreenButtonRef}
+          type="button"
+          onClick={() => {
+            inlineHeightRef.current = previewRef.current?.offsetHeight ?? 0;
+            setFullscreen(!fullscreen);
+          }}
+          aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+          title={fullscreen ? "Exit fullscreen (Esc)" : "Fullscreen"}
+        >
+          {fullscreen ? <Shrink size={14} /> : <Expand size={14} />}
+        </button>
       </div>
       <div
         className="visual-preview-viewport"
@@ -166,5 +229,51 @@ export function ZoomablePreview({
         </div>
       </div>
     </div>
+  );
+  return fullscreen ? (
+    <>
+      <div style={{ height: inlineHeightRef.current }} aria-hidden="true" />
+      {createPortal(
+        <dialog
+          ref={dialogRef}
+          open={!nativeDialog}
+          className="modal-backdrop visual-preview-fullscreen"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${label} fullscreen`}
+          onCancel={(event) => {
+            event.preventDefault();
+            setFullscreen(false);
+          }}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (nativeDialog) return;
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setFullscreen(false);
+            } else if (event.key === "Tab") {
+              const controls =
+                event.currentTarget.querySelectorAll<HTMLElement>(
+                  "button:not(:disabled), [tabindex='0']",
+                );
+              const first = controls[0],
+                last = controls[controls.length - 1];
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last?.focus();
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first?.focus();
+              }
+            }
+          }}
+        >
+          {preview}
+        </dialog>,
+        document.body,
+      )}
+    </>
+  ) : (
+    preview
   );
 }

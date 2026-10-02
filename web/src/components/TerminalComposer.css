@@ -168,8 +168,7 @@
   .terminal-composer-close,
   .terminal-composer-attach,
   .terminal-composer-shortcuts-toggle,
-  .terminal-composer-commands-toggle,
-  .terminal-composer-help {
+  .terminal-composer-commands-toggle {
     width: 30px;
     padding: 0;
     flex: 0 0 auto;

@@ -4,7 +4,6 @@ import {
   useShortcutPreferences,
 } from "../shortcutPreferences";
 import {
-  CircleHelp,
   CornerDownLeft,
   CornerDownRight,
   Keyboard,
@@ -13,7 +12,8 @@ import {
   X,
 } from "lucide-react";
 import { type CSSProperties, useEffect, useId, useRef, useState } from "react";
-import { createPortal, flushSync } from "react-dom";
+import { flushSync } from "react-dom";
+import { roamgateLocalStorage } from "../browserStorage";
 import {
   type MobileTerminalShortcut,
   mobileTerminalShortcutOption,
@@ -42,7 +42,6 @@ import {
   filterComposerCommands,
   terminalComposerCommands,
 } from "../terminalComposerCommands";
-import { MessageDialog } from "./ModalDialogs";
 import {
   filesFromTerminalDrop,
   isNativeFileDrag,
@@ -56,8 +55,8 @@ import "./TerminalComposer.css";
 import type { TerminalInputMode } from "../terminalInputMode";
 export type { TerminalInputMode } from "../terminalInputMode";
 
-const TERMINAL_COMPOSER_HELP =
-  "Composer uses your phone’s native editor for IME, dictation, multiline text, and cursor editing. Insert pastes the draft; Send also sends Enter. In Direct, tap the terminal to open the keyboard and send keys immediately. Switching modes preserves the draft. Shortcut keys always act on the terminal. Adding a file opens the system picker and inserts its uploaded path into the draft; tap the editor to reopen the keyboard if needed.";
+const SHORTCUTS_OPEN_STORAGE_KEY = "terminalComposerShortcutsOpen.v1";
+let unsavedShortcutsOpen: boolean | undefined;
 
 /**
  * Bottom-docked mobile terminal composer. A plain textarea owns all editing
@@ -115,8 +114,11 @@ export function TerminalComposer({
     terminalComposerUploadCount(draftKey),
   );
   const [composing, setComposing] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(true);
+  const [shortcutsOpen, setShortcutsOpen] = useState(
+    () =>
+      unsavedShortcutsOpen ??
+      roamgateLocalStorage.getItem(SHORTCUTS_OPEN_STORAGE_KEY) !== "false",
+  );
   const [pickerMode, setPickerMode] = useState<"browse" | "inline" | null>(
     null,
   );
@@ -201,9 +203,9 @@ export function TerminalComposer({
     const shouldFocus = focusSelectionAfterInsertRef.current;
     focusSelectionAfterInsertRef.current = false;
     if (!textarea || !selection || mode !== "composer") return;
-    if (shouldFocus && !helpOpen) textarea.focus({ preventScroll: true });
+    if (shouldFocus) textarea.focus({ preventScroll: true });
     textarea.setSelectionRange(selection.start, selection.end);
-  }, [draftKey, helpOpen, text, mode]);
+  }, [draftKey, text, mode]);
 
   // No visualViewport lift here: App.tsx owns keyboard geometry and exposes
   // the measured inset through shared CSS variables.
@@ -478,7 +480,20 @@ export function TerminalComposer({
               aria-expanded={shortcutsOpen}
               aria-controls={`${pickerId}-shortcuts`}
               onMouseDown={keepTextareaFocus}
-              onClick={() => setShortcutsOpen((open) => !open)}
+              onClick={() => {
+                const open = !shortcutsOpen;
+                setShortcutsOpen(open);
+                try {
+                  roamgateLocalStorage.setItem(
+                    SHORTCUTS_OPEN_STORAGE_KEY,
+                    String(open),
+                  );
+                  unsavedShortcutsOpen = undefined;
+                } catch {
+                  // Keep the choice across mounts when storage is unavailable.
+                  unsavedShortcutsOpen = open;
+                }
+              }}
             >
               <Keyboard size={17} aria-hidden="true" />
             </button>
@@ -508,18 +523,6 @@ export function TerminalComposer({
             }}
           >
             <SquareTerminal size={17} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="terminal-composer-help"
-            title="About terminal input"
-            aria-label="About terminal input"
-            aria-haspopup="dialog"
-            aria-expanded={helpOpen}
-            onMouseDown={keepTextareaFocus}
-            onClick={() => setHelpOpen(true)}
-          >
-            <CircleHelp size={15} />
           </button>
           <button
             type="button"
@@ -850,17 +853,6 @@ export function TerminalComposer({
           </button>
         </div>
       </div>
-      {helpOpen && typeof document !== "undefined"
-        ? createPortal(
-            <MessageDialog
-              open
-              title="About terminal input"
-              message={TERMINAL_COMPOSER_HELP}
-              onClose={() => setHelpOpen(false)}
-            />,
-            document.body,
-          )
-        : null}
     </>
   );
 }

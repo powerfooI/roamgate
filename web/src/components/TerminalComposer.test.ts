@@ -46,6 +46,24 @@ test.each(["claude", "grok-build", "agy"])(
       globalThis,
       "document",
     );
+    const previousStorage = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "localStorage",
+    );
+    const shortcutsStorageKey = "roamgate:terminalComposerShortcutsOpen.v1";
+    const savedValues = new Map<string, string>();
+    let storageWriteFails = false;
+    const writeStorage = mock((key: string, value: string) => {
+      if (storageWriteFails) throw new Error("Storage unavailable");
+      savedValues.set(key, value);
+    });
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => savedValues.get(key) ?? null,
+        setItem: writeStorage,
+      },
+    });
     Object.defineProperty(globalThis, "document", {
       configurable: true,
       value: {
@@ -242,6 +260,16 @@ test.each(["claude", "grok-build", "agy"])(
       callback(event);
       render();
     }
+    function remount() {
+      for (const effect of effects) effect.cleanup?.();
+      for (const ref of boundRefs) ref.current = null;
+      states.length = refs.length = 0;
+      effects = [];
+      boundRefs = [];
+      nodes.clear();
+      activeElement = {};
+      render();
+    }
     function key(element: Element, key: string, isComposing = false) {
       const event = {
         key,
@@ -263,6 +291,8 @@ test.each(["claude", "grok-build", "agy"])(
     const option = () => find("role", "option");
     try {
       render();
+      expect(shortcutPanel().props.hidden).toBe(false);
+      expect(writeStorage).not.toHaveBeenCalled();
       expect(commands().props["aria-label"]).toBe("Commands");
       expect((commands().props.children as Element).type).toBe(SquareTerminal);
       const textarea = nodes.get("terminal-composer-input")!;
@@ -543,12 +573,45 @@ test.each(["claude", "grok-build", "agy"])(
       render();
       expect(onSubmit).toHaveBeenLastCalledWith("new upload or edit", true);
       expect(draft).toBe("");
+
+      // Closing/reopening the composer creates new hooks but retains the choice.
+      invoke(shortcutToggle(), "onClick");
+      expect(savedValues.get(shortcutsStorageKey)).toBe("false");
+      const writesAfterHide = writeStorage.mock.calls.length;
+      remount();
+      expect(shortcutToggle().props["aria-expanded"]).toBe(false);
+      expect(shortcutPanel().props.hidden).toBe(true);
+      expect(writeStorage).toHaveBeenCalledTimes(writesAfterHide);
+      invoke(shortcutToggle(), "onClick");
+      expect(savedValues.get(shortcutsStorageKey)).toBe("true");
+      remount();
+      expect(shortcutToggle().props["aria-expanded"]).toBe(true);
+      expect(shortcutPanel().props.hidden).toBe(false);
+
+      // A rejected write keeps the page's selection over the stale stored value.
+      storageWriteFails = true;
+      invoke(shortcutToggle(), "onClick");
+      expect(savedValues.get(shortcutsStorageKey)).toBe("true");
+      remount();
+      expect(shortcutToggle().props["aria-expanded"]).toBe(false);
+      expect(shortcutPanel().props.hidden).toBe(true);
+      storageWriteFails = false;
+      invoke(shortcutToggle(), "onClick");
+      remount();
+      expect(shortcutPanel().props.hidden).toBe(false);
+
+      savedValues.set(shortcutsStorageKey, "invalid");
+      remount();
+      expect(shortcutPanel().props.hidden).toBe(false);
     } finally {
       for (const effect of effects) effect.cleanup?.();
       for (const spy of spies.reverse()) spy.mockRestore();
       if (previousDocument)
         Object.defineProperty(globalThis, "document", previousDocument);
       else Reflect.deleteProperty(globalThis, "document");
+      if (previousStorage)
+        Object.defineProperty(globalThis, "localStorage", previousStorage);
+      else Reflect.deleteProperty(globalThis, "localStorage");
     }
   },
 );

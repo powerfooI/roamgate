@@ -213,7 +213,8 @@ after fetch, and abort conflicts. They never push.
 - Text previews provide highlighting, line numbers, search, and refresh.
   Markdown has a Preview/Source switch with the active mode highlighted;
   Mermaid fences and `.mmd`/`.mermaid` files
-  have zoomable diagrams and source views. Markdown links navigate within
+  have zoomable diagrams, fullscreen viewing, and source views. Markdown
+  diagrams expand to their content height. Markdown links navigate within
   Inspector; external links open a browser tab.
 - Workspace `.html`/`.htm` files open in Preview mode with a Preview/Source switch.
   Static previews support workspace CSS, images, and fonts, including relative
@@ -312,7 +313,8 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   position is kept per browser and stays clear of the header and tab strip.
 - The bottom-right **Type** button opens one input dock with a
   **Composer / Direct** mode switch and the configured two shortcut rows.
-  The keyboard button shows or hides both rows in either mode. Swipe the
+  The keyboard button shows or hides both rows in either mode and remembers
+  the choice per browser, including after reload. Swipe the
   terminal up or down to scroll with the dock open in either mode; gestures
   inside the Composer editor keep their native text-editing behavior.
   Composer supports IME, dictation,

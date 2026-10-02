@@ -11,6 +11,7 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   min-height: 36px;
   padding: 4px 8px;
@@ -93,6 +94,34 @@
 }
 .file-preview-visual .visual-preview-viewport,
 .file-preview-mermaid.visual-preview .visual-preview-viewport {
+  flex: 1 1 auto;
+  height: auto;
+}
+
+.visual-preview-fullscreen {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  border: 0;
+  background: var(--viewer-code-bg);
+  animation: none;
+}
+
+.visual-preview-fullscreen > .visual-preview {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.visual-preview-fullscreen .visual-preview-viewport {
   flex: 1 1 auto;
   height: auto;
 }
