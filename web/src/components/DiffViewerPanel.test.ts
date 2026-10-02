@@ -274,6 +274,56 @@ if (process.env.ROAMGATE_DIFF_PANEL_DOM_TEST !== "1") {
       expect(selected()?.files["unstaged:error.ts"]).toBeUndefined();
       expect(selected()?.fileErrors["unstaged:error.ts"]).toBe("fresh error");
 
+      for (const opened of [
+        { ...entry, path: "generated.ts", generated: true },
+        { ...entry, path: "large.ts", file_size: 256 * 1024 },
+        { ...entry, path: "many-lines.ts", additions: 1000 },
+      ]) {
+        const unopened = { ...opened, path: `unopened-${opened.path}` };
+        const key = `unstaged:${opened.path}`;
+        summaryEntries = [entry, opened, unopened];
+        await act(async () => refresh());
+        await act(async () =>
+          pending[
+            requested.map((request) => request.path).lastIndexOf(entry.path)
+          ](file("selected-before-open")),
+        );
+        await act(async () => ref.current!.selectEntry(opened));
+        const oldIndex = requested.length - 1;
+        const old = { ...file("old-opened"), path: opened.path };
+        await act(async () => pending[oldIndex](old));
+        await act(async () => ref.current!.selectEntry(entry));
+        const revision = selected()?.selectionRevision;
+        await act(async () => refresh());
+        await act(async () =>
+          pending[
+            requested.map((request) => request.path).lastIndexOf(entry.path)
+          ](file("selected-after-refresh")),
+        );
+        expect(selected()?.files[key]).toBe(old);
+        const requestCount = requested.length;
+        await act(async () =>
+          ref.current!.loadNearbyEntries([opened, unopened]),
+        );
+        expect(requested).toHaveLength(requestCount + 1);
+        expect(requested[requested.length - 1]).toEqual({
+          path: opened.path,
+          automatic: false,
+        });
+        expect(
+          requested.some((request) => request.path === unopened.path),
+        ).toBe(false);
+        const fresh = { ...old, diff: "fresh-opened" };
+        await act(async () => pending[requested.length - 1](fresh));
+        expect(selected()?.files[key]).toBe(fresh);
+        expect(selected()?.entry).toEqual(entry);
+        expect(selected()?.selectionRevision).toBe(revision);
+        await act(async () =>
+          ref.current!.loadNearbyEntries([opened, unopened]),
+        );
+        expect(requested).toHaveLength(requestCount + 1);
+      }
+
       const visible = { ...entry, path: "folder/visible.ts" };
       const stagedVisible = { ...visible, kind: "staged" as const };
       summaryEntries = [entry, visible, stagedVisible];

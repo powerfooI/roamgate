@@ -1452,7 +1452,8 @@ export const DiffViewerPanel = forwardRef<
       );
       if (
         current &&
-        !diffAutoCollapseInfo(current, cache.files[diffEntryKey(current)])
+        (explicitEntryKeysRef.current.has(diffEntryKey(current)) ||
+          !diffAutoCollapseInfo(current, cache.files[diffEntryKey(current)]))
       ) {
         void loadFileRef.current(current, {}, false);
       }
