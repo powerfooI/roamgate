@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "HOST=127.0.0.1 PORT=8788 bun run --hot src/index.ts",
+    "dev": "NODE_ENV=development HOST=127.0.0.1 PORT=8788 bun run --hot src/index.ts",
     "start": "bun run src/index.ts",
     "compile": "bun build --compile --minify --sourcemap --asset ./public --no-compile-autoload-dotenv --no-compile-autoload-bunfig src/index.ts --outfile roamgate",
     "postcompile": "bun run clean:bun-build",

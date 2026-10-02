@@ -30,13 +30,17 @@ browser leaves terminals running; host sleep, shutdown, or process exit can stop
 2. Run `roamgate` on that computer and leave it running (`roamgate.exe` on
    Windows). Plugin users instead use the [startup action](./DEPLOYMENT.md#herdr-plugin)
    and obtain the URL from its panel/log; the plugin does not add the CLI to PATH.
-3. Open the printed URL, including any token, **on the same computer**. Select
-   a workspace and idle shell; run `pwd` (`Get-Location` in PowerShell).
+3. Open the printed URL, including any token, **on the same computer**. Log in
+   with your configured password or the saved token at the file path reported
+   by the bridge. Select a workspace and idle shell; run `pwd`
+   (`Get-Location` in PowerShell).
 
 **You are done when:** terminal input shows your project directory.
 
-Standalone defaults to `127.0.0.1:8787`, which **bypasses login even with a
-password**. A new user/plugin service defaults to `0.0.0.0:8787` with a token.
+Standalone defaults to `127.0.0.1:8787`. **Normal runtime requires a token or
+password**, including loopback; see [Security](../SECURITY.md#trust-model) for
+the local development exception. A new user/plugin service defaults to
+`0.0.0.0:8787` with a token.
 Existing Herdr Studio / Roamgate 0.7.0 installations should follow
 [migration guidance](./DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui)
 before changing services.
@@ -137,7 +141,7 @@ this exercise; when enabled they fetch/merge, never push.
 Complete [Tailscale + Serve](#tailscale) first. Use its HTTPS URL; `127.0.0.1`
 on a phone points to the phone, not your computer.
 
-1. Open Roamgate on your phone, authenticate if required, and select your project/pane.
+1. Open Roamgate on your phone, log in, and select your project/pane.
 2. Use the floating terminal shortcuts for Ctrl/arrows, then open Changes to review
    the unified diff. Long-press opens file actions.
 3. Adjust **Configuration > Appearance > Interface scale** or **Terminal** font size
@@ -184,11 +188,11 @@ Hop B: Roamgate -> Herdr       (local sockets / Roamgate SSH profile)
 ### Safety checks
 
 - Admit only fully trusted people/devices. UI access has the Roamgate user's authority.
-- **Loopback bypasses login even with a password.** A proxy/tunnel forwarding to
-  it becomes the entire remote access boundary. Use an independently authenticated
-  proxy if that is insufficient; do not widen the bind just to force login.
+- Use normal runtime for forwarded access: loopback requires login too. Keep the
+  password or generated token private; use the credential from the Roamgate host.
 - Use trusted HTTPS/encrypted tunnels and restrict listener/access policy.
-  Authentication alone adds no TLS, rate limiting, permission roles, or sandbox.
+  Authentication alone adds no TLS, permission roles, or sandbox. See
+  [Security](../SECURITY.md#trust-model) for login limits and shared proxy-IP limits.
 - Keep passwords, token URLs, and Tailcat addresses out of screenshots, issues,
   chats, and committed configuration. Read [Security](../SECURITY.md).
 
@@ -215,8 +219,8 @@ remain encrypted.
    `HOST=127.0.0.1` and `PORT=8787` in its protected
    [environment file](./DEPLOYMENT.md#run-as-a-user-service), preserving other settings,
    then run `roamgate service restart` or the plugin's `roamgate.restart` action.
-   Confirm asynchronous plugin restarts in its log. **Loopback removes the
-   token/password gate; Tailscale policy must replace it.**
+   Confirm asynchronous plugin restarts in its log. Keep the configured password
+   or saved token available; Roamgate still requires it behind Serve.
 
 4. Inspect `tailscale serve status`. Only if HTTPS port 443 at `/` is free, run:
 
@@ -228,9 +232,10 @@ remain encrypted.
    Approve HTTPS certificate consent as an authorized admin. Hostnames appear in
    public certificate transparency logs, so avoid sensitive names.
 5. On the Tailscale-connected phone, open the **printed HTTPS hostname**, not an
-   IP or localhost. Run `pwd` in an idle pane. Verify excluded devices cannot
-   connect, using policy tests if no test device exists. With Tailscale off and
-   no other access path, the URL should be unreachable.
+   IP or localhost. Log in with the Roamgate credential, then run `pwd` in an
+   idle pane. Verify excluded devices cannot connect, using policy tests if no
+   test device exists. With Tailscale off and no other access path, the URL
+   should be unreachable.
 
 **You are done when:** cellular access works and excluded devices are denied.
 Incognito is not an admission test; device identity is unchanged.
@@ -272,8 +277,8 @@ variables override tunnel paths and can select the wrong host. Profiles store no
 SSH secrets; see [connection configuration](./DEPLOYMENT.md#multiple-and-remote-herdr-connections).
 
 **Option B — forward remote Roamgate's web port:** both services stay remote;
-this works with Windows OpenSSH too. Remote Roamgate uses loopback, so SSH is the
-admission boundary. Local processes on the visiting computer also gain access.
+this works with Windows OpenSSH too. Remote Roamgate in normal runtime uses
+loopback and still requires login; SSH restricts who can establish forwarding.
 
 On the visiting computer, replace `workbox` with your SSH alias:
 
@@ -282,7 +287,8 @@ ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:18787:127.0.0.1:8787 workbox
 ```
 
 Open `http://127.0.0.1:18787` **on that computer**, not your phone. HTTP remains
-loopback at both ends; SSH encrypts the link. Press Ctrl+C to stop forwarding.
+loopback at both ends; SSH encrypts the link. Log in using the credential from
+the remote Roamgate host. Press Ctrl+C to stop forwarding.
 
 <a id="tailcat"></a>
 
@@ -299,7 +305,7 @@ on both computers (`brew install tailcat` on macOS). Check `tailcat --help`,
 demo is not a general Roamgate proxy; use Tailscale for phones.
 
 1. Run and locally verify Roamgate at `127.0.0.1:8787` on your work computer.
-   There is **no Roamgate login gate**; only proceed between computers you control.
+   Keep its login credential available; only proceed between computers you control.
 2. In another terminal there, start a single-port service:
 
    ```bash
@@ -315,7 +321,8 @@ demo is not a general Roamgate proxy; use Tailscale for phones.
    ```
 
    Verify the listener is `127.0.0.1`; never add `--bind=0.0.0.0`.
-4. Open `http://127.0.0.1:18787` there and verify terminal input with `pwd`.
+4. Open `http://127.0.0.1:18787` there, log in with the Roamgate credential,
+   and verify terminal input with `pwd`.
 5. Press Ctrl+C in both Tailcat terminals and confirm the URL stops working.
    The ephemeral address no longer points to a running service after exit.
 
@@ -345,7 +352,8 @@ Check in order (about 3 minutes):
 | Symptom | First check |
 | --- | --- |
 | Phone localhost cannot reach the computer | Use Serve's printed HTTPS hostname. |
-| Password set but no login page | Loopback bypasses login; for non-loopback, use incognito to rule out an existing cookie. |
+| Password set but no login page | Use incognito to rule out an existing cookie or a token URL that already logged you in. |
+| Login returns `429` | Wait for `Retry-After`; forwarded clients may share the same [source-IP limits](../SECURITY.md#trust-model). |
 | Address already in use | Check for an existing plugin/user service; do not duplicate it. |
 | SSH history is empty | Check transcript readability and [session lookup limits](../FEATURES.md#agent-awareness-and-session-inspection). |
 | Clipboard/PWA restricted | Use trusted, warning-free HTTPS; check browser permissions/support. |

@@ -6,7 +6,13 @@ import { parseArgs } from "node:util";
 import { createHash } from "node:crypto";
 import { validateSshDestination } from "../bridge/ssh-command";
 import { assertSshTunnelPlatformSupported } from "../bridge/ssh-tunnel";
-import { defaultAuthTokenPath, loadOrCreateAuthToken } from "./auth-token";
+import {
+  assertValidAuthPassword,
+  defaultAuthTokenPath,
+  loadOrCreateAuthToken,
+  MAX_PASSWORD_LENGTH,
+  MIN_PASSWORD_LENGTH,
+} from "./auth-token";
 import { roamgateEnv } from "./environment";
 import { dataRoot } from "./data-paths";
 import { type LogLevel, parseLogLevel, serverLogger } from "../utils/logger";
@@ -158,7 +164,8 @@ Service actions:
 Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
   --host <addr>              listen address        (env HOST,            default 127.0.0.1)
   --port <n>                 listen port           (env PORT,            default 8787)
-  --password <pw>            fixed login password  (env ROAMGATE_PASSWORD; otherwise a token is generated)
+  --password <pw>            fixed login password, ${MIN_PASSWORD_LENGTH}..${MAX_PASSWORD_LENGTH} characters
+                             (env ROAMGATE_PASSWORD; otherwise a token is generated)
   --tls-cert <path>          PEM certificate chain (env ROAMGATE_TLS_CERT; requires --tls-key)
   --tls-key <path>           PEM private key       (env ROAMGATE_TLS_KEY; requires --tls-cert)
   --socket-path <path>       control socket        (env HERDR_SOCKET_PATH)
@@ -219,6 +226,9 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
 
   const host = String(args.host ?? process.env.HOST ?? "127.0.0.1");
   const port = Number(args.port ?? process.env.PORT ?? 8787);
+  const authRequired =
+    process.env.NODE_ENV !== "development" ||
+    !["127.0.0.1", "localhost", "::1"].includes(host);
   let tls: ServerConfig["tls"];
   try {
     tls = loadServerTls(
@@ -232,7 +242,13 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
   const configuredPassword = String(
     args.password ?? roamgateEnv("PASSWORD") ?? "",
   );
-  const authRequired = !isLocalHost(host);
+  try {
+    if (authRequired && configuredPassword)
+      assertValidAuthPassword(configuredPassword);
+  } catch (error) {
+    console.error(`[bridge] ${(error as Error).message}`);
+    process.exit(2);
+  }
   const generatedAuthTokenPath =
     authRequired && !configuredPassword ? defaultAuthTokenPath() : undefined;
   let generatedAuthToken: string | undefined;
@@ -246,7 +262,9 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
     );
     process.exit(1);
   }
-  const password = configuredPassword || generatedAuthToken || "";
+  const password = authRequired
+    ? configuredPassword || generatedAuthToken || ""
+    : "";
 
   const sshHostValue =
     (typeof args["ssh-host"] === "string" && args["ssh-host"]) ||
@@ -295,10 +313,6 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
     hasExplicitSocketPath,
     hasExplicitClientSocketPath,
   };
-}
-
-function isLocalHost(host: string) {
-  return host === "127.0.0.1" || host === "localhost" || host === "::1";
 }
 
 function remoteTunnelLocalPath(

@@ -15,6 +15,10 @@ bun run dev:web
 
 Open <http://localhost:5173>. Vite proxies `/api`, `/ws`, and `/login` to the dev
 bridge at `127.0.0.1:8788`; installed services and `start:server` default to 8787.
+`dev:server` sets `NODE_ENV=development`, so its loopback listener needs no login.
+To test authentication, use `NODE_ENV=production bun run start:server` and log
+in with your configured password or the saved token at the reported file path.
+See [Security](./SECURITY.md#trust-model) before forwarding a listener.
 
 Keep the only lockfile (`bun.lock`) and shared tooling at root; runtime
 dependencies belong in their web/server workspace. After changes, run root

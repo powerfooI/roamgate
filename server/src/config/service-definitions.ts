@@ -19,7 +19,7 @@ export const DEFAULT_SERVICE_ENV_FILE = `# roamgate service environment
 HOST=0.0.0.0
 PORT=8787
 
-# Optional fixed password. By default, service install creates a generated token.
+# Optional fixed password (15..1024 characters). Otherwise a token is generated.
 # ROAMGATE_PASSWORD=replace-with-a-strong-password
 
 # Optional native HTTPS. Set both to absolute PEM file paths.

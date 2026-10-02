@@ -1359,7 +1359,9 @@ function main() {
             return new Response("invalid request URL", { status: 400 });
           }
 
-          const tokenLoginResponse = handleTokenLogin(req);
+          // Forwarded headers are untrusted; use the actual TCP peer address.
+          const clientIp = server.requestIP(req)?.address ?? "unknown";
+          const tokenLoginResponse = handleTokenLogin(req, clientIp);
           if (tokenLoginResponse) return tokenLoginResponse;
 
           if (url.pathname === "/health" || url.pathname === "/healthz") {
@@ -1371,7 +1373,7 @@ function main() {
 
           // Auth endpoints are always reachable.
           if (url.pathname === "/api/login" && req.method === "POST") {
-            return handleLogin(req);
+            return handleLogin(req, clientIp);
           }
           if (url.pathname === "/login") {
             return loginPage();
@@ -1393,7 +1395,7 @@ function main() {
             return response;
           }
 
-          // Everything else requires auth when bound to a non-localhost address.
+          // Authentication is bypassed only for development loopback listeners.
           if (!isAuthed(req)) {
             const accept = req.headers.get("accept") ?? "";
             if (req.method === "GET" && accept.includes("text/html")) {

@@ -10,7 +10,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultAuthTokenPath, loadOrCreateAuthToken } from "./auth-token";
+import {
+  assertValidAuthPassword,
+  defaultAuthTokenPath,
+  loadOrCreateAuthToken,
+} from "./auth-token";
 
 const tempDirs: string[] = [];
 
@@ -35,6 +39,28 @@ afterEach(() => {
 });
 
 describe("generated authentication token", () => {
+  test("requires 15 to 1024 Unicode characters for login secrets", () => {
+    for (const password of [
+      "",
+      "a".repeat(14),
+      "\u{1f600}".repeat(8),
+      "a".repeat(1025),
+      "\u{1f600}".repeat(1025),
+    ]) {
+      expect(() => assertValidAuthPassword(password)).toThrow(
+        "at least 15 characters and at most 1024 characters",
+      );
+    }
+    for (const password of [
+      "a".repeat(15),
+      "\u{1f600}".repeat(15),
+      "a".repeat(1024),
+      "\u{1f600}".repeat(1024),
+    ]) {
+      expect(() => assertValidAuthPassword(password)).not.toThrow();
+    }
+  });
+
   test("uses APPDATA for the Windows token", () => {
     const home = join("C:", "Users", "tester");
     const appData = join(home, "AppData", "Roaming");

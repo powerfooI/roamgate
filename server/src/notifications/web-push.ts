@@ -15,6 +15,7 @@ import {
   publishDataFile,
 } from "../config/data-paths";
 import { roamgateEnv } from "../config/environment";
+import { readJsonBody } from "../http/json-body";
 import type { TaskEvent } from "./task-events";
 
 export interface PushPreferences {
@@ -140,28 +141,6 @@ export function validatePushDevice(value: unknown): Device {
       blocked: preferences.blocked,
     },
   };
-}
-
-async function readBody(req: Request): Promise<unknown> {
-  if (!req.body) throw new Error("Missing request body");
-  const reader = req.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.length;
-      if (size > MAX_BODY_BYTES) {
-        await reader.cancel();
-        throw new Error("Request body too large");
-      }
-      chunks.push(value);
-    }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } finally {
-    reader.releaseLock();
-  }
 }
 
 export function createWebPushService(
@@ -350,7 +329,7 @@ export function createWebPushService(
         );
       let input: unknown;
       try {
-        input = await readBody(req);
+        input = await readJsonBody(req, MAX_BODY_BYTES);
       } catch {
         return Response.json(
           { error: "Invalid push request" },

@@ -134,8 +134,9 @@ and pull requests.
 
 ## Security
 
-Roamgate controls terminals and modifies real files. Keep the default loopback
-binding; read [SECURITY.md](./SECURITY.md) before allowing another device access.
+Roamgate controls terminals and modifies real files. Normal runtime requires a
+token or password, including loopback. Keep the default loopback binding; read
+[SECURITY.md](./SECURITY.md) before allowing another device access.
 
 ## License
 

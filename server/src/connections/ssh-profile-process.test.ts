@@ -12,6 +12,24 @@ import { join } from "node:path";
 import { BinReader, BinWriter, encodeFrame } from "../bridge/bincode";
 import type { SshConnectionProfile } from "./profiles";
 
+const password = "profile-test-password";
+// Bun supports authentication headers on WebSocket handshakes.
+const BrowserSocket = WebSocket as unknown as new (
+  url: string,
+  options: Bun.WebSocketOptions,
+) => WebSocket;
+
+async function login(port: number): Promise<string> {
+  const response = await fetch(`http://127.0.0.1:${port}/api/login`, {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+  expect(response.status).toBe(200);
+  const cookie = response.headers.get("set-cookie")?.split(";", 1)[0];
+  expect(cookie).toBeTruthy();
+  return cookie!;
+}
+
 const roots: string[] = [];
 const servers: net.Server[] = [];
 const sockets = new Set<net.Socket>();
@@ -310,6 +328,7 @@ process.on("SIGINT", () => void stop());
       ...process.env,
       PATH: `${bin}:${process.env.PATH ?? ""}`,
       HOST: "127.0.0.1",
+      ROAMGATE_PASSWORD: password,
       PORT: "0",
       HERDR_GUI_CONNECTIONS_PATH: registryPath,
       HERDR_GUI_FAKE_SSH_STATE_DIR: state,
@@ -326,7 +345,10 @@ process.on("SIGINT", () => void stop());
   try {
     const port = await bridgeListeningPort(child.stdout);
     await waitForHealth(port);
-    ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    const cookie = await login(port);
+    ws = new BrowserSocket(`ws://127.0.0.1:${port}/ws`, {
+      headers: { cookie },
+    });
     await new Promise<void>((resolve, reject) => {
       ws!.onopen = () => resolve();
       ws!.onerror = () => reject(new Error("websocket open failed"));

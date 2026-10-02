@@ -201,9 +201,9 @@ XDG_STATE_HOME=/tmp/roamgate-demo/runtime-state bun server/src/index.ts --host 1
   --client-socket-path /tmp/roamgate-demo/config/herdr/sessions/roamgate-demo/herdr-client.sock
 ```
 
-Open <http://127.0.0.1:8799>. This loopback configuration does not require a
-login. If capturing an authenticated non-loopback setup, use its login URL
-privately and remove the authentication token from the URL before capturing.
+Open <http://127.0.0.1:8799> and log in with your configured password or the
+saved token at the file path reported in the startup log. Remove any
+authentication token from the URL before capturing.
 Both socket paths must match a custom `ROAMGATE_DEMO_ROOT`.
 The wrapper's Herdr session directory is selected by its `XDG_CONFIG_HOME`;
 passing a different socket environment variable to a named Herdr session is

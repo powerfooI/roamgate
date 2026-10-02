@@ -265,7 +265,7 @@ explicit connection registry paths remain authoritative, including empty values.
 | --- | --- | --- |
 | `--host <addr>` | `HOST` | `127.0.0.1` |
 | `--port <n>` | `PORT` | `8787` |
-| `--password <pw>` | `ROAMGATE_PASSWORD` | Generated token for non-loopback |
+| `--password <pw>` | `ROAMGATE_PASSWORD` | Generated token when authentication is enabled |
 | `--tls-cert <path>` | `ROAMGATE_TLS_CERT` | Disabled; PEM chain, requires key |
 | `--tls-key <path>` | `ROAMGATE_TLS_KEY` | Disabled; PEM key, requires certificate |
 | `--socket-path <path>` | `HERDR_SOCKET_PATH` | Default control socket/pipe |
@@ -296,12 +296,15 @@ fail closed without archive discovery. HTTPS is required except loopback tests;
 credentials, queries, and fragments in URLs are rejected.
 
 ```bash
-roamgate                              # local, no login
+roamgate                              # loopback, generated token
 roamgate --host 0.0.0.0 --port 8787     # generated token
 ```
 
 For a fixed password, prefer `ROAMGATE_PASSWORD` over process-visible
-`--password`. Read [Security](../SECURITY.md) before non-loopback use.
+`--password`. It must contain 15-1024 Unicode characters; values outside that
+range stop startup, including existing short passwords. Normal runtime requires
+login; see [Security](../SECURITY.md#trust-model) for the local development
+exception, login limits, and remote access guidance.
 
 ### Host file reveal
 
@@ -330,8 +333,8 @@ roamgate --host 0.0.0.0 --port 8443 \
 
 Missing/unreadable/malformed/mismatched files stop startup, never fall back to
 HTTP. Without TLS settings, HTTP is used. HTTPS adds `Secure` cookies and HTTPS
-startup links, but **does not change authentication**: loopback bypasses login;
-non-loopback requires a token/password. Do not expose directly to the public internet.
+startup links; it does not change the [authentication rules](../SECURITY.md#trust-model).
+Do not expose directly to the public internet.
 
 For private LAN testing, use your issuer or [mkcert](https://github.com/FiloSottile/mkcert).
 Replace this reserved example IP with the host's actual LAN address:

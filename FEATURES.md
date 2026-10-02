@@ -365,9 +365,11 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   checksum-verified standalone updates under a supported supervisor, and probe
   `/health` or `/healthz`.
 
-**Loopback bypasses login even with a password.** Non-loopback requires a token
-or password. UI access grants terminal/file authority, not a read-only role;
-read [Security](./SECURITY.md) before sharing access.
+**Normal runtime requires a token or password, including loopback.** The local
+development exception, password policy, and login limits are described in
+[Security](./SECURITY.md#trust-model).
+UI access grants terminal/file authority, not a read-only role; read it before
+sharing access.
 
 ## Keyboard Shortcuts
 

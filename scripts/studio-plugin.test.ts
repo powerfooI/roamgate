@@ -247,7 +247,7 @@ describe("computeUrl", () => {
     expect(computeUrl(fixture({}))).toBe("http://127.0.0.1:8787");
   });
 
-  test("includes the login token only for non-loopback binds", () => {
+  test("includes the login token for non-loopback binds", () => {
     const dir = fixture({
       "roamgate.env": "HOST=0.0.0.0\nPORT=8791\n",
       "auth-token": "abc123\n",
@@ -255,12 +255,12 @@ describe("computeUrl", () => {
     expect(computeUrl(dir)).toBe("http://localhost:8791/?token=abc123");
   });
 
-  test("ignores a stale token file on loopback binds", () => {
+  test("includes the login token for loopback binds", () => {
     const dir = fixture({
       "roamgate.env": "HOST=127.0.0.1\nPORT=8787\n",
       "auth-token": "abc123\n",
     });
-    expect(computeUrl(dir)).toBe("http://127.0.0.1:8787");
+    expect(computeUrl(dir)).toBe("http://127.0.0.1:8787/?token=abc123");
   });
 
   test("new password values take precedence, including empty values", () => {

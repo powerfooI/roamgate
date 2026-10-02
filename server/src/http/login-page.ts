@@ -91,6 +91,9 @@ export const LOGIN_HTML = `<!doctype html>
       if(r.status===401){
         err.textContent='Wrong password or token. Try again.';
         pw.setAttribute('aria-invalid','true');pw.value='';pw.focus();
+      }else if(r.status===429){
+        const seconds=Number(r.headers.get('retry-after'))||60;
+        err.textContent='Too many login attempts. Try again in '+seconds+' seconds.';
       }else{err.textContent='Unable to log in. Please try again.';}
     }catch{err.textContent='Cannot reach the server. Check your connection and try again.';}
     finally{btn.disabled=false;btn.textContent='Log in';}

@@ -15,6 +15,17 @@ import {
 import { randomBytes } from "node:crypto";
 
 const AUTH_TOKEN_PATTERN = /^[a-f0-9]{64}$/;
+export const MIN_PASSWORD_LENGTH = 15;
+export const MAX_PASSWORD_LENGTH = 1024;
+
+export function assertValidAuthPassword(password: string): void {
+  const length = Array.from(password).length;
+  if (length < MIN_PASSWORD_LENGTH || length > MAX_PASSWORD_LENGTH) {
+    throw new Error(
+      `Login password must contain at least ${MIN_PASSWORD_LENGTH} characters and at most ${MAX_PASSWORD_LENGTH} characters (--password or ROAMGATE_PASSWORD).`,
+    );
+  }
+}
 
 export function defaultAuthTokenPath(
   homeDir = homedir(),

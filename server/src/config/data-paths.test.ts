@@ -277,7 +277,7 @@ test("plugin URL reads legacy files without migrating and prefers new paths", as
   expect(await invoke()).toBe(`http://localhost:8890/?token=${"c".repeat(64)}`);
   expect(existsSync(current)).toBeFalse();
   write(join(current, "roamgate.env"), "HOST=127.0.0.1\nPORT=8891\n");
-  expect(await invoke()).toBe("http://127.0.0.1:8891");
+  expect(await invoke()).toBe(`http://127.0.0.1:8891/?token=${"c".repeat(64)}`);
   expect(readFileSync(join(legacy, "herdr-gui.env"), "utf8")).toBe(
     "HOST=0.0.0.0\nPORT=8890\n",
   );

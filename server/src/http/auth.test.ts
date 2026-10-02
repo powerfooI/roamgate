@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, jest, test } from "bun:test";
 import { runInNewContext } from "node:vm";
 import { createHmac } from "node:crypto";
 import { createAuthHandlers, unauthenticatedLoginRedirect } from "./auth";
@@ -11,10 +11,40 @@ function cookieHeader(response: Response): string {
 }
 
 describe("request authentication boundaries", () => {
+  test("requires authentication by default", () => {
+    const handlers = createAuthHandlers({ password: "test-login-secret" });
+    expect(handlers.isAuthed(new Request("http://localhost/"))).toBe(false);
+  });
+
+  test("explicitly disabled development authentication needs no password or cookie", async () => {
+    const handlers = createAuthHandlers({
+      authRequired: false,
+      password: "",
+      urlLoginToken: "ignored-token",
+    });
+    expect(handlers.isAuthed(new Request("http://localhost/"))).toBe(true);
+    const page = handlers.loginPage();
+    expect(page.status).toBe(302);
+    expect(page.headers.get("location")).toBe("/");
+    expect(page.headers.get("cache-control")).toBe("no-store");
+    const response = await handlers.handleLogin(
+      new Request("http://localhost/api/login", { method: "POST" }),
+      "127.0.0.1",
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true });
+    expect(response.headers.has("set-cookie")).toBe(false);
+    expect(
+      handlers.handleTokenLogin(
+        new Request("http://localhost/?token=ignored-token"),
+        "127.0.0.1",
+      ),
+    ).toBeNull();
+  });
+
   test("brands the login page as Roamgate", async () => {
     const handlers = createAuthHandlers({
-      authRequired: true,
-      password: "fixed-password",
+      password: "fixed-test-password",
     });
     const html = await handlers.loginPage().text();
 
@@ -29,13 +59,12 @@ describe("request authentication boundaries", () => {
 
   test("login preserves same-origin notification launch fragments", async () => {
     const handlers = createAuthHandlers({
-      authRequired: true,
-      password: "test-secret",
+      password: "test-login-secret",
     });
     const html = await handlers.loginPage().text();
     const elements: Record<string, any> = {
       login: {},
-      pw: { value: "test-secret", removeAttribute() {} },
+      pw: { value: "test-login-secret", removeAttribute() {} },
       btn: {},
       err: {},
       reveal: {},
@@ -56,12 +85,11 @@ describe("request authentication boundaries", () => {
     expect(location.href).toBe("/#roamgate-task=example-target");
   });
 
-  test.each(["credentials", "server", "network"])(
+  test.each(["credentials", "server", "network", "throttle"])(
     "login recovers from %s failures and prevents duplicate submissions",
     async (failure) => {
       const handlers = createAuthHandlers({
-        authRequired: true,
-        password: "secret",
+        password: "test-login-secret",
       });
       const html = await handlers.loginPage().text();
       let focused = false;
@@ -69,7 +97,7 @@ describe("request authentication boundaries", () => {
       const elements: Record<string, any> = {
         login: {},
         pw: {
-          value: "secret",
+          value: "test-login-secret",
           type: "password",
           focus() {
             focused = true;
@@ -105,7 +133,15 @@ describe("request authentication boundaries", () => {
       if (failure === "network") pending.reject(new Error("offline"));
       else
         pending.resolve(
-          new Response(null, { status: failure === "credentials" ? 401 : 500 }),
+          new Response(null, {
+            status:
+              failure === "credentials"
+                ? 401
+                : failure === "throttle"
+                  ? 429
+                  : 500,
+            headers: { "retry-after": "300" },
+          }),
         );
       await submission;
       expect(elements.btn.disabled).toBe(false);
@@ -113,11 +149,15 @@ describe("request authentication boundaries", () => {
       expect(elements.err.textContent).toContain(
         failure === "network"
           ? "Cannot reach"
-          : failure === "server"
-            ? "Unable to log in"
-            : "Wrong password",
+          : failure === "throttle"
+            ? "Try again in 300 seconds"
+            : failure === "server"
+              ? "Unable to log in"
+              : "Wrong password",
       );
-      expect(elements.pw.value).toBe(failure === "credentials" ? "" : "secret");
+      expect(elements.pw.value).toBe(
+        failure === "credentials" ? "" : "test-login-secret",
+      );
       expect(focused).toBe(failure === "credentials");
       if (failure === "credentials")
         expect(attributes["aria-invalid"]).toBe("true");
@@ -127,15 +167,15 @@ describe("request authentication boundaries", () => {
 
   test("does not derive authorization from reverse-proxy authorities", async () => {
     const handlers = createAuthHandlers({
-      authRequired: true,
-      password: "fixed-password",
+      password: "fixed-test-password",
     });
     const login = await handlers.handleLogin(
       new Request("http://upstream.example/api/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ password: "fixed-password" }),
+        body: JSON.stringify({ password: "fixed-test-password" }),
       }),
+      "127.0.0.1",
     );
     const proxiedRequest = new Request("http://upstream.example/ws", {
       headers: {
@@ -151,20 +191,21 @@ describe("request authentication boundaries", () => {
     "sets Secure for both login paths only with native TLS (%s)",
     async (secureCookies) => {
       const handlers = createAuthHandlers({
-        authRequired: true,
-        password: "test-secret",
-        urlLoginToken: "test-secret",
+        password: "test-login-secret",
+        urlLoginToken: "test-login-secret",
         secureCookies,
       });
       const login = await handlers.handleLogin(
         new Request("https://example.test/api/login", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ password: "test-secret" }),
+          body: JSON.stringify({ password: "test-login-secret" }),
         }),
+        "127.0.0.1",
       );
       const token = handlers.handleTokenLogin(
-        new Request("https://example.test/?token=test-secret"),
+        new Request("https://example.test/?token=test-login-secret"),
+        "127.0.0.1",
       )!;
       for (const response of [login, token]) {
         const cookie = response.headers.get("set-cookie")!;
@@ -189,16 +230,275 @@ describe("request authentication boundaries", () => {
   });
 });
 
+describe("login attempt limits", () => {
+  test.each(["password", "URL token"])(
+    "%s shares IP rate limits, clears failures on success and expires cooldowns",
+    async (mode) => {
+      jest.useFakeTimers({ now: 1_700_000_000_000 });
+      try {
+        const handlers = createAuthHandlers({
+          password: "test-login-secret",
+          urlLoginToken: "test-login-secret",
+        });
+        const login = async (
+          credential = "test-login-secret",
+          ip = "192.0.2.1",
+        ) =>
+          mode === "password"
+            ? handlers.handleLogin(
+                new Request("http://example.test/api/login", {
+                  method: "POST",
+                  body: JSON.stringify({ password: credential }),
+                }),
+                ip,
+              )
+            : handlers.handleTokenLogin(
+                new Request(`http://example.test/?token=${credential}`),
+                ip,
+              )!;
+        const invalidStatus = mode === "password" ? 401 : 303;
+        for (let i = 0; i < 4; i++)
+          expect((await login("wrong")).status).toBe(invalidStatus);
+        const authenticated = cookieHeader(await login());
+        for (let i = 0; i < 5; i++)
+          expect((await login("wrong")).status).toBe(invalidStatus);
+        const blocked = await login();
+        expect(blocked.status).toBe(429);
+        expect(blocked.headers.get("retry-after")).toBe("300");
+        expect(blocked.headers.get("cache-control")).toBe("no-store");
+        expect(blocked.headers.has("set-cookie")).toBe(false);
+        expect(
+          handlers.isAuthed(
+            new Request("http://example.test/", {
+              headers: { cookie: authenticated },
+            }),
+          ),
+        ).toBe(true);
+        expect((await login("test-login-secret", "192.0.2.2")).status).toBe(
+          mode === "password" ? 200 : 303,
+        );
+        // Password and URL-token entry points cannot bypass each other's cooldown.
+        const otherEntry =
+          mode === "password"
+            ? handlers.handleTokenLogin(
+                new Request("http://example.test/?token=test-login-secret"),
+                "192.0.2.1",
+              )!
+            : await handlers.handleLogin(
+                new Request("http://example.test/api/login", {
+                  method: "POST",
+                  body: JSON.stringify({ password: "test-login-secret" }),
+                }),
+                "192.0.2.1",
+              );
+        expect(otherEntry.status).toBe(429);
+        jest.advanceTimersByTime(299_999);
+        expect((await login()).headers.get("retry-after")).toBe("1");
+        jest.advanceTimersByTime(1);
+        expect((await login()).status).toBe(mode === "password" ? 200 : 303);
+
+        for (let i = 0; i < 20; i++)
+          expect((await login("test-login-secret", "192.0.2.3")).status).toBe(
+            mode === "password" ? 200 : 303,
+          );
+        expect(
+          (await login("test-login-secret", "192.0.2.3")).headers.get(
+            "retry-after",
+          ),
+        ).toBe("60");
+        jest.advanceTimersByTime(59_999);
+        expect((await login("test-login-secret", "192.0.2.3")).status).toBe(
+          429,
+        );
+        jest.advanceTimersByTime(1);
+        expect((await login("test-login-secret", "192.0.2.3")).status).toBe(
+          mode === "password" ? 200 : 303,
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
+
+  test("reserves concurrent attempts before reading JSON and counts malformed failures", async () => {
+    const handlers = createAuthHandlers({ password: "test-login-secret" });
+    const request = (body: string, ip: string) =>
+      handlers.handleLogin(
+        new Request("http://example.test/api/login", { method: "POST", body }),
+        ip,
+      );
+    const statuses = await Promise.all(
+      Array.from({ length: 25 }, () =>
+        request(
+          JSON.stringify({ password: "test-login-secret" }),
+          "192.0.2.1",
+        ).then((r) => r.status),
+      ),
+    );
+    expect(statuses.filter((status) => status === 200)).toHaveLength(20);
+    expect(statuses.filter((status) => status === 429)).toHaveLength(5);
+    for (let i = 0; i < 5; i++)
+      expect((await request("invalid json", "192.0.2.2")).status).toBe(400);
+    expect(
+      (
+        await request(
+          JSON.stringify({ password: "test-login-secret" }),
+          "192.0.2.2",
+        )
+      ).status,
+    ).toBe(429);
+  });
+
+  test("bounds IP state without evicting cooldowns and reclaims expired entries", async () => {
+    jest.useFakeTimers({ now: 1_700_000_000_000 });
+    try {
+      const handlers = createAuthHandlers({
+        password: "test-login-secret",
+        urlLoginToken: "test-login-secret",
+      });
+      const login = (ip: string) =>
+        handlers.handleTokenLogin(
+          new Request("http://example.test/?token=wrong"),
+          ip,
+        )!;
+      for (let i = 0; i < 5; i++) expect(login("blocked").status).toBe(303);
+      for (let i = 1; i < 4096; i++) expect(login(`ip-${i}`).status).toBe(303);
+      expect(login("new-ip").status).toBe(429);
+      expect(login("blocked").status).toBe(429);
+      jest.advanceTimersByTime(300_000);
+      expect(login("new-ip").status).toBe(303);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("rejects oversized streamed JSON and cancels reading without Content-Length", async () => {
+    const handlers = createAuthHandlers({ password: "test-login-secret" });
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"password":"'));
+        controller.enqueue(new Uint8Array(16 * 1024));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const response = await handlers.handleLogin(
+      new Request("http://example.test/api/login", { method: "POST", body }),
+      "192.0.2.1",
+    );
+    expect(response.status).toBe(413);
+    expect(cancelled).toBe(true);
+    expect(response.headers.has("set-cookie")).toBe(false);
+  });
+
+  test("slow login bodies cannot bypass a replaced IP record's cooldown", async () => {
+    jest.useFakeTimers({ now: 1_700_000_000_000 });
+    try {
+      const handlers = createAuthHandlers({ password: "test-login-secret" });
+      let controller!: ReadableStreamDefaultController<Uint8Array>;
+      const body = new ReadableStream<Uint8Array>({
+        start(value) {
+          controller = value;
+        },
+      });
+      const pending = handlers.handleLogin(
+        new Request("http://example.test/api/login", { method: "POST", body }),
+        "192.0.2.1",
+      );
+      jest.advanceTimersByTime(300_000);
+      for (let i = 0; i < 5; i++) {
+        expect(
+          (
+            await handlers.handleLogin(
+              new Request("http://example.test/api/login", {
+                method: "POST",
+                body: JSON.stringify({ password: "wrong" }),
+              }),
+              "192.0.2.1",
+            )
+          ).status,
+        ).toBe(401);
+      }
+      controller.enqueue(
+        new TextEncoder().encode(
+          JSON.stringify({ password: "test-login-secret" }),
+        ),
+      );
+      controller.close();
+      const response = await pending;
+      expect(response.status).toBe(429);
+      expect(response.headers.has("set-cookie")).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test.each(["wrong password", "malformed JSON"])(
+    "a slow %s finishing after cooldown starts a fresh failure count",
+    async (failure) => {
+      jest.useFakeTimers({ now: 1_700_000_000_000 });
+      try {
+        const handlers = createAuthHandlers({ password: "test-login-secret" });
+        const login = (body: string | ReadableStream<Uint8Array>) =>
+          handlers.handleLogin(
+            new Request("http://example.test/api/login", {
+              method: "POST",
+              body,
+            }),
+            "192.0.2.1",
+          );
+        let controller!: ReadableStreamDefaultController<Uint8Array>;
+        const pending = login(
+          new ReadableStream<Uint8Array>({
+            start(value) {
+              controller = value;
+            },
+          }),
+        );
+        for (let i = 0; i < 5; i++)
+          expect(
+            (await login(JSON.stringify({ password: "wrong" }))).status,
+          ).toBe(401);
+        // Keep the same IP record alive without moving its cooldown deadline.
+        jest.advanceTimersByTime(299_999);
+        expect(
+          (await login(JSON.stringify({ password: "test-login-secret" })))
+            .status,
+        ).toBe(429);
+        jest.advanceTimersByTime(1);
+        controller.enqueue(
+          new TextEncoder().encode(
+            failure === "wrong password"
+              ? JSON.stringify({ password: "wrong" })
+              : "invalid json",
+          ),
+        );
+        controller.close();
+        const response = await pending;
+        expect(response.status).toBe(failure === "wrong password" ? 401 : 400);
+        expect(response.headers.has("set-cookie")).toBe(false);
+        expect(
+          (await login(JSON.stringify({ password: "test-login-secret" })))
+            .status,
+        ).toBe(200);
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
+});
+
 describe("browser logout", () => {
   test.each(["password", "URL token"])(
     "%s reauthentication preserves the current cookie and its expiry",
     async (mode) => {
       const handlers = createAuthHandlers({
-        authRequired: true,
-        password: "secret",
-        urlLoginToken: "secret",
+        password: "test-login-secret",
+        urlLoginToken: "test-login-secret",
       });
-      const login = async (cookie = "", credential = "secret") =>
+      const login = async (cookie = "", credential = "test-login-secret") =>
         mode === "password"
           ? handlers.handleLogin(
               new Request("http://example.test/api/login", {
@@ -206,11 +506,13 @@ describe("browser logout", () => {
                 headers: { cookie },
                 body: JSON.stringify({ password: credential }),
               }),
+              "127.0.0.1",
             )
           : handlers.handleTokenLogin(
               new Request(`http://example.test/?token=${credential}`, {
                 headers: { cookie },
               }),
+              "127.0.0.1",
             )!;
       const first = cookieHeader(await login());
       const otherBrowser = cookieHeader(await login());
@@ -230,7 +532,7 @@ describe("browser logout", () => {
       const expiredPayload = Buffer.from(JSON.stringify({ exp: 0 })).toString(
         "base64url",
       );
-      const expiredSignature = createHmac("sha256", "secret")
+      const expiredSignature = createHmac("sha256", "test-login-secret")
         .update(expiredPayload)
         .digest("hex");
       for (const cookie of [
@@ -254,16 +556,16 @@ describe("browser logout", () => {
     "expires the cookie with matching attributes (TLS %s)",
     async (secureCookies) => {
       const handlers = createAuthHandlers({
-        authRequired: true,
-        password: "secret",
+        password: "test-login-secret",
         secureCookies,
       });
       const login = () =>
         handlers.handleLogin(
           new Request("http://example.test/api/login", {
             method: "POST",
-            body: JSON.stringify({ password: "secret" }),
+            body: JSON.stringify({ password: "test-login-secret" }),
           }),
+          "127.0.0.1",
         );
       const first = cookieHeader(await login());
       const second = cookieHeader(await login());
@@ -296,8 +598,7 @@ describe("browser logout", () => {
 
   test("rejects GET and cross-site logout, but allows retry without a cookie", () => {
     const handlers = createAuthHandlers({
-      authRequired: true,
-      password: "secret",
+      password: "test-login-secret",
     });
     for (const method of ["GET", "HEAD", "OPTIONS"]) {
       const response = handlers.handleLogout(
@@ -332,7 +633,6 @@ describe("browser logout", () => {
 describe("generated token login", () => {
   test("exchanges a URL token for a signed cookie and strips it", () => {
     const handlers = createAuthHandlers({
-      authRequired: true,
       password: "generated-secret",
       urlLoginToken: "generated-secret",
     });
@@ -340,6 +640,7 @@ describe("generated token login", () => {
       new Request(
         "http://example.test/workspace?view=terminal&token=generated-secret",
       ),
+      "127.0.0.1",
     );
 
     expect(response?.status).toBe(303);
@@ -357,12 +658,12 @@ describe("generated token login", () => {
 
   test("removes an invalid token without creating a session", () => {
     const handlers = createAuthHandlers({
-      authRequired: true,
       password: "generated-secret",
       urlLoginToken: "generated-secret",
     });
     const response = handlers.handleTokenLogin(
       new Request("http://example.test/?token=wrong"),
+      "127.0.0.1",
     );
 
     expect(response?.status).toBe(303);
@@ -372,28 +673,28 @@ describe("generated token login", () => {
 
   test("ignores token parameters when URL login is not enabled", () => {
     const handlers = createAuthHandlers({
-      authRequired: true,
-      password: "fixed-password",
+      password: "fixed-test-password",
     });
 
     expect(
       handlers.handleTokenLogin(
-        new Request("http://example.test/?token=fixed-password"),
+        new Request("http://example.test/?token=fixed-test-password"),
+        "127.0.0.1",
       ),
     ).toBeNull();
   });
 
-  test("preserves fixed-password login behavior", async () => {
+  test("preserves fixed-test-password login behavior", async () => {
     const handlers = createAuthHandlers({
-      authRequired: true,
-      password: "fixed-password",
+      password: "fixed-test-password",
     });
     const response = await handlers.handleLogin(
       new Request("http://example.test/api/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ password: "fixed-password" }),
+        body: JSON.stringify({ password: "fixed-test-password" }),
       }),
+      "127.0.0.1",
     );
 
     expect(response.status).toBe(200);
@@ -415,9 +716,8 @@ describe("generated token login", () => {
   test("rejects an empty authentication secret", () => {
     expect(() =>
       createAuthHandlers({
-        authRequired: true,
         password: "",
       }),
-    ).toThrow("authentication requires a non-empty signing secret");
+    ).toThrow("at least 15 characters");
   });
 });

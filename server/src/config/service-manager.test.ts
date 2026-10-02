@@ -372,7 +372,10 @@ describe("service commands", () => {
     const homeDir = tempHome();
     const configPath = join(homeDir, ".config", "roamgate", "roamgate.env");
     mkdirSync(join(homeDir, ".config", "roamgate"), { recursive: true });
-    writeFileSync(configPath, "HOST=0.0.0.0\nHERDR_GUI_PASSWORD=secret\n");
+    writeFileSync(
+      configPath,
+      "HOST=0.0.0.0\nHERDR_GUI_PASSWORD=fixed-secret-password\n",
+    );
     chmodSync(configPath, 0o644);
 
     const code = runServiceCommand(["service", "install"], {
@@ -388,7 +391,7 @@ describe("service commands", () => {
 
     expect(code).toBe(0);
     expect(readFileSync(configPath, "utf8")).toBe(
-      "HOST=0.0.0.0\nHERDR_GUI_PASSWORD=secret\n",
+      "HOST=0.0.0.0\nHERDR_GUI_PASSWORD=fixed-secret-password\n",
     );
     if (process.platform !== "win32") {
       expect(statSync(configPath).mode & 0o777).toBe(0o600);
@@ -397,6 +400,83 @@ describe("service commands", () => {
       false,
     );
   });
+
+  test.each(["127.0.0.1", "localhost", "::1"])(
+    "generates a login token for loopback service host %s",
+    (host) => {
+      const homeDir = tempHome();
+      const paths = resolveServicePaths("systemd", homeDir);
+      mkdirSync(dirname(paths.config), { recursive: true });
+      writeFileSync(paths.config, `HOST=${host}\n`);
+      const logs: string[] = [];
+      expect(
+        runServiceCommand(["service", "install"], {
+          runtime: {
+            platform: "linux",
+            homeDir,
+            execPath: "/opt/roamgate",
+            argv: ["/opt/roamgate", "service", "install"],
+          },
+          runCommand: () => 0,
+          log: (message) => logs.push(message),
+        }),
+      ).toBe(0);
+      const token = readFileSync(
+        join(dirname(paths.config), "auth-token"),
+        "utf8",
+      ).trim();
+      expect(token).toMatch(/^[a-f0-9]{64}$/);
+      expect(logs.join("\n")).toContain(`?token=${token}`);
+    },
+  );
+
+  test.each([
+    ["roamgate", "too-short"],
+    ["roamgate", "a".repeat(1025)],
+    ["herdr-gui", "too-short"],
+    ["herdr-gui", "a".repeat(1025)],
+  ])(
+    "rejects out-of-range passwords in %s config before migrating or changing services",
+    (identity, password) => {
+      const homeDir = tempHome();
+      const current = resolveServicePaths("systemd", homeDir);
+      const source =
+        identity === "roamgate"
+          ? current
+          : resolveLegacyServicePaths("systemd", homeDir);
+      mkdirSync(dirname(source.config), { recursive: true });
+      const contents = `HOST=127.0.0.1\nHERDR_GUI_PASSWORD=${password}\n`;
+      writeFileSync(source.config, contents);
+      const commands: string[][] = [];
+      const errors: string[] = [];
+      expect(
+        runServiceCommand(["service", "install"], {
+          runtime: {
+            platform: "linux",
+            homeDir,
+            execPath: "/opt/roamgate",
+            argv: ["/opt/roamgate", "service", "install"],
+          },
+          runCommand: (argv) => {
+            commands.push(argv);
+            return 0;
+          },
+          error: (message) => errors.push(message),
+        }),
+      ).toBe(1);
+      expect(commands).toEqual([]);
+      expect(errors.join("\n")).toContain(
+        "at least 15 characters and at most 1024 characters",
+      );
+      expect(readFileSync(source.config, "utf8")).toBe(contents);
+      expect(existsSync(current.definition)).toBe(false);
+      expect(existsSync(join(dirname(current.config), "auth-token"))).toBe(
+        false,
+      );
+      if (identity === "herdr-gui")
+        expect(existsSync(current.config)).toBe(false);
+    },
+  );
 
   test("preserves a managed custom wrapper command", () => {
     const homeDir = tempHome();

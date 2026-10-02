@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { homedir, tmpdir } from "node:os";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  rmSync,
+} from "node:fs";
 import { runServiceCommand } from "./service-manager";
 import { join, resolve } from "node:path";
 import {
@@ -12,6 +19,146 @@ import {
   resolveServerLogLevel,
   resolveServerProfile,
 } from "./server-config";
+
+describe("authentication configuration", () => {
+  test("production requires authentication and persists a token on every listen address", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roamgate-auth-config-"));
+    try {
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        HOME: dir,
+        APPDATA: dir,
+        NODE_ENV: "production",
+      };
+      delete env.ROAMGATE_PASSWORD;
+      delete env.HERDR_GUI_PASSWORD;
+      let token: string | undefined;
+      for (const host of ["127.0.0.1", "localhost", "::1", "0.0.0.0"]) {
+        const result = Bun.spawnSync(
+          [
+            process.execPath,
+            "-e",
+            `import {loadServerConfig} from ${JSON.stringify(join(import.meta.dir, "server-config.ts"))}; process.argv = [process.execPath, "roamgate", "--host", ${JSON.stringify(host)}]; console.log(JSON.stringify(loadServerConfig("test")));`,
+          ],
+          { env, stdout: "pipe", stderr: "pipe" },
+        );
+        expect(result.exitCode).toBe(0);
+        const config = JSON.parse(result.stdout.toString());
+        expect(config.authRequired).toBe(true);
+        expect(config.password).toMatch(/^[a-f0-9]{64}$/);
+        expect(config.generatedAuthToken).toBe(config.password);
+        expect(readFileSync(config.generatedAuthTokenPath, "utf8").trim()).toBe(
+          config.password,
+        );
+        if (token) expect(config.password).toBe(token);
+        token = config.password;
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ["development", "127.0.0.1", false],
+    ["development", "localhost", false],
+    ["development", "::1", false],
+    ["development", "0.0.0.0", true],
+    ["development", "::", true],
+    ["development", "192.0.2.10", true],
+    ["development", "127.0.0.2", true],
+    ["development", "::ffff:127.0.0.1", true],
+    ["production", "127.0.0.1", true],
+    ["production", "localhost", true],
+    ["production", "::1", true],
+    ["test", "127.0.0.1", true],
+    ["test", "localhost", true],
+    ["test", "::1", true],
+    [undefined, "127.0.0.1", true],
+    [undefined, "localhost", true],
+    [undefined, "::1", true],
+  ] as const)(
+    "NODE_ENV=%s HOST=%s requires authentication: %s",
+    (nodeEnv, host, authRequired) => {
+      const dir = mkdtempSync(join(tmpdir(), "roamgate-auth-config-"));
+      try {
+        const env: NodeJS.ProcessEnv = {
+          ...process.env,
+          HOME: dir,
+          APPDATA: dir,
+          NODE_ENV: nodeEnv,
+        };
+        delete env.ROAMGATE_PASSWORD;
+        delete env.HERDR_GUI_PASSWORD;
+        if (nodeEnv === undefined) delete env.NODE_ENV;
+        const result = Bun.spawnSync(
+          [
+            process.execPath,
+            "-e",
+            `import {loadServerConfig} from ${JSON.stringify(join(import.meta.dir, "server-config.ts"))}; process.argv = [process.execPath, "roamgate", "--host", ${JSON.stringify(host)}]; console.log(JSON.stringify(loadServerConfig("test")));`,
+          ],
+          { env, stdout: "pipe", stderr: "pipe" },
+        );
+        expect(result.exitCode).toBe(0);
+        const config = JSON.parse(result.stdout.toString());
+        expect(config.authRequired).toBe(authRequired);
+        if (authRequired) {
+          expect(config.password).toMatch(/^[a-f0-9]{64}$/);
+          expect(config.generatedAuthToken).toBe(config.password);
+        } else {
+          expect(config.password).toBe("");
+          expect(config.generatedAuthToken).toBeUndefined();
+          expect(config.generatedAuthTokenPath).toBeUndefined();
+          expect(existsSync(join(dir, ".config", "roamgate"))).toBe(false);
+          expect(existsSync(join(dir, "roamgate"))).toBe(false);
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.each(["too-short", "a".repeat(1025)])(
+    "rejects CLI and environment passwords outside 15..1024 characters",
+    (password) => {
+      const dir = mkdtempSync(join(tmpdir(), "roamgate-auth-config-"));
+      try {
+        for (const source of [
+          "cli",
+          "ROAMGATE_PASSWORD",
+          "HERDR_GUI_PASSWORD",
+        ]) {
+          const env: NodeJS.ProcessEnv = {
+            ...process.env,
+            HOME: dir,
+            APPDATA: dir,
+            NODE_ENV: "production",
+          };
+          delete env.ROAMGATE_PASSWORD;
+          delete env.HERDR_GUI_PASSWORD;
+          const args = [process.execPath, "roamgate", "--host", "127.0.0.1"];
+          if (source === "cli") args.push("--password", password);
+          else env[source] = password;
+          const result = Bun.spawnSync(
+            [
+              process.execPath,
+              "-e",
+              `import {loadServerConfig} from ${JSON.stringify(join(import.meta.dir, "server-config.ts"))}; process.argv = ${JSON.stringify(args)}; loadServerConfig("test");`,
+            ],
+            { env, stdout: "pipe", stderr: "pipe" },
+          );
+          expect(result.exitCode).toBe(2);
+          expect(result.stderr.toString()).toContain(
+            "at least 15 characters and at most 1024 characters",
+          );
+          expect(existsSync(join(dir, ".config", "roamgate"))).toBe(false);
+          expect(existsSync(join(dir, "roamgate"))).toBe(false);
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+});
 
 describe("herdrConfigDir", () => {
   test("uses APPDATA on win32", () => {
@@ -62,16 +209,25 @@ describe("CPU profile configuration", () => {
   test("loads CLI flags with precedence over environment settings", () => {
     const originalArgs = process.argv;
     const keys = [
+      "NODE_ENV",
       "ROAMGATE_PROFILE",
       "ROAMGATE_PROFILE_DURATION",
       "ROAMGATE_PROFILE_DIR",
     ] as const;
     const originalEnv = keys.map((key) => process.env[key]);
     try {
+      process.env.NODE_ENV = "production";
       process.env.ROAMGATE_PROFILE = "1";
       process.env.ROAMGATE_PROFILE_DURATION = "45";
       process.env.ROAMGATE_PROFILE_DIR = tmpdir();
-      process.argv = [process.execPath, "roamgate", "--host", "127.0.0.1"];
+      process.argv = [
+        process.execPath,
+        "roamgate",
+        "--host",
+        "127.0.0.1",
+        "--password",
+        "test-password-long",
+      ];
       expect(loadServerConfig("test").profile?.durationMs).toBe(45_000);
       process.env.ROAMGATE_PROFILE = "0";
       expect(loadServerConfig("test").profile).toBeUndefined();
@@ -123,7 +279,9 @@ describe("native TLS", () => {
       const originalArgs = process.argv;
       const originalCert = process.env.ROAMGATE_TLS_CERT;
       const originalKey = process.env.ROAMGATE_TLS_KEY;
+      const originalNodeEnv = process.env.NODE_ENV;
       try {
+        process.env.NODE_ENV = "production";
         writeFileSync(
           join(dir, "openssl.cnf"),
           "[req]\ndistinguished_name=dn\nx509_extensions=extensions\n[dn]\n[extensions]\nsubjectAltName=DNS:localhost,IP:127.0.0.1\nbasicConstraints=critical,CA:TRUE\n",
@@ -163,9 +321,18 @@ describe("native TLS", () => {
           cert,
           "--tls-key",
           key,
+          "--password",
+          "test-password-long",
         ];
         expect(loadServerConfig("0.0.0").tls).toEqual(tls);
-        process.argv = [process.execPath, "roamgate", "--host", "127.0.0.1"];
+        process.argv = [
+          process.execPath,
+          "roamgate",
+          "--host",
+          "127.0.0.1",
+          "--password",
+          "test-password-long",
+        ];
         process.env.ROAMGATE_TLS_CERT = cert;
         process.env.ROAMGATE_TLS_KEY = key;
         expect(loadServerConfig("0.0.0").tls).toEqual(tls);
@@ -260,6 +427,8 @@ describe("native TLS", () => {
         );
       } finally {
         process.argv = originalArgs;
+        if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = originalNodeEnv;
         if (originalCert === undefined) delete process.env.ROAMGATE_TLS_CERT;
         else process.env.ROAMGATE_TLS_CERT = originalCert;
         if (originalKey === undefined) delete process.env.ROAMGATE_TLS_KEY;

@@ -415,8 +415,9 @@ aliases. Old clients require [manual migration](./DEPLOYMENT.md#transition-from-
 ## Trust boundary
 
 Roamgate is trusted single-user administration, not a sandbox or multi-user
-permission system. Listener access and required authentication grant authority;
-see [Security](../SECURITY.md#trust-model) for loopback, TLS, and outer access controls.
+permission system. Normal runtime requires authentication, which grants full
+authority; see [Security](../SECURITY.md#trust-model) for the local development
+exception, login limits, TLS, and outer access controls.
 
 The browser accepts one unscoped bridge hello before other messages. Message kinds
 are exclusive and validated; downstream events cannot inject reserved bridge

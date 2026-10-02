@@ -41,7 +41,7 @@ test("development bridge and Vite proxies stay off the production port", async (
   const requireRoot = createRequire(new URL("package.json", root));
   const { scripts } = requireRoot("./server/package.json");
   expect(scripts.dev).toBe(
-    "HOST=127.0.0.1 PORT=8788 bun run --hot src/index.ts",
+    "NODE_ENV=development HOST=127.0.0.1 PORT=8788 bun run --hot src/index.ts",
   );
   expect(scripts.start).toBe("bun run src/index.ts");
 
