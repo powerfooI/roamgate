@@ -13,7 +13,8 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
   restarts, so pins persist until the tab closes elsewhere, such as in the TUI.
 - Drag a tab with the mouse to reorder it within its pinned or unpinned group;
   Escape cancels. The order is saved in Herdr (`tab.move`), and numbered tab
-  shortcuts address tab-strip positions.
+  shortcuts address tab-strip positions. Dragging is enabled after the bridge
+  confirms Herdr 0.7.2+ support, including legacy connections.
 - Split right/down, resize, focus neighbors, move panes to swap with a
   neighbor, zoom, or close panes. Hover over a pane to reveal a drag handle at
   its top center. Drag it onto another pane in the same tab to swap positions;

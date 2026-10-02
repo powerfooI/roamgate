@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Lexer } from "marked";
 import {
   annotationDraftStorageKey,
   compileReviewFeedback,
@@ -360,6 +361,26 @@ describe("file line ranges", () => {
 });
 
 describe("compiled feedback and delivery targets", () => {
+  test("keeps backslashes and backticks inside literal Markdown path spans", () => {
+    for (const path of [
+      "C:\\workspace\\notes.md",
+      "C:\\workspace\\`notes`.md",
+      "src/a``b`c.ts",
+      "`notes.md",
+      "notes.md`",
+      "x\\`[example](https://example.com)",
+      " leading and trailing spaces ",
+      "   ",
+    ]) {
+      const location = compileReviewFeedback([diffAnnotation({ path })])
+        .split("\n")[2]!
+        .slice(3);
+      const tokens = Lexer.lexInline(location);
+      expect(tokens[0]).toMatchObject({ type: "codespan", text: path });
+      expect(tokens.some((token) => token.type === "link")).toBe(false);
+    }
+  });
+
   test("compiles diff, file-line, and Markdown annotations", () => {
     const message = compileReviewFeedback([
       diffAnnotation(),

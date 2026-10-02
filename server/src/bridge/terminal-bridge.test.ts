@@ -1281,6 +1281,42 @@ test("navigation mode uses exactly the terminal backend decision", async () => {
   }
 });
 
+test("tab reordering requires a verified protocol with tab.move, including legacy connections", async () => {
+  for (const [protocol, supported] of [
+    [Number.NaN, false],
+    [13, false],
+    [14, false],
+    [15, false],
+    [16, true],
+    [17, true],
+    [18, true],
+    [19, true],
+    [20, true],
+    [21, false],
+    [22, true],
+    [23, false],
+  ] as const) {
+    let probes = 0;
+    const bridge = createTerminalBridge({
+      clientSocketPath: "/unused",
+      herdrProtocol: async () => {
+        probes += 1;
+        return protocol;
+      },
+      safeSend: () => true,
+      clientLabel: () => "test",
+      markRpcError: () => {},
+    });
+    try {
+      expect(await bridge.navigationMode()).toBe("shared");
+      expect(await bridge.tabMoveSupported()).toBe(supported);
+      expect(probes).toBe(1);
+    } finally {
+      bridge.dispose();
+    }
+  }
+});
+
 // A legacy ThinClient stream carries `full` on the wire, and it is false for an
 // incremental frame. Coalescing drops held frames, so a dropped incremental
 // frame loses output that no later frame repeats: the terminal renders corrupt.

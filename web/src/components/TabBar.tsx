@@ -86,6 +86,7 @@ export function TabBar({
     (state) => ({
       activeConnectionId: state.activeConnectionId,
       connectionGeneration: state.connectionGeneration,
+      tabMoveSupported: state.tabMoveSupported,
       panes: state.panes,
       tabs: state.tabs,
       workspaces: state.workspaces,
@@ -112,6 +113,7 @@ export function TabBar({
   );
   const reorder = useTabReorderDrag({
     groupOf: (tabId) => {
+      if (!s.tabMoveSupported) return [];
       const pinned = pinnedTabIds.has(tabId);
       return tabs
         .filter((tab) => pinnedTabIds.has(tab.tab_id) === pinned)
@@ -262,11 +264,15 @@ export function TabBar({
                 : `Tab ${t.number}`;
             const agentSummary = summarizeTabAgents(s.panes, t.tab_id);
             const pinned = pinnedTabIds.has(t.tab_id);
+            const reorderHandlers = reorder.handlers(t.tab_id);
             return (
               <div
                 key={t.tab_id}
                 ref={reorder.register(t.tab_id)}
-                {...reorder.handlers(t.tab_id)}
+                {...reorderHandlers}
+                onPointerDown={
+                  s.tabMoveSupported ? reorderHandlers.onPointerDown : undefined
+                }
                 className={`tabbar-tab ${t.focused ? "is-active" : ""} ${
                   pinned ? "is-pinned" : ""
                 }`}

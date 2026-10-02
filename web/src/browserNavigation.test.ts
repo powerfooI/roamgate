@@ -235,6 +235,7 @@ async function withBrowserStore(
     topology: ReturnType<typeof navigationTopology>,
     control: {
       mode: string;
+      tabMoveSupported?: unknown;
       endpointAvailability?: EndpointAvailability;
       layoutWait?: Promise<void>;
       createWait?: Promise<void>;
@@ -249,6 +250,7 @@ async function withBrowserStore(
   const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   const control: {
     mode: string;
+    tabMoveSupported?: unknown;
     endpointAvailability?: EndpointAvailability;
     layoutWait?: Promise<void>;
     createWait?: Promise<void>;
@@ -270,6 +272,7 @@ async function withBrowserStore(
           return {
             workspaces: topology.workspaces,
             navigation_mode: control.mode,
+            tab_move_supported: control.tabMoveSupported,
             endpoint_availability:
               control.endpointAvailability ??
               Object.fromEntries(
@@ -357,6 +360,85 @@ function renderTerminalSnapshot() {
 }
 
 describe("store browser-local navigation", () => {
+  test("tab movement waits for support confirmation after disconnect and reconnect", async () => {
+    await withBrowserStore(async (calls, _topology, control) => {
+      const catalog = spyOn(bridge, "call").mockRejectedValue(
+        new Error("Connection catalog is not ready"),
+      );
+      __storeTesting.replaceState({
+        ...store.get(),
+        automaticUpdateChecksEnabled: false,
+      });
+      try {
+        control.tabMoveSupported = true;
+        await store.refresh();
+        expect(store.get().tabMoveSupported).toBe(true);
+
+        __storeTesting.handleBridgeStatus("disconnected");
+        expect(store.get().tabMoveSupported).toBe(false);
+        expect(store.get().endpointAvailability).toEqual({});
+        __storeTesting.handleBridgeStatus("connected");
+        expect(store.get().tabMoveSupported).toBe(false);
+        const tabs = store.get().tabs;
+        await store.moveTab("a1", 2);
+        expect(store.get().tabs).toBe(tabs);
+        expect(calls.filter((call) => call.method === "tab.move")).toEqual([]);
+
+        control.tabMoveSupported = false;
+        await store.refresh();
+        await store.moveTab("a1", 2);
+        expect(store.get().tabMoveSupported).toBe(false);
+        expect(calls.filter((call) => call.method === "tab.move")).toEqual([]);
+
+        control.tabMoveSupported = true;
+        await store.refresh();
+        await store.moveTab("a1", 2);
+        expect(calls.filter((call) => call.method === "tab.move")).toEqual([
+          { method: "tab.move", params: { tab_id: "a1", insert_index: 2 } },
+        ]);
+      } finally {
+        catalog.mockRestore();
+      }
+    });
+  });
+
+  test("tab movement requires confirmed connection support and preserves capable legacy connections", async () => {
+    for (const mode of ["shared", "browser-local"] as const) {
+      await withBrowserStore(async (calls, _topology, control) => {
+        control.mode = mode;
+        for (const supported of [undefined, false, "true", true]) {
+          control.tabMoveSupported = supported;
+          await store.refresh();
+          const tabs = store.get().tabs;
+          await store.moveTab("a1", 2);
+          expect(store.get().tabMoveSupported).toBe(supported === true);
+          expect(calls.filter((call) => call.method === "tab.move")).toEqual(
+            supported === true
+              ? [
+                  {
+                    method: "tab.move",
+                    params: { tab_id: "a1", insert_index: 2 },
+                  },
+                ]
+              : [],
+          );
+          if (supported !== true) expect(store.get().tabs).toBe(tabs);
+        }
+        await store.refresh();
+        const switched = activateConnectionState(store.get(), "other", 2);
+        expect(switched.tabMoveSupported).toBe(false);
+        __storeTesting.replaceState(switched);
+        await store.moveTab("a1", 2);
+        expect(calls.filter((call) => call.method === "tab.move")).toHaveLength(
+          1,
+        );
+        expect(
+          activateConnectionState(switched, "test", 3).tabMoveSupported,
+        ).toBe(false);
+      });
+    }
+  });
+
   test.each([
     ["shared", false, false],
     ["shared", true, false],

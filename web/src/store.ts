@@ -78,6 +78,7 @@ export interface ServerSessionState {
   /** ConnectionManager generation that owns every server resource below. */
   serverRuntimeGeneration: number | null;
   navigationMode: "browser-local" | "shared";
+  tabMoveSupported: boolean;
   endpointAvailability: EndpointAvailability;
   browserNavigation: BrowserNavigation;
   workspaces: Workspace[];
@@ -200,6 +201,7 @@ export function emptyServerSessionState(
   return {
     serverRuntimeGeneration,
     navigationMode: "shared",
+    tabMoveSupported: false,
     endpointAvailability: {},
     browserNavigation: emptyBrowserNavigation(),
     workspaces: [],
@@ -344,6 +346,7 @@ const initial: State = {
 const SERVER_SESSION_KEYS: Array<keyof ServerSessionState> = [
   "serverRuntimeGeneration",
   "navigationMode",
+  "tabMoveSupported",
   "endpointAvailability",
   "browserNavigation",
   "workspaces",
@@ -364,6 +367,7 @@ function serverSessionFromState(snapshot: State): ServerSessionState {
   return {
     serverRuntimeGeneration: snapshot.serverRuntimeGeneration,
     navigationMode: snapshot.navigationMode,
+    tabMoveSupported: snapshot.tabMoveSupported,
     endpointAvailability: snapshot.endpointAvailability,
     browserNavigation: snapshot.browserNavigation,
     workspaces: snapshot.workspaces,
@@ -409,6 +413,7 @@ export function activateConnectionState(
       : emptyServerSessionState(runtimeGeneration);
   const newSession = {
     ...restored,
+    tabMoveSupported: false,
     endpointAvailability: {},
     // A restored pending focus outlived its action, so treat it as settled:
     // the next fresh observation decides whether it still applies. Reuse the
@@ -1162,6 +1167,7 @@ const REFRESH_SLICE_KEYS = [
 ] as const;
 const REFRESH_SCALAR_KEYS = [
   "navigationMode",
+  "tabMoveSupported",
   "error",
   "pendingFocusWorkspaceId",
   "pendingFocusWorkspaceSettledAt",
@@ -1297,6 +1303,7 @@ async function refreshNow(lease = captureConnectionLease()) {
       wsRes?.navigation_mode === "browser-local" ? "browser-local" : "shared";
     const next: Partial<State> = {
       navigationMode,
+      tabMoveSupported: wsRes?.tab_move_supported === true,
       endpointAvailability: parseEndpointAvailability(
         wsRes?.endpoint_availability,
       ),
@@ -2040,6 +2047,71 @@ export function worktreeRemovalCompletionNotice(
   };
 }
 
+function handleBridgeStatus(s: ConnectionStatus) {
+  if (s === "disconnected") {
+    set({ tabMoveSupported: false, endpointAvailability: {} });
+    catalogReadyForConnection = false;
+    terminalReattachPending = true;
+    bridge.setConnectionRuntimeGenerations([]);
+    clearTerminalRelayViewports();
+    clearTabLayouts();
+    focusActionChain = Promise.resolve();
+    queuedConnectionKeys.clear();
+  }
+  const completedRecovery =
+    s === "connected" && !state.connectionPaused && state.notice?.loading
+      ? connectionRecoveryIntent
+      : null;
+  if (s === "connected") connectionRecoveryIntent = null;
+  const completedRecoveryMessage =
+    completedRecovery === "reconnect"
+      ? "Browser reconnected"
+      : "Browser sync resumed";
+  set(
+    completedRecovery
+      ? {
+          status: s,
+          connectionGeneration: state.connectionGeneration,
+          notice: {
+            kind: "success",
+            message: completedRecoveryMessage,
+            autoDismissMs: 5000,
+          },
+        }
+      : {
+          status: s,
+          connectionGeneration:
+            s === "disconnected"
+              ? bridge.clientGeneration
+              : state.connectionGeneration,
+          bridgeStatus: s === "connected" ? state.bridgeStatus : null,
+        },
+  );
+  if (s === "connected" && !state.connectionPaused) {
+    // Polling may have been stopped by the hello-driven initial
+    // connection switch; every settled connection must re-arm it.
+    startPolling();
+    void refreshConnectionCatalog().then((catalogReady) => {
+      if (
+        !catalogReady ||
+        state.status !== "connected" ||
+        state.connectionPaused
+      ) {
+        return;
+      }
+      rearmTerminalAttachmentsAfterCatalog(true);
+      void refreshNow();
+      void refreshBridgeStatus();
+      // Popup state is pushed only on change, so ask once per
+      // settled connection.
+      void store.watchPopup();
+    });
+    if (state.pendingRestartVersion) {
+      void reloadWhenUpdatedServerIsReady(state.pendingRestartVersion);
+    }
+  }
+}
+
 function handlePopupPush(push: PopupStatePush) {
   if (
     !state.connectionPaused &&
@@ -2303,70 +2375,7 @@ export const store = {
         void refreshConnectionCatalog();
       }
     });
-    bridge.onStatus((s) => {
-      if (s === "disconnected") {
-        set({ endpointAvailability: {} });
-        catalogReadyForConnection = false;
-        terminalReattachPending = true;
-        bridge.setConnectionRuntimeGenerations([]);
-        clearTerminalRelayViewports();
-        clearTabLayouts();
-        focusActionChain = Promise.resolve();
-        queuedConnectionKeys.clear();
-      }
-      const completedRecovery =
-        s === "connected" && !state.connectionPaused && state.notice?.loading
-          ? connectionRecoveryIntent
-          : null;
-      if (s === "connected") connectionRecoveryIntent = null;
-      const completedRecoveryMessage =
-        completedRecovery === "reconnect"
-          ? "Browser reconnected"
-          : "Browser sync resumed";
-      set(
-        completedRecovery
-          ? {
-              status: s,
-              connectionGeneration: state.connectionGeneration,
-              notice: {
-                kind: "success",
-                message: completedRecoveryMessage,
-                autoDismissMs: 5000,
-              },
-            }
-          : {
-              status: s,
-              connectionGeneration:
-                s === "disconnected"
-                  ? bridge.clientGeneration
-                  : state.connectionGeneration,
-              bridgeStatus: s === "connected" ? state.bridgeStatus : null,
-            },
-      );
-      if (s === "connected" && !state.connectionPaused) {
-        // Polling may have been stopped by the hello-driven initial
-        // connection switch; every settled connection must re-arm it.
-        startPolling();
-        void refreshConnectionCatalog().then((catalogReady) => {
-          if (
-            !catalogReady ||
-            state.status !== "connected" ||
-            state.connectionPaused
-          ) {
-            return;
-          }
-          rearmTerminalAttachmentsAfterCatalog(true);
-          void refreshNow();
-          void refreshBridgeStatus();
-          // Popup state is pushed only on change, so ask once per
-          // settled connection.
-          void store.watchPopup();
-        });
-        if (state.pendingRestartVersion) {
-          void reloadWhenUpdatedServerIsReady(state.pendingRestartVersion);
-        }
-      }
-    });
+    bridge.onStatus(handleBridgeStatus);
     bridge.onEvent(handleHerdrEvent);
     bridge.onPopup(handlePopupPush);
     bridge.onControl((control) => {
@@ -2651,6 +2660,10 @@ export const store = {
   moveTab(tabId: string, insertIndex: number) {
     return action(
       async (lease) => {
+        if (!state.tabMoveSupported)
+          throw new Error(
+            "This Herdr connection does not support tab reordering.",
+          );
         // Settle the strip in its new order before Herdr's list comes back.
         const previousTabs = state.tabs;
         setForConnection(lease, {
@@ -3816,6 +3829,7 @@ export const store = {
 
 /** Test-only singleton seam for deterministic deferred production-store tests. */
 export const __storeTesting = {
+  handleBridgeStatus,
   handleHerdrEvent,
   startUpdatePolling,
   updatePollingActive: () => updateTimer !== null,

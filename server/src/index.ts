@@ -1221,6 +1221,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       result = {
         ...result,
         navigation_mode: await terminalBridge.navigationMode(),
+        tab_move_supported: await terminalBridge.tabMoveSupported(),
         endpoint_availability: terminalBridge.endpointAvailability(),
       };
     }

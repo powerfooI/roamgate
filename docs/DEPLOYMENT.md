@@ -19,6 +19,8 @@ rejected at control/binary probes. Use a compatible Roamgate build or separate
 server; **do not downgrade a live server**. Published binaries follow their
 [release notes](https://github.com/powerfooI/roamgate/releases).
 The [plugin](#herdr-plugin) separately requires Herdr 0.7.2+.
+Tab reordering requires Herdr 0.7.2+; Herdr 0.7.0 and 0.7.1 retain their fixed
+tab order. The bridge confirms support before enabling dragging.
 
 Herdr 0.9.0 uses stable endpoint generation 1, distinct from protocol 22.
 `ROAMGATE_DISABLE_ENDPOINT=1` explicitly selects legacy direct-terminal fallback.

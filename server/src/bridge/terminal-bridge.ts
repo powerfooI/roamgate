@@ -12,7 +12,10 @@ import { type Logger, silentLogger } from "../utils/logger";
 import { NO_TERMINAL_ATTACHED_MESSAGE } from "../utils/rpc-logging";
 import { ThinClient } from "./thin-client";
 import { roamgateEnv } from "../config/environment";
-import { isTerminalHelloProtocol } from "./protocol-compat";
+import {
+  isSupportedHerdrProtocol,
+  isTerminalHelloProtocol,
+} from "./protocol-compat";
 import { EndpointTerminalSession } from "./endpoint-terminal-session";
 import { EndpointClient } from "./endpoint-client";
 import type { Popup, SurfaceBaseline } from "./endpoint-surface";
@@ -149,6 +152,12 @@ export function createTerminalBridge(args: {
       roamgateEnv("DISABLE_ENDPOINT") !== "1"
       ? "browser-local"
       : "shared";
+  }
+
+  async function tabMoveSupported(): Promise<boolean> {
+    const protocol = await bridgeProtocol();
+    // Herdr 0.7.2 added tab.move in protocol 16, including legacy connections.
+    return isSupportedHerdrProtocol(protocol) && protocol >= 16;
   }
 
   const terminalCoalesceKey = (terminalId: string) =>
@@ -1459,6 +1468,7 @@ export function createTerminalBridge(args: {
   return {
     createFromTerminal,
     navigationMode,
+    tabMoveSupported,
     endpointAvailability,
     handleTerminalRpc,
     cleanupWs,

@@ -731,7 +731,20 @@ export function reanchorFileReviewAnnotations(
 }
 
 function quotedPath(path: string) {
-  return `\`${path.replace(/`/g, "\\`")}\``;
+  const delimiter = "`".repeat(
+    Math.max(
+      0,
+      ...Array.from(path.matchAll(/`+/g), (match) => match[0].length),
+    ) + 1,
+  );
+  // Code spans keep backslashes literal; longer fences contain backtick runs.
+  const padding =
+    path.startsWith("`") ||
+    path.endsWith("`") ||
+    (path.startsWith(" ") && path.endsWith(" ") && /[^ ]/.test(path))
+      ? " "
+      : "";
+  return `${delimiter}${padding}${path}${padding}${delimiter}`;
 }
 
 function quoteBlock(value: string) {
