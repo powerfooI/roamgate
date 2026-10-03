@@ -9,7 +9,7 @@ import {
   rmSync,
 } from "node:fs";
 import { runServiceCommand } from "./service-manager";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   herdrConfigDir,
   nativeSocketPath,
@@ -18,6 +18,7 @@ import {
   loadServerTls,
   resolveServerLogLevel,
   resolveServerProfile,
+  type ServerConfig,
 } from "./server-config";
 
 describe("authentication configuration", () => {
@@ -438,6 +439,158 @@ describe("native TLS", () => {
     },
   );
 });
+
+describe.skipIf(process.platform === "win32")(
+  "SSH socket configuration",
+  () => {
+    function loadSocketConfig(
+      args: string[],
+      overrides: Record<string, string> = {},
+    ): ServerConfig {
+      const env = Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([key]) => !/^(HERDR_|ROAMGATE_)/.test(key),
+        ),
+      );
+      const argv = [
+        process.execPath,
+        "roamgate",
+        "--host",
+        "127.0.0.1",
+        "--password",
+        "test-password-long",
+        ...args,
+      ];
+      const result = Bun.spawnSync(
+        [
+          process.execPath,
+          "-e",
+          `import {loadServerConfig} from ${JSON.stringify(join(import.meta.dir, "server-config.ts"))}; process.argv = ${JSON.stringify(argv)}; console.log(JSON.stringify(loadServerConfig("test")));`,
+        ],
+        {
+          env: { ...env, NODE_ENV: "production", TMPDIR: "/tmp", ...overrides },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      expect(result.exitCode).toBe(0);
+      return JSON.parse(result.stdout.toString()) as ServerConfig;
+    }
+
+    test("uses stable 12-hex SHA-256 identifiers for each socket kind", () => {
+      const args = ["--ssh-host", "alice@example.com", "--session", "work"];
+      const first = loadSocketConfig(args);
+      const second = loadSocketConfig(args);
+      expect(first.socketPath).toBe("/tmp/roamgate-cce73172d55b-control.sock");
+      expect(first.clientSocketPath).toBe(
+        "/tmp/roamgate-4796b7bb06b9-client.sock",
+      );
+      expect(second.socketPath).toBe(first.socketPath);
+      expect(second.clientSocketPath).toBe(first.clientSocketPath);
+      expect(first.hasExplicitSocketPath).toBe(false);
+      expect(first.hasExplicitClientSocketPath).toBe(false);
+    });
+
+    test("distinguishes hosts, sessions, and the default session", () => {
+      const configs = [
+        ["--ssh-host", "alice@example.com"],
+        ["--ssh-host", "alice@example.com", "--session", "work"],
+        ["--ssh-host", "bob@example.com", "--session", "work"],
+        ["--ssh-host", "alice@example.com", "--session", "other"],
+      ].map((args) => loadSocketConfig(args));
+      expect(new Set(configs.map((config) => config.socketPath)).size).toBe(4);
+      expect(
+        new Set(configs.map((config) => config.clientSocketPath)).size,
+      ).toBe(4);
+      expect(configs[0].socketPath).toBe(
+        "/tmp/roamgate-3c8b63447e14-control.sock",
+      );
+      expect(configs[0].clientSocketPath).toBe(
+        "/tmp/roamgate-d2b2306369cc-client.sock",
+      );
+    });
+
+    test("separates host and session fields before hashing", () => {
+      const first = loadSocketConfig([
+        "--ssh-host",
+        "host-a",
+        "--session",
+        "bc",
+      ]);
+      const second = loadSocketConfig([
+        "--ssh-host",
+        "host-ab",
+        "--session",
+        "c",
+      ]);
+      expect(first.socketPath).not.toBe(second.socketPath);
+      expect(first.clientSocketPath).not.toBe(second.clientSocketPath);
+    });
+
+    test("keeps long host and session inputs out of socket filenames", () => {
+      const config = loadSocketConfig([
+        "--ssh-host",
+        `${"u".repeat(64)}@${"h".repeat(253)}`,
+        "--session",
+        "s".repeat(1_000),
+      ]);
+      for (const [path, kind] of [
+        [config.socketPath, "control"],
+        [config.clientSocketPath, "client"],
+      ]) {
+        expect(dirname(path)).toBe("/tmp");
+        expect(basename(path)).toMatch(
+          new RegExp(`^roamgate-[a-f0-9]{12}-${kind}\\.sock$`),
+        );
+        expect(basename(path).length).toBe(
+          `roamgate-000000000000-${kind}.sock`.length,
+        );
+        expect(Buffer.byteLength(path)).toBeLessThan(100);
+      }
+    });
+
+    test.each(["cli", "environment"] as const)(
+      "preserves explicit %s socket paths",
+      (source) => {
+        const socketPath = "/tmp/explicit-control.sock";
+        const clientSocketPath = "/tmp/explicit-client.sock";
+        const args = ["--ssh-host", "alice@example.com", "--session", "work"];
+        if (source === "cli") {
+          args.push(
+            "--socket-path",
+            socketPath,
+            "--client-socket-path",
+            clientSocketPath,
+          );
+        }
+        const config = loadSocketConfig(args, {
+          HERDR_SOCKET_PATH:
+            source === "cli" ? "/tmp/ignored-control.sock" : socketPath,
+          HERDR_CLIENT_SOCKET_PATH:
+            source === "cli" ? "/tmp/ignored-client.sock" : clientSocketPath,
+        });
+        expect(config.socketPath).toBe(socketPath);
+        expect(config.clientSocketPath).toBe(clientSocketPath);
+        expect(config.hasExplicitSocketPath).toBe(true);
+        expect(config.hasExplicitClientSocketPath).toBe(true);
+      },
+    );
+
+    test.each([undefined, "work"])(
+      "preserves local Herdr socket paths for session %s",
+      (session) => {
+        const config = loadSocketConfig(session ? ["--session", session] : []);
+        const base = session
+          ? join(herdrConfigDir(), "sessions", session)
+          : herdrConfigDir();
+        expect(config.socketPath).toBe(join(base, "herdr.sock"));
+        expect(config.clientSocketPath).toBe(join(base, "herdr-client.sock"));
+        expect(config.hasExplicitSocketPath).toBe(false);
+        expect(config.hasExplicitClientSocketPath).toBe(false);
+      },
+    );
+  },
+);
 
 describe("nativeSocketPath", () => {
   test("maps Herdr's Windows socket name onto its named pipe", () => {

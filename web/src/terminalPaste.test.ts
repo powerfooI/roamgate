@@ -197,7 +197,8 @@ function snapshot(
 
 describe("terminal paste", () => {
   test("recovers full native paste text from xterm's helper textarea", () => {
-    const text = `${"中英文😀".repeat(300)}\nsecond line`;
+    const firstLine = "中英文😀".repeat(300);
+    const text = `${firstLine}\nsecond line\nthird line`;
     expect(
       terminalPasteInputText(
         { inputType: "insertFromPaste", isComposing: false },
@@ -206,7 +207,7 @@ describe("terminal paste", () => {
       ),
     ).toBe(text);
     expect(terminalPasteRequest("p7", text).params.text).toBe(
-      text.replace("\n", "\r"),
+      `${firstLine}\rsecond line\rthird line`,
     );
     expect(
       terminalPasteInputText(

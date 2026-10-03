@@ -1,8 +1,27 @@
 import { describe, expect, jest, test } from "bun:test";
 import { runInNewContext } from "node:vm";
 import { createHmac } from "node:crypto";
+import { Window } from "happy-dom";
 import { createAuthHandlers, unauthenticatedLoginRedirect } from "./auth";
 import { browserUrlFor, withLoginToken } from "../config/server-config";
+
+const parserWindow = new Window({
+  settings: {
+    disableJavaScriptEvaluation: true,
+    disableJavaScriptFileLoading: true,
+    disableCSSFileLoading: true,
+  },
+});
+
+function loginScript(markup: string): string {
+  const document = new parserWindow.DOMParser().parseFromString(
+    markup,
+    "text/html",
+  );
+  const scripts = document.querySelectorAll("script:not([src])");
+  if (scripts.length !== 1) throw new Error("Expected one inline login script");
+  return scripts[0]!.textContent;
+}
 
 function cookieHeader(response: Response): string {
   const cookie = response.headers.get("set-cookie");
@@ -11,6 +30,23 @@ function cookieHeader(response: Response): string {
 }
 
 describe("request authentication boundaries", () => {
+  test("login script extraction is inert and respects HTML structure", () => {
+    const source = 'throw new Error("keep < &amp; > as script text");';
+    expect(
+      loginScript(`
+        <!-- <script>commented out</script> -->
+        <script src="/external.js">external fallback</script>
+        <SCRIPT data-note=">">${source}</SCRIPT>
+      `),
+    ).toBe(source);
+    expect(() => loginScript("<p>No script</p>")).toThrow(
+      "Expected one inline login script",
+    );
+    expect(() => loginScript("<script></script><script></script>")).toThrow(
+      "Expected one inline login script",
+    );
+  });
+
   test("requires authentication by default", () => {
     const handlers = createAuthHandlers({ password: "test-login-secret" });
     expect(handlers.isAuthed(new Request("http://localhost/"))).toBe(false);
@@ -76,7 +112,7 @@ describe("request authentication boundaries", () => {
         this.href = value;
       },
     };
-    runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)![1]!, {
+    runInNewContext(loginScript(html), {
       document: { getElementById: (id: string) => elements[id] },
       location,
       fetch: async () => ({ ok: true }),
@@ -115,7 +151,7 @@ describe("request authentication boundaries", () => {
       };
       let calls = 0;
       const pending = Promise.withResolvers<Response>();
-      runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)![1]!, {
+      runInNewContext(loginScript(html), {
         document: { getElementById: (id: string) => elements[id] },
         fetch: () => {
           calls++;

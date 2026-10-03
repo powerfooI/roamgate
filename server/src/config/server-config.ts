@@ -322,7 +322,9 @@ function remoteTunnelLocalPath(
 ): string {
   const hostKey = host ?? "remote";
   const sessionKey = session ?? "default";
-  const key = createHash("sha1")
+  // A short deterministic filename identifier, not an authentication secret.
+  // Keep it bounded for Unix socket path limits regardless of input length.
+  const key = createHash("sha256")
     .update(`${hostKey}\0${sessionKey}\0${kind}`)
     .digest("hex")
     .slice(0, 12);

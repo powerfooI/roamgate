@@ -113,7 +113,7 @@ export function MermaidDiagram({
         className="mermaid-svg"
         role="img"
         aria-label="Mermaid diagram"
-        // Renderer labels are escaped, styles are scoped, and IDs are unique.
+        // Final renderer output is SVG-sanitized after style/ID preparation.
         dangerouslySetInnerHTML={{ __html: state.svg }}
       />
     </ZoomablePreview>

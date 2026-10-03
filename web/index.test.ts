@@ -1,12 +1,42 @@
 import { expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
+import { Window } from "happy-dom";
 
 const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
-const bootstrap = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].find(
-  (match) => match[1]?.includes("storedTheme"),
-)?.[1];
+const parserWindow = new Window({
+  settings: {
+    disableJavaScriptEvaluation: true,
+    disableJavaScriptFileLoading: true,
+    disableCSSFileLoading: true,
+  },
+});
+
+function inlineScripts(markup: string): string[] {
+  const document = new parserWindow.DOMParser().parseFromString(
+    markup,
+    "text/html",
+  );
+  return [...document.querySelectorAll("script:not([src])")].map(
+    (script) => script.textContent,
+  );
+}
+
+const bootstrap = inlineScripts(html).find((script) =>
+  script.includes("storedTheme"),
+);
 if (!bootstrap) throw new Error("First-paint appearance bootstrap is missing");
+
+test("inline script extraction handles HTML structure without executing scripts", () => {
+  const source = 'throw new Error("keep < &amp; > as script text");';
+  expect(
+    inlineScripts(`
+      <!-- <script>commented out</script> -->
+      <script src="/external.js">external fallback</script>
+      <SCRIPT data-note=">">${source}</SCRIPT>
+    `),
+  ).toEqual([source]);
+});
 
 function firstPaint(values: Record<string, string>, systemLight = false) {
   const element = {

@@ -1,4 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
+import { Window } from "happy-dom";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import * as storeModule from "../store";
@@ -56,13 +57,31 @@ function renderRow(
   }
 }
 
+const parserWindow = new Window({
+  settings: {
+    disableJavaScriptEvaluation: true,
+    disableJavaScriptFileLoading: true,
+    disableCSSFileLoading: true,
+  },
+});
+
 function title(markup: string): string {
-  return markup
-    .match(
-      /class="agent-title-label">(.*?)<\/span>(?:<span class="badge|<\/div>)/,
-    )![1]
-    .replace(/<[^>]+>/g, "");
+  const document = new parserWindow.DOMParser().parseFromString(
+    markup,
+    "text/html",
+  );
+  const label = document.querySelector(".agent-title-label");
+  if (!label) throw new Error("Agent title label is missing");
+  return label.textContent;
 }
+
+test("agent titles preserve escaped labels and nested pane IDs as text", () => {
+  const label = `<review> & "quoted" 'work'`;
+  expect(title(renderRow(pane(), [tab(label)]))).toBe(`${label} · Alice`);
+  expect(title(renderRow(pane(), [tab(label)], { showPaneId: true }))).toBe(
+    `${label} · Alice · p1`,
+  );
+});
 
 test("nested rows prioritize tab names and deduplicate the directory", () => {
   expect(title(renderRow(pane(), [tab(" Alice ")]))).toBe("Alice");

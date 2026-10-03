@@ -24,6 +24,59 @@ async function login(port: number): Promise<string> {
   return cookie!;
 }
 
+function dispatchRpcReply(
+  pending: Map<string, (message: unknown) => void>,
+  message: unknown,
+): void {
+  if (
+    !message ||
+    typeof message !== "object" ||
+    Array.isArray(message) ||
+    !("id" in message) ||
+    typeof message.id !== "string" ||
+    !pending.has(message.id)
+  )
+    return;
+  const callback = pending.get(message.id);
+  if (typeof callback === "function") callback(message);
+}
+
+test("RPC fixture dispatches only registered string reply IDs", () => {
+  const replies: unknown[] = [];
+  const pending = new Map<string, (message: unknown) => void>([
+    ["request-1", (message) => replies.push(message)],
+  ]);
+  for (const message of [
+    null,
+    false,
+    1,
+    "request-1",
+    [],
+    {},
+    { id: 1 },
+    { id: ["request-1"] },
+    { id: {} },
+    { id: "missing" },
+    { id: "__proto__" },
+    { id: "constructor" },
+    { id: "toString" },
+  ]) {
+    dispatchRpcReply(pending, message);
+  }
+  expect(replies).toEqual([]);
+  for (const id of ["request-1", "__proto__", "constructor", "toString"]) {
+    pending.set(id, (message) => replies.push(message));
+    const message = { id, result: { ok: true } };
+    dispatchRpcReply(pending, message);
+    expect(replies.at(-1)).toBe(message);
+    pending.delete(id);
+    const count = replies.length;
+    dispatchRpcReply(pending, message);
+    expect(replies).toHaveLength(count);
+  }
+  expect(replies).toHaveLength(4);
+});
+
 const roots: string[] = [];
 const servers: net.Server[] = [];
 const sockets = new Set<net.Socket>();
@@ -280,7 +333,7 @@ test("production dispatcher isolates two local profiles and profile CRUD", async
       const pending = new Map<string, (message: any) => void>();
       socket.onmessage = (event) => {
         const message = JSON.parse(String(event.data));
-        if (typeof message.id === "string") pending.get(message.id)?.(message);
+        dispatchRpcReply(pending, message);
       };
       const raw = async (
         method: string,
