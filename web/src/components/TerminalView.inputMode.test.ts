@@ -257,11 +257,15 @@ async function registerDomTests() {
   const { TERMINAL_INPUT_MODE_STORAGE_KEY } = await import(
     "../terminalInputMode"
   );
-  const { roamgateLocalStorage } = await import("../browserStorage");
+  const { roamgateLocalStorage, subscribeLocalStorage } = await import(
+    "../browserStorage"
+  );
+  const { normalizeTerminalFontScale } = await import("../appearance");
   const {
     clearTerminalComposerDraft,
     readTerminalComposerDraft,
     terminalComposerDraftKey,
+    writeTerminalComposerDraft,
   } = await import("../terminalComposer");
   const draftKey = terminalComposerDraftKey("connection-a", 1, "pane-a");
   const storageKey = `roamgate:${TERMINAL_INPUT_MODE_STORAGE_KEY}`;
@@ -270,6 +274,7 @@ async function registerDomTests() {
   let open = false;
   let strict = false;
   let explicitPane: string | undefined;
+  let terminalFontScale = 100;
   beforeEach(() => {
     state = initialState();
     calls.length = 0;
@@ -283,6 +288,7 @@ async function registerDomTests() {
     open = false;
     strict = false;
     explicitPane = undefined;
+    terminalFontScale = 100;
   });
   afterEach(async () => {
     if (root) await act(async () => root?.unmount());
@@ -304,7 +310,7 @@ async function registerDomTests() {
       paneId: explicitPane,
       terminalTheme: {},
       terminalFontFamily: "monospace",
-      terminalFontScale: 1,
+      terminalFontScale,
       showMobileKeys: false,
       mobileShortcuts: [[], []],
       mobileSideShortcuts: [],
@@ -738,6 +744,79 @@ async function registerDomTests() {
     expectInputBlocked();
   });
 
+  test.each(["direct", "composer", "saved Direct"])(
+    "remote font scale updates preserve %s input, focus and draft",
+    async (mode) => {
+      writeTerminalComposerDraft(draftKey, "unsent draft");
+      if (mode === "saved Direct") localStorage.setItem(storageKey, "direct");
+      await mount();
+      await setOpen(true);
+      if (mode !== "saved Direct") await choose(mode as TerminalInputMode);
+      const term = currentTerminal();
+      const editor = container.querySelector<HTMLTextAreaElement>(
+        '[aria-label="Terminal input draft"]',
+      );
+      if (editor) editor.setSelectionRange(3, 8);
+      const focused = document.activeElement;
+      const focusCount = term.focusCount;
+      const expectedMode = selectedMode();
+      const preference = savedMode();
+      // Model App's subscription so native prefixed events reach a real commit.
+      const unsubscribe = subscribeLocalStorage((key) => {
+        if (key !== null && key !== "terminalFontScale" && key !== "uiScale")
+          return;
+        terminalFontScale = normalizeTerminalFontScale(
+          roamgateLocalStorage.getItem("terminalFontScale"),
+          roamgateLocalStorage.getItem("uiScale"),
+        );
+        render();
+      });
+      try {
+        for (const scale of [105, 90, 100]) {
+          await act(async () => {
+            localStorage.setItem("roamgate:terminalFontScale", String(scale));
+            window.dispatchEvent(
+              new browser.StorageEvent("storage", {
+                key: "roamgate:terminalFontScale",
+                newValue: String(scale),
+                storageArea: browser.localStorage,
+              }) as unknown as Event,
+            );
+          });
+          expect(currentTerminal()).toBe(term);
+          expect(term.options.fontSize).toBe((12 * scale) / 100);
+          expect(selectedMode()).toBe(expectedMode);
+          expect(savedMode()).toBe(preference);
+          expect(document.activeElement).toBe(focused);
+          expect(term.focusCount).toBe(focusCount);
+          expect(readTerminalComposerDraft(draftKey)).toBe("unsent draft");
+          if (editor) {
+            expect(editor.value).toBe("unsent draft");
+            expect(editor.selectionStart).toBe(3);
+            expect(editor.selectionEnd).toBe(8);
+          }
+          const before = calls.filter(
+            (call) => call.method === "terminal.input",
+          );
+          if (mode === "direct") {
+            expect(term.options.disableStdin).toBe(false);
+            expect(term.textarea.readOnly).toBe(false);
+            act(() => term.onDataCallback("continued"));
+            const input = calls.filter(
+              (call) => call.method === "terminal.input",
+            );
+            expect(input).toHaveLength(before.length + 1);
+            expect(input[input.length - 1]?.params.terminal_id).toBe(
+              "terminal-a",
+            );
+          } else expectInputBlocked();
+        }
+      } finally {
+        unsubscribe();
+      }
+    },
+  );
+
   test.each([
     "status",
     "paused",
@@ -753,6 +832,9 @@ async function registerDomTests() {
       await mount();
       await setOpen(true);
       await choose("direct");
+      terminalFontScale = 105;
+      await act(async () => render());
+      expect(selectedMode()).toBe("direct");
       const previousTerminal = currentTerminal();
       const previousFocusCount = previousTerminal.focusCount;
       if (change === "status") await patch({ status: "disconnected" });

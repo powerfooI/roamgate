@@ -555,7 +555,6 @@ export function TerminalView({
     pane?.workspace_id,
     pane?.tab_id,
     s.layout?.tab_id,
-    terminalFontScale,
     s.status,
     s.connectionPaused,
     s.terminalAttachEpoch,
@@ -2992,6 +2991,12 @@ export function TerminalView({
   useEffect(() => {
     terminalFontScaleRef.current = terminalFontScale;
     if (!termInstance) return;
+    // Font geometry invalidates hit targets, not the current input session.
+    linkRevisionRef.current++;
+    termInstance.refresh(0, termInstance.rows - 1);
+    setFileLinkMenu(null);
+    setWorkspaceDirectory(null);
+    touchSelectionRef.current?.reset();
     termInstance.options = terminalDensity(terminalFontScale);
     const size = fitVisibleTerminal();
     if (size) resizeSyncRef.current?.sendNow(size);
