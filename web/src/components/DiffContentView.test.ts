@@ -181,6 +181,7 @@ if (process.env.ROAMGATE_DIFF_CONTENT_DOM_TEST !== "1") {
     const reviewEntries = entries.slice(0, 2);
     let selected = reviewEntries[1];
     let revision = 1;
+    let mobile = false;
     let upperHeight = 1_000;
     let files = Object.fromEntries(
       reviewEntries.map((entry) => [
@@ -234,6 +235,7 @@ if (process.env.ROAMGATE_DIFF_CONTENT_DOM_TEST !== "1") {
             error: null,
             selectionRevision: revision,
             resourceKey: "local-scroll-dom",
+            mobile,
             connectionClient: client,
             onNearbyFilesChange: (next) => {
               nearby = next;
@@ -347,6 +349,46 @@ if (process.env.ROAMGATE_DIFF_CONTENT_DOM_TEST !== "1") {
       expect(nearby).toHaveLength(0);
       expect(body.isConnected).toBe(true);
       expect(scroller.querySelector(".diff-file-section-body")).toBe(body);
+
+      const preferenceChange = async (key: string, value: string) => {
+        const rawKey = `roamgate:${key}`;
+        browser.localStorage.setItem(rawKey, value);
+        await act(async () => {
+          browser.dispatchEvent(
+            new browser.StorageEvent("storage", {
+              key: rawKey,
+              newValue: value,
+              storageArea: browser.localStorage,
+            }),
+          );
+        });
+      };
+      const buttonPressed = (selector: string) =>
+        container.querySelector(selector)?.getAttribute("aria-pressed");
+      await preferenceChange("diffViewMode", "unified");
+      await preferenceChange("desktopDiffWrap", "false");
+      expect(buttonPressed(".diff-view-toggle button:last-child")).toBe("true");
+      expect(buttonPressed(".diff-wrap-toggle")).toBe("false");
+      expect(selected).toBe(reviewEntries[1]);
+      mobile = true;
+      await render();
+      await preferenceChange("mobileDiffWrap", "true");
+      expect(buttonPressed(".diff-wrap-toggle")).toBe("true");
+      browser.localStorage.clear();
+      await act(async () => {
+        const event = new browser.StorageEvent("storage", {
+          storageArea: browser.localStorage,
+        });
+        Object.defineProperty(event, "key", { value: null });
+        browser.dispatchEvent(event);
+      });
+      expect(buttonPressed(".diff-wrap-toggle")).toBe("false");
+      mobile = false;
+      await render();
+      expect(buttonPressed(".diff-view-toggle button:first-child")).toBe(
+        "true",
+      );
+      expect(buttonPressed(".diff-wrap-toggle")).toBe("true");
     } finally {
       await act(async () => root.unmount());
       clearDiffContentResourceState("local-scroll-dom");

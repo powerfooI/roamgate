@@ -225,7 +225,7 @@ export function relativePathWithinCheckout(
   return relative;
 }
 
-function preferencesStorageKey(scope: ResourceScope): string {
+export function preferencesStorageKey(scope: ResourceScope): string {
   return connectionStorageKey(
     scope.connectionId,
     `${INSPECTOR_PREFERENCES_PREFIX}${resourceOwnerKey(scope)}`,

@@ -14,7 +14,7 @@ export const DEFAULT_MOBILE_CONTROLS_PLACEMENT: MobileControlsPlacement = {
   offsetY: 0,
 };
 
-const STORAGE_KEY = "mobileControlsPlacement";
+export const MOBILE_CONTROLS_PLACEMENT_STORAGE_KEY = "mobileControlsPlacement";
 // Far beyond any screen; rejects corrupt values before clamping.
 const MAX_ABS_OFFSET = 10_000;
 
@@ -44,7 +44,9 @@ export function readMobileControlsPlacement(
   storage: Pick<Storage, "getItem"> = roamgateLocalStorage,
 ): MobileControlsPlacement {
   try {
-    return parseMobileControlsPlacement(storage.getItem(STORAGE_KEY));
+    return parseMobileControlsPlacement(
+      storage.getItem(MOBILE_CONTROLS_PLACEMENT_STORAGE_KEY),
+    );
   } catch {
     return DEFAULT_MOBILE_CONTROLS_PLACEMENT;
   }
@@ -56,7 +58,7 @@ export function writeMobileControlsPlacement(
 ) {
   try {
     storage.setItem(
-      STORAGE_KEY,
+      MOBILE_CONTROLS_PLACEMENT_STORAGE_KEY,
       JSON.stringify({
         side: placement.side,
         offsetY: Math.round(placement.offsetY),

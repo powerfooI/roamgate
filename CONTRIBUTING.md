@@ -63,6 +63,11 @@ a real backend for affected changes:
   delivery with the page closed, and settings/integration changes on the server.
 - Check desktop focus after app switching, OS clipboard/rectangular selection,
   and responsiveness during sustained terminal output and real network latency.
+- Open two tabs at the same backend/origin. Change appearance, layout, font,
+  shortcut, diff/wrapping, notification and automatic-update preferences; confirm
+  the other tab updates without reloading. Remove/clear saved preferences and
+  confirm defaults return. Keep each tab's workspace, file selection, draft,
+  focus and active input mode independent, including across different connections.
 
 Record device/browser and results in the PR. Passing unit and server integration
 tests does not establish browser behavior or real-user-experience acceptance.

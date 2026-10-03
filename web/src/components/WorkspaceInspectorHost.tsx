@@ -24,7 +24,7 @@ import {
 } from "react";
 import type { ConnectionClient } from "../api";
 import { connectionClientScopeKey } from "../useConnectionClient";
-import { roamgateLocalStorage } from "../browserStorage";
+import { roamgateLocalStorage, subscribeLocalStorage } from "../browserStorage";
 import {
   type NewReviewAnnotation,
   type ReviewAnnotation,
@@ -35,6 +35,7 @@ import type { GitDiffEntry, Pane, Workspace } from "../types";
 import {
   DEFAULT_INSPECTOR_NAVIGATION_RATIO,
   inspectorNavigationRatioAtPosition,
+  preferencesStorageKey,
   readInspectorPreferences,
   resourceOwnerKey,
   resourceStateKey,
@@ -479,11 +480,14 @@ export function WorkspaceInspectorHost({
   };
 
   useEffect(() => {
-    const preferences = readInspectorPreferences(
-      roamgateLocalStorage,
-      state.scope,
-    );
-    setNavigationPreferences(preferences);
+    const refresh = () =>
+      setNavigationPreferences(
+        readInspectorPreferences(roamgateLocalStorage, state.scope),
+      );
+    refresh();
+    return subscribeLocalStorage((key) => {
+      if (key === null || key === preferencesStorageKey(state.scope)) refresh();
+    });
   }, [contentResourceKey, state.scope]);
 
   useLayoutEffect(() => {

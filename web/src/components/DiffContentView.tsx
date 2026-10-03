@@ -1,5 +1,5 @@
 import { imageMimeForPath } from "../../../shared/filePreview";
-import { roamgateLocalStorage } from "../browserStorage";
+import { roamgateLocalStorage, subscribeLocalStorage } from "../browserStorage";
 import { shortcutMatches } from "../shortcutPreferences";
 import {
   DEFAULT_THEMES,
@@ -916,6 +916,18 @@ export function DiffContentView({
   );
   const [desktopWrap, setDesktopWrap] = useState(() => loadDesktopDiffWrap());
   const [mobileWrap, setMobileWrap] = useState(() => loadMobileDiffWrap());
+  useEffect(
+    () =>
+      subscribeLocalStorage((key) => {
+        if (key === null || key === DIFF_VIEW_MODE_KEY)
+          setViewMode(loadDiffViewMode());
+        if (key === null || key === DESKTOP_DIFF_WRAP_KEY)
+          setDesktopWrap(loadDesktopDiffWrap());
+        if (key === null || key === MOBILE_DIFF_WRAP_KEY)
+          setMobileWrap(loadMobileDiffWrap());
+      }),
+    [],
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [pendingAnnotation, setPendingAnnotation] =
     useState<DiffAnnotationRequest | null>(null);

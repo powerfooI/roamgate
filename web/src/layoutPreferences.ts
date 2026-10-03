@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { roamgateLocalStorage, subscribeLocalStorage } from "./browserStorage";
 
 export const LAYOUT_PREFERENCES_STORAGE_KEY = "layoutPreferences.v1";
 export const LAYOUT_CHANGE_EVENT = "herdr-layout-change";
@@ -108,7 +109,7 @@ function publishLayout(preferences = snapshot.preferences) {
 function readPreferences() {
   try {
     return parseLayoutPreferences(
-      localStorage.getItem(LAYOUT_PREFERENCES_STORAGE_KEY),
+      roamgateLocalStorage.getItem(LAYOUT_PREFERENCES_STORAGE_KEY),
     );
   } catch {
     return { ...defaults };
@@ -121,8 +122,8 @@ export function initializeLayoutPreferences() {
   publishLayout(readPreferences());
   window.addEventListener("resize", () => publishLayout());
   window.addEventListener("popstate", () => publishLayout());
-  window.addEventListener("storage", (event) => {
-    if (event.key === LAYOUT_PREFERENCES_STORAGE_KEY || event.key === null)
+  subscribeLocalStorage((key) => {
+    if (key === LAYOUT_PREFERENCES_STORAGE_KEY || key === null)
       publishLayout(readPreferences());
   });
 }
@@ -141,7 +142,7 @@ export function updateLayoutPreferences(patch: Partial<LayoutPreferences>) {
     window.history.replaceState(window.history.state, "", url);
   }
   try {
-    localStorage.setItem(
+    roamgateLocalStorage.setItem(
       LAYOUT_PREFERENCES_STORAGE_KEY,
       JSON.stringify(preferences),
     );

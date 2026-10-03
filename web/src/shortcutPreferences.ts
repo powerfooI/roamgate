@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { roamgateLocalStorage, subscribeLocalStorage } from "./browserStorage";
 import {
   defaultShortcutBindings,
   detectShortcutPlatform,
@@ -173,7 +174,9 @@ function publish(preferences: ShortcutPreferences, storageError = "") {
 }
 function read() {
   try {
-    return parseShortcutPreferences(localStorage.getItem(SHORTCUT_STORAGE_KEY));
+    return parseShortcutPreferences(
+      roamgateLocalStorage.getItem(SHORTCUT_STORAGE_KEY),
+    );
   } catch {
     return defaults;
   }
@@ -183,15 +186,17 @@ export function initializeShortcutPreferences() {
   initialized = true;
   platform = detectShortcutPlatform();
   publish(read());
-  window.addEventListener("storage", (event) => {
-    if (event.key === SHORTCUT_STORAGE_KEY || event.key === null)
-      publish(read());
+  subscribeLocalStorage((key) => {
+    if (key === SHORTCUT_STORAGE_KEY || key === null) publish(read());
   });
 }
 function save(preferences: ShortcutPreferences) {
   let error = "";
   try {
-    localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(preferences));
+    roamgateLocalStorage.setItem(
+      SHORTCUT_STORAGE_KEY,
+      JSON.stringify(preferences),
+    );
   } catch {
     error =
       "Browser storage is unavailable. Changes apply only until this page reloads; export a preset to keep them.";

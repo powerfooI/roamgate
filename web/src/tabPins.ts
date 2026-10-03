@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { roamgateLocalStorage } from "./browserStorage";
+import { roamgateLocalStorage, subscribeLocalStorage } from "./browserStorage";
 import { connectionStorageKey } from "./connectionStorage";
 import type { Pane, Tab } from "./types";
 
@@ -93,6 +93,7 @@ export function paneCloseBlockReason(
 // and Roamgate. Like workspace pins, they stay in this browser.
 const pinsByConnection = new Map<string, ReadonlySet<string>>();
 const listeners = new Set<() => void>();
+let unsubscribeStorage: (() => void) | undefined;
 
 function storageKey(connectionId: string): string {
   return connectionStorageKey(connectionId, TAB_PINS_STORAGE_KEY);
@@ -164,18 +165,27 @@ export function forgetClosedTabPins(
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  if (listeners.size === 1) window.addEventListener("storage", onStorage);
+  if (listeners.size === 1)
+    unsubscribeStorage = subscribeLocalStorage(onStorage);
   return () => {
     listeners.delete(listener);
-    if (listeners.size === 0) window.removeEventListener("storage", onStorage);
+    if (listeners.size === 0) {
+      unsubscribeStorage?.();
+      unsubscribeStorage = undefined;
+    }
   };
 }
 
 // Another window changed its pins: reload them on the next read.
-function onStorage(event: StorageEvent) {
-  if (event.key !== null && !event.key.includes(TAB_PINS_STORAGE_KEY)) return;
-  pinsByConnection.clear();
-  notify();
+function onStorage(key: string | null) {
+  let changed = false;
+  for (const connectionId of pinsByConnection.keys()) {
+    if (key === null || key === storageKey(connectionId)) {
+      pinsByConnection.delete(connectionId);
+      changed = true;
+    }
+  }
+  if (changed) notify();
 }
 
 export function useTabPins(connectionId: string): ReadonlySet<string> {

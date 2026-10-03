@@ -152,6 +152,69 @@ describe("automatic update check preference", () => {
     ).toBe(true);
   });
 
+  test("external changes stop polling without rewriting the preference", async () => {
+    const previousState = store.get();
+    const previousFetch = globalThis.fetch;
+    const previousStorage = globalThis.localStorage;
+    let storedValue = "false";
+    let writes = 0;
+    let resolveFetch!: (response: Response) => void;
+    globalThis.fetch = (() =>
+      new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      })) as unknown as typeof fetch;
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) =>
+          key === "roamgate:automaticUpdateChecksEnabled" ? storedValue : null,
+        setItem: () => {
+          writes += 1;
+        },
+      },
+    });
+    try {
+      __storeTesting.replaceState(partitionState());
+      const automaticCheck = __storeTesting.startUpdatePolling();
+      __storeTesting.handlePreferenceStorageChange("unrelated");
+      expect(__storeTesting.updatePollingActive()).toBe(true);
+
+      __storeTesting.handlePreferenceStorageChange(
+        "automaticUpdateChecksEnabled",
+      );
+      expect(store.get().automaticUpdateChecksEnabled).toBe(false);
+      expect(__storeTesting.updatePollingActive()).toBe(false);
+      resolveFetch(
+        Response.json({ update_available: true, latest_version: "1.0.0" }),
+      );
+      await automaticCheck;
+      expect(store.get().updateInfo).toBeNull();
+
+      __storeTesting.replaceState({
+        ...store.get(),
+        connectionPaused: true,
+      });
+      storedValue = "true";
+      __storeTesting.handlePreferenceStorageChange(
+        "automaticUpdateChecksEnabled",
+      );
+      expect(store.get().automaticUpdateChecksEnabled).toBe(true);
+      expect(__storeTesting.updatePollingActive()).toBe(false);
+      expect(writes).toBe(0);
+    } finally {
+      __storeTesting.replaceState(previousState);
+      globalThis.fetch = previousFetch;
+      if (previousStorage === undefined) {
+        delete (globalThis as { localStorage?: Storage }).localStorage;
+      } else {
+        Object.defineProperty(globalThis, "localStorage", {
+          configurable: true,
+          value: previousStorage,
+        });
+      }
+    }
+  });
+
   test("cancels polling and ignores an in-flight automatic result when disabled", async () => {
     const previousState = store.get();
     const previousFetch = globalThis.fetch;

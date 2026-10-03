@@ -2,6 +2,7 @@ import { afterAll, afterEach, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { Root } from "react-dom/client";
 import * as drafts from "../terminalComposer";
+import { defaultMobileTerminalShortcutRows } from "../mobileTerminalShortcuts";
 import type { TerminalInputMode } from "./TerminalComposer";
 
 // Use real React commits: hook spies cannot reproduce batched completions or
@@ -79,7 +80,12 @@ async function registerDomTests() {
     return { promise, resolve, reject };
   }
 
-  async function mount(text = "left SELECT right", start = 5, end = 11) {
+  async function mount(
+    text = "left SELECT right",
+    start = 5,
+    end = 11,
+    shortcuts = false,
+  ) {
     const connection = `upload-dom-${++serial}`;
     drafts.activateTerminalComposerDraftScope(connection, 1);
     const key = drafts.terminalComposerDraftKey(connection, 1, "pane-a");
@@ -111,7 +117,7 @@ async function registerDomTests() {
           },
           onFocusDirect: () => directInput.focus(),
           directDisabled: false,
-          shortcutRows: [],
+          shortcutRows: shortcuts ? defaultMobileTerminalShortcutRows() : [],
           onRunShortcut: () => {},
           onClose: () => {},
           onSubmit: async (value) => {
@@ -209,6 +215,39 @@ async function registerDomTests() {
       directInput,
     };
   }
+
+  test("other-tab shortcut visibility changes preserve the active draft and caret", async () => {
+    const key = "roamgate:terminalComposerShortcutsOpen.v1";
+    browser.localStorage.removeItem(key);
+    const h = await mount("left SELECT right", 5, 11, true);
+    await h.select(5, 11);
+    const editor = h.textarea();
+    const panel = () =>
+      container.querySelector<HTMLElement>(".terminal-composer-shortcuts")!;
+    const change = async (value: string | null) => {
+      if (value === null) browser.localStorage.removeItem(key);
+      else browser.localStorage.setItem(key, value);
+      await act(async () => {
+        const event = new browser.StorageEvent("storage", {
+          key,
+          newValue: value ?? undefined,
+          storageArea: browser.localStorage,
+        });
+        Object.defineProperty(event, "newValue", { value });
+        browser.dispatchEvent(event);
+      });
+    };
+    expect(panel().hidden).toBe(false);
+    await change("false");
+    expect(panel().hidden).toBe(true);
+    expect(h.textarea()).toBe(editor);
+    expect(document.activeElement).toBe(editor);
+    expect([editor.selectionStart, editor.selectionEnd]).toEqual([5, 11]);
+    expect(drafts.readTerminalComposerDraft(h.key)).toBe("left SELECT right");
+    expect(h.sent).toEqual([]);
+    await change(null);
+    expect(panel().hidden).toBe(false);
+  });
 
   for (const mode of ["composer", "direct"] as const) {
     for (const batched of [false, true]) {

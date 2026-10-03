@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { type CSSProperties, useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { roamgateLocalStorage } from "../browserStorage";
+import { roamgateLocalStorage, subscribeLocalStorage } from "../browserStorage";
 import {
   type MobileTerminalShortcut,
   mobileTerminalShortcutOption,
@@ -118,6 +118,17 @@ export function TerminalComposer({
     () =>
       unsavedShortcutsOpen ??
       roamgateLocalStorage.getItem(SHORTCUTS_OPEN_STORAGE_KEY) !== "false",
+  );
+  useEffect(
+    () =>
+      subscribeLocalStorage((key) => {
+        if (key !== null && key !== SHORTCUTS_OPEN_STORAGE_KEY) return;
+        unsavedShortcutsOpen = undefined;
+        setShortcutsOpen(
+          roamgateLocalStorage.getItem(SHORTCUTS_OPEN_STORAGE_KEY) !== "false",
+        );
+      }),
+    [],
   );
   const [pickerMode, setPickerMode] = useState<"browse" | "inline" | null>(
     null,

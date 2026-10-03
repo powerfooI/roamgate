@@ -14,8 +14,9 @@ import {
   type NewReviewAnnotation,
   type ReviewAnnotation,
 } from "./annotations";
-import { roamgateLocalStorage } from "./browserStorage";
+import { roamgateLocalStorage, subscribeLocalStorage } from "./browserStorage";
 import {
+  MOBILE_CONTROLS_PLACEMENT_STORAGE_KEY,
   readMobileControlsPlacement,
   writeMobileControlsPlacement,
   type MobileControlsPlacement,
@@ -176,6 +177,7 @@ import {
   type InspectorView,
   inspectorMaximumSize,
   isWorkspaceInspectorShortcut,
+  preferencesStorageKey,
   readInspectorPreferences,
   readResourceFileSelection,
   relativePathWithinCheckout,
@@ -3208,9 +3210,7 @@ export default function App() {
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.style.colorScheme = resolvedTheme;
-    roamgateLocalStorage.setItem(THEME_KEY, theme);
     document.documentElement.dataset.accent = accentColor;
-    roamgateLocalStorage.setItem(ACCENT_COLOR_KEY, accentColor);
     document.documentElement.style.zoom =
       uiScale === UI_SCALE_DEFAULT ? "" : String(uiScale / 100);
     if (uiScale === UI_SCALE_DEFAULT) {
@@ -3244,8 +3244,16 @@ export default function App() {
       document.documentElement.style.removeProperty("--popover-portal-zoom");
       document.documentElement.style.removeProperty("--popover-content-zoom");
     }
-    roamgateLocalStorage.setItem(UI_SCALE_KEY, String(uiScale));
   }, [accentColor, resolvedTheme, theme, uiScale]);
+  useEffect(() => {
+    roamgateLocalStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
+  useEffect(() => {
+    roamgateLocalStorage.setItem(ACCENT_COLOR_KEY, accentColor);
+  }, [accentColor]);
+  useEffect(() => {
+    roamgateLocalStorage.setItem(UI_SCALE_KEY, String(uiScale));
+  }, [uiScale]);
   useEffect(() => {
     roamgateLocalStorage.setItem(
       TERMINAL_FONT_SCALE_KEY,
@@ -3282,25 +3290,95 @@ export default function App() {
       serializeCustomTerminalThemes(customTerminalThemes),
     );
   }, [customTerminalThemes]);
-  useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY) {
-        setMobileTerminalShortcuts(
-          parseMobileTerminalShortcutRows(event.newValue),
+  useEffect(
+    () =>
+      subscribeLocalStorage((key) => {
+        if (key === null || key === THEME_KEY) setTheme(loadTheme());
+        if (key === null || key === ACCENT_COLOR_KEY)
+          setAccentColor(loadAccentColor());
+        if (key === null || key === UI_SCALE_KEY) setUiScale(loadUiScale());
+        if (
+          key === null ||
+          key === TERMINAL_FONT_SCALE_KEY ||
+          key === UI_SCALE_KEY
+        )
+          setTerminalFontScale(loadTerminalFontScale());
+        if (key === null || key === TERMINAL_FONT_FAMILY_KEY)
+          setTerminalFontName(loadTerminalFontFamily());
+        if (key === null || key === ZEN_MODE_KEY) applyZenMode(loadZenMode());
+        if (key === null || key === "sidebarWidth")
+          setSidebarWidth(loadSidebarWidth());
+        if (key === null || key === "annotationPanelMode")
+          setAnnotationsFloating(
+            roamgateLocalStorage.getItem("annotationPanelMode") !== "fixed",
+          );
+        if (key === null || key === MOBILE_CONTROLS_PLACEMENT_STORAGE_KEY)
+          setMobileControlsPlacement(readMobileControlsPlacement());
+        if (
+          key === null ||
+          key === MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY ||
+          key === LEGACY_MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY
+        )
+          setMobileTerminalShortcuts(loadMobileTerminalShortcuts());
+        if (key === null || key === MOBILE_TERMINAL_SIDE_SHORTCUTS_STORAGE_KEY)
+          setMobileTerminalSideShortcuts(loadMobileTerminalSideShortcuts());
+        if (key === null || key === TERMINAL_THEME_SELECTION_STORAGE_KEY)
+          setTerminalThemeSelection(loadTerminalThemeSelection());
+        if (key === null || key === CUSTOM_TERMINAL_THEMES_STORAGE_KEY)
+          setCustomTerminalThemes(loadCustomTerminalThemes());
+      }),
+    [applyZenMode],
+  );
+  useEffect(
+    () =>
+      subscribeLocalStorage((key) => {
+        const current = inspectorStateRef.current;
+        if (
+          !current ||
+          (key !== null && key !== preferencesStorageKey(current.scope))
+        )
+          return;
+        const preferences = readInspectorPreferences(
+          roamgateLocalStorage,
+          current.scope,
         );
-      } else if (event.key === MOBILE_TERMINAL_SIDE_SHORTCUTS_STORAGE_KEY) {
-        setMobileTerminalSideShortcuts(
-          parseMobileTerminalSideShortcuts(event.newValue),
-        );
-      } else if (event.key === TERMINAL_THEME_SELECTION_STORAGE_KEY) {
-        setTerminalThemeSelection(parseTerminalThemeSelection(event.newValue));
-      } else if (event.key === CUSTOM_TERMINAL_THEMES_STORAGE_KEY) {
-        setCustomTerminalThemes(parseCustomTerminalThemes(event.newValue));
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
+        const dock = preferences.dock;
+        const preferredSize =
+          dock === "right" ? preferences.rightSize : preferences.bottomSize;
+        const stage = inspectorStageRef.current;
+        const size =
+          stage &&
+          ((dock === "right" && stage.clientWidth >= 1000) ||
+            (dock === "bottom" && stage.clientHeight > 0))
+            ? Math.min(
+                preferredSize,
+                inspectorMaximumSize(
+                  dock,
+                  stage.clientWidth,
+                  stage.clientHeight,
+                  annotationsDocked,
+                ),
+              )
+            : preferredSize;
+        if (
+          current.dock === dock &&
+          current.size === size &&
+          current.expanded === preferences.expanded
+        )
+          return;
+        // Layout is shared; opening, view, file and focus stay in this tab.
+        const next = {
+          ...current,
+          dock,
+          size,
+          expanded: preferences.expanded,
+        };
+        if (inspectorFocusRequestRef.current?.state === current)
+          inspectorFocusRequestRef.current.state = next;
+        commitInspectorState(next);
+      }),
+    [annotationsDocked, commitInspectorState],
+  );
   const notice = s.notice;
   useEffect(() => {
     if (!notice) return;

@@ -225,6 +225,15 @@ used only inside the checkout. Removal clears only that checkout's state; closin
 one workspace retains resources another workspace still uses. Terminals stay
 mounted across Inspector changes; layout preferences and content caches are separate.
 
+Browser UI preferences share namespaced local storage across tabs at the same
+origin. Subscribers normalize current keys, legacy keys and deletion markers,
+then reread effective values so cleared preferences cannot revive legacy values.
+Appearance, layout, shortcuts, pins and display options update without reloading.
+Inspector geometry is shared; active views, files, workspace/tab navigation,
+drafts and focus stay local to each tab. A saved input-mode choice is read on
+explicit dock opening and never remotely enables Direct input in a live session.
+Session-storage reload guards and live connection controls remain tab-local.
+
 ### Last step capture limits and ownership
 
 Last step captures checkout contents at workspace active/idle boundaries, not

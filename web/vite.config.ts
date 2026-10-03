@@ -30,6 +30,12 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             {
+              // These startup preferences share storage; keep their small
+              // helpers together instead of adding utility-only requests.
+              name: "browser-preferences",
+              test: /src[\\/](?:browserStorage|layoutPreferences|shortcutPreferences)\.ts$/,
+            },
+            {
               // Share startup React and icons without loading feature-only icons.
               name: "ui-runtime",
               test: /node_modules[\\/](?:lucide-react|react|react-dom|scheduler)[\\/]/,

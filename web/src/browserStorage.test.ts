@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { roamgateStorage } from "./browserStorage";
+import { roamgateStorage, subscribeLocalStorage } from "./browserStorage";
 
 function memoryStorage(initial: Record<string, string> = {}): Storage {
   const values = new Map(Object.entries(initial));
@@ -84,4 +84,62 @@ test("enumeration keeps legacy connection migration working without duplicate ke
   storage.clear();
   expect(storage.getItem("diffViewerSelected:one")).toBeNull();
   expect(raw.getItem("diffViewerSelected:one")).toBe("saved");
+});
+
+test("local subscriptions normalize keys, reread effective values and ignore session events", () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const previousStorage = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "localStorage",
+  );
+  const target = new EventTarget();
+  const raw = memoryStorage({ theme: "dark", "roamgate:theme": "light" });
+  const storage = roamgateStorage(raw);
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: target,
+  });
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: raw,
+  });
+  const changes: Array<[string | null, string | null]> = [];
+  const unsubscribe = subscribeLocalStorage((key) => {
+    changes.push([key, storage.getItem("theme")]);
+  });
+  const dispatch = (key: string | null, storageArea: Storage = raw) => {
+    target.dispatchEvent(
+      Object.assign(new Event("storage"), { key, storageArea }),
+    );
+  };
+  try {
+    dispatch("theme");
+    expect(changes.pop()).toEqual(["theme", "light"]);
+    raw.setItem("roamgate:theme", "dark");
+    dispatch("roamgate:theme");
+    expect(changes.pop()).toEqual(["theme", "dark"]);
+    storage.removeItem("theme");
+    dispatch("roamgate:deleted:theme");
+    expect(changes.pop()).toEqual(["theme", null]);
+    dispatch("roamgate:deleted:workspaceInspector%3Aone");
+    expect(changes.pop()).toEqual(["workspaceInspector:one", null]);
+    dispatch("roamgate:deleted:%invalid");
+    dispatch("roamgate:theme", memoryStorage());
+    expect(changes).toEqual([]);
+    storage.setItem("theme", "light");
+    storage.clear();
+    dispatch(null);
+    expect(changes.pop()).toEqual([null, null]);
+    unsubscribe();
+    dispatch("roamgate:theme");
+    expect(changes).toEqual([]);
+  } finally {
+    unsubscribe();
+    if (previousWindow)
+      Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+    if (previousStorage)
+      Object.defineProperty(globalThis, "localStorage", previousStorage);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
 });

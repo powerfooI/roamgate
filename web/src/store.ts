@@ -1,4 +1,8 @@
-import { roamgateLocalStorage, roamgateSessionStorage } from "./browserStorage";
+import {
+  roamgateLocalStorage,
+  roamgateSessionStorage,
+  subscribeLocalStorage,
+} from "./browserStorage";
 import { syncTaskPush, type TaskNotificationPreferences } from "./taskPush";
 import {
   isTaskNotificationTarget,
@@ -1582,6 +1586,37 @@ function startUpdatePolling(): Promise<void> {
   return initialCheck;
 }
 
+function applyAutomaticUpdateChecksEnabled(enabled: boolean) {
+  if (!enabled && updateTimer) {
+    clearInterval(updateTimer);
+    updateTimer = null;
+  }
+  set({
+    automaticUpdateChecksEnabled: enabled,
+    updateInfo: enabled ? state.updateInfo : null,
+  });
+  if (enabled && !state.connectionPaused) void startUpdatePolling();
+}
+
+function handlePreferenceStorageChange(key: string | null) {
+  if (
+    key === TASK_NOTIFICATIONS_KEY ||
+    key === TASK_NOTIFICATION_PREFERENCES_KEY ||
+    key === null
+  ) {
+    set({
+      taskNotificationsEnabled: storedTaskNotificationsEnabled(),
+      taskNotificationPreferences: storedTaskNotificationPreferences(),
+    });
+    void store.restoreTaskNotifications();
+  }
+  if (key === AUTOMATIC_UPDATE_CHECKS_KEY || key === null) {
+    const enabled = storedAutomaticUpdateChecksEnabled();
+    if (enabled !== state.automaticUpdateChecksEnabled)
+      applyAutomaticUpdateChecksEnabled(enabled);
+  }
+}
+
 function stopPolling() {
   if (refreshTimer) {
     clearTimeout(refreshTimer);
@@ -2348,20 +2383,7 @@ export const store = {
     if (initialized) return;
     initialized = true;
     void store.restoreTaskNotifications();
-    window.addEventListener("storage", (event) => {
-      const key = event.key?.replace(/^roamgate:/, "");
-      if (
-        key === TASK_NOTIFICATIONS_KEY ||
-        key === TASK_NOTIFICATION_PREFERENCES_KEY ||
-        event.key === null
-      ) {
-        set({
-          taskNotificationsEnabled: storedTaskNotificationsEnabled(),
-          taskNotificationPreferences: storedTaskNotificationPreferences(),
-        });
-        void store.restoreTaskNotifications();
-      }
-    });
+    subscribeLocalStorage(handlePreferenceStorageChange);
     bridge.onHello((hello) => {
       const defaultConnectionId = hello.default_connection_id;
       set({ defaultConnectionId });
@@ -3505,15 +3527,7 @@ export const store = {
     } catch {
       // The in-memory preference still applies when storage is unavailable.
     }
-    if (!enabled && updateTimer) {
-      clearInterval(updateTimer);
-      updateTimer = null;
-    }
-    set({
-      automaticUpdateChecksEnabled: enabled,
-      updateInfo: enabled ? state.updateInfo : null,
-    });
-    if (enabled && !state.connectionPaused) startUpdatePolling();
+    applyAutomaticUpdateChecksEnabled(enabled);
   },
 
   updateOrCheck() {
@@ -3832,6 +3846,7 @@ export const __storeTesting = {
   handleBridgeStatus,
   handleHerdrEvent,
   startUpdatePolling,
+  handlePreferenceStorageChange,
   updatePollingActive: () => updateTimer !== null,
   refreshBridgeStatus,
   markTerminalReattachPending() {

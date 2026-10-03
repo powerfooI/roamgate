@@ -80,3 +80,26 @@ function browserStorage(kind: "localStorage" | "sessionStorage"): Storage {
 
 export const roamgateLocalStorage = browserStorage("localStorage");
 export const roamgateSessionStorage = browserStorage("sessionStorage");
+
+/** Reload effective values through roamgateLocalStorage, not event.newValue. */
+export function subscribeLocalStorage(
+  listener: (key: string | null) => void,
+): () => void {
+  if (typeof window === "undefined") return () => {};
+  const onStorage = (event: StorageEvent) => {
+    if (event.storageArea !== globalThis.localStorage) return;
+    let key = event.key;
+    if (key?.startsWith(DELETED_PREFIX)) {
+      try {
+        key = decodeURIComponent(key.slice(DELETED_PREFIX.length));
+      } catch {
+        return;
+      }
+    } else if (key?.startsWith(PREFIX)) {
+      key = key.slice(PREFIX.length);
+    }
+    listener(key);
+  };
+  window.addEventListener("storage", onStorage);
+  return () => window.removeEventListener("storage", onStorage);
+}
