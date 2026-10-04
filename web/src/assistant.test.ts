@@ -2,6 +2,7 @@ import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import {
   type AssistantAction,
   type AssistantSnapshot,
+  type AssistantTaskDetail,
   isAssistantSnapshot,
 } from "../../shared/assistant";
 import { bridge, type ConnectionStatus } from "./api";
@@ -9,6 +10,7 @@ import {
   __resetAssistantForTests,
   assistantActionExecuting,
   callAssistant,
+  getAssistantTask,
   readAssistantState,
   parseAssistantContext,
   refreshAssistant,
@@ -412,6 +414,18 @@ test("confirmed actions block further mutations and reconnect never confirms aga
     );
   expect(readAssistantState().draft).toBe("Keep this draft");
 
+  for (const action of [
+    "task.pause",
+    "task.cancel",
+    "task.stop",
+    "task.action.confirm",
+  ]) {
+    await callAssistant(action, { task_id: "task" });
+    expect(server.call).toHaveBeenLastCalledWith(`bridge.assistant.${action}`, {
+      task_id: "task",
+    });
+  }
+
   server.status("disconnected");
   server.status("connected");
   await refreshAssistant();
@@ -430,4 +444,70 @@ test("confirmed actions block further mutations and reconnect never confirms aga
   server.push(withAction(4, "uncertain"));
   expect(assistantActionExecuting(readAssistantState().snapshot)).toBe(false);
   expect(assistantActionExecuting(snapshot())).toBe(false);
+});
+
+test("task detail validates task and run identity without replacing chat state or accepting reconnect replies", async () => {
+  const server = installBridge();
+  startAssistantClient();
+  await refreshAssistant();
+  const chat = readAssistantState().snapshot;
+  const at = "2026-10-04T00:00:00Z";
+  const run = {
+    id: "run",
+    task_id: "task",
+    status: "succeeded" as const,
+    scheduled_at: at,
+    error: null,
+  };
+  const detail: AssistantTaskDetail = {
+    task: {
+      id: "task",
+      title: "Check project",
+      prompt: "Read status",
+      scope,
+      schedule: { type: "interval", minutes: 60 },
+      status: "active",
+      created_at: at,
+      updated_at: at,
+      next_run_at: at,
+      model: { provider: "provider", id: "model" },
+      workspaces: [
+        {
+          ...scope[0],
+          label: "Project",
+          connection_label: "Local",
+          runtime_generation: 1,
+        },
+      ],
+    },
+    runs: [run],
+    run: { ...run, messages: [] },
+  };
+  server.call.mockResolvedValueOnce(detail);
+  expect(await getAssistantTask("task", "run")).toEqual(detail);
+  expect(server.call).toHaveBeenLastCalledWith("bridge.assistant.task.get", {
+    task_id: "task",
+    run_id: "run",
+  });
+  expect(readAssistantState().snapshot).toBe(chat);
+  for (const value of [
+    { ...detail, task: { ...detail.task, id: "other" } },
+    { ...detail, run: undefined },
+    { ...detail, run: { ...detail.run, messages: [null] } },
+  ]) {
+    server.call.mockResolvedValueOnce(value);
+    await expect(getAssistantTask("task", "run")).rejects.toThrow(
+      "Invalid Ranger task",
+    );
+  }
+  expect(readAssistantState().error).toBeNull();
+  const pending = Promise.withResolvers<AssistantTaskDetail>();
+  server.call.mockReturnValueOnce(pending.promise);
+  const old = getAssistantTask("task");
+  server.status("disconnected");
+  await expect(getAssistantTask("task")).rejects.toThrow("Reconnect");
+  server.status("connected");
+  pending.resolve(detail);
+  await expect(old).rejects.toThrow("connection changed");
+  expect(readAssistantState().snapshot).toEqual(chat);
 });

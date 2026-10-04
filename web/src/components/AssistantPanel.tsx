@@ -43,6 +43,7 @@ import { MarkdownPreview } from "./markdown";
 import { ConfirmDialog } from "./ModalDialogs";
 import { ThemedSelect } from "./ThemedSelect";
 import { AssistantConversationMap } from "./AssistantConversationMap";
+import { AssistantTasks, TaskProposalCard } from "./AssistantTasks";
 import "./AssistantPanel.css";
 
 function workspaceKey(workspace: AssistantWorkspaceRef) {
@@ -489,6 +490,7 @@ export function AssistantPanel({
   const [maximized, setMaximized] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [providerSearch, setProviderSearch] = useState("");
+  const [view, setView] = useState<"chat" | "tasks">("chat");
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const followingOutput = useRef(true);
@@ -571,13 +573,14 @@ export function AssistantPanel({
   }, [open, snapshot?.messages, showSettings]);
 
   useEffect(() => {
-    if (open && !showSettings) inputRef.current?.focus({ preventScroll: true });
-  }, [open, showSettings]);
+    if (open && !showSettings && view === "chat" && !historyOpen)
+      inputRef.current?.focus({ preventScroll: true });
+  }, [open, showSettings, view, historyOpen]);
 
   const run = async (action: string, params: Record<string, unknown> = {}) => {
     if (
       pendingAction.current ||
-      (executing && action !== "stop") ||
+      (executing && action !== "stop" && !action.startsWith("task.")) ||
       ((action === "action.confirm" || action === "action.cancel") &&
         snapshot?.running) ||
       ((action === "new_session" || action === "select_session") &&
@@ -774,6 +777,23 @@ export function AssistantPanel({
         </button>
       </header>
 
+      <nav className="assistant-primary-nav" aria-label="Ranger views">
+        {(["chat", "tasks"] as const).map((item) => (
+          <button
+            type="button"
+            key={item}
+            className="ghost"
+            aria-pressed={!showSettings && view === item}
+            onClick={() => {
+              setView(item);
+              setSettingsOpen(false);
+            }}
+          >
+            {item === "chat" ? "Chat" : "Tasks"}
+          </button>
+        ))}
+      </nav>
+
       {displayedError ? (
         <div className="assistant-error" role="alert">
           <span>{displayedError}</span>
@@ -818,7 +838,10 @@ export function AssistantPanel({
             <button
               type="button"
               className="ghost"
-              onClick={() => setSettingsOpen(false)}
+              onClick={() => {
+                setView("chat");
+                setSettingsOpen(false);
+              }}
             >
               <ChevronLeft size={14} /> Chat
             </button>
@@ -1182,7 +1205,7 @@ export function AssistantPanel({
             Save connection
           </button>
         </div>
-      ) : (
+      ) : view === "tasks" ? null : (
         <>
           <div className="assistant-chat-toolbar">
             {historySupported ? (
@@ -1251,6 +1274,17 @@ export function AssistantPanel({
               role="region"
               aria-label="Saved Ranger chats"
             >
+              <div className="assistant-section-heading">
+                <strong>History</strong>
+                <button
+                  type="button"
+                  className="ghost"
+                  aria-label="Close Ranger chat history"
+                  onClick={() => setHistoryOpen(false)}
+                >
+                  <ChevronLeft size={13} /> Chat
+                </button>
+              </div>
               {snapshot.messages.some((message) =>
                 message.actions?.some((action) => action.status === "pending"),
               ) ? (
@@ -1378,6 +1412,16 @@ export function AssistantPanel({
                             action={action}
                             busy={operationBusy || !connected}
                             running={snapshot.running}
+                            run={run}
+                          />
+                        ))
+                      : null}
+                    {message.role === "assistant"
+                      ? message.task_proposals?.map((proposal) => (
+                          <TaskProposalCard
+                            key={proposal.id}
+                            proposal={proposal}
+                            busy={busy || !connected}
                             run={run}
                           />
                         ))
@@ -1551,6 +1595,16 @@ export function AssistantPanel({
           </form>
         </>
       )}
+      {snapshot ? (
+        <AssistantTasks
+          active={!showSettings && view === "tasks"}
+          snapshot={snapshot}
+          connected={connected}
+          workspaces={permittedWorkspaces}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSource={onOpenSource}
+        />
+      ) : null}
       <ConfirmDialog
         open={confirmNew}
         title="Start a new Ranger chat?"

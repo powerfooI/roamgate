@@ -66,6 +66,58 @@ export type AssistantMessage = {
   tools: AssistantToolActivity[];
   sources: AssistantSource[];
   actions?: AssistantAction[];
+  task_proposals?: AssistantTaskProposal[];
+};
+
+export type AssistantTaskSchedule =
+  | { type: "once"; at: string }
+  | { type: "interval"; minutes: number }
+  | { type: "daily"; time: string; timezone: string };
+
+export type AssistantTaskInput = {
+  title: string;
+  prompt: string;
+  scope: AssistantWorkspaceRef[];
+  schedule: AssistantTaskSchedule;
+};
+
+export type AssistantTaskRun = {
+  id: string;
+  task_id: string;
+  status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "stopped";
+  scheduled_at: string;
+  started_at?: string;
+  finished_at?: string;
+  error: string | null;
+};
+
+export type AssistantTask = AssistantTaskInput & {
+  id: string;
+  status: "active" | "paused" | "cancelled";
+  created_at: string;
+  updated_at: string;
+  next_run_at: string | null;
+  workspaces: AssistantWorkspace[];
+  model: { provider: string; id: string };
+  current_run?: AssistantTaskRun;
+  last_run?: AssistantTaskRun;
+};
+
+export type AssistantTaskRunDetail = AssistantTaskRun & {
+  messages: AssistantMessage[];
+};
+
+export type AssistantTaskDetail = {
+  task: AssistantTask;
+  runs: AssistantTaskRun[];
+  run?: AssistantTaskRunDetail;
+};
+
+export type AssistantTaskProposal = AssistantTaskInput & {
+  id: string;
+  status: "pending" | "confirmed" | "cancelled";
+  created_at: string;
+  task_id?: string;
 };
 
 export type AssistantAuthState = {
@@ -109,6 +161,7 @@ export type AssistantSnapshot = {
   running: boolean;
   error: string | null;
   auth: AssistantAuthState | null;
+  tasks?: AssistantTask[];
 };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -131,6 +184,144 @@ function workspaceRef(value: unknown): value is AssistantWorkspaceRef {
 
 function generation(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function timestamp(value: unknown): value is string {
+  return text(value) && Number.isFinite(Date.parse(value));
+}
+
+export function isAssistantTaskInput(
+  value: unknown,
+): value is AssistantTaskInput {
+  if (
+    !record(value) ||
+    !text(value.title) ||
+    !value.title.trim() ||
+    value.title.length > 100 ||
+    !text(value.prompt) ||
+    !value.prompt.trim() ||
+    value.prompt.length > 32_000 ||
+    !Array.isArray(value.scope) ||
+    !value.scope.length ||
+    value.scope.length > ASSISTANT_MAX_WORKSPACES ||
+    !value.scope.every(workspaceRef) ||
+    new Set(
+      value.scope.map((ref) =>
+        JSON.stringify([ref.connection_id, ref.workspace_id]),
+      ),
+    ).size !== value.scope.length ||
+    !record(value.schedule)
+  )
+    return false;
+  const schedule = value.schedule;
+  if (schedule.type === "once") return timestamp(schedule.at);
+  if (schedule.type === "interval")
+    return (
+      typeof schedule.minutes === "number" &&
+      Number.isSafeInteger(schedule.minutes) &&
+      schedule.minutes >= 1 &&
+      schedule.minutes <= 525600
+    );
+  if (
+    schedule.type !== "daily" ||
+    !text(schedule.time) ||
+    !/^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.time) ||
+    !text(schedule.timezone) ||
+    schedule.timezone.length > 100
+  )
+    return false;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: schedule.timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function taskRun(value: unknown): value is AssistantTaskRun {
+  return (
+    record(value) &&
+    text(value.id) &&
+    !!value.id &&
+    text(value.task_id) &&
+    !!value.task_id &&
+    ["queued", "running", "waiting", "succeeded", "failed", "stopped"].includes(
+      String(value.status),
+    ) &&
+    timestamp(value.scheduled_at) &&
+    (value.started_at === undefined || timestamp(value.started_at)) &&
+    (value.finished_at === undefined || timestamp(value.finished_at)) &&
+    (value.error === null || text(value.error))
+  );
+}
+
+function task(value: unknown): value is AssistantTask {
+  if (!isAssistantTaskInput(value)) return false;
+  const data: Record<string, unknown> = value;
+  return (
+    text(data.id) &&
+    !!data.id &&
+    ["active", "paused", "cancelled"].includes(String(data.status)) &&
+    timestamp(data.created_at) &&
+    timestamp(data.updated_at) &&
+    (data.next_run_at === null || timestamp(data.next_run_at)) &&
+    record(data.model) &&
+    text(data.model.provider) &&
+    text(data.model.id) &&
+    Array.isArray(data.workspaces) &&
+    data.workspaces.length === value.scope.length &&
+    data.workspaces.every(
+      (workspace) =>
+        record(workspace) &&
+        text(workspace.label) &&
+        text(workspace.connection_label) &&
+        generation(workspace.runtime_generation) &&
+        workspaceRef(workspace),
+    ) &&
+    (data.current_run === undefined ||
+      (taskRun(data.current_run) && data.current_run.task_id === data.id)) &&
+    (data.last_run === undefined ||
+      (taskRun(data.last_run) && data.last_run.task_id === data.id))
+  );
+}
+
+function taskProposal(value: unknown): value is AssistantTaskProposal {
+  if (!isAssistantTaskInput(value)) return false;
+  const data: Record<string, unknown> = value;
+  return (
+    text(data.id) &&
+    !!data.id &&
+    ["pending", "confirmed", "cancelled"].includes(String(data.status)) &&
+    timestamp(data.created_at) &&
+    (data.task_id === undefined || text(data.task_id))
+  );
+}
+
+export function isAssistantTaskDetail(
+  value: unknown,
+): value is AssistantTaskDetail {
+  if (
+    !record(value) ||
+    !task(value.task) ||
+    !Array.isArray(value.runs) ||
+    value.runs.length > 20
+  )
+    return false;
+  const taskId = value.task.id;
+  const runs = value.runs;
+  if (!runs.every((run) => taskRun(run) && run.task_id === taskId))
+    return false;
+  const run = value.run;
+  return (
+    run === undefined ||
+    (record(run) &&
+      Array.isArray(run.messages) &&
+      run.messages.length <= 80 &&
+      run.messages.every(isAssistantMessage) &&
+      taskRun(run) &&
+      run.task_id === taskId &&
+      runs.some((entry) => entry.id === run.id))
+  );
 }
 
 function action(value: unknown): value is AssistantAction {
@@ -169,6 +360,49 @@ function action(value: unknown): value is AssistantAction {
     Object.values(value.params).every(
       (entry) => text(entry) && entry.length <= 20_000,
     )
+  );
+}
+
+export function isAssistantMessage(value: unknown): value is AssistantMessage {
+  return (
+    record(value) &&
+    text(value.id) &&
+    (value.role === "user" || value.role === "assistant") &&
+    text(value.text) &&
+    text(value.sent_at) &&
+    (value.actions === undefined ||
+      (Array.isArray(value.actions) &&
+        value.actions.length <= 8 &&
+        value.actions.every(action))) &&
+    Array.isArray(value.tools) &&
+    value.tools.every(
+      (tool) =>
+        record(tool) &&
+        text(tool.id) &&
+        text(tool.name) &&
+        ["running", "completed", "failed"].includes(String(tool.status)),
+    ) &&
+    Array.isArray(value.sources) &&
+    value.sources.every(
+      (source) =>
+        record(source) &&
+        text(source.connection_id) &&
+        source.connection_id.length > 0 &&
+        text(source.workspace_id) &&
+        source.workspace_id.length > 0 &&
+        text(source.id) &&
+        text(source.title) &&
+        ["status", "history", "diff", "terminal"].includes(
+          String(source.kind),
+        ) &&
+        generation(source.runtime_generation) &&
+        (source.pane_id === undefined || text(source.pane_id)) &&
+        text(source.read_at),
+    ) &&
+    (value.task_proposals === undefined ||
+      (Array.isArray(value.task_proposals) &&
+        value.task_proposals.length <= 8 &&
+        value.task_proposals.every(taskProposal)))
   );
 }
 
@@ -240,44 +474,14 @@ export function isAssistantSnapshot(
         text(model.id) &&
         text(model.label),
     ) ||
+    (value.tasks !== undefined &&
+      (!Array.isArray(value.tasks) ||
+        value.tasks.length > 50 ||
+        !value.tasks.every(task) ||
+        new Set(value.tasks.map((task) => task.id)).size !==
+          value.tasks.length)) ||
     !Array.isArray(value.messages) ||
-    !value.messages.every(
-      (message) =>
-        record(message) &&
-        text(message.id) &&
-        (message.role === "user" || message.role === "assistant") &&
-        text(message.text) &&
-        text(message.sent_at) &&
-        (message.actions === undefined ||
-          (Array.isArray(message.actions) &&
-            message.actions.length <= 8 &&
-            message.actions.every(action))) &&
-        Array.isArray(message.tools) &&
-        message.tools.every(
-          (tool) =>
-            record(tool) &&
-            text(tool.id) &&
-            text(tool.name) &&
-            ["running", "completed", "failed"].includes(String(tool.status)),
-        ) &&
-        Array.isArray(message.sources) &&
-        message.sources.every(
-          (source) =>
-            record(source) &&
-            text(source.connection_id) &&
-            source.connection_id.length > 0 &&
-            text(source.workspace_id) &&
-            source.workspace_id.length > 0 &&
-            text(source.id) &&
-            text(source.title) &&
-            ["status", "history", "diff", "terminal"].includes(
-              String(source.kind),
-            ) &&
-            generation(source.runtime_generation) &&
-            (source.pane_id === undefined || text(source.pane_id)) &&
-            text(source.read_at),
-        ),
-    )
+    !value.messages.every(isAssistantMessage)
   )
     return false;
   if (value.auth === null) return true;

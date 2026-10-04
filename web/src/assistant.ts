@@ -1,9 +1,11 @@
 import { useEffect, useSyncExternalStore } from "react";
 import {
   isAssistantSnapshot,
+  isAssistantTaskDetail,
   type AssistantSnapshot,
   type AssistantWorkspace,
   type AssistantWorkspaceRef,
+  type AssistantTaskDetail,
 } from "../../shared/assistant";
 import { bridge, type ConnectionStatus } from "./api";
 
@@ -127,7 +129,8 @@ export async function callAssistant(
   if (
     assistantActionExecuting(state.snapshot) &&
     action !== "get" &&
-    action !== "stop"
+    action !== "stop" &&
+    !action.startsWith("task.")
   ) {
     throw new Error("Wait for the current action to finish.");
   }
@@ -158,6 +161,29 @@ export async function callAssistant(
       });
     throw error;
   }
+}
+
+// Run transcripts are fetched separately from the small global snapshot.
+export async function getAssistantTask(
+  taskId: string,
+  runId?: string,
+): Promise<AssistantTaskDetail> {
+  if (state.connectionStatus !== "connected" || !state.supported)
+    throw new Error("Reconnect to the bridge before viewing Ranger tasks.");
+  const epoch = socketEpoch;
+  const value: unknown = await bridge.call("bridge.assistant.task.get", {
+    task_id: taskId,
+    ...(runId ? { run_id: runId } : {}),
+  });
+  if (epoch !== socketEpoch)
+    throw new Error("The bridge connection changed. Reload the task.");
+  if (
+    !isAssistantTaskDetail(value) ||
+    value.task.id !== taskId ||
+    (runId && value.run?.id !== runId)
+  )
+    throw new Error("Invalid Ranger task received from the bridge.");
+  return value;
 }
 
 export async function refreshAssistant() {

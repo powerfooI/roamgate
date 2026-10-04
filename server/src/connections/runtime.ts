@@ -16,6 +16,10 @@ import { createAgentSessionHandlers } from "../agent/agent-sessions";
 import { createAgentSessionFileAccess } from "../agent/session-file-access";
 import { HerdrClient } from "../bridge/herdr-client";
 import {
+  EndpointClient,
+  type EndpointSnapshot,
+} from "../bridge/endpoint-client";
+import {
   assertSupportedHerdrProtocol,
   isTerminalHelloProtocol,
 } from "../bridge/protocol-compat";
@@ -550,6 +554,38 @@ export function createLegacyConnectionRuntime(args: {
   let disposed = false;
   let stopTask: Promise<void> | null = null;
 
+  async function recoveryIdentity(
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    signal?.throwIfAborted();
+    if (disposed) throw new Error("connection runtime is disposed");
+    if (roamgateEnv("DISABLE_ENDPOINT") === "1") return null;
+    const ping = await herdr.call("ping", {}, 5_000);
+    signal?.throwIfAborted();
+    if (disposed) throw new Error("connection runtime is disposed");
+    if (!isTerminalHelloProtocol(ping.protocol)) return null;
+    // A passive handshake reads the existing server boot identity without a
+    // terminal attachment or another long-lived background connection.
+    const client = new EndpointClient(clientSocketPath, false, "notifications");
+    let bootId: string | null = null;
+    client.on("snapshot", (snapshot: EndpointSnapshot) => {
+      bootId = snapshot.bootId || null;
+    });
+    client.on("error", () => {});
+    const abort = () => client.close();
+    signal?.addEventListener("abort", abort, { once: true });
+    try {
+      signal?.throwIfAborted();
+      await client.connect(80, 24);
+      signal?.throwIfAborted();
+      if (disposed) throw new Error("connection runtime is disposed");
+      return bootId;
+    } finally {
+      signal?.removeEventListener("abort", abort);
+      client.close();
+    }
+  }
+
   async function startTransport() {
     if (disposed) throw new Error("connection runtime is disposed");
     if (transportStarted) return;
@@ -627,6 +663,7 @@ export function createLegacyConnectionRuntime(args: {
     worktreeRemovalRuntime,
     terminalBridge,
     agentSessions,
+    recoveryIdentity,
     taskNotificationSource,
     startTransport,
     startBackground,

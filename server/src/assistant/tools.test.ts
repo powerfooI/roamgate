@@ -3,11 +3,50 @@ import {
   type ActionToolProposer,
   actionTools,
   callActionTool,
+  callTaskTool,
   callWorkspaceTool,
   type WorkspaceToolReader,
   type WorkspaceToolResult,
   workspaceTools,
 } from "./tools";
+
+test("task tools validate the published schedule and reject effects outside the schema", async () => {
+  let calls = 0;
+  const handle = async () => {
+    calls++;
+    return { text: "Pending preview" };
+  };
+  const proposal = {
+    title: "Status",
+    prompt: "Summarize status",
+    scope: [{ connection_id: "local", workspace_id: "workspace" }],
+    schedule: { type: "daily", time: "09:00", timezone: "UTC" },
+  };
+  expect(await callTaskTool("propose_ranger_task", proposal, handle)).toEqual({
+    text: "Pending preview",
+  });
+  for (const params of [
+    { ...proposal, execute: true },
+    { ...proposal, scope: [] },
+    {
+      ...proposal,
+      schedule: { type: "daily", time: "25:00", timezone: "UTC" },
+    },
+    { ...proposal, schedule: { type: "interval", minutes: 0 } },
+  ])
+    await expect(
+      callTaskTool("propose_ranger_task", params, handle),
+    ).rejects.toThrow("Invalid task tool parameters.");
+  await expect(callTaskTool("run_ranger_task", {}, handle)).rejects.toThrow(
+    "Unknown task tool.",
+  );
+  const controller = new AbortController();
+  controller.abort();
+  await expect(
+    callTaskTool("list_ranger_tasks", {}, handle, controller.signal),
+  ).rejects.toThrow("Task unavailable");
+  expect(calls).toBe(1);
+});
 
 test("the tool directory is JSON Schema and named calls preserve structured results", async () => {
   expect(JSON.parse(JSON.stringify(workspaceTools))).toMatchObject([

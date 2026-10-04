@@ -1,0 +1,152 @@
+.assistant-tasks {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+.assistant-tasks[hidden] {
+  display: none;
+}
+
+.assistant-tasks > *,
+.assistant-task-form > * {
+  flex-shrink: 0;
+}
+.assistant-tasks p {
+  margin: 0;
+}
+.assistant-task-list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.assistant-task-row {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 9px;
+  text-align: left;
+}
+.assistant-task-row > div,
+.assistant-task-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.assistant-task-row strong,
+.assistant-task-heading h3 {
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.assistant-task-row > span {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.assistant-task-row small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.assistant-task-state {
+  flex: 0 0 auto;
+  border-radius: 5px;
+  padding: 2px 6px;
+  background: var(--viewer-code-bg);
+  color: var(--muted);
+  font-size: 10px;
+}
+.assistant-task-state.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.assistant-task-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.assistant-task-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.assistant-tasks .assistant-section-heading > button,
+.assistant-task-buttons button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 11px;
+}
+.assistant-task-form {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.assistant-task-form textarea {
+  min-height: 90px;
+  width: 100%;
+  resize: vertical;
+  padding: 8px;
+  font-size: 12px;
+}
+.assistant-task-scope legend {
+  margin-bottom: 7px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.assistant-task-prompt {
+  min-width: 0;
+  font-size: 11px;
+}
+.assistant-task-prompt summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.assistant-task-prompt p {
+  margin-top: 6px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--viewer-code-bg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+}
+.assistant-task-error {
+  padding: 8px;
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  border-radius: 6px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.assistant-task-run {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.assistant-task-run-status {
+  font-size: 10px;
+  color: var(--muted);
+}
+.assistant-task-proposal {
+  font-size: 11px;
+}
+.assistant-panel.is-maximized .assistant-tasks {
+  width: 100%;
+  max-width: 800px;
+  align-self: center;
+}

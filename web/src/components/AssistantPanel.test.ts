@@ -899,6 +899,87 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       ).not.toBeNull();
       panelMobile = false;
       await render();
+      clientState.snapshot = {
+        ...clientState.snapshot,
+        tasks: [],
+        session_id: "00000000-0000-4000-8000-000000000001",
+        sessions: [
+          {
+            id: "00000000-0000-4000-8000-000000000001",
+            title: "Current chat",
+            created_at: proposal.created_at,
+            updated_at: proposal.created_at,
+            message_count: 1,
+          },
+        ],
+      };
+      await render();
+      expect(
+        container.querySelectorAll(".assistant-chat-toolbar button"),
+      ).toHaveLength(2);
+      await React.act(async () => button("History").click());
+      expect(
+        container.querySelector('[aria-label="Saved Ranger chats"]'),
+      ).not.toBeNull();
+      await React.act(async () => button("Close Ranger chat history").click());
+      await React.act(async () => button("Tasks").click());
+      expect(
+        container.querySelector('[aria-label="Ranger tasks"]'),
+      ).not.toBeNull();
+      expect(
+        container.querySelector('[aria-label="Message Ranger"]'),
+      ).toBeNull();
+      await React.act(async () => button("New task").click());
+      const taskForm = container.querySelector<HTMLFormElement>(
+        '[aria-label="Create task"]',
+      )!;
+      const taskName = taskForm.querySelector<HTMLInputElement>(
+        '[aria-label="Task name"]',
+      )!;
+      const taskPrompt = taskForm.querySelector<HTMLTextAreaElement>(
+        '[aria-label="Task prompt"]',
+      )!;
+      await React.act(async () => {
+        Object.getOwnPropertyDescriptor(
+          browser.HTMLInputElement.prototype,
+          "value",
+        )!.set!.call(taskName, "Keep my task draft");
+        taskName.dispatchEvent(new Event("input", { bubbles: true }));
+        Object.getOwnPropertyDescriptor(
+          browser.HTMLTextAreaElement.prototype,
+          "value",
+        )!.set!.call(taskPrompt, "Read status tomorrow");
+        taskPrompt.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await React.act(async () => button("Chat").click());
+      expect(
+        container.querySelector('[aria-label="Message Ranger"]')?.textContent,
+      ).toBe("Next question");
+      expect(taskForm.closest<HTMLElement>(".assistant-tasks")!.hidden).toBe(
+        true,
+      );
+      expect(document.activeElement?.getAttribute("aria-label")).toBe(
+        "Message Ranger",
+      );
+      await React.act(async () => button("Tasks").click());
+      expect(container.querySelector('[aria-label="Create task"]')).toBe(
+        taskForm,
+      );
+      expect(taskName.value).toBe("Keep my task draft");
+      expect(taskPrompt.value).toBe("Read status tomorrow");
+      expect(document.activeElement).toBe(taskName);
+      await React.act(async () => button("Ranger settings").click());
+      expect(taskForm.closest<HTMLElement>(".assistant-tasks")!.hidden).toBe(
+        true,
+      );
+      await React.act(async () => button("Tasks").click());
+      expect(container.querySelector('[aria-label="Create task"]')).toBe(
+        taskForm,
+      );
+      expect(taskName.value).toBe("Keep my task draft");
+      expect(taskPrompt.value).toBe("Read status tomorrow");
+      await React.act(async () => button("Cancel", taskForm).click());
+      await React.act(async () => button("Chat").click());
       const input = container.querySelector<HTMLTextAreaElement>("textarea")!;
       expect(document.activeElement).toBe(input);
       terminalFrame();

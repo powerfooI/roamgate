@@ -380,12 +380,41 @@ the bridge host. Separate Ranger credentials live in
 `~/.config/roamgate/assistant/auth.json` or
 `%APPDATA%\roamgate\assistant\auth.json`; configuration, the active conversation,
 model context, and history summaries live beside them in `state.json`. Inactive
-conversations live in private `sessions/<UUID>.json` files. Back up the whole
-assistant directory to retain saved chats and credentials. These files may
-contain secrets or workspace content. Keep them private and use one bridge
+conversations live in private `sessions/<UUID>.json` files. Durable execution
+state and tool results live in `durable/<UUID>/execution.sqlite`. Stop the bridge
+before backing up the whole assistant directory to retain saved chats, database
+files and credentials. These files may contain secrets or workspace content.
+Keep them private and use one bridge
 process per data directory.
 `ROAMGATE_ASSISTANT_DIR` overrides this directory; the legacy
 `HERDR_GUI_ASSISTANT_DIR` alias is also accepted.
+
+An unfinished question resumes when the bridge restarts and its original
+connections become ready, even with the browser closed. Recovery requires the
+same Herdr server boot and workspace identity and a supported endpoint handshake.
+It waits for manually connected profiles until the user reconnects them; it does
+not connect additional profiles itself. If Herdr also restarted or the original
+target, permissions, or provider is unavailable, send a new question. **Stop**
+cancels work; stopping the bridge pauses it. Confirmed management operations are
+never automatically retried. Durable stores have no automatic retention quota.
+
+The Ranger **Tasks** view manages one-time, daily, and interval schedules.
+Task creation requires an endpoint with a stable Herdr boot identity, the chosen
+model, and an explicitly allowed workspace scope. Tasks keep their original
+model and target identities; after a Herdr restart or target change, edit the
+task to authorize the current targets. The bridge must be running for schedules
+to fire. After downtime, missed occurrences are combined into one run.
+Daily times use the task's IANA timezone, independently of the bridge's local
+timezone; daylight-saving gaps are skipped and overlaps fire only once.
+Plans, proposals, deduplication records and run receipts live in `tasks.sqlite`,
+with private per-run state under `tasks/<task UUID>/runs/<run UUID>/`. The task
+database and Pi Durable databases use WAL mode with `synchronous = FULL`.
+An invalid database disables task scheduling instead of discarding saved plans.
+Task runs share the selected bridge credential store; credentials are not copied
+into run directories. Include
+these files when backing up the assistant directory. The latest 20 runs per
+task are retained; cancelling keeps history, while deleting a cancelled task
+removes its saved runs. There is no aggregate byte quota for durable stores.
 
 **Shared Pi credentials** explicitly opts into Pi's existing credential store
 for that bridge account. Signing in or entering an API key in this mode updates

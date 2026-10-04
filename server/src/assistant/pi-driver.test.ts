@@ -1,9 +1,38 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { type AssistantDriver, createPiDriver } from "./pi-driver";
 import { actionTools, type WorkspaceToolResult, workspaceTools } from "./tools";
+
+function durableEntries(directory: string, entries: unknown[]) {
+  const pointer = entries[0] as { id: string };
+  const sqlite = join(directory, "durable", pointer.id, "execution.sqlite");
+  const database = new DatabaseSync(sqlite, { readOnly: true });
+  try {
+    return database
+      .prepare("SELECT record FROM entries ORDER BY id")
+      .all()
+      .map(
+        (row) =>
+          JSON.parse(
+            String(row.record),
+          ) as import("@earendil-works/pi-durable").EntryRecord,
+      );
+  } finally {
+    database.close();
+  }
+}
 
 function events(values: Record<string, unknown>[]) {
   return values
@@ -74,6 +103,638 @@ function toolUse(
     { type: "content_block_stop", index },
   ];
 }
+
+async function durableFixture(reply: (index: number) => Response) {
+  const directory = mkdtempSync(join(tmpdir(), "roamgate-durable-"));
+  writeFileSync(
+    join(directory, "auth.json"),
+    JSON.stringify({
+      anthropic: { type: "api_key", key: "synthetic-local-key" },
+    }),
+  );
+  const requests: { messages: unknown[]; tools: { name: string }[] }[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      requests.push((await request.json()) as (typeof requests)[number]);
+      return reply(requests.length);
+    },
+  });
+  const pi = await import("@earendil-works/pi-coding-agent");
+  const drivers: AssistantDriver[] = [];
+  const createDriver = (dataDirectory = directory) => {
+    const driver = createPiDriver(
+      dataDirectory,
+      async () =>
+        ({
+          ...pi,
+          ModelRuntime: {
+            create: async (
+              options: import("@earendil-works/pi-coding-agent").CreateModelRuntimeOptions,
+            ) => {
+              const runtime = await pi.ModelRuntime.create(options);
+              const model = runtime
+                .getModels("anthropic")
+                .find((model) => model.api === "anthropic-messages")!;
+              runtime.getModel = () => ({ ...model, baseUrl: server.url.href });
+              return runtime;
+            },
+          },
+        }) as unknown as typeof pi,
+      directory,
+    );
+    drivers.push(driver);
+    return driver;
+  };
+  const input = (
+    changes: Partial<Parameters<AssistantDriver["run"]>[0]> = {},
+  ): Parameters<AssistantDriver["run"]>[0] => ({
+    config: {
+      provider: "anthropic",
+      model: "test",
+      credential_source: "assistant",
+      allowed_workspaces: [],
+    },
+    entries: [],
+    text: "Inspect the authorized workspace.",
+    requestId: "request-1",
+    signal: new AbortController().signal,
+    read: async () => ({ text: "Running" }),
+    delta: () => {},
+    message: () => {},
+    tool: () => {},
+    error: () => {},
+    ...changes,
+  });
+  return {
+    directory,
+    requests,
+    createDriver,
+    input,
+    pi,
+    async cleanup() {
+      for (const driver of drivers) await driver.dispose();
+      server.stop(true);
+      rmSync(directory, { recursive: true, force: true });
+    },
+  };
+}
+
+function modelReply(index: number, values: Record<string, unknown>[]) {
+  return new Response(events([start(index), ...values]), {
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function hangingReply(index: number) {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            events([
+              start(index),
+              {
+                type: "content_block_start",
+                index: 0,
+                content_block: { type: "text", text: "" },
+              },
+              {
+                type: "content_block_delta",
+                index: 0,
+                delta: { type: "text_delta", text: "Partial before pause" },
+              },
+            ]),
+          ),
+        );
+      },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+test("task tools use shared credentials with isolated durable storage and never replay a recorded proposal", async () => {
+  const proposed = {
+    title: "Daily status",
+    prompt: "Summarize the workspace status.",
+    scope: [{ connection_id: "local", workspace_id: "workspace" }],
+    schedule: { type: "daily", time: "09:00", timezone: "Asia/Shanghai" },
+  };
+  const f = await durableFixture((index) =>
+    modelReply(
+      index,
+      index === 1
+        ? [
+            ...toolUse("list_ranger_tasks", "list-tasks", {}, 0),
+            ...finish("tool_use"),
+          ]
+        : index === 2
+          ? [
+              ...toolUse("propose_ranger_task", "propose-task", proposed, 0),
+              ...finish("tool_use"),
+            ]
+          : [
+              ...text("Task preview is awaiting confirmation."),
+              ...finish("end_turn"),
+            ],
+    ),
+  );
+  let creates = 0;
+  let lists = 0;
+  const dataDirectory = join(f.directory, "task-run");
+  try {
+    const task: NonNullable<
+      Parameters<AssistantDriver["run"]>[0]["task"]
+    > = async (kind, params) => {
+      if (kind === "list") {
+        lists++;
+        return { text: '{"now":"2026-10-04T00:00:00Z","tasks":[]}' };
+      }
+      expect(params).toEqual(proposed);
+      creates++;
+      return { text: '{"id":"pending-task","status":"pending"}' };
+    };
+    const first = f.createDriver(dataDirectory);
+    const entries = await first.run(f.input({ task }));
+    await first.dispose();
+    const second = f.createDriver(dataDirectory);
+    await second.run(f.input({ entries, task, recover: true }));
+    expect(creates).toBe(1);
+    expect(lists).toBe(1);
+    expect(f.requests).toHaveLength(3);
+    expect(f.requests[0]!.tools.map((tool) => tool.name)).toEqual([
+      ...workspaceTools.map((tool) => tool.name),
+      "list_ranger_tasks",
+      "propose_ranger_task",
+    ]);
+    expect(existsSync(join(dataDirectory, "auth.json"))).toBe(false);
+    expect(
+      durableEntries(dataDirectory, entries).some((entry) =>
+        entry.model?.some((message) => message.role === "toolResult"),
+      ),
+    ).toBe(true);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("durable completion checkpoints before admission, deduplicates a restarted request and restores its answer and sources", async () => {
+  let checkpoints = 0;
+  const f = await durableFixture((index) => {
+    expect(checkpoints).toBeGreaterThan(0);
+    return modelReply(
+      index,
+      index === 1
+        ? [
+            ...text("Inspecting."),
+            ...toolUse("workspace_status", "read-status", {}, 1),
+            ...finish("tool_use"),
+          ]
+        : [...text("Verified workspace status."), ...finish("end_turn")],
+    );
+  });
+  const source = {
+    id: "source-1",
+    kind: "status" as const,
+    title: "Status",
+    connection_id: "local",
+    workspace_id: "workspace",
+    runtime_generation: 1,
+    read_at: "2026-10-04T00:00:00.000Z",
+  };
+  let reads = 0;
+  let pointer: unknown[] = [];
+  try {
+    const first = f.createDriver();
+    const saved = await first.run(
+      f.input({
+        checkpoint: (entries) => {
+          checkpoints++;
+          pointer = entries;
+        },
+        read: async () => {
+          reads++;
+          return { text: "Running", sources: [source] };
+        },
+      }),
+    );
+    expect(saved).toEqual(pointer);
+    expect(checkpoints).toBe(1);
+    await first.dispose();
+    const restored: string[] = [];
+    const sources: unknown[] = [];
+    const statuses: string[] = [];
+    const second = f.createDriver();
+    const replayed = await second.run(
+      f.input({
+        entries: saved,
+        recover: true,
+        text: "This must not replace the original submission.",
+        replace: (text) => restored.push(text),
+        sources: (value) => sources.push(...value),
+        tool: (_id, _name, status) => statuses.push(status),
+        read: async () => {
+          throw new Error("A completed read must not run again");
+        },
+      }),
+    );
+    expect(replayed).toEqual(saved);
+    expect(f.requests).toHaveLength(2);
+    expect(reads).toBe(1);
+    expect(restored.at(-1)).toBe("Inspecting.\n\nVerified workspace status.");
+    expect(sources).toEqual([source]);
+    expect(statuses).toEqual(["completed"]);
+    const entries = durableEntries(f.directory, saved);
+    expect(entries.filter((entry) => entry.kind === "pi.user")).toHaveLength(1);
+    expect(JSON.stringify(entries)).not.toContain("synthetic-local-key");
+    const path = join(f.directory, "durable", (saved[0] as { id: string }).id);
+    if (process.platform !== "win32") {
+      expect(lstatSync(path).mode & 0o777).toBe(0o700);
+      for (const file of readdirSync(path))
+        expect(lstatSync(join(path, file)).mode & 0o777).toBe(0o600);
+    }
+  } finally {
+    await f.cleanup();
+  }
+}, 3000);
+
+test("compaction preserves the complete submission answer, sources and tools on recovery without including later turns", async () => {
+  const f = await durableFixture((index) =>
+    modelReply(
+      index,
+      index === 1
+        ? [
+            ...text("Earlier verified finding"),
+            ...toolUse("workspace_status", "earlier-read", {}, 1),
+            ...finish("tool_use"),
+          ]
+        : [...text("Later finding"), ...finish("end_turn")],
+    ),
+  );
+  const source = {
+    id: "earlier-source",
+    kind: "status" as const,
+    title: "Earlier status",
+    connection_id: "local",
+    workspace_id: "workspace",
+    runtime_generation: 1,
+    read_at: "2026-10-04T00:00:00.000Z",
+  };
+  try {
+    const first = f.createDriver();
+    const saved = await first.run(
+      f.input({ read: async () => ({ text: "Verified", sources: [source] }) }),
+    );
+    await first.dispose();
+    const durable = await import("@earendil-works/pi-durable");
+    const { BACKGROUND_CONTEXT } = await import(
+      "@earendil-works/chord/context"
+    );
+    const { openPrivateDurableStorage } = await import("./durable-storage");
+    const owned = await openPrivateDurableStorage(
+      f.directory,
+      (saved[0] as { id: string }).id,
+      BACKGROUND_CONTEXT,
+      true,
+    );
+    const harness = await durable.Harness.open(
+      owned.storage,
+      {
+        registry: durable.createRegistry(),
+        models: await f.pi.ModelRuntime.create({
+          authPath: join(f.directory, "auth.json"),
+          modelsPath: null,
+          allowModelNetwork: false,
+          refreshOnCreate: false,
+        }),
+      },
+      BACKGROUND_CONTEXT,
+    );
+    try {
+      const root = await harness.root(BACKGROUND_CONTEXT);
+      const answer = durableEntries(f.directory, saved).findLast(
+        (entry) => entry.kind === durable.AssistantEntry.kind,
+      )!;
+      await root.commit(
+        (tx) =>
+          tx.appendEntry(durable.CompactionEntry, root.id, {
+            head: answer.id,
+            model: [
+              {
+                role: "user",
+                content: "Earlier context summary",
+                timestamp: 0,
+              },
+            ],
+            data: { reason: "threshold" },
+          }),
+        BACKGROUND_CONTEXT,
+      );
+      const active = await root.context(BACKGROUND_CONTEXT);
+      expect(
+        active.entries.some(
+          (entry) => entry.kind === durable.ToolResultEntry.kind,
+        ),
+      ).toBe(false);
+      expect(JSON.stringify(active.messages)).not.toContain(
+        "Earlier verified finding",
+      );
+      // A later turn can advance the durable tail before an earlier completed
+      // request is recovered. Its answer must remain bound to its own receipt.
+      await root.commit(
+        (tx) =>
+          tx.appendEntry(root.id, {
+            kind: durable.UserEntry.kind,
+            model: [
+              {
+                role: "user",
+                content: "Unrelated later question",
+                timestamp: 1,
+              },
+            ],
+          }),
+        BACKGROUND_CONTEXT,
+      );
+      await root.commit(
+        (tx) =>
+          tx.appendEntry(root.id, {
+            kind: durable.AssistantEntry.kind,
+            model: answer.model?.map((message) =>
+              message.role === "assistant"
+                ? {
+                    ...message,
+                    content: [{ type: "text", text: "Unrelated later answer" }],
+                  }
+                : message,
+            ),
+          }),
+        BACKGROUND_CONTEXT,
+      );
+    } finally {
+      await harness.close(BACKGROUND_CONTEXT);
+      await owned.storage.close(BACKGROUND_CONTEXT);
+      await owned.release();
+    }
+    const answers: string[] = [];
+    const sources: unknown[] = [];
+    const statuses: string[] = [];
+    await f.createDriver().run(
+      f.input({
+        entries: saved,
+        recover: true,
+        replace: (value) => answers.push(value),
+        sources: (value) => sources.push(...value),
+        tool: (_id, _name, status) => statuses.push(status),
+        read: async () => {
+          throw new Error("Completed reads must not replay");
+        },
+      }),
+    );
+    expect(answers.at(-1)).toBe("Earlier verified finding\n\nLater finding");
+    expect(sources).toEqual([source]);
+    expect(statuses).toEqual(["completed"]);
+    expect(f.requests).toHaveLength(2);
+  } finally {
+    await f.cleanup();
+  }
+}, 3000);
+
+test("SQLite pauses a committed partial without aborting the durable submission and recovery replaces it", async () => {
+  const f = await durableFixture((index) =>
+    index === 1
+      ? hangingReply(index)
+      : modelReply(index, [
+          ...text("Recovered complete answer."),
+          ...finish("end_turn"),
+        ]),
+  );
+  const partial = Promise.withResolvers<void>();
+  let pointer: unknown[] = [];
+  try {
+    const first = f.createDriver();
+    const pending = first.run(
+      f.input({
+        checkpoint: (entries) => {
+          pointer = entries;
+        },
+        replace: (text) => {
+          if (text.includes("Partial before pause")) partial.resolve();
+        },
+      }),
+    );
+    await partial.promise;
+    await first.dispose();
+    expect(await pending).toEqual(pointer);
+    const replay: string[] = [];
+    const second = f.createDriver();
+    await second.run(
+      f.input({
+        entries: pointer,
+        recover: true,
+        replace: (text) => replay.push(text),
+      }),
+    );
+    expect(f.requests).toHaveLength(2);
+    expect(replay.at(-1)).toBe("Recovered complete answer.");
+    expect(replay.at(-1)).not.toContain("Partial before pause");
+    expect(
+      durableEntries(f.directory, pointer).filter(
+        (entry) => entry.kind === "pi.user",
+      ),
+    ).toHaveLength(1);
+    expect(JSON.stringify(f.requests[1]?.messages)).not.toContain(
+      "Partial before pause",
+    );
+    const directory = join(
+      f.directory,
+      "durable",
+      (pointer[0] as { id: string }).id,
+    );
+    expect(existsSync(join(directory, "execution.sqlite"))).toBe(true);
+    expect(existsSync(join(directory, "main.jsonl"))).toBe(false);
+  } finally {
+    await f.cleanup();
+  }
+}, 3000);
+
+test.each(["read", "proposal"] as const)(
+  "interrupted %s tools follow their declared replay policy",
+  async (kind) => {
+    const name = kind === "read" ? "workspace_status" : "propose_agent_prompt";
+    const params =
+      kind === "read"
+        ? {}
+        : {
+            connection_id: "local",
+            workspace_id: "workspace",
+            pane_id: "pane",
+            prompt: "Review",
+          };
+    const f = await durableFixture((index) =>
+      modelReply(
+        index,
+        index === 1
+          ? [...toolUse(name, "tool-1", params, 0), ...finish("tool_use")]
+          : [...text("Recovery inspected."), ...finish("end_turn")],
+      ),
+    );
+    const began = Promise.withResolvers<void>();
+    let calls = 0;
+    let pointer: unknown[] = [];
+    const callback = async (
+      _kind: unknown,
+      _params: unknown,
+      signal?: AbortSignal,
+    ) => {
+      calls++;
+      if (calls === 1) {
+        began.resolve();
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new Error("paused")), {
+            once: true,
+          });
+        });
+      }
+      return { text: "Read completed after recovery" };
+    };
+    try {
+      const first = f.createDriver();
+      const pending = first.run(
+        f.input({
+          checkpoint: (entries) => {
+            pointer = entries;
+          },
+          read: callback,
+          propose: callback,
+        }),
+      );
+      await began.promise;
+      await first.dispose();
+      await pending;
+      const second = f.createDriver();
+      const states: string[] = [];
+      await second.run(
+        f.input({
+          entries: pointer,
+          recover: true,
+          read: callback,
+          propose: callback,
+          tool: (_id, _name, status) => states.push(status),
+        }),
+      );
+      expect(calls).toBe(kind === "read" ? 2 : 1);
+      expect(states.at(-1)).toBe(kind === "read" ? "completed" : "failed");
+      expect(f.requests).toHaveLength(2);
+      const results = durableEntries(f.directory, pointer)
+        .flatMap((entry) => entry.model ?? [])
+        .filter((message) => message.role === "toolResult");
+      expect(results).toHaveLength(1);
+      expect(results[0]?.role === "toolResult" && results[0].isError).toBe(
+        kind === "proposal",
+      );
+      expect(
+        durableEntries(f.directory, pointer).filter(
+          (entry) => entry.kind === "pi.user",
+        ),
+      ).toHaveLength(1);
+    } finally {
+      await f.cleanup();
+    }
+  },
+  3000,
+);
+
+test("nonempty contexts without a durable pointer are rejected before a model request or checkpoint", async () => {
+  const f = await durableFixture((index) =>
+    modelReply(index, [...text("Unexpected request"), ...finish("end_turn")]),
+  );
+  try {
+    const driver = f.createDriver();
+    let checkpoints = 0;
+    for (const entries of [
+      [
+        {
+          type: "message",
+          message: { role: "user", content: "Old context", timestamp: 0 },
+        },
+      ],
+      [{ type: "custom", data: "Unsupported history" }],
+    ]) {
+      await expect(
+        driver.run(
+          f.input({
+            entries,
+            checkpoint: () => {
+              checkpoints++;
+            },
+          }),
+        ),
+      ).rejects.toThrow("Invalid durable context");
+    }
+    expect(checkpoints).toBe(0);
+    expect(f.requests).toHaveLength(0);
+    expect(existsSync(join(f.directory, "durable"))).toBe(false);
+  } finally {
+    await f.cleanup();
+  }
+}, 3000);
+
+test("durable storage refuses missing pointers, symlinks and a second live owner", async () => {
+  const f = await durableFixture((index) =>
+    modelReply(index, [...text("Saved"), ...finish("end_turn")]),
+  );
+  const { BACKGROUND_CONTEXT, withAbortSignal } = await import(
+    "@earendil-works/chord/context"
+  );
+  const { openPrivateDurableStorage } = await import("./durable-storage");
+  try {
+    const driver = f.createDriver();
+    await expect(
+      driver.run(
+        f.input({ entries: [{ type: "ranger-durable", id: "../escape" }] }),
+      ),
+    ).rejects.toThrow();
+    const saved = await driver.run(f.input());
+    const id = (saved[0] as { id: string }).id;
+    const sqlite = join(f.directory, "durable", id, "execution.sqlite");
+    const contents = JSON.stringify(durableEntries(f.directory, saved));
+    const owner = await openPrivateDurableStorage(
+      f.directory,
+      id,
+      BACKGROUND_CONTEXT,
+      true,
+    );
+    const controller = new AbortController();
+    const blocked = openPrivateDurableStorage(
+      f.directory,
+      id,
+      withAbortSignal(controller.signal, BACKGROUND_CONTEXT),
+      true,
+    );
+    controller.abort();
+    await expect(blocked).rejects.toThrow();
+    expect(existsSync(join(f.directory, "durable", `${id}.lock`))).toBe(true);
+    await owner.storage.close(BACKGROUND_CONTEXT);
+    await owner.release();
+    rmSync(sqlite);
+    await expect(
+      driver.run(f.input({ entries: saved, recover: true })),
+    ).rejects.toThrow();
+    writeFileSync(join(f.directory, "sentinel"), "Do not follow");
+    symlinkSync(join(f.directory, "sentinel"), sqlite);
+    await expect(
+      driver.run(f.input({ entries: saved, recover: true })),
+    ).rejects.toThrow();
+    expect(readFileSync(join(f.directory, "sentinel"), "utf8")).toBe(
+      "Do not follow",
+    );
+    expect(f.requests).toHaveLength(1);
+    expect(contents).toContain("Saved");
+  } finally {
+    await f.cleanup();
+  }
+}, 3000);
 
 test.each(["SDK loading", "runtime creation"])(
   "Pi runtime initialization can retry after failed %s without dropping other credentials",
@@ -286,7 +947,6 @@ test("the real Pi SDK streams, executes only a workspace tool, resumes, and abor
     },
   });
   const pi = await import("@earendil-works/pi-coding-agent");
-  const activeTools: string[][] = [];
   let selectedModel = "";
   const driver = createPiDriver(
     directory,
@@ -305,19 +965,6 @@ test("the real Pi SDK streams, executes only a workspace tool, resumes, and abor
             runtime.getModel = () => ({ ...model, baseUrl: server.url.href });
             return runtime;
           },
-        },
-        createAgentSession: async (
-          options: import("@earendil-works/pi-coding-agent").CreateAgentSessionOptions,
-        ) => {
-          const result = await pi.createAgentSession(options);
-          activeTools.push(result.session.getActiveToolNames());
-          expect(options.noTools).toBe("builtin");
-          expect(options.settingsManager?.getSettings()).toMatchObject({
-            cacheWarming: "off",
-            enableAnalytics: false,
-            enableInstallTelemetry: false,
-          });
-          return result;
         },
       }) as unknown as typeof pi,
   );
@@ -372,13 +1019,11 @@ test("the real Pi SDK streams, executes only a workspace tool, resumes, and abor
     expect(deltas.join("")).toBe("Inspecting status.Workspace is running.");
     expect(messages).toEqual(["Inspecting status.", "Workspace is running."]);
     expect(tools).toEqual(["running", "completed"]);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ type: "ranger-durable" });
     expect(
-      saved.some(
-        (entry) =>
-          !!entry &&
-          typeof entry === "object" &&
-          "message" in entry &&
-          (entry.message as { role?: string }).role === "toolResult",
+      durableEntries(directory, saved).some(
+        (entry) => entry.model?.[0]?.role === "toolResult",
       ),
     ).toBe(true);
     for (const request of requests) {
@@ -398,7 +1043,7 @@ test("the real Pi SDK streams, executes only a workspace tool, resumes, and abor
         "workspace_terminal",
       ]);
       expect(JSON.stringify(request)).not.toContain("synthetic-local-test-key");
-      expect(JSON.stringify(request.system)).not.toContain(
+      expect(JSON.stringify(request)).not.toContain(
         "Unexpected project instructions",
       );
     }
@@ -422,20 +1067,6 @@ test("the real Pi SDK streams, executes only a workspace tool, resumes, and abor
     await driver.stop();
     await stopped;
     expect(requests).toHaveLength(3);
-    expect(activeTools).toEqual([
-      [
-        "workspace_status",
-        "workspace_history",
-        "workspace_diff",
-        "workspace_terminal",
-      ],
-      [
-        "workspace_status",
-        "workspace_history",
-        "workspace_diff",
-        "workspace_terminal",
-      ],
-    ]);
   } finally {
     await driver.dispose();
     server.stop(true);
@@ -590,11 +1221,9 @@ test("the real Pi SDK records pending action proposals and finishes without exec
         .map((activity) => activity.name)
         .sort(),
     ).toEqual(calls.map((call) => call.name).sort());
-    const results = saved.flatMap((entry) => {
-      if (!entry || typeof entry !== "object" || !("message" in entry))
-        return [];
-      const message = entry.message as { role?: string; details?: unknown };
-      return message.role === "toolResult" ? [message] : [];
+    const results = durableEntries(directory, saved).flatMap((entry) => {
+      const message = entry.model?.[0];
+      return message?.role === "toolResult" ? [message] : [];
     });
     expect(results).toHaveLength(4);
     for (const result of results) expect(result.details).toEqual({});
@@ -606,10 +1235,10 @@ test("the real Pi SDK records pending action proposals and finishes without exec
       ).toEqual([...workspaceTools, ...actionTools].map((tool) => tool.name));
       expect(JSON.stringify(request)).not.toContain("synthetic-local-test-key");
     }
-    expect(JSON.stringify(requests[0]?.system)).toContain(
+    expect(JSON.stringify(requests[0])).toContain(
       "only after the user clicks Confirm",
     );
-    expect(JSON.stringify(requests[0]?.system)).toContain(
+    expect(JSON.stringify(requests[0])).toContain(
       "Never claim that a pending proposal was executed or succeeded",
     );
     const modelContext = JSON.stringify(requests[1]?.messages);

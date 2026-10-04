@@ -1,7 +1,10 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { AssistantWorkspaceRef } from "../../../shared/assistant";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
-import { createAssistantContext } from "./context";
+import {
+  AssistantRecoveryNotReadyError,
+  createAssistantContext,
+} from "./context";
 import { callWorkspaceTool, type WorkspaceToolReader } from "./tools";
 
 const first: AssistantWorkspaceRef = {
@@ -17,13 +20,15 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function fixture() {
+function fixture(recovery = false) {
   let generation = 1;
   let ready = true;
+  let endpointFingerprint = "1".repeat(64);
   const workspaces = [
     {
       workspace_id: "w1",
       label: "Allowed",
+      cwd: "/secret/repo",
       agent_status: "working",
       pane_count: 1,
       tab_count: 1,
@@ -125,6 +130,8 @@ function fixture() {
     agentSessions: { readHistory },
     files: { readGitDiffSummary, readGitDiffFile },
   } as unknown as LegacyConnectionRuntime;
+  const recoveryIdentity = mock(async (): Promise<string | null> => "boot-1");
+  runtime.recoveryIdentity = recoveryIdentity;
   const lease = mock(() => {
     if (!ready) return null;
     const capturedGeneration = generation;
@@ -144,6 +151,7 @@ function fixture() {
       },
     ],
     lease,
+    ...(recovery ? { recoveryFingerprint: () => endpointFingerprint } : {}),
   });
   return {
     context,
@@ -155,6 +163,10 @@ function fixture() {
     readGitDiffFile,
     panes,
     workspaces,
+    recoveryIdentity,
+    replaceEndpoint: () => {
+      endpointFingerprint = "2".repeat(64);
+    },
     retire: () => {
       generation += 1;
     },
@@ -163,6 +175,169 @@ function fixture() {
     },
   };
 }
+
+describe("assistant recovery scope", () => {
+  test("restores the same endpoint into fresh leases without exposing private identities", async () => {
+    const f = fixture(true);
+    const captured = await f.context.captureScope([first]);
+    const targets = await f.context.recoveryScope(captured);
+    expect(targets).toEqual([
+      {
+        ...first,
+        endpoint_fingerprint: "1".repeat(64),
+        herdr_boot_id: "boot-1",
+        workspace_identity: expect.stringMatching(/^[a-f0-9]{64}$/),
+      },
+    ]);
+    expect(JSON.stringify(targets)).not.toContain("/secret/");
+    f.retire();
+    f.workspaces[0]!.label = "Renamed";
+    const restored = await f.context.restoreScope(targets);
+    expect(restored[0]?.runtime_generation).toBe(2);
+    expect(restored[0]?.label).toBe("Renamed");
+    const output = await f.context.read("status", restored, {});
+    expect(JSON.stringify([restored, output])).not.toContain("boot-1");
+    expect(JSON.stringify([restored, output])).not.toContain("fingerprint");
+    await expect(f.context.read("status", captured, {})).rejects.toThrow(
+      "Connection changed",
+    );
+  });
+
+  test("changed endpoints and server boots reject before workspace reads", async () => {
+    for (const change of ["endpoint", "boot"] as const) {
+      const f = fixture(true);
+      const targets = await f.context.recoveryScope(
+        await f.context.captureScope([first]),
+      );
+      f.call.mockClear();
+      if (change === "endpoint") f.replaceEndpoint();
+      else f.recoveryIdentity.mockResolvedValue("another-server-boot");
+      await expect(f.context.restoreScope(targets)).rejects.toThrow(
+        change === "endpoint" ? "endpoint changed" : "server identity changed",
+      );
+      expect(f.call).not.toHaveBeenCalled();
+    }
+  });
+
+  test("same-ID workspace replacement rejects both capture and restore", async () => {
+    const f = fixture(true);
+    const captured = await f.context.captureScope([first]);
+    const targets = await f.context.recoveryScope(captured);
+    f.workspaces[0]!.cwd = "/another/repo";
+    await expect(f.context.recoveryScope(captured)).rejects.toThrow(
+      "workspace changed",
+    );
+    await expect(f.context.restoreScope(targets)).rejects.toThrow(
+      "workspace changed",
+    );
+    f.workspaces[0]!.cwd = "/secret/repo";
+    Object.assign(f.workspaces[0]!, {
+      worktree: { repo_key: "another-repo", checkout_path: "/secret/repo" },
+    });
+    await expect(f.context.restoreScope(targets)).rejects.toThrow(
+      "workspace changed",
+    );
+  });
+
+  test("unsupported identity leaves ordinary reads available and cannot restore", async () => {
+    const f = fixture(true);
+    const captured = await f.context.captureScope([first]);
+    const targets = await f.context.recoveryScope(captured);
+    f.recoveryIdentity.mockResolvedValue(null);
+    expect(await f.context.recoveryScope(captured)).toEqual([]);
+    expect((await f.context.read("status", captured, {})).sources).toHaveLength(
+      1,
+    );
+    await expect(f.context.restoreScope(targets)).rejects.toThrow(
+      "server identity changed",
+    );
+    const legacy = fixture();
+    expect(
+      await legacy.context.recoveryScope(
+        await legacy.context.captureScope([first]),
+      ),
+    ).toEqual([]);
+    expect(legacy.recoveryIdentity).not.toHaveBeenCalled();
+  });
+
+  test("not-ready recovery is distinguishable from changed or invalid targets", async () => {
+    const f = fixture(true);
+    const targets = await f.context.recoveryScope(
+      await f.context.captureScope([first]),
+    );
+    f.disconnect();
+    await expect(f.context.restoreScope(targets)).rejects.toBeInstanceOf(
+      AssistantRecoveryNotReadyError,
+    );
+    f.replaceEndpoint();
+    await expect(f.context.restoreScope(targets)).rejects.toThrow(
+      "endpoint changed",
+    );
+    await expect(f.context.restoreScope([])).rejects.toThrow("Invalid");
+    await expect(
+      f.context.restoreScope([
+        { ...targets[0]!, endpoint_fingerprint: "/socket" },
+      ]),
+    ).rejects.toThrow("Invalid");
+    await expect(
+      f.context.restoreScope([
+        ...targets,
+        { ...targets[0]!, workspace_id: "w2", herdr_boot_id: "different" },
+      ]),
+    ).rejects.toThrow("Inconsistent");
+  });
+
+  test("aborting an identity probe rejects promptly and stale leases cannot resume", async () => {
+    for (const operation of ["capture", "restore"] as const) {
+      const f = fixture(true);
+      const captured = await f.context.captureScope([first]);
+      const targets = await f.context.recoveryScope(captured);
+      const pending = deferred<string>();
+      f.recoveryIdentity.mockImplementation(() => pending.promise);
+      const controller = new AbortController();
+      const work =
+        operation === "capture"
+          ? f.context.recoveryScope(captured, controller.signal)
+          : f.context.restoreScope(targets, controller.signal);
+      controller.abort(new Error("Stopped recovery"));
+      await expect(work).rejects.toThrow("Stopped recovery");
+      pending.resolve("boot-1");
+    }
+    const f = fixture(true);
+    const targets = await f.context.recoveryScope(
+      await f.context.captureScope([first]),
+    );
+    f.recoveryIdentity.mockImplementation(async () => {
+      f.retire();
+      return "boot-1";
+    });
+    await expect(f.context.restoreScope(targets)).rejects.toThrow(
+      "Connection changed",
+    );
+  });
+
+  test("recovery admission snapshots its input and rechecks endpoint changes", async () => {
+    const f = fixture(true);
+    const targets = await f.context.recoveryScope(
+      await f.context.captureScope([first]),
+    );
+    const pending = deferred<string>();
+    f.recoveryIdentity.mockImplementation(() => pending.promise);
+    const work = f.context.restoreScope(targets);
+    targets[0]!.herdr_boot_id = "mutated-by-caller";
+    targets[0]!.workspace_id = "w2";
+    pending.resolve("boot-1");
+    expect((await work)[0]?.workspace_id).toBe("w1");
+    const captured = await f.context.captureScope([first]);
+    f.recoveryIdentity.mockImplementation(async () => {
+      f.replaceEndpoint();
+      return "boot-1";
+    });
+    await expect(f.context.recoveryScope(captured)).rejects.toThrow(
+      "endpoint changed",
+    );
+  });
+});
 
 describe("assistant approved context", () => {
   test("catalog exposes only workspace metadata and reports disconnected connections", async () => {

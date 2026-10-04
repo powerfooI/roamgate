@@ -1,4 +1,5 @@
 import type { ServerWebSocket } from "bun";
+import { createHash } from "node:crypto";
 import { createAssistantContext } from "./assistant/context";
 import { isHtmlPath } from "../../shared/filePreview";
 import { DOWNLOAD_TIMEOUT_MS } from "./workspace/file-constants";
@@ -390,6 +391,7 @@ const connectionManager = new ConnectionManager<LegacyConnectionRuntime>(
       return;
     }
     if (status.state !== "ready") return;
+    resumeAssistantIfLoaded();
     if (reporter.recovered(fields)) {
       readyConnectionGenerations.set(status.id, status.generation);
     } else if (
@@ -405,6 +407,26 @@ const connectionManager = new ConnectionManager<LegacyConnectionRuntime>(
 const assistantContext = createAssistantContext({
   catalog: () => connectionProfiles.list(),
   lease: (id) => connectionManager.readyRuntimeLease(id),
+  recoveryFingerprint: (id) => {
+    const profile = connectionProfiles
+      .list()
+      .find((profile) => profile.id === id);
+    if (!profile) throw new Error("Ranger connection is no longer configured");
+    const target =
+      profile.type === "local"
+        ? [
+            profile.type,
+            profile.control_socket_path,
+            profile.client_socket_path,
+          ]
+        : [
+            profile.type,
+            profile.ssh_destination,
+            profile.remote_control_socket_path,
+            profile.remote_client_socket_path,
+          ];
+    return createHash("sha256").update(JSON.stringify(target)).digest("hex");
+  },
   createWorktree: (runtime, params, isCurrent) =>
     createWorkspaceWorktree(runtime, params, isCurrent),
 });
@@ -430,6 +452,14 @@ function getAssistantService() {
       throw error;
     });
   return assistantServiceTask;
+}
+
+function resumeAssistantIfLoaded() {
+  void assistantServiceTask
+    ?.then((service) => service.resume())
+    .catch(() => {
+      logger.warn("Ranger recovery could not be started");
+    });
 }
 
 const { handleHerdrStatus, handleHerdrSetup } = createHerdrSetupHandlers({
@@ -758,7 +788,9 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       const result =
         method === "bridge.assistant.context"
           ? await assistantContext.catalog()
-          : await (await getAssistantService()).handle(method, params ?? {});
+          : method === "bridge.assistant.task.get"
+            ? await (await getAssistantService()).taskDetail(params ?? {})
+            : await (await getAssistantService()).handle(method, params ?? {});
       sendReply({ id, result }, "assistant-rpc");
     } catch (error) {
       sendError("assistant-rpc-error", error);
@@ -1596,6 +1628,9 @@ function main() {
       }),
     startConnection: async () => {
       await connectionProfiles.startConfigured();
+      // Resume saved work even when no browser has opened Ranger yet.
+      await getAssistantService();
+      resumeAssistantIfLoaded();
       notifyBrowserClientCount();
       const runtime = connectionManager.defaultReadyRuntime();
       void runtime?.herdr
@@ -1670,13 +1705,13 @@ let managerStopTask: Promise<void> | null = null;
 function stopManagerOnce(): Promise<void> {
   webPush.stop();
   connectionProfiles.stopSupervision();
-  managerStopTask ??= Promise.all([
-    connectionManager.stopAll(),
-    cpuProfile?.stop(),
-    assistantServiceTask
+  managerStopTask ??= (async () => {
+    // Pause the harness before taking away the runtimes its reads depend on.
+    await assistantServiceTask
       ?.then((assistant) => assistant.dispose())
-      .catch(() => undefined),
-  ]).then(() => undefined);
+      .catch(() => undefined);
+    await Promise.all([connectionManager.stopAll(), cpuProfile?.stop()]);
+  })();
   return managerStopTask;
 }
 

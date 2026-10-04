@@ -17,6 +17,8 @@ import type {
   AssistantMessage,
   AssistantSessionSummary,
   AssistantSnapshot,
+  AssistantTaskDetail,
+  AssistantWorkspace,
   AssistantWorkspaceRef,
 } from "../../../shared/assistant";
 import {
@@ -25,8 +27,18 @@ import {
 } from "../../../shared/assistant";
 import { assertSafeDataPath, dataRoot } from "../config/data-paths";
 import { roamgateEnv } from "../config/environment";
-import type { AssistantContext } from "./context";
+import {
+  type AssistantContext,
+  AssistantRecoveryNotReadyError,
+  type RecoveryTarget,
+} from "./context";
 import { type AssistantDriver, createPiDriver } from "./pi-driver";
+import {
+  createAssistantTasks,
+  type PreparedTask,
+  type SavedTaskRun,
+  validateTaskInput,
+} from "./tasks";
 
 const DEFAULT_CONFIG: AssistantConfig = {
   provider: "",
@@ -43,6 +55,18 @@ const jsonBytes = (value: unknown) =>
 const refKey = (ref: AssistantWorkspaceRef) =>
   `${ref.connection_id}\0${ref.workspace_id}`;
 const SESSION_ID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
+
+type SavedRun = {
+  request_id: string;
+  draft_id: string;
+  config: AssistantConfig;
+  text: string;
+  recovery_targets: RecoveryTarget[];
+};
+
+export function assistantDirectory() {
+  return roamgateEnv("ASSISTANT_DIR") ?? join(dataRoot(), "assistant");
+}
 
 function sessionSummary(
   id: string = randomUUID(),
@@ -110,19 +134,116 @@ function authUrl(value: string): string | undefined {
   }
 }
 
+export type AssistantService = {
+  resume(): Promise<void>;
+  snapshot(): Promise<AssistantSnapshot>;
+  peek(): AssistantSnapshot;
+  handle(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<AssistantSnapshot>;
+  taskDetail(params: Record<string, unknown>): Promise<AssistantTaskDetail>;
+  dispose(): Promise<void>;
+};
+
 export function createAssistantService(options: {
   context: AssistantContext;
   publish(snapshot: AssistantSnapshot): void;
   directory?: string;
   driver?: AssistantDriver;
-}) {
-  const directory =
-    options.directory ??
-    roamgateEnv("ASSISTANT_DIR") ??
-    join(dataRoot(), "assistant");
+  createDriver?(
+    directory: string,
+    credentialDirectory: string,
+  ): AssistantDriver;
+  taskRun?: SavedTaskRun;
+  globalAllowed?(): AssistantWorkspaceRef[];
+}): AssistantService {
+  const directory = options.directory ?? assistantDirectory();
   const statePath = join(directory, "state.json");
   const sessionsDirectory = join(directory, "sessions");
-  const driver = options.driver ?? createPiDriver(directory);
+  const driver =
+    options.driver ??
+    options.createDriver?.(directory, directory) ??
+    createPiDriver(directory);
+  let tasks: ReturnType<typeof createAssistantTasks> | undefined;
+  const baseContext = options.context;
+  function assertTaskAllowed() {
+    if (
+      options.taskRun &&
+      options.taskRun.targets.some(
+        (target) =>
+          !new Set(options.globalAllowed?.().map(refKey)).has(refKey(target)),
+      )
+    )
+      throw new Error("The task workspace permission was removed.");
+  }
+  const checkTaskScope = async (signal?: AbortSignal) => {
+    if (!options.taskRun) return;
+    const allowed = new Set(options.globalAllowed?.().map(refKey));
+    if (
+      options.taskRun.targets.some((target) => !allowed.has(refKey(target))) ||
+      !baseContext.restoreScope
+    )
+      throw new Error("The task workspace permission was removed.");
+    await baseContext.restoreScope(options.taskRun.targets, signal);
+    signal?.throwIfAborted();
+    if (
+      options.taskRun.targets.some(
+        (target) =>
+          !new Set(options.globalAllowed?.().map(refKey)).has(refKey(target)),
+      )
+    )
+      throw new Error("The task workspace permission was removed.");
+  };
+  const context: AssistantContext = options.taskRun
+    ? {
+        ...baseContext,
+        captureScope: async (refs, signal) => {
+          if (
+            JSON.stringify(refs.map(refKey).sort()) !==
+            JSON.stringify(options.taskRun!.targets.map(refKey).sort())
+          )
+            throw new Error("Invalid scheduled task scope");
+          await checkTaskScope(signal);
+          return baseContext.restoreScope!(options.taskRun!.targets, signal);
+        },
+        restoreScope: async (targets, signal) => {
+          if (
+            JSON.stringify(targets) !== JSON.stringify(options.taskRun!.targets)
+          )
+            throw new Error("The scheduled task identity changed.");
+          await checkTaskScope(signal);
+          return baseContext.restoreScope!(options.taskRun!.targets, signal);
+        },
+        read: async (kind, captured, params, signal) => {
+          await checkTaskScope(signal);
+          const result = await baseContext.read(kind, captured, params, signal);
+          await checkTaskScope(signal);
+          return result;
+        },
+        prepareAction: baseContext.prepareAction
+          ? async (kind, captured, params, signal) => {
+              await checkTaskScope(signal);
+              const prepared = await baseContext.prepareAction!(
+                kind,
+                captured,
+                params,
+                signal,
+              );
+              await checkTaskScope(signal);
+              return {
+                preview: prepared.preview,
+                execute: async () => {
+                  await checkTaskScope();
+                  const result = await prepared.execute();
+                  await checkTaskScope();
+                  return result;
+                },
+              };
+            }
+          : undefined,
+      }
+    : baseContext;
   let entries: unknown[] = [];
   let entryScope = "";
   let requests: string[] = [];
@@ -132,6 +253,9 @@ export function createAssistantService(options: {
   let disposed = false;
   let changing = false;
   let run: Promise<void> | undefined;
+  let activeRun: SavedRun | undefined;
+  let recovering = false;
+  let awaitingRecovery = false;
   let actionWork: Promise<void> | undefined;
   const preparedActions = new Map<
     string,
@@ -155,7 +279,7 @@ export function createAssistantService(options: {
     revision: 0,
     session_id: initialSession.id,
     sessions: [initialSession],
-    config: structuredClone(DEFAULT_CONFIG),
+    config: structuredClone(options.taskRun?.config ?? DEFAULT_CONFIG),
     providers: [],
     models: [],
     messages: [],
@@ -198,11 +322,58 @@ export function createAssistantService(options: {
       entries = restored.entries;
       entryScope = restored.entry_scope;
       requests = restored.requests;
+      if (saved.active_run !== undefined) {
+        const pending = saved.active_run;
+        const turnConfig = config(pending.config);
+        if (
+          !Array.isArray(pending.recovery_targets) ||
+          pending.recovery_targets.length > ASSISTANT_MAX_WORKSPACES ||
+          !pending.recovery_targets.every(
+            (target: RecoveryTarget) =>
+              target &&
+              typeof target.connection_id === "string" &&
+              typeof target.workspace_id === "string" &&
+              /^[a-f0-9]{64}$/.test(target.endpoint_fingerprint) &&
+              /^[a-f0-9]{64}$/.test(target.workspace_identity) &&
+              typeof target.herdr_boot_id === "string" &&
+              target.herdr_boot_id.length > 0 &&
+              target.herdr_boot_id.length <= 500,
+          ) ||
+          !requests.includes(pending.request_id) ||
+          !state.messages.some(
+            (message) =>
+              message.id === pending.draft_id && message.role === "assistant",
+          )
+        )
+          throw new Error("Invalid saved Ranger run");
+        activeRun = {
+          request_id: string(pending.request_id, "request identifier"),
+          draft_id: string(pending.draft_id, "draft identifier"),
+          config: turnConfig,
+          text: string(pending.text, "saved prompt", MAX_CONTEXT_BYTES),
+          recovery_targets: pending.recovery_targets,
+        };
+        state.running = true;
+        awaitingRecovery = true;
+        turnController = new AbortController();
+        state.error =
+          "Waiting for the original workspace connections to resume Ranger...";
+      }
       migrateSavedState = migrated;
     }
   } catch {
     invalidSavedState = true;
     state.error = "The saved Ranger session could not be loaded.";
+  }
+  if (
+    options.taskRun &&
+    JSON.stringify(state.config) !== JSON.stringify(options.taskRun.config)
+  ) {
+    activeRun = undefined;
+    awaitingRecovery = false;
+    state.running = false;
+    state.error =
+      "The scheduled task configuration changed and could not be restored.";
   }
   if (migrateSavedState) {
     try {
@@ -244,6 +415,11 @@ export function createAssistantService(options: {
             "The bridge restarted during execution. Check the target before proposing another operation; this action will not be replayed.";
         }
       }
+      for (const proposal of message.task_proposals ?? [])
+        if (proposal.status === "pending") {
+          proposal.status = "cancelled";
+          tasks?.cancelProposal(proposal.id);
+        }
     }
   }
   function boundMessages() {
@@ -278,7 +454,12 @@ export function createAssistantService(options: {
   function current(): AssistantSnapshot {
     boundMessages();
     updateSummary();
-    return structuredClone(state);
+    return structuredClone({
+      ...state,
+      ...(tasks
+        ? { tasks: tasks.summaries(), error: tasks.error() ?? state.error }
+        : {}),
+    });
   }
   function publish(immediate = false) {
     state.revision++;
@@ -294,9 +475,13 @@ export function createAssistantService(options: {
       }, 80);
     }
   }
-  function writeSaved(path: string, saved: unknown) {
+  function writeSaved(
+    path: string,
+    saved: unknown,
+    maxBytes = MAX_STATE_BYTES,
+  ) {
     const contents = `${JSON.stringify(saved)}\n`;
-    if (Buffer.byteLength(contents, "utf8") > MAX_STATE_BYTES)
+    if (Buffer.byteLength(contents, "utf8") > maxBytes)
       throw new Error("Saved session is too large");
     assertSafeDataPath(path);
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -330,6 +515,7 @@ export function createAssistantService(options: {
       entries,
       entry_scope: entryScope,
       requests,
+      active_run: activeRun,
     });
   }
   function saveChange(change: () => void) {
@@ -347,6 +533,7 @@ export function createAssistantService(options: {
     const previousScope = entryScope;
     const previousRequests = requests;
     const previousPrepared = new Map(preparedActions);
+    const previousRun = activeRun;
     try {
       change();
       persist();
@@ -355,6 +542,7 @@ export function createAssistantService(options: {
       entries = previousEntries;
       entryScope = previousScope;
       requests = previousRequests;
+      activeRun = previousRun;
       preparedActions.clear();
       for (const [id, prepared] of previousPrepared)
         preparedActions.set(id, prepared);
@@ -377,6 +565,12 @@ export function createAssistantService(options: {
         if (action.status === "pending") {
           action.status = "cancelled";
           action.detail = detail;
+        }
+      }
+      for (const proposal of message.task_proposals ?? []) {
+        if (proposal.status === "pending") {
+          proposal.status = "cancelled";
+          tasks?.cancelProposal(proposal.id);
         }
       }
     }
@@ -538,7 +732,11 @@ export function createAssistantService(options: {
     const requestId = string(params.request_id, "request identifier");
     if (requests.includes(requestId) || pendingRequest === requestId) return;
     idle();
-    const text = string(params.text, "message", 20_000);
+    const text = string(
+      params.text,
+      "message",
+      options.taskRun ? 32_000 : 20_000,
+    );
     const scope =
       params.scope === undefined
         ? structuredClone(state.config.allowed_workspaces)
@@ -569,143 +767,261 @@ export function createAssistantService(options: {
         )
       )
         throw new Error("The selected model is not configured");
-      const captured = await options.context.captureScope(
-        scope,
-        controller.signal,
-      );
+      const captured = await context.captureScope(scope, controller.signal);
       if (disposed) throw new Error("Ranger unavailable");
       const capturedKey = JSON.stringify(captured);
       if (entryScope !== capturedKey) entries = [];
       entryScope = capturedKey;
       const draft = message("assistant", "");
-      cancelPendingActions(
-        "A new question replaced this preview. Ask Ranger to propose it again if needed.",
-      );
-      state.messages.push(message("user", text), draft);
-      requests.push(requestId);
+      let recoveryTargets: RecoveryTarget[] = [];
+      try {
+        recoveryTargets =
+          (await context.recoveryScope?.(captured, controller.signal)) ?? [];
+      } catch {
+        controller.signal.throwIfAborted();
+        // Older Herdr endpoints can still answer ordinary Ranger questions.
+      }
+      controller.signal.throwIfAborted();
+      if (disposed) throw new Error("Ranger unavailable");
+      await checkTaskScope(controller.signal);
+      assertTaskAllowed();
+      const prompt = `Authorized workspace scope for this turn (only these IDs may be read or used as action targets):\n${JSON.stringify(captured)}\n\nRecorded operation outcomes (server receipts, not proof of task completion):\n${JSON.stringify(
+        state.messages
+          .flatMap((item) => item.actions ?? [])
+          .filter((action) =>
+            captured.some(
+              (ref) =>
+                refKey(ref) === refKey(action) &&
+                ref.runtime_generation === action.runtime_generation,
+            ),
+          )
+          .slice(-8),
+      )}\n\nUser message:\n${text}`;
+      saveChange(() => {
+        cancelPendingActions(
+          "A new question replaced this preview. Ask Ranger to propose it again if needed.",
+        );
+        state.messages.push(message("user", text), draft);
+        requests.push(requestId);
+        activeRun = {
+          request_id: requestId,
+          draft_id: draft.id,
+          config: turnConfig,
+          text: prompt,
+          recovery_targets: recoveryTargets,
+        };
+      });
       pendingRequest = undefined;
       publish(true);
-      let finalizedText = "";
-      let streamedText = "";
-      const updateText = () => {
-        draft.text = [finalizedText, streamedText]
-          .filter(Boolean)
-          .join("\n\n")
-          .slice(0, MAX_TEXT);
-        publish();
-      };
-      run = (async () => {
-        try {
-          if (controller.signal.aborted) return;
-          entries = await driver.run({
-            config: turnConfig,
-            entries,
-            signal: controller.signal,
-            text: `Authorized workspace scope for this turn (only these IDs may be read or used as action targets):\n${JSON.stringify(captured)}\n\nRecorded operation outcomes (server receipts, not proof of task completion):\n${JSON.stringify(
-              state.messages
-                .flatMap((item) => item.actions ?? [])
-                .filter((action) =>
-                  captured.some(
-                    (ref) =>
-                      refKey(ref) === refKey(action) &&
-                      ref.runtime_generation === action.runtime_generation,
-                  ),
-                )
-                .slice(-8),
-            )}\n\nUser message:\n${text}`,
-            propose: async (kind: AssistantActionKind, args, signal) => {
-              const combined = signal
-                ? AbortSignal.any([signal, controller.signal])
-                : controller.signal;
-              combined.throwIfAborted();
-              if (!options.context.prepareAction)
-                throw new Error("Action previews are unavailable.");
-              if ((draft.actions?.length ?? 0) >= 8)
-                throw new Error("This turn already has eight action previews.");
-              const prepared = await options.context.prepareAction(
-                kind,
-                captured,
-                args,
-                combined,
-              );
-              combined.throwIfAborted();
-              if ((draft.actions?.length ?? 0) >= 8)
-                throw new Error("This turn already has eight action previews.");
-              const action: AssistantAction = {
-                ...structuredClone(prepared.preview),
-                id: randomUUID(),
-                kind,
-                status: "pending",
-                created_at: new Date().toISOString(),
-                detail:
-                  "Waiting for your confirmation. Nothing has been executed.",
-              };
-              draft.actions ??= [];
-              draft.actions.push(action);
-              try {
-                persist();
-              } catch {
-                draft.actions = draft.actions.filter(
-                  (entry) => entry.id !== action.id,
-                );
-                throw new Error("The action preview could not be saved.");
+      executeTurn(activeRun!, captured, controller);
+    } catch {
+      state.running = false;
+      turnController = undefined;
+      requests = requests.filter((id) => id !== requestId);
+      pendingRequest = undefined;
+      publish(true);
+      // Provider errors can contain credentials; expose only our fixed message.
+      throw new Error(
+        controller.signal.aborted
+          ? "The Ranger request was stopped."
+          : "The workspace scope or provider connection is unavailable",
+      );
+    }
+  }
+
+  function executeTurn(
+    pending: SavedRun,
+    captured: AssistantWorkspace[],
+    controller: AbortController,
+    recover = false,
+  ) {
+    const turnConfig = pending.config;
+    const draft = state.messages.find((item) => item.id === pending.draft_id)!;
+    awaitingRecovery = false;
+    state.error = null;
+    let finalizedText = "";
+    let streamedText = "";
+    const updateText = () => {
+      draft.text = [finalizedText, streamedText]
+        .filter(Boolean)
+        .join("\n\n")
+        .slice(0, MAX_TEXT);
+      publish();
+    };
+    run = (async () => {
+      try {
+        if (controller.signal.aborted) return;
+        assertTaskAllowed();
+        entries = await driver.run({
+          config: turnConfig,
+          entries,
+          signal: controller.signal,
+          text: pending.text,
+          requestId: pending.request_id,
+          recover,
+          checkpoint: (value) => {
+            entries = value;
+            persist();
+          },
+          replace: (value) => {
+            finalizedText = "";
+            streamedText = value.slice(0, MAX_TEXT);
+            updateText();
+          },
+          sources: (sources) => {
+            for (const source of sources) {
+              if (
+                captured.some((target) => refKey(target) === refKey(source)) &&
+                draft.sources.length < 64 &&
+                !draft.sources.some((entry) => entry.id === source.id)
+              )
+                draft.sources.push(source);
+            }
+            publish();
+          },
+          task: tasks
+            ? async (kind, args, signal) => {
+                const combined = signal
+                  ? AbortSignal.any([signal, controller.signal])
+                  : controller.signal;
+                combined.throwIfAborted();
+                if (kind === "list") {
+                  const approved = new Set(captured.map(refKey));
+                  return {
+                    text: JSON.stringify({
+                      now: new Date().toISOString(),
+                      time_zone:
+                        Intl.DateTimeFormat().resolvedOptions().timeZone,
+                      tasks: tasks!
+                        .summaries()
+                        .filter((task) =>
+                          task.scope.every((ref) => approved.has(refKey(ref))),
+                        ),
+                    }),
+                  };
+                }
+                if ((draft.task_proposals?.length ?? 0) >= 8)
+                  throw new Error(
+                    "This turn already has eight task proposals.",
+                  );
+                const prepared = await prepareTask(args, combined, captured);
+                combined.throwIfAborted();
+                const proposal = await tasks!.propose(prepared, combined);
+                if (combined.aborted) {
+                  tasks!.cancelProposal(proposal.id);
+                  combined.throwIfAborted();
+                }
+                if ((draft.task_proposals?.length ?? 0) >= 8) {
+                  tasks!.cancelProposal(proposal.id);
+                  throw new Error(
+                    "This turn already has eight task proposals.",
+                  );
+                }
+                draft.task_proposals ??= [];
+                draft.task_proposals.push(proposal);
+                try {
+                  persist();
+                } catch {
+                  draft.task_proposals = draft.task_proposals.filter(
+                    (entry) => entry.id !== proposal.id,
+                  );
+                  tasks!.cancelProposal(proposal.id);
+                  throw new Error("The task proposal could not be saved.");
+                }
+                publish(true);
+                return { text: JSON.stringify(proposal) };
               }
-              preparedActions.set(action.id, prepared);
-              publish(true);
-              return { text: JSON.stringify(action) };
-            },
-            read: async (kind, args, signal) => {
-              const combined = signal
-                ? AbortSignal.any([signal, controller.signal])
-                : controller.signal;
-              combined.throwIfAborted();
-              const result = await options.context.read(
-                kind,
-                captured,
-                args,
-                combined,
+            : undefined,
+          propose: async (kind: AssistantActionKind, args, signal) => {
+            const combined = signal
+              ? AbortSignal.any([signal, controller.signal])
+              : controller.signal;
+            combined.throwIfAborted();
+            if (!context.prepareAction)
+              throw new Error("Action previews are unavailable.");
+            if ((draft.actions?.length ?? 0) >= 8)
+              throw new Error("This turn already has eight action previews.");
+            const prepared = await context.prepareAction(
+              kind,
+              captured,
+              args,
+              combined,
+            );
+            combined.throwIfAborted();
+            if ((draft.actions?.length ?? 0) >= 8)
+              throw new Error("This turn already has eight action previews.");
+            const action: AssistantAction = {
+              ...structuredClone(prepared.preview),
+              id: randomUUID(),
+              kind,
+              status: "pending",
+              created_at: new Date().toISOString(),
+              detail:
+                "Waiting for your confirmation. Nothing has been executed.",
+            };
+            draft.actions ??= [];
+            draft.actions.push(action);
+            try {
+              persist();
+            } catch {
+              draft.actions = draft.actions.filter(
+                (entry) => entry.id !== action.id,
               );
-              combined.throwIfAborted();
-              for (const source of result.sources) {
-                if (
-                  draft.sources.length < 64 &&
-                  !draft.sources.some((entry) => entry.id === source.id)
-                )
-                  draft.sources.push(source);
-              }
-              publish();
-              return result;
-            },
-            delta: (value) => {
-              streamedText = (streamedText + value).slice(0, MAX_TEXT);
-              updateText();
-            },
-            message: (value) => {
-              if (value)
-                finalizedText = [finalizedText, value]
-                  .filter(Boolean)
-                  .join("\n\n")
-                  .slice(0, MAX_TEXT);
-              streamedText = "";
-              updateText();
-            },
-            tool: (id, name, status) => {
-              const tool = draft.tools.find((entry) => entry.id === id);
-              if (tool) tool.status = status;
-              else if (draft.tools.length < 64)
-                draft.tools.push({ id, name, status });
-              publish();
-            },
-            error: () => {
-              state.error =
-                "The model request failed. Check the provider connection and try again.";
-            },
-          });
-        } catch {
-          if (!controller.signal.aborted)
+              throw new Error("The action preview could not be saved.");
+            }
+            preparedActions.set(action.id, prepared);
+            publish(true);
+            return { text: JSON.stringify(action) };
+          },
+          read: async (kind, args, signal) => {
+            const combined = signal
+              ? AbortSignal.any([signal, controller.signal])
+              : controller.signal;
+            combined.throwIfAborted();
+            const result = await context.read(kind, captured, args, combined);
+            combined.throwIfAborted();
+            for (const source of result.sources) {
+              if (
+                draft.sources.length < 64 &&
+                !draft.sources.some((entry) => entry.id === source.id)
+              )
+                draft.sources.push(source);
+            }
+            publish();
+            return result;
+          },
+          delta: (value) => {
+            streamedText = (streamedText + value).slice(0, MAX_TEXT);
+            updateText();
+          },
+          message: (value) => {
+            if (value)
+              finalizedText = [finalizedText, value]
+                .filter(Boolean)
+                .join("\n\n")
+                .slice(0, MAX_TEXT);
+            streamedText = "";
+            updateText();
+          },
+          tool: (id, name, status) => {
+            const tool = draft.tools.find((entry) => entry.id === id);
+            if (tool) tool.status = status;
+            else if (draft.tools.length < 64)
+              draft.tools.push({ id, name, status });
+            publish();
+          },
+          error: () => {
             state.error =
-              "The Ranger request failed. Check the provider connection and try again.";
-        } finally {
+              "The model request failed. Check the provider connection and try again.";
+          },
+        });
+      } catch {
+        if (!disposed && !controller.signal.aborted)
+          state.error =
+            "The Ranger request failed. Check the provider connection and try again.";
+      } finally {
+        if (!disposed) {
+          activeRun = undefined;
           for (const tool of draft.tools)
             if (tool.status === "running") tool.status = "failed";
           if (controller.signal.aborted)
@@ -721,19 +1037,77 @@ export function createAssistantService(options: {
           }
           publish(true);
         }
-      })();
-    } catch {
-      state.running = false;
-      turnController = undefined;
-      requests = requests.filter((id) => id !== requestId);
-      pendingRequest = undefined;
-      publish(true);
-      // Provider errors can contain credentials; expose only our fixed message.
-      throw new Error(
-        controller.signal.aborted
-          ? "The Ranger request was stopped."
-          : "The workspace scope or provider connection is unavailable",
+      }
+    })();
+  }
+
+  async function resume() {
+    if (disposed || recovering || !awaitingRecovery || !activeRun) return;
+    const pending = activeRun;
+    const controller = turnController!;
+    recovering = true;
+    try {
+      const allowed = new Set(state.config.allowed_workspaces.map(refKey));
+      const approved = new Set(pending.config.allowed_workspaces.map(refKey));
+      if (
+        !pending.recovery_targets.length ||
+        !context.restoreScope ||
+        pending.recovery_targets.some(
+          (target) =>
+            !allowed.has(refKey(target)) || !approved.has(refKey(target)),
+        )
+      )
+        throw new Error("The original scope cannot be restored");
+      const captured = await context.restoreScope(
+        pending.recovery_targets,
+        controller.signal,
       );
+      controller.signal.throwIfAborted();
+      if (disposed || activeRun !== pending) return;
+      // Retain the fixed model and credential source selected at admission.
+      const available = await driver.catalog(pending.config.credential_source);
+      if (
+        !available.providers.some(
+          (provider) =>
+            provider.id === pending.config.provider && provider.configured,
+        ) ||
+        !available.models.some(
+          (model) =>
+            model.provider === pending.config.provider &&
+            model.id === pending.config.model,
+        )
+      )
+        throw new Error("The original model is unavailable");
+      controller.signal.throwIfAborted();
+      if (disposed || activeRun !== pending) return;
+      await checkTaskScope(controller.signal);
+      assertTaskAllowed();
+      entryScope = JSON.stringify(captured);
+      executeTurn(pending, captured, controller, true);
+      publish(true);
+    } catch (error) {
+      if (disposed || activeRun !== pending || controller.signal.aborted)
+        return;
+      if (error instanceof AssistantRecoveryNotReadyError) {
+        state.error =
+          "Waiting for the original workspace connections to resume Ranger...";
+      } else {
+        awaitingRecovery = false;
+        activeRun = undefined;
+        entries = [];
+        state.running = false;
+        turnController = undefined;
+        state.error =
+          "Ranger could not safely resume this question. Check the original workspace and provider, then send a new question.";
+        for (const tool of state.messages.find(
+          (item) => item.id === pending.draft_id,
+        )?.tools ?? [])
+          if (tool.status === "running") tool.status = "failed";
+        persist();
+      }
+      publish(true);
+    } finally {
+      recovering = false;
     }
   }
 
@@ -854,7 +1228,142 @@ export function createAssistantService(options: {
     })();
   }
 
+  async function validatePreparedTask(
+    prepared: PreparedTask,
+    signal?: AbortSignal,
+  ) {
+    signal?.throwIfAborted();
+    const allowed = new Set(state.config.allowed_workspaces.map(refKey));
+    if (
+      !prepared.targets.length ||
+      !context.restoreScope ||
+      prepared.targets.some((target) => !allowed.has(refKey(target)))
+    )
+      throw new Error("The original task permission is unavailable.");
+    await context.restoreScope(prepared.targets, signal);
+    const available = await driver.catalog(prepared.config.credential_source);
+    signal?.throwIfAborted();
+    if (
+      disposed ||
+      prepared.targets.some(
+        (target) =>
+          !new Set(state.config.allowed_workspaces.map(refKey)).has(
+            refKey(target),
+          ),
+      ) ||
+      !available.providers.some(
+        (provider) =>
+          provider.id === prepared.config.provider && provider.configured,
+      ) ||
+      !available.models.some(
+        (model) =>
+          model.provider === prepared.config.provider &&
+          model.id === prepared.config.model,
+      )
+    )
+      throw new Error("The original task model or permission is unavailable.");
+  }
+  async function prepareTask(
+    value: unknown,
+    signal?: AbortSignal,
+    capturedTurn?: AssistantWorkspace[],
+  ): Promise<PreparedTask> {
+    const input = validateTaskInput(value);
+    const allowed = new Set(state.config.allowed_workspaces.map(refKey));
+    const turn = capturedTurn ? new Set(capturedTurn.map(refKey)) : allowed;
+    if (
+      input.scope.some(
+        (ref) => !allowed.has(refKey(ref)) || !turn.has(refKey(ref)),
+      )
+    )
+      throw new Error("Choose an authorized task scope.");
+    if (!context.recoveryScope || !context.restoreScope)
+      throw new Error(
+        "These workspace connections do not support safe scheduled tasks.",
+      );
+    const selected = new Set(input.scope.map(refKey));
+    const original =
+      capturedTurn ?? (await context.captureScope(input.scope, signal));
+    const targets = (await context.recoveryScope(original, signal)).filter(
+      (target) => selected.has(refKey(target)),
+    );
+    if (targets.length !== input.scope.length)
+      throw new Error(
+        "These workspace connections do not support safe scheduled tasks.",
+      );
+    const workspaces = await context.restoreScope(targets, signal);
+    const prepared: PreparedTask = {
+      input,
+      targets,
+      workspaces,
+      config: {
+        ...structuredClone(state.config),
+        allowed_workspaces: structuredClone(input.scope),
+      },
+    };
+    await validatePreparedTask(prepared, signal);
+    return prepared;
+  }
+  if (!options.taskRun) {
+    tasks = createAssistantTasks({
+      directory,
+      publish: () => publish(true),
+      validate: validatePreparedTask,
+      child: (taskRun, childDirectory, onSnapshot) => {
+        const child = createAssistantService({
+          directory: childDirectory,
+          context: baseContext,
+          taskRun,
+          globalAllowed: () => state.config.allowed_workspaces,
+          driver:
+            options.createDriver?.(childDirectory, directory) ??
+            createPiDriver(childDirectory, undefined, directory),
+          publish: onSnapshot,
+        });
+        return {
+          async start(recover) {
+            if (recover && child.peek().running) await child.resume();
+            else
+              await child.handle("send", {
+                request_id: taskRun.id,
+                text: taskRun.input.prompt,
+              });
+          },
+          resume: () => child.resume(),
+          stop: async () => {
+            await child.handle("stop", {});
+          },
+          action: async (method, actionId) => {
+            await child.handle(`action.${method}`, { action_id: actionId });
+          },
+          snapshot: child.peek,
+          dispose: child.dispose,
+        };
+      },
+    });
+    if (tasks.invalid())
+      state.error = "The saved Ranger tasks could not be loaded.";
+    else
+      for (const message of state.messages)
+        for (const proposal of message.task_proposals ?? [])
+          if (proposal.status === "cancelled")
+            tasks.cancelProposal(proposal.id);
+  }
+
   return {
+    async resume() {
+      await resume();
+      await tasks?.resume();
+    },
+    peek: current,
+    async taskDetail(params) {
+      if (disposed || !tasks) throw new Error("Ranger tasks unavailable");
+      if (
+        Object.keys(params).some((key) => key !== "task_id" && key !== "run_id")
+      )
+        throw new Error("Task detail accepts only task and run identifiers.");
+      return tasks.detail(params.task_id, params.run_id);
+    },
     async snapshot(): Promise<AssistantSnapshot> {
       if (disposed) throw new Error("Ranger unavailable");
       try {
@@ -870,6 +1379,80 @@ export function createAssistantService(options: {
     ): Promise<AssistantSnapshot> {
       if (disposed) throw new Error("Ranger unavailable");
       method = method.replace(/^bridge\.assistant\./, "");
+      if (method.startsWith("task.")) {
+        if (!tasks) throw new Error("Nested scheduled tasks are unavailable.");
+        const operation = method.slice(5);
+        if (operation === "create") {
+          const { request_id, ...input } = params;
+          await tasks.create(
+            await prepareTask(input),
+            string(request_id, "task request identifier"),
+          );
+        } else if (operation === "update") {
+          const { task_id, ...input } = params;
+          await tasks.update(task_id, await prepareTask(input));
+        } else if (operation === "delete") {
+          if (Object.keys(params).some((key) => key !== "task_id"))
+            throw new Error("Task deletion accepts only the task identifier.");
+          tasks.delete(params.task_id);
+        } else if (
+          ["pause", "resume", "cancel", "run_now", "stop"].includes(operation)
+        ) {
+          if (Object.keys(params).some((key) => key !== "task_id"))
+            throw new Error("Task control accepts only the task identifier.");
+          await tasks.control(
+            operation as "pause" | "resume" | "cancel" | "run_now" | "stop",
+            params.task_id,
+          );
+        } else if (
+          operation === "confirm_proposal" ||
+          operation === "cancel_proposal"
+        ) {
+          if (Object.keys(params).some((key) => key !== "proposal_id"))
+            throw new Error(
+              "Task confirmation accepts only the proposal identifier.",
+            );
+          const id = string(params.proposal_id, "task proposal identifier");
+          const proposal = state.messages
+            .flatMap((message) => message.task_proposals ?? [])
+            .find((entry) => entry.id === id);
+          if (!proposal)
+            throw new Error("This task proposal is no longer available.");
+          if (proposal.status === "pending") {
+            if (operation === "confirm_proposal")
+              await tasks.confirmProposal(id);
+            else tasks.cancelProposal(id);
+            Object.assign(proposal, tasks.proposal(id));
+            // Confirmation may happen while this question is still streaming.
+            // Keep its durable pointer until the admitted run has completed.
+            if (!state.running) entries = [];
+            try {
+              persist();
+            } catch {
+              state.error =
+                "The task receipt was saved, but the chat could not be updated.";
+            }
+            publish(true);
+          }
+        } else if (
+          operation === "action.confirm" ||
+          operation === "action.cancel"
+        ) {
+          if (
+            Object.keys(params).some(
+              (key) => !["task_id", "run_id", "action_id"].includes(key),
+            )
+          )
+            throw new Error("Task actions accept only target identifiers.");
+          await tasks.action(
+            operation === "action.confirm" ? "confirm" : "cancel",
+            params.task_id,
+            params.run_id,
+            params.action_id,
+          );
+        } else throw new Error("Unknown Ranger task method");
+        return current();
+      }
       switch (method) {
         case "get":
           try {
@@ -890,7 +1473,7 @@ export function createAssistantService(options: {
             const added = next.allowed_workspaces.filter(
               (ref) => !existing.has(refKey(ref)),
             );
-            if (added.length) await options.context.captureScope(added);
+            if (added.length) await context.captureScope(added);
             const nextCatalog = await driver.catalog(next.credential_source);
             if (disposed) throw new Error("Ranger unavailable");
             if (
@@ -927,6 +1510,7 @@ export function createAssistantService(options: {
                 entries = [];
               state.error = null;
             });
+            await tasks?.revalidate();
             publish(true);
           } catch {
             throw new Error(
@@ -940,7 +1524,16 @@ export function createAssistantService(options: {
         case "send":
           await send(params);
           break;
-        case "stop":
+        case "stop": {
+          const waiting = awaitingRecovery;
+          if (activeRun) {
+            // Persist cancellation intent before touching the running harness.
+            // A crash during abort must not resume a question the user stopped.
+            saveChange(() => {
+              activeRun = undefined;
+              entries = [];
+            });
+          }
           turnController?.abort();
           try {
             await driver.stop();
@@ -948,7 +1541,19 @@ export function createAssistantService(options: {
             throw new Error("Ranger could not be stopped.");
           }
           await run;
+          if (waiting) {
+            awaitingRecovery = false;
+            state.running = false;
+            state.error = null;
+            turnController = undefined;
+            entries = [];
+            for (const tool of state.messages.at(-1)?.tools ?? [])
+              if (tool.status === "running") tool.status = "failed";
+            persist();
+            publish(true);
+          }
           break;
+        }
         case "new_session":
           idle();
           saveChange(() => {
@@ -1034,8 +1639,9 @@ export function createAssistantService(options: {
       disposed = true;
       if (timer) clearTimeout(timer);
       authController?.abort();
-      turnController?.abort();
+      await tasks?.dispose();
       await driver.dispose();
+      turnController?.abort();
       await Promise.allSettled(
         [run, authWork, actionWork].filter(
           (entry): entry is Promise<void> => !!entry,

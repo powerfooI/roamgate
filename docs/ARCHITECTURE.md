@@ -373,7 +373,7 @@ metadata unknown without failing the list. There is no remote-to-local fallback.
 
 ## Ranger
 
-The bridge owns one Pi SDK assistant service, independent of the selected Herdr
+The bridge owns one Pi Durable assistant service, independent of the selected Herdr
 connection. Authenticated browsers share its configuration, saved conversations,
 active conversation, and single active turn. `bridge.assistant.*` RPC and dedicated
 assistant snapshot pushes are
@@ -463,17 +463,66 @@ while keeping the current global configuration. New chats and switches require a
 idle service and retire pending action previews; archived actions never replay.
 Snapshots include the active session ID and summaries for the history list. A
 send may include that session ID to reject a stale browser's submission after
-another device changes the active conversation. A bridge restart restores saved
-history but does not restart an interrupted turn. Unsent drafts stay in
-browser-tab memory, keyed by conversation.
+another device changes the active conversation. The service records an admitted
+run before submitting it to a persistent Pi Durable conversation. Reopening the
+bridge resumes the same request without a browser resending it. Graceful shutdown
+pauses work; **Stop** explicitly aborts it. Recovery waits for the original
+connections, verifies their configured endpoint fingerprints and Herdr boot IDs,
+and checks workspace directory/worktree identities before acquiring fresh leases.
+Changed or unsupported identities, removed permissions, and unavailable original
+models prevent automatic recovery. Unsent drafts stay in browser-tab memory,
+keyed by conversation.
+
+Completed tool results are retained. Interrupted reads may replay after scope
+validation; proposal tools are not replay-safe. Confirmed operations retain their
+existing receipt and uncertainty rules and are never automatically repeated.
+Interrupted model streams are regenerated; aborted partial answers are excluded
+from the completed answer displayed in the chat.
 
 Each retained transcript is limited to the newest 80 messages and 1 MB of serialized
 UTF-8 data. Answers are capped at 32,000 characters, 64 tool activities, and 64
-sources each. Retained model context above 1 MB is cleared before another turn;
-the displayed transcript can remain available after that reset. The active state
+sources each. Durable conversations compact model context while retaining the original
+entries on disk. The active state
 and history summaries live in `state.json`; inactive conversations are stored in
 private `sessions/<UUID>.json` files. Existing single-conversation state is
-migrated without clearing its messages.
+migrated without clearing its messages. Private
+`durable/<UUID>/execution.sqlite` databases use Pi Durable's SQLite backend to
+hold execution checkpoints, transcripts, and tool results; `state.json` retains
+their active context reference and pending run. SQLite uses WAL mode and
+`synchronous = FULL` with a process ownership lock. Missing or invalid execution
+stores cannot create replacement contexts.
+There is no automatic deletion or aggregate disk quota
+for saved conversations or durable stores, including contexts retired by scope
+changes. One bridge process must own an assistant data directory.
+
+Scheduled tasks are independent of chat sessions. A confirmed form or chat
+proposal persists the exact prompt, scope, model configuration, original
+endpoint/Herdr/workspace identities, and next deadline. Every admission is saved
+before its isolated Ranger service starts. `tasks.sqlite` stores tasks, runs,
+proposals and deduplication records in separate queryable tables. Each state
+change commits in one transaction before being published; a failed save rolls
+back in-memory changes and pauses scheduling. Schema creation is transactional,
+and invalid databases disable scheduling instead of clearing saved tasks.
+Each run uses the ordinary send,
+durable resume, and Stop paths with its own transcript and execution directory;
+credential lookup remains in the main assistant directory. Runs verify the
+original identities and current global workspace permissions before reading or
+proposing operations. Schedule execution never confirms a management operation.
+
+One scheduled model run is admitted at a time; interactive chat has a separate
+service. A run waiting for operation confirmation retains its service and blocks
+new runs of the same task, while other tasks can proceed. Restart cancels those
+previews under the ordinary receipt rules. A task has at most one outstanding
+run; overdue occurrences are combined rather than replayed in a backlog.
+Interval schedules preserve their cadence, daily schedules use explicit IANA
+timezones (skip gaps, first overlap occurrence), and one-time schedules admit
+their scheduled occurrence only once. Manual runs do not resume a paused task
+or change its schedule. Pause leaves current work running; Stop ends only the
+current run; Cancel stops it and disables future admissions. Editing preserves
+paused status.
+Cancelled tasks can be deleted. Up to 50 tasks and the latest 20 runs per task are
+retained. List snapshots contain task and run summaries; full run transcripts are
+fetched separately through `bridge.assistant.task.get`.
 
 ## Task notifications
 

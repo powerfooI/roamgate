@@ -218,8 +218,33 @@ The conversation stays available when switching workspaces or connections.
 
 The bridge stores saved conversations and one active chat shared by its
 authenticated browsers/devices; messages survive bridge restarts. A reconnect
-fetches current progress without resending a question. Unsent drafts stay in the
+fetches current progress without resending a question. Unfinished questions can
+resume after a bridge restart once the original connections and workspace
+identities have been verified. Stopping the bridge pauses a question; **Stop**
+cancels it. Confirmed management operations are never automatically replayed.
+Unsent drafts stay in the
 current browser tab's memory, separately for each conversation.
+The **Chat / Tasks** switch keeps scheduled work separate from conversations.
+The Chat toolbar provides direct **History** and **New chat** buttons.
+
+Create a task in **Tasks**, or ask Ranger to propose a schedule and confirm its
+preview. Schedules support one UTC timestamp, a daily time in an explicit
+timezone, or an interval in whole minutes. The task fixes its workspace scope and
+model at creation. It runs with the browser closed and retains separate results
+and tool activity for each run; reopening Tasks shows the current progress.
+Daily schedules skip nonexistent daylight-saving times and run only once at a
+repeated time. Missed occurrences are combined into one run after restart.
+
+**Pause** prevents future runs without interrupting the current run.
+**Stop run** ends only the current run. **Cancel task** ends current work and
+future scheduling while preserving its history. **Run now** starts an extra run;
+paused tasks stay paused after a manual run or an edit. Cancelled tasks can be
+deleted with their history. Each task retains the latest 20 runs, with at most 50
+stored tasks.
+Task plans, run receipts and durable execution data are persisted in SQLite on
+the bridge host.
+Automatic runs may read and propose operations; management operations still need
+confirmation in the run details. Task execution does not replace the active chat.
 Workspace permissions cover both reads and confirmed management operations.
 Ordinary Roamgate access still grants the
 [administrative authority](SECURITY.md#trust-model) described by its trust model.

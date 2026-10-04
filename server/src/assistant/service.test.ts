@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import {
   mkdtempSync,
   mkdirSync,
@@ -16,7 +17,10 @@ import type {
   AssistantWorkspace,
 } from "../../../shared/assistant";
 import { isAssistantSnapshot } from "../../../shared/assistant";
-import type { AssistantContext } from "./context";
+import {
+  type AssistantContext,
+  AssistantRecoveryNotReadyError,
+} from "./context";
 import { type AssistantDriver, createPiDriver } from "./pi-driver";
 import { createAssistantService } from "./service";
 
@@ -46,7 +50,10 @@ const configured = {
 };
 const temporary: string[] = [];
 const services: ReturnType<typeof createAssistantService>[] = [];
-function setup(overrides: Partial<AssistantDriver> = {}) {
+function setup(
+  overrides: Partial<AssistantDriver> = {},
+  childDriver?: () => AssistantDriver,
+) {
   const directory = mkdtempSync(join(tmpdir(), "roamgate-assistant-"));
   temporary.push(directory);
   const snapshots: AssistantSnapshot[] = [];
@@ -93,6 +100,7 @@ function setup(overrides: Partial<AssistantDriver> = {}) {
     directory,
     context,
     driver,
+    createDriver: childDriver ? () => childDriver() : undefined,
     publish: (snapshot) => snapshots.push(snapshot),
   });
   services.push(service);
@@ -107,8 +115,293 @@ async function until(check: () => boolean) {
 }
 afterEach(async () => {
   await Promise.all(services.splice(0).map((service) => service.dispose()));
+  jest.useRealTimers();
   for (const path of temporary.splice(0))
     rmSync(path, { recursive: true, force: true });
+});
+
+function stableTaskIdentity(context: AssistantContext) {
+  context.recoveryScope = async (captured) =>
+    captured.map((ref) => ({
+      connection_id: ref.connection_id,
+      workspace_id: ref.workspace_id,
+      endpoint_fingerprint: "a".repeat(64),
+      workspace_identity: "b".repeat(64),
+      herdr_boot_id: "original-server",
+    }));
+  context.restoreScope = async (targets) =>
+    targets.map((target) => ({
+      ...workspace,
+      workspace_id: target.workspace_id,
+    }));
+}
+async function flushTasks() {
+  for (let index = 0; index < 60; index++) await Promise.resolve();
+}
+
+describe("Ranger scheduled task service", () => {
+  test("task tools filter the current turn, freeze proposals and require explicit confirmation", async () => {
+    let listed = "";
+    const pointer = [{ type: "ranger-durable", id: randomUUID() }];
+    const done = Promise.withResolvers<unknown[]>();
+    const input = {
+      title: "Check later",
+      prompt: "Read verified status",
+      scope: configured.allowed_workspaces,
+      schedule: {
+        type: "once",
+        at: new Date(Date.now() + 3_600_000).toISOString(),
+      },
+    };
+    const f = setup({
+      run: async (turn) => {
+        turn.checkpoint!(pointer);
+        listed = (await turn.task!("list", {})).text;
+        await expect(
+          turn.task!("create", {
+            ...input,
+            scope: [{ connection_id: "local", workspace_id: "other" }],
+          }),
+        ).rejects.toThrow("authorized");
+        await turn.task!("create", input);
+        return done.promise;
+      },
+      dispose: async () => {
+        done.resolve(pointer);
+      },
+    });
+    stableTaskIdentity(f.context);
+    f.context.captureScope = async (refs) =>
+      refs.map((ref) => ({ ...workspace, workspace_id: ref.workspace_id }));
+    await f.service.handle("configure", {
+      config: {
+        ...configured,
+        allowed_workspaces: [
+          ...configured.allowed_workspaces,
+          { connection_id: "local", workspace_id: "other" },
+        ],
+      },
+    });
+    await f.service.handle("task.create", {
+      ...input,
+      request_id: randomUUID(),
+    });
+    await f.service.handle("task.create", {
+      ...input,
+      title: "Other private task",
+      scope: [{ connection_id: "local", workspace_id: "other" }],
+      request_id: randomUUID(),
+    });
+    await f.service.handle("send", {
+      text: "Schedule a check",
+      request_id: "proposal-turn",
+      scope: configured.allowed_workspaces,
+    });
+    await until(
+      () => !!f.service.peek().messages.at(-1)?.task_proposals?.length,
+    );
+    const before = f.service.peek();
+    expect(before.error).toBeNull();
+    expect(before.tasks).toHaveLength(2);
+    expect(before.messages.at(-1)?.task_proposals?.[0]?.status).toBe("pending");
+    expect(listed).toContain("Check later");
+    expect(listed).not.toContain("Other private task");
+    expect(listed).not.toContain("endpoint_fingerprint");
+    expect(JSON.parse(listed)).toMatchObject({
+      time_zone: expect.any(String),
+      now: expect.any(String),
+    });
+    const id = before.messages.at(-1)!.task_proposals![0]!.id;
+    await expect(
+      f.service.handle("task.confirm_proposal", {
+        proposal_id: id,
+        prompt: "Changed by browser",
+      }),
+    ).rejects.toThrow("only");
+    await Promise.all([
+      f.service.handle("task.confirm_proposal", { proposal_id: id }),
+      f.service.handle("task.confirm_proposal", { proposal_id: id }),
+    ]);
+    const confirmed = f.service.peek();
+    expect(confirmed.tasks).toHaveLength(3);
+    expect(confirmed.messages.at(-1)?.task_proposals?.[0]?.status).toBe(
+      "confirmed",
+    );
+    expect(confirmed.tasks?.[0]?.prompt).toBe(input.prompt);
+    expect(isAssistantSnapshot(confirmed)).toBe(true);
+    const saved = JSON.parse(
+      readFileSync(join(f.directory, "state.json"), "utf8"),
+    );
+    expect(saved.messages.at(-1).task_proposals[0].status).toBe("confirmed");
+    expect(saved.entries).toEqual(pointer);
+    expect(saved.active_run.request_id).toBe("proposal-turn");
+    expect(confirmed.running).toBe(true);
+    done.resolve(pointer);
+    await until(() => !f.service.peek().running);
+  });
+
+  test("an isolated child can run beside the main chat and waits for a human before a workspace write", async () => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    const mainDone = Promise.withResolvers<unknown[]>();
+    const childDone = Promise.withResolvers<unknown[]>();
+    const childInputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    let writes = 0;
+    const childDriver: AssistantDriver = {
+      catalog: async () => catalog,
+      login: async () => {},
+      run: async (input) => {
+        childInputs.push(input);
+        input.signal.addEventListener("abort", () => childDone.resolve([]));
+        return childDone.promise;
+      },
+      stop: async () => {
+        childDone.resolve([]);
+      },
+      dispose: async () => {
+        childDone.resolve([]);
+      },
+    };
+    const f = setup(
+      {
+        run: async (input) => {
+          input.message("Main chat answer");
+          return mainDone.promise;
+        },
+        dispose: async () => {
+          mainDone.resolve([]);
+        },
+      },
+      () => childDriver,
+    );
+    stableTaskIdentity(f.context);
+    f.context.prepareAction = async () => ({
+      preview: {
+        ...workspace,
+        workspace_label: workspace.label,
+        kind: "send_prompt",
+        params: { prompt: "Inspect" },
+        summary: "Send Inspect",
+      },
+      execute: async () => {
+        writes++;
+        return { status: "succeeded", detail: "Accepted" };
+      },
+    });
+    await f.service.handle("configure", { config: configured });
+    const created = await f.service.handle("task.create", {
+      request_id: randomUUID(),
+      title: "Independent run",
+      prompt: "Read status",
+      scope: configured.allowed_workspaces,
+      schedule: { type: "interval", minutes: 1 },
+    });
+    const taskId = created.tasks![0]!.id;
+    await f.service.resume();
+    await f.service.handle("send", {
+      text: "Continue main chat",
+      request_id: "main-busy",
+    });
+    await f.service.handle("task.run_now", { task_id: taskId });
+    jest.advanceTimersByTime(0);
+    await flushTasks();
+    expect(childInputs).toHaveLength(1);
+    expect(childInputs[0]!.task).toBeUndefined();
+    expect(f.service.peek().running).toBe(true);
+    expect((await childInputs[0]!.read("status", {})).sources).toHaveLength(1);
+    await childInputs[0]!.propose!("send_prompt", {
+      connection_id: "local",
+      workspace_id: "ws",
+      pane_id: "pane",
+      prompt: "Inspect",
+    });
+    childInputs[0]!.message("Scheduled answer");
+    childDone.resolve([]);
+    await flushTasks();
+    const waiting = await f.service.taskDetail({
+      task_id: taskId,
+      run_id: childInputs[0]!.requestId,
+    });
+    expect(waiting.task.current_run?.status).toBe("waiting");
+    expect(waiting.run?.messages.at(-1)?.text).toBe("Scheduled answer");
+    expect(f.service.peek().messages.at(-1)?.text).toBe("Main chat answer");
+    expect(writes).toBe(0);
+    const action = waiting.run!.messages.at(-1)!.actions![0]!;
+    await f.service.handle("task.action.confirm", {
+      task_id: taskId,
+      run_id: childInputs[0]!.requestId,
+      action_id: action.id,
+    });
+    await flushTasks();
+    expect(writes).toBe(1);
+    expect(
+      (await f.service.taskDetail({ task_id: taskId })).task.last_run?.status,
+    ).toBe("succeeded");
+    mainDone.resolve([]);
+    await flushTasks();
+  });
+
+  test("workspace identity reuse and global permission tightening fail closed throughout a child read", async () => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    const done = Promise.withResolvers<unknown[]>();
+    const readDone = Promise.withResolvers<{ text: string; sources: [] }>();
+    let input: Parameters<AssistantDriver["run"]>[0] | undefined;
+    const childDriver: AssistantDriver = {
+      catalog: async () => catalog,
+      login: async () => {},
+      run: async (value) => {
+        input = value;
+        value.signal.addEventListener("abort", () => done.resolve([]));
+        return done.promise;
+      },
+      stop: async () => {
+        done.resolve([]);
+      },
+      dispose: async () => {
+        done.resolve([]);
+      },
+    };
+    const f = setup({}, () => childDriver);
+    stableTaskIdentity(f.context);
+    await f.service.handle("configure", { config: configured });
+    const taskId = (
+      await f.service.handle("task.create", {
+        request_id: randomUUID(),
+        title: "Scope guard",
+        prompt: "Inspect",
+        scope: configured.allowed_workspaces,
+        schedule: { type: "interval", minutes: 1 },
+      })
+    ).tasks![0]!.id;
+    await f.service.resume();
+    await f.service.handle("task.run_now", { task_id: taskId });
+    jest.advanceTimersByTime(0);
+    await flushTasks();
+    const restore = f.context.restoreScope!;
+    f.context.restoreScope = async () => {
+      throw new Error("Same workspace ID now points at a different repository");
+    };
+    await expect(input!.read("status", {})).rejects.toThrow();
+    expect(f.reads).toHaveLength(0);
+    await expect(
+      f.service.handle("task.run_now", { task_id: taskId }),
+    ).rejects.toThrow();
+    f.context.restoreScope = restore;
+    f.context.read = async () => readDone.promise;
+    const read = input!.read("status", {});
+    await flushTasks();
+    await f.service.handle("configure", {
+      config: { ...configured, allowed_workspaces: [] },
+    });
+    readDone.resolve({ text: "New private contents", sources: [] });
+    await expect(read).rejects.toThrow();
+    expect(input!.signal.aborted).toBe(true);
+    expect(
+      (await f.service.taskDetail({ task_id: taskId })).task.last_run?.status,
+    ).toBe("stopped");
+    await expect(
+      f.service.handle("task.resume", { task_id: taskId }),
+    ).rejects.toThrow();
+  });
 });
 
 describe("bridge-global assistant", () => {
@@ -1203,76 +1496,247 @@ describe("bridge-global assistant", () => {
     ).toEqual([]);
   });
 
-  test("Pi sessions expose only fixed workspace tools and no discovered resources", async () => {
-    const pi = await import("@earendil-works/pi-coding-agent");
-    let captured:
-      | import("@earendil-works/pi-coding-agent").CreateAgentSessionOptions
-      | undefined;
-    let prompts = 0;
-    const driver = createPiDriver(
-      "/unused-private-assistant-directory",
-      async () =>
-        ({
-          ...pi,
-          ModelRuntime: {
-            create: async (options: unknown) => {
-              expect(options).toMatchObject({
-                modelsPath: null,
-                refreshOnCreate: false,
-                allowModelNetwork: false,
-              });
-              return { getModel: () => ({ provider: "test", id: "model" }) };
-            },
-          },
-          createAgentSession: async (
-            options: import("@earendil-works/pi-coding-agent").CreateAgentSessionOptions,
-          ) => {
-            captured = options;
-            return {
-              session: {
-                subscribe: () => () => {},
-                prompt: async () => {
-                  prompts++;
-                },
-                waitForIdle: async () => {},
-                abort: async () => {},
-                dispose: () => {},
-              },
-            };
-          },
-        }) as unknown as typeof pi,
-    );
-    const input: Parameters<AssistantDriver["run"]>[0] = {
-      config: { ...configured, credential_source: "assistant" },
-      entries: [],
-      text: "Read status",
-      signal: new AbortController().signal,
-      read: async () => ({ text: "status" }),
-      delta: () => {},
-      message: () => {},
-      tool: () => {},
-      error: () => {},
-    };
-    await driver.run(input);
-    expect(prompts).toBe(1);
-    expect(captured?.noTools).toBe("builtin");
-    expect(captured?.tools).toEqual([
-      "workspace_status",
-      "workspace_history",
-      "workspace_diff",
-      "workspace_terminal",
-    ]);
-    expect(captured?.resourceLoader?.getAgentsFiles()).toEqual({
-      agentsFiles: [],
+  test("persists the admitted run before execution and resumes its original model with fresh leases", async () => {
+    const closed = Promise.withResolvers<void>();
+    const f = setup({
+      run: async (input) => {
+        input.checkpoint?.([{ type: "ranger-durable", id: "context" }]);
+        input.replace?.("Interrupted partial");
+        await closed.promise;
+        return input.entries;
+      },
+      dispose: async () => {
+        closed.resolve();
+      },
     });
-    expect(captured?.resourceLoader?.getSkills().skills).toEqual([]);
-    expect(captured?.resourceLoader?.getExtensions().extensions).toEqual([]);
-    const stopped = new AbortController();
-    stopped.abort();
-    await expect(
-      driver.run({ ...input, signal: stopped.signal }),
-    ).rejects.toThrow();
-    expect(prompts).toBe(1);
-    await driver.dispose();
+    const targets = [
+      {
+        connection_id: "local",
+        workspace_id: "ws",
+        endpoint_fingerprint: "a".repeat(64),
+        workspace_identity: "b".repeat(64),
+        herdr_boot_id: "same-herdr",
+      },
+    ];
+    f.context.recoveryScope = async () => targets;
+    await f.service.handle("configure", configured);
+    await f.service.handle("send", {
+      request_id: "durable",
+      text: "Read status",
+    });
+    await until(
+      () =>
+        JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8"))
+          .entries[0]?.type === "ranger-durable",
+    );
+    const admitted = JSON.parse(
+      readFileSync(join(f.directory, "state.json"), "utf8"),
+    );
+    expect(admitted.active_run.request_id).toBe("durable");
+    expect(admitted.active_run.config).toEqual(configured);
+    await f.service.dispose();
+    expect(
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8"))
+        .active_run,
+    ).toBeDefined();
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    let restored = false;
+    const driver: AssistantDriver = {
+      ...f.driver,
+      run: async (input) => {
+        expect(restored).toBe(true);
+        inputs.push(input);
+        input.replace?.("Recovered answer");
+        await input.read("status", {});
+        return input.entries;
+      },
+    };
+    f.context.restoreScope = async (saved) => {
+      expect(saved).toEqual(targets);
+      restored = true;
+      return [{ ...workspace, runtime_generation: 8 }];
+    };
+    const service = createAssistantService({
+      directory: f.directory,
+      context: f.context,
+      driver,
+      publish: (snapshot) => f.snapshots.push(snapshot),
+    });
+    services.push(service);
+    await service.resume();
+    await until(() => f.snapshots.at(-1)?.running === false);
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]).toMatchObject({
+      recover: true,
+      requestId: "durable",
+      config: configured,
+    });
+    expect(f.reads[0]?.scope[0]?.runtime_generation).toBe(8);
+    const snapshot = await service.snapshot();
+    expect(
+      snapshot.messages.filter((message) => message.role === "user"),
+    ).toHaveLength(1);
+    expect(snapshot.messages[1]?.text).toBe("Recovered answer");
+    expect(
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8"))
+        .active_run,
+    ).toBeUndefined();
+    await service.handle("send", { request_id: "durable", text: "Duplicate" });
+    expect(inputs).toHaveLength(1);
   });
+
+  test("Stop durably revokes recovery before awaiting the driver's abort", async () => {
+    const completed = Promise.withResolvers<void>();
+    const f = setup({
+      run: async (input) => {
+        await completed.promise;
+        return input.entries;
+      },
+      dispose: async () => {
+        completed.resolve();
+      },
+    });
+    f.driver.stop = async () => {
+      const saved = JSON.parse(
+        readFileSync(join(f.directory, "state.json"), "utf8"),
+      );
+      expect(saved.active_run).toBeUndefined();
+      expect(saved.entries).toEqual([]);
+      completed.resolve();
+    };
+    await f.service.handle("configure", configured);
+    await f.service.handle("send", {
+      request_id: "cancel-before-abort",
+      text: "Read",
+    });
+    expect(
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8"))
+        .active_run,
+    ).toBeDefined();
+    await f.service.handle("stop", {});
+    expect((await f.service.snapshot()).running).toBe(false);
+  });
+
+  test.each(["removed permission", "changed endpoint", "unsupported identity"])(
+    "rejects recovery for %s without starting a model",
+    async (reason) => {
+      const closed = Promise.withResolvers<void>();
+      const f = setup({
+        run: async (input) => {
+          await closed.promise;
+          return input.entries;
+        },
+        dispose: async () => {
+          closed.resolve();
+        },
+      });
+      f.context.recoveryScope = async () =>
+        reason === "unsupported identity"
+          ? []
+          : [
+              {
+                ...workspace,
+                endpoint_fingerprint: "a".repeat(64),
+                workspace_identity: "b".repeat(64),
+                herdr_boot_id: "same",
+              },
+            ];
+      await f.service.handle("configure", configured);
+      await f.service.handle("send", { request_id: "blocked", text: "Read" });
+      await f.service.dispose();
+      if (reason === "removed permission") {
+        const path = join(f.directory, "state.json");
+        const state = JSON.parse(readFileSync(path, "utf8"));
+        state.config.allowed_workspaces = [];
+        writeFileSync(path, JSON.stringify(state));
+      }
+      let starts = 0;
+      f.context.restoreScope = async () => {
+        throw new Error("Target changed");
+      };
+      const service = createAssistantService({
+        directory: f.directory,
+        context: f.context,
+        driver: {
+          ...f.driver,
+          run: async () => {
+            starts++;
+            return [];
+          },
+        },
+        publish: () => {},
+      });
+      services.push(service);
+      await service.resume();
+      expect(starts).toBe(0);
+      const state = await service.snapshot();
+      expect(state.running).toBe(false);
+      expect(state.error).toContain("could not safely resume");
+    },
+  );
+
+  test.each([false, true])(
+    "waiting recovery can resume or be explicitly cancelled (cancel: %s)",
+    async (cancel) => {
+      const closed = Promise.withResolvers<void>();
+      const f = setup({
+        run: async (input) => {
+          input.tool("interrupted-read", "workspace_status", "running");
+          input.checkpoint?.(input.entries);
+          await closed.promise;
+          return input.entries;
+        },
+        dispose: async () => {
+          closed.resolve();
+        },
+      });
+      f.context.recoveryScope = async () => [
+        {
+          ...workspace,
+          endpoint_fingerprint: "a".repeat(64),
+          workspace_identity: "b".repeat(64),
+          herdr_boot_id: "same",
+        },
+      ];
+      await f.service.handle("configure", configured);
+      await f.service.handle("send", { request_id: "waiting", text: "Read" });
+      await f.service.dispose();
+      let starts = 0;
+      let ready = false;
+      f.context.restoreScope = async () => {
+        if (!ready) throw new AssistantRecoveryNotReadyError("Not ready");
+        return [workspace];
+      };
+      const service = createAssistantService({
+        directory: f.directory,
+        context: f.context,
+        driver: {
+          ...f.driver,
+          run: async () => {
+            starts++;
+            return [];
+          },
+        },
+        publish: () => {},
+      });
+      services.push(service);
+      await service.resume();
+      const waiting = await service.snapshot();
+      expect(waiting.running).toBe(true);
+      expect(waiting.error).toContain("Waiting");
+      expect(starts).toBe(0);
+      if (cancel) await service.handle("stop", {});
+      ready = true;
+      await Promise.all([service.resume(), service.resume()]);
+      expect(starts).toBe(cancel ? 0 : 1);
+      expect((await service.snapshot()).running).toBe(false);
+      expect((await service.snapshot()).messages.at(-1)?.tools[0]?.status).toBe(
+        "failed",
+      );
+      expect(
+        JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8"))
+          .active_run,
+      ).toBeUndefined();
+    },
+  );
 });

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   AssistantActionKind,
   AssistantSource,
@@ -30,6 +30,29 @@ type RuntimeLease = {
   generation: number;
   isCurrent(): boolean;
 };
+
+/** Private recovery metadata. Never include these identities in model context. */
+export type RecoveryTarget = AssistantWorkspaceRef & {
+  endpoint_fingerprint: string;
+  herdr_boot_id: string;
+  workspace_identity: string;
+};
+
+export class AssistantRecoveryNotReadyError extends Error {}
+
+function workspaceIdentity(workspace: Record<string, unknown>): string {
+  const worktree = isRecord(workspace.worktree) ? workspace.worktree : {};
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        workspace.cwd ?? null,
+        worktree.repo_key ?? null,
+        worktree.repo_root ?? null,
+        worktree.checkout_path ?? null,
+      ]),
+    )
+    .digest("hex");
+}
 
 function identifier(value: unknown, name: string): string {
   try {
@@ -72,10 +95,20 @@ function relativePath(value: unknown): string {
 export function createAssistantContext(args: {
   catalog(): { id: string; label: string }[];
   lease(connectionId: string): RuntimeLease | null;
+  /** SHA-256 of the configured endpoint, excluding labels and transient tunnels. */
+  recoveryFingerprint?(connectionId: string): string;
   createWorktree?: AssistantWorktreeCreator;
 }) {
   // Keep each turn's original leases, including runtime identity, out of model data.
   const scopes = new WeakMap<AssistantWorkspace[], Map<string, RuntimeLease>>();
+  const workspaceIdentities = new WeakMap<AssistantWorkspace[], string[]>();
+
+  function fingerprint(connectionId: string): string | undefined {
+    const value = args.recoveryFingerprint?.(connectionId);
+    if (value !== undefined && !/^[a-f0-9]{64}$/.test(value))
+      throw new Error("Ranger recovery endpoint identity is invalid");
+    return value;
+  }
 
   function assertCurrent(lease: RuntimeLease, signal?: AbortSignal) {
     signal?.throwIfAborted();
@@ -206,6 +239,7 @@ export function createAssistantContext(args: {
   async function captureScope(
     refs: AssistantWorkspaceRef[],
     signal?: AbortSignal,
+    recoveryTargets?: RecoveryTarget[],
   ): Promise<AssistantWorkspace[]> {
     signal?.throwIfAborted();
     if (
@@ -227,6 +261,8 @@ export function createAssistantContext(args: {
     const connections = args.catalog();
     const leases = new Map<string, RuntimeLease>();
     const captured: AssistantWorkspace[] = [];
+    const identities: string[] = [];
+    const checkedConnections = new Set<string>();
     const seen = new Set<string>();
     for (const ref of requested) {
       const connectionId = ref.connection_id;
@@ -236,10 +272,34 @@ export function createAssistantContext(args: {
       seen.add(key);
       const connection = connections.find((item) => item.id === connectionId);
       if (!connection) throw new Error(`Unknown connection ${connectionId}`);
+      const expected = recoveryTargets?.[captured.length];
+      if (
+        expected &&
+        fingerprint(connectionId) !== expected.endpoint_fingerprint
+      )
+        throw new Error("Ranger recovery endpoint changed");
       const lease = leases.get(connectionId) ?? args.lease(connectionId);
-      if (!lease) throw new Error(`Connection ${connectionId} is not ready`);
+      if (!lease) {
+        if (recoveryTargets)
+          throw new AssistantRecoveryNotReadyError(
+            `Connection ${connectionId} is not ready`,
+          );
+        throw new Error(`Connection ${connectionId} is not ready`);
+      }
       leases.set(connectionId, lease);
+      if (expected) {
+        if (!checkedConnections.has(connectionId)) {
+          const bootId = await recoveryIdentity(lease, signal);
+          if (!bootId || bootId !== expected.herdr_boot_id)
+            throw new Error("Ranger recovery server identity changed");
+          checkedConnections.add(connectionId);
+        }
+      }
       const item = await workspace(lease, workspaceId, signal);
+      const identity = workspaceIdentity(item);
+      if (expected && identity !== expected.workspace_identity)
+        throw new Error("Ranger recovery workspace changed");
+      identities.push(identity);
       captured.push(
         Object.freeze({
           connection_id: connectionId,
@@ -251,9 +311,104 @@ export function createAssistantContext(args: {
       );
     }
     for (const lease of leases.values()) assertCurrent(lease, signal);
+    for (const expected of recoveryTargets ?? [])
+      if (fingerprint(expected.connection_id) !== expected.endpoint_fingerprint)
+        throw new Error("Ranger recovery endpoint changed");
     Object.freeze(captured);
     scopes.set(captured, leases);
+    workspaceIdentities.set(captured, identities);
     return captured;
+  }
+
+  async function recoveryIdentity(lease: RuntimeLease, signal?: AbortSignal) {
+    if (!lease.runtime.recoveryIdentity) return null;
+    return readLeased(
+      lease,
+      () => lease.runtime.recoveryIdentity(signal),
+      "Ranger recovery server identity",
+      signal,
+    );
+  }
+
+  async function recoveryScope(
+    captured: AssistantWorkspace[],
+    signal?: AbortSignal,
+  ): Promise<RecoveryTarget[]> {
+    signal?.throwIfAborted();
+    const leases = scopes.get(captured);
+    const identities = workspaceIdentities.get(captured);
+    if (!leases || !identities || !captured.length)
+      throw new Error("Ranger workspace scope was not approved");
+    const targets: RecoveryTarget[] = [];
+    const bootIds = new Map<string, string>();
+    for (const [index, ref] of captured.entries()) {
+      const lease = leases.get(ref.connection_id)!;
+      assertCurrent(lease, signal);
+      const endpoint = fingerprint(ref.connection_id);
+      if (!endpoint) return [];
+      const bootId =
+        bootIds.get(ref.connection_id) ??
+        (await recoveryIdentity(lease, signal));
+      if (!bootId) return [];
+      bootIds.set(ref.connection_id, bootId);
+      if (
+        workspaceIdentity(await workspace(lease, ref.workspace_id, signal)) !==
+        identities[index]
+      )
+        throw new Error("Ranger recovery workspace changed");
+      targets.push({
+        connection_id: ref.connection_id,
+        workspace_id: ref.workspace_id,
+        endpoint_fingerprint: endpoint,
+        herdr_boot_id: bootId,
+        workspace_identity: identities[index]!,
+      });
+    }
+    for (const lease of leases.values()) assertCurrent(lease, signal);
+    for (const target of targets)
+      if (fingerprint(target.connection_id) !== target.endpoint_fingerprint)
+        throw new Error("Ranger recovery endpoint changed");
+    return targets;
+  }
+
+  async function restoreScope(
+    targets: RecoveryTarget[],
+    signal?: AbortSignal,
+  ): Promise<AssistantWorkspace[]> {
+    signal?.throwIfAborted();
+    if (
+      !Array.isArray(targets) ||
+      !targets.length ||
+      targets.length > ASSISTANT_MAX_WORKSPACES ||
+      !targets.every(
+        (target) =>
+          isRecord(target) &&
+          typeof target.endpoint_fingerprint === "string" &&
+          /^[a-f0-9]{64}$/.test(target.endpoint_fingerprint) &&
+          typeof target.workspace_identity === "string" &&
+          /^[a-f0-9]{64}$/.test(target.workspace_identity) &&
+          typeof target.herdr_boot_id === "string" &&
+          !!target.herdr_boot_id &&
+          target.herdr_boot_id.length <= 500,
+      )
+    )
+      throw new Error("Invalid Ranger recovery scope");
+    // Clone before awaiting: persisted targets cannot change during admission.
+    const expected = structuredClone(targets);
+    const connections = new Map<string, string>();
+    for (const target of expected) {
+      const identity = JSON.stringify([
+        target.endpoint_fingerprint,
+        target.herdr_boot_id,
+      ]);
+      if (
+        connections.has(target.connection_id) &&
+        connections.get(target.connection_id) !== identity
+      )
+        throw new Error("Inconsistent Ranger recovery connection identity");
+      connections.set(target.connection_id, identity);
+    }
+    return captureScope(expected, signal, expected);
   }
 
   async function read(
@@ -599,11 +754,23 @@ export function createAssistantContext(args: {
     });
   }
 
-  return { catalog, captureScope, read, prepareAction };
+  return {
+    catalog,
+    captureScope,
+    recoveryScope,
+    restoreScope,
+    read,
+    prepareAction,
+  };
 }
 
 export type AssistantContext = Omit<
   ReturnType<typeof createAssistantContext>,
-  "prepareAction"
+  "prepareAction" | "recoveryScope" | "restoreScope"
 > &
-  Partial<Pick<ReturnType<typeof createAssistantContext>, "prepareAction">>;
+  Partial<
+    Pick<
+      ReturnType<typeof createAssistantContext>,
+      "prepareAction" | "recoveryScope" | "restoreScope"
+    >
+  >;

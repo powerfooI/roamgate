@@ -21,6 +21,12 @@ export type ActionToolProposer = (
   params: Record<string, unknown>,
   signal?: AbortSignal,
 ) => Promise<WorkspaceToolResult>;
+export type TaskToolKind = "list" | "create";
+export type TaskToolHandler = (
+  kind: TaskToolKind,
+  params: Record<string, unknown>,
+  signal?: AbortSignal,
+) => Promise<WorkspaceToolResult>;
 
 export const workspaceTools = (
   ["status", "history", "diff", "terminal"] as const
@@ -76,6 +82,56 @@ const actionTarget = {
   connection_id: Type.String(),
   workspace_id: Type.String(),
 };
+
+export const taskTools = [
+  {
+    name: "list_ranger_tasks",
+    kind: "list",
+    label: "Read Ranger tasks",
+    description:
+      "List scheduled Ranger tasks in this turn's authorized scope and the current time and timezone. Use the current time before interpreting relative dates.",
+    parameters: Type.Object({}, { additionalProperties: false }),
+  },
+  {
+    name: "propose_ranger_task",
+    kind: "create",
+    label: "Propose a scheduled task",
+    description:
+      "Propose a Ranger task with an exact prompt, authorized workspace scope and schedule. A once schedule uses a future UTC ISO 8601 timestamp ending in Z. A daily schedule uses HH:mm and an IANA timezone; skipped DST times do not run and repeated times run once. An interval starts the given number of minutes after confirmation. Returns a pending preview: the task is enabled only when the user clicks Confirm. Scheduled tasks may read and propose operations; they never automatically confirm management actions. Ask the user if their schedule or timezone is ambiguous.",
+    parameters: Type.Object(
+      {
+        title: Type.String({ minLength: 1, maxLength: 100 }),
+        prompt: Type.String({ minLength: 1, maxLength: 32_000 }),
+        scope: Type.Array(
+          Type.Object(actionTarget, { additionalProperties: false }),
+          { minItems: 1, maxItems: 64 },
+        ),
+        schedule: Type.Union([
+          Type.Object(
+            { type: Type.Literal("once"), at: Type.String() },
+            { additionalProperties: false },
+          ),
+          Type.Object(
+            {
+              type: Type.Literal("interval"),
+              minutes: Type.Integer({ minimum: 1, maximum: 525600 }),
+            },
+            { additionalProperties: false },
+          ),
+          Type.Object(
+            {
+              type: Type.Literal("daily"),
+              time: Type.String({ pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }),
+              timezone: Type.String({ minLength: 1, maxLength: 100 }),
+            },
+            { additionalProperties: false },
+          ),
+        ]),
+      },
+      { additionalProperties: false },
+    ),
+  },
+] as const;
 
 export const actionTools = [
   {
@@ -205,6 +261,33 @@ export async function callActionTool(
   } catch {
     throw new Error(
       "Action proposal unavailable, stale, or outside the authorized scope.",
+    );
+  }
+}
+
+/** Task admission remains on the explicit confirmation path. */
+export async function callTaskTool(
+  name: string,
+  params: unknown,
+  handle: TaskToolHandler,
+  signal?: AbortSignal,
+): Promise<WorkspaceToolResult> {
+  const tool = taskTools.find((entry) => entry.name === name);
+  if (!tool) throw new Error("Unknown task tool.");
+  if (!Value.Check(tool.parameters, params))
+    throw new Error("Invalid task tool parameters.");
+  try {
+    signal?.throwIfAborted();
+    const result = await handle(
+      tool.kind,
+      params as Record<string, unknown>,
+      signal,
+    );
+    signal?.throwIfAborted();
+    return result;
+  } catch {
+    throw new Error(
+      "Task unavailable, invalid, or outside the authorized scope.",
     );
   }
 }
