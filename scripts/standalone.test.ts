@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, mkdir, rename, rm } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, rename, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import serverPackage from "../server/package.json";
 
@@ -9,7 +9,7 @@ async function checkStandalone(sourceMaps: boolean) {
   const dir = await mkdtemp(join(tmpdir(), "roamgate-standalone-"));
   const runtimeDir = join(dir, "runtime");
   const overrideDir = join(dir, "override");
-  const binary = join(
+  let binary = join(
     dir,
     process.platform === "win32" ? "roamgate.exe" : "roamgate",
   );
@@ -110,6 +110,33 @@ try {
     );
     expect(build.code, build.stderr).toBe(0);
     expect(await Bun.file(join(dir, "roamgate.map")).exists()).toBe(sourceMaps);
+    if (sourceMaps) {
+      const mode = (await stat(binary)).mode & 0o777;
+      const archive = join(dir, "debug.tar");
+      const packed = await run(
+        ["tar", "-C", dir, "-cf", archive, basename(binary), "roamgate.map"],
+        dir,
+      );
+      expect(packed.code, packed.stderr).toBe(0);
+      // Artifact downloads normalize the outer file's permissions to 0644.
+      await chmod(archive, 0o644);
+      const unpackedDir = join(dir, "unpacked-debug");
+      await mkdir(unpackedDir);
+      const unpacked = await run(
+        ["tar", "-C", unpackedDir, "-xf", archive],
+        dir,
+      );
+      expect(unpacked.code, unpacked.stderr).toBe(0);
+      binary = join(unpackedDir, basename(binary));
+      if (process.platform !== "win32") {
+        expect((await stat(binary)).mode & 0o777).toBe(mode);
+        expect(mode & 0o111).not.toBe(0);
+      }
+      expect(await Bun.file(join(unpackedDir, "roamgate.map")).exists()).toBe(
+        true,
+      );
+      await rm(join(unpackedDir, "roamgate.map"));
+    }
     await rename(join(dir, "public"), join(dir, "source-public"));
     await rename(join(dir, "src"), join(dir, "source-src"));
     await rm(join(dir, "roamgate.map"), { force: true });
@@ -166,7 +193,7 @@ test(
   45_000,
 );
 test(
-  "debug standalone retains source maps without original sources or sidecar",
+  "debug archive retains executable permissions and embedded source maps",
   () => checkStandalone(true),
   45_000,
 );
