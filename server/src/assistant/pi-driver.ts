@@ -95,7 +95,10 @@ export function createPiDriver(
           allowModelNetwork: false,
           refreshOnCreate: false,
         });
-      })();
+      })().catch((error) => {
+        runtimes.delete(source);
+        throw error;
+      });
       runtimes.set(source, pending);
     }
     return pending;

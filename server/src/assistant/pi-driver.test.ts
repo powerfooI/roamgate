@@ -75,6 +75,67 @@ function toolUse(
   ];
 }
 
+test.each(["SDK loading", "runtime creation"])(
+  "Pi runtime initialization can retry after failed %s without dropping other credentials",
+  async (failure) => {
+    const directory = mkdtempSync(join(tmpdir(), "roamgate-pi-retry-"));
+    const pi = await import("@earendil-works/pi-coding-agent");
+    const started = Promise.withResolvers<void>();
+    const initialization = Promise.withResolvers<never>();
+    let loads = 0;
+    let creations = 0;
+    const driver = createPiDriver(directory, async () => {
+      if (++loads === 1 && failure === "SDK loading") {
+        started.resolve();
+        await initialization.promise;
+      }
+      return {
+        ...pi,
+        ModelRuntime: {
+          create: async (
+            options: import("@earendil-works/pi-coding-agent").CreateModelRuntimeOptions,
+          ) => {
+            if (++creations === 1 && failure === "runtime creation") {
+              started.resolve();
+              await initialization.promise;
+            }
+            return pi.ModelRuntime.create({
+              ...options,
+              authPath: options.authPath ?? join(directory, "pi-auth.json"),
+            });
+          },
+        },
+      } as unknown as typeof pi;
+    });
+    try {
+      const pending = Promise.allSettled([
+        driver.catalog("assistant"),
+        driver.catalog("assistant"),
+      ]);
+      await started.promise;
+      expect(loads).toBe(1);
+      const otherSource = await driver.catalog("pi");
+      const error = new Error("Temporary initialization failure");
+      initialization.reject(error);
+      expect(await pending).toEqual([
+        { status: "rejected", reason: error },
+        { status: "rejected", reason: error },
+      ]);
+      // The failed request is not retried until a caller explicitly tries again.
+      expect(loads).toBe(2);
+      const recovered = await driver.catalog("assistant");
+      expect(recovered.providers.length).toBeGreaterThan(0);
+      expect(await driver.catalog("assistant")).toEqual(recovered);
+      expect(await driver.catalog("pi")).toEqual(otherSource);
+      expect(loads).toBe(3);
+      expect(creations).toBe(failure === "SDK loading" ? 2 : 3);
+    } finally {
+      await driver.dispose();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 test("Pi login saves to the selected credential store without changing other providers", async () => {
   const directory = mkdtempSync(join(tmpdir(), "roamgate-pi-login-"));
   const rangerAuth = join(directory, "auth.json");
