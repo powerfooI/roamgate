@@ -404,6 +404,9 @@ model, and an explicitly allowed workspace scope. Tasks keep their original
 model and target identities; after a Herdr restart or target change, edit the
 task to authorize the current targets. The bridge must be running for schedules
 to fire. After downtime, missed occurrences are combined into one run.
+If an original connection is temporarily unavailable, its run stays queued while
+other ready tasks can run. Manual connection profiles still require the user to
+reconnect them; scheduling does not override their `auto_connect` setting.
 Daily times use the task's IANA timezone, independently of the bridge's local
 timezone; daylight-saving gaps are skipped and overlaps fire only once.
 Plans, proposals, deduplication records and run receipts live in `tasks.sqlite`,

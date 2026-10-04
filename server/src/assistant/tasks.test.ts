@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AssistantSnapshot } from "../../../shared/assistant";
+import { AssistantRecoveryNotReadyError } from "./context";
 import { openTaskStorage } from "./task-storage";
 import {
   createAssistantTasks,
@@ -71,7 +72,10 @@ const prepared = (
 });
 function fixture(
   existing?: string,
-  validation?: (signal?: AbortSignal) => Promise<void>,
+  validation?: (
+    signal: AbortSignal | undefined,
+    prepared: PreparedTask,
+  ) => Promise<void>,
 ) {
   const directory = existing ?? mkdtempSync(join(tmpdir(), "roamgate-tasks-"));
   if (!existing) directories.push(directory);
@@ -93,7 +97,7 @@ function fixture(
     publish: () => {},
     validate: async (_prepared, signal) => {
       if (deny) throw new Error("Original identity replaced");
-      await validation?.(signal);
+      await validation?.(signal, _prepared);
     },
     child: (run, path, publish) => {
       const snapshot: AssistantSnapshot = {
@@ -418,6 +422,135 @@ test("failed storage and revoked identity cannot start a model or confirm a prev
   expect(f.runs).toHaveLength(0);
   expect(f.manager.summaries()[0]!.last_run?.status).toBe("failed");
 });
+
+test("a due task waits for its original connection without spinning or losing the occurrence", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  let ready = true;
+  let checks = 0;
+  const f = fixture(undefined, async () => {
+    checks++;
+    if (!ready)
+      throw new AssistantRecoveryNotReadyError("Connection is not ready");
+  });
+  const task = await f.manager.create(
+    prepared({ type: "once", at: "2026-10-04T00:01:00.000Z" }),
+    randomUUID(),
+  );
+  await f.manager.resume();
+  ready = false;
+  jest.advanceTimersByTime(60_000);
+  await flush();
+  const queued = f.manager.detail(task.id).runs[0]!;
+  expect(queued.status).toBe("queued");
+  expect(queued.error).toContain(
+    "Waiting for the original workspace connection",
+  );
+  expect(queued.started_at).toBeUndefined();
+  expect(queued.finished_at).toBeUndefined();
+  expect(f.manager.detail(task.id).task.next_run_at).toBeNull();
+  expect(f.runs).toHaveLength(0);
+  expect(checks).toBe(2);
+  jest.advanceTimersByTime(4_999);
+  await flush();
+  expect(checks).toBe(2);
+  jest.advanceTimersByTime(1);
+  await flush();
+  expect(checks).toBe(3);
+  expect(f.manager.detail(task.id).runs).toHaveLength(1);
+  ready = true;
+  await f.manager.resume();
+  await flush();
+  expect(f.runs).toHaveLength(1);
+  expect(f.runs[0]!.run.id).toBe(queued.id);
+  expect(f.runs[0]!.run.scheduled_at).toBe(queued.scheduled_at);
+  expect(f.runs[0]!.run.error).toBeNull();
+  f.runs[0]!.complete();
+  jest.advanceTimersByTime(120_000);
+  await flush();
+  expect(f.runs).toHaveLength(1);
+  expect(f.manager.detail(task.id).runs[0]!.status).toBe("succeeded");
+});
+
+test("a disconnected queued task releases the slot for another workspace and can be cancelled", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  let ready = true;
+  const f = fixture(undefined, async (_signal, input) => {
+    if (!ready && input.input.title === "Disconnected workspace")
+      throw new AssistantRecoveryNotReadyError("Connection is not ready");
+  });
+  const input = prepared({ type: "once", at: "2026-10-04T00:01:00.000Z" });
+  input.input.title = "Disconnected workspace";
+  const disconnected = await f.manager.create(input, randomUUID());
+  const connected = await f.manager.create(
+    prepared({ type: "once", at: "2026-10-04T00:01:01.000Z" }),
+    randomUUID(),
+  );
+  await f.manager.resume();
+  ready = false;
+  jest.advanceTimersByTime(60_000);
+  await flush();
+  jest.advanceTimersByTime(1_000);
+  await flush();
+  expect(f.runs).toHaveLength(1);
+  expect(f.runs[0]!.run.task_id).toBe(connected.id);
+  expect(f.manager.detail(disconnected.id).runs[0]!.status).toBe("queued");
+  await f.manager.control("cancel", disconnected.id);
+  f.runs[0]!.complete();
+  ready = true;
+  await f.manager.resume();
+  jest.advanceTimersByTime(5_000);
+  await flush();
+  expect(f.runs).toHaveLength(1);
+  expect(f.manager.detail(disconnected.id).runs[0]!.status).toBe("stopped");
+});
+
+test.each(["ready", "replaced"] as const)(
+  "a queued occurrence survives restart and revalidates a %s connection",
+  async (connection) => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    let ready = true;
+    const validation = async () => {
+      if (!ready)
+        throw new AssistantRecoveryNotReadyError("Connection is not ready");
+    };
+    const f = fixture(undefined, validation);
+    const task = await f.manager.create(
+      prepared({ type: "once", at: "2026-10-04T00:01:00.000Z" }),
+      randomUUID(),
+    );
+    await f.manager.resume();
+    ready = false;
+    jest.advanceTimersByTime(60_000);
+    await flush();
+    const queued = f.manager.detail(task.id).runs[0]!;
+    await f.manager.dispose();
+    const restored = fixture(f.directory, validation);
+    await restored.manager.resume();
+    await flush();
+    expect(restored.manager.detail(task.id).runs[0]!.id).toBe(queued.id);
+    expect(restored.manager.detail(task.id).runs[0]!.status).toBe("queued");
+    expect(restored.runs).toHaveLength(0);
+    ready = true;
+    restored.deny(connection === "replaced");
+    await restored.manager.resume();
+    await flush();
+    expect(restored.manager.detail(task.id).runs).toHaveLength(1);
+    if (connection === "ready") {
+      expect(restored.runs).toHaveLength(1);
+      expect(restored.runs[0]!.run.id).toBe(queued.id);
+      expect(restored.runs[0]!.recover).toBe(false);
+    } else {
+      expect(restored.runs).toHaveLength(0);
+      expect(restored.manager.detail(task.id).runs[0]!.status).toBe("failed");
+      expect(
+        restored.manager.detail(task.id).runs[0]!.finished_at,
+      ).toBeDefined();
+      expect(restored.manager.detail(task.id).runs[0]!.error).toContain(
+        "identity",
+      );
+    }
+  },
+);
 
 test("completed history retains only receipts, caps at 20 runs and reloads large prompts", async () => {
   jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });

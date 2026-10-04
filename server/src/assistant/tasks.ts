@@ -13,7 +13,7 @@ import type {
 } from "../../../shared/assistant";
 import { isAssistantSnapshot } from "../../../shared/assistant";
 import { assertSafeDataPath } from "../config/data-paths";
-import type { RecoveryTarget } from "./context";
+import { AssistantRecoveryNotReadyError, type RecoveryTarget } from "./context";
 import { nextTaskTime, validateTaskSchedule } from "./task-schedule";
 import {
   MAX_TASK_STATE_BYTES,
@@ -278,6 +278,7 @@ export function createAssistantTasks(options: {
   const children = new Map<string, ScheduledChild>();
   const controller = new AbortController();
   const admissions = new Map<string, AbortController>();
+  const retryAt = new Map<string, number>();
   const revisions = new Map<string, number>();
   const checks = new Map<string, Set<AbortController>>();
   const jobs = new Set<Promise<void>>();
@@ -380,6 +381,7 @@ export function createAssistantTasks(options: {
     const retained = new Set(
       tasks.flatMap((entry) => entry.runs.map((run) => run.id)),
     );
+    for (const id of retryAt.keys()) if (!retained.has(id)) retryAt.delete(id);
     for (const entry of previous.tasks)
       for (const run of entry.runs)
         if (
@@ -457,17 +459,15 @@ export function createAssistantTasks(options: {
       )
       .map((entry) => Date.parse(entry.task.next_run_at!));
     if (busy) due.push(Date.now() + 5_000);
-    if (
-      !busy &&
-      tasks.some((entry) => {
+    if (!busy)
+      for (const entry of tasks) {
         const run = current(entry);
-        return (
+        if (
           run?.status === "queued" &&
           (entry.task.status === "active" || run.manual)
-        );
-      })
-    )
-      due.push(Date.now());
+        )
+          due.push(retryAt.get(run.id) ?? Date.now());
+      }
     if (!due.length) return;
     timer = setTimeout(
       () => {
@@ -534,8 +534,10 @@ export function createAssistantTasks(options: {
     try {
       if (!recover)
         change(() => {
+          retryAt.delete(run.id);
           run.status = "running";
           run.started_at = now();
+          run.error = null;
         });
       if (!validPrepared(run)) throw new Error("Invalid task admission");
       if (!recover) await validate(run, admission.signal);
@@ -555,8 +557,22 @@ export function createAssistantTasks(options: {
       children.set(run.id, child);
       await child.start(recover);
       if (!disposed) finish(run.id, child.snapshot());
-    } catch {
+    } catch (error) {
       if (!disposed && run.status !== "stopped") {
+        if (
+          !recover &&
+          !child &&
+          error instanceof AssistantRecoveryNotReadyError
+        ) {
+          change(() => {
+            run.status = "queued";
+            run.error =
+              "Waiting for the original workspace connection to become ready.";
+            delete run.started_at;
+          });
+          retryAt.set(run.id, Date.now() + 5_000);
+          return;
+        }
         change(() => {
           run.status = "failed";
           run.error =
@@ -606,6 +622,7 @@ export function createAssistantTasks(options: {
             .filter(
               (run) =>
                 run.status === "queued" &&
+                (retryAt.get(run.id) ?? 0) <= time &&
                 (entry.task.status === "active" || run.manual),
             )
             .map((run) => ({ entry, run })),
@@ -951,6 +968,7 @@ export function createAssistantTasks(options: {
       enabled = true;
       started = true;
       fault = null;
+      retryAt.clear();
       for (const entry of tasks) {
         const run = current(entry);
         if (!run || children.has(run.id)) continue;
