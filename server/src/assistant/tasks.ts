@@ -989,6 +989,10 @@ export function createAssistantTasks(options: {
             run.error =
               "The bridge restarted and task action previews expired. Ask Ranger for a fresh preview.";
             compact(run);
+            if (entry.due_at && entry.task.status === "active") {
+              queue(entry, entry.due_at);
+              delete entry.due_at;
+            }
           });
         } else if (run.status === "running" && !busy)
           track(launch(entry, run, true));

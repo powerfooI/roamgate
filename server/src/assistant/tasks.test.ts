@@ -301,6 +301,106 @@ test("one model slot coalesces missed intervals and waiting previews release the
   expect(f.manager.detail(second.id).task.next_run_at).toBeNull();
 });
 
+test.each(["interval", "once"] as const)(
+  "restart expires a waiting preview and starts its coalesced %s occurrence once",
+  async (schedule) => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    const f = fixture();
+    const task = await f.manager.create(
+      schedule === "interval"
+        ? prepared()
+        : prepared({ type: "once", at: "2026-10-04T00:01:00.000Z" }),
+      randomUUID(),
+    );
+    await f.manager.resume();
+    if (schedule === "once") await f.manager.control("run_now", task.id);
+    jest.advanceTimersByTime(schedule === "interval" ? 60_000 : 0);
+    await flush();
+    const expiredId = f.runs[0]!.run.id;
+    f.runs[0]!.complete(true);
+    await flush();
+    jest.advanceTimersByTime(60_000);
+    await flush();
+    const scheduledAt =
+      schedule === "interval"
+        ? "2026-10-04T00:02:00.000Z"
+        : "2026-10-04T00:01:00.000Z";
+    const nextRunAt = f.manager.detail(task.id).task.next_run_at;
+    expect(f.manager.detail(task.id).task.current_run?.status).toBe("waiting");
+    await f.manager.dispose();
+
+    const restored = fixture(f.directory);
+    await restored.manager.resume();
+    await flush();
+    expect(
+      restored.manager.detail(task.id).runs.find((run) => run.id === expiredId),
+    ).toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("previews expired"),
+    });
+    expect(restored.runs).toHaveLength(1);
+    expect(restored.runs[0]!.run).toMatchObject({
+      status: "running",
+      scheduled_at: scheduledAt,
+      manual: false,
+    });
+    expect(restored.runs[0]!.run.id).not.toBe(expiredId);
+    expect(restored.runs[0]!.recover).toBe(false);
+    expect(restored.manager.detail(task.id).task.next_run_at).toBe(nextRunAt);
+    restored.runs[0]!.complete();
+    await flush();
+    jest.advanceTimersByTime(0);
+    await flush();
+    expect(restored.runs).toHaveLength(1);
+    await restored.manager.dispose();
+
+    const restarted = fixture(f.directory);
+    await restarted.manager.resume();
+    await flush();
+    expect(restarted.runs).toHaveLength(0);
+    expect(
+      restarted.manager.detail(task.id).runs.map((run) => run.status),
+    ).toEqual(["succeeded", "failed"]);
+    expect(restarted.manager.detail(task.id).task.next_run_at).toBe(nextRunAt);
+    jest.advanceTimersByTime(60_000);
+    await flush();
+    expect(restarted.runs).toHaveLength(schedule === "interval" ? 1 : 0);
+    if (schedule === "interval")
+      expect(restarted.runs[0]!.run.scheduled_at).toBe(nextRunAt!);
+  },
+);
+
+test("restart expires a paused task preview without restarting its coalesced occurrence", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const task = await f.manager.create(prepared(), randomUUID());
+  await f.manager.resume();
+  await f.manager.control("run_now", task.id);
+  jest.advanceTimersByTime(0);
+  await flush();
+  f.runs[0]!.complete(true);
+  await flush();
+  jest.advanceTimersByTime(60_000);
+  await flush();
+  await f.manager.control("pause", task.id);
+  const nextRunAt = f.manager.detail(task.id).task.next_run_at;
+  await f.manager.dispose();
+
+  const restored = fixture(f.directory);
+  await restored.manager.resume();
+  jest.advanceTimersByTime(60_000);
+  await flush();
+  expect(restored.runs).toHaveLength(0);
+  expect(restored.manager.detail(task.id).task).toMatchObject({
+    status: "paused",
+    next_run_at: nextRunAt,
+    current_run: undefined,
+  });
+  expect(
+    restored.manager.detail(task.id).runs.map((run) => run.status),
+  ).toEqual(["failed"]);
+});
+
 test.each([false, true])(
   "queued Run now preserves a due one-time run (restart: %s)",
   async (restart) => {
