@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import serverPackage from "../server/package.json";
 
-test("standalone serves native assets without ambient config and retains source maps", async () => {
+async function checkStandalone(sourceMaps: boolean) {
   const dir = await mkdtemp(join(tmpdir(), "roamgate-standalone-"));
   const runtimeDir = join(dir, "runtime");
   const overrideDir = join(dir, "override");
@@ -33,6 +33,16 @@ test("standalone serves native assets without ambient config and retains source 
     await mkdir(join(dir, "src"));
     await mkdir(runtimeDir);
     await mkdir(overrideDir);
+    await Bun.write(
+      join(dir, "package.json"),
+      JSON.stringify({
+        scripts: {
+          compile: serverPackage.scripts.compile,
+          postcompile: serverPackage.scripts.postcompile,
+          "clean:bun-build": serverPackage.scripts["clean:bun-build"],
+        },
+      }),
+    );
     await Bun.write(join(dir, "public/index.html"), "embedded entry");
     await Bun.write(
       join(dir, "public/assets/app-hash.js"),
@@ -86,12 +96,20 @@ try {
 } finally { server.stop(true); }
 `,
     );
-    // Exercise the actual release flags, not a separate test-only build recipe.
+    // Exercise the actual release/debug commands, including postcompile cleanup.
     const build = await run(
-      [process.execPath, ...serverPackage.scripts.compile.split(" ").slice(1)],
+      [
+        process.execPath,
+        "run",
+        "--cwd",
+        dir,
+        "compile",
+        ...(sourceMaps ? ["--sourcemap"] : []),
+      ],
       dir,
     );
     expect(build.code, build.stderr).toBe(0);
+    expect(await Bun.file(join(dir, "roamgate.map")).exists()).toBe(sourceMaps);
     await rename(join(dir, "public"), join(dir, "source-public"));
     await rename(join(dir, "src"), join(dir, "source-src"));
     await rm(join(dir, "roamgate.map"), { force: true });
@@ -132,8 +150,23 @@ try {
     const crash = await run([binary, overrideDir, "--crash"], runtimeDir);
     expect(crash.code).not.toBe(0);
     expect(crash.stderr).toContain("source map probe");
-    expect(crash.stderr).toMatch(/src[\\/]index\.ts:\d+/);
+    if (sourceMaps) {
+      expect(crash.stderr).toMatch(/src[\\/]index\.ts:\d+/);
+    } else {
+      expect(crash.stderr).not.toMatch(/src[\\/]index\.ts:\d+/);
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
-}, 45_000);
+}
+
+test(
+  "release standalone serves assets without ambient config or source maps",
+  () => checkStandalone(false),
+  45_000,
+);
+test(
+  "debug standalone retains source maps without original sources or sidecar",
+  () => checkStandalone(true),
+  45_000,
+);

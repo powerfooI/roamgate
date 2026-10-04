@@ -125,6 +125,20 @@ jobs:
               file "$binary" | grep -Eq 'PE32\+ executable.*Aarch64.*MS Windows'
               ;;
           esac
+      - name: Build debug executable
+        run: |
+          bun run --cwd server compile:${{ matrix.platform }} --sourcemap
+          test -f "server/roamgate-${{ matrix.platform }}.map"
+      - name: Retain debug executable and source map
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: debug-roamgate-${{ github.ref_name }}-${{ matrix.platform }}
+          path: |
+            server/roamgate-${{ matrix.platform }}
+            server/roamgate-${{ matrix.platform }}.exe
+            server/roamgate-${{ matrix.platform }}.map
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: roamgate-${{ matrix.platform }}
