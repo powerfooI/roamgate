@@ -482,7 +482,7 @@ export function createAssistantTasks(options: {
     void work.catch(() => {}).finally(() => jobs.delete(work));
   }
   function finish(runId: string, snapshot: AssistantSnapshot) {
-    if (disposed) return;
+    if (disposed || admissions.has(runId)) return;
     const entry = tasks.find((item) =>
       item.runs.some((run) => run.id === runId),
     );
@@ -555,13 +555,11 @@ export function createAssistantTasks(options: {
       );
       children.set(run.id, child);
       await child.start(recover);
+      admissions.delete(run.id);
       if (!disposed) finish(run.id, child.snapshot());
     } catch (error) {
       if (!disposed && run.status !== "stopped") {
-        if (
-          (!child || recover) &&
-          error instanceof AssistantRecoveryNotReadyError
-        ) {
+        if (error instanceof AssistantRecoveryNotReadyError) {
           await child?.dispose();
           children.delete(run.id);
           if (disposed || !["running", "waiting"].includes(run.status)) return;

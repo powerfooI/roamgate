@@ -340,6 +340,193 @@ describe("Ranger scheduled task service", () => {
     await flushTasks();
   });
 
+  test("a model that completes during child admission still records its final receipt once", async () => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    let starts = 0;
+    const f = setup({}, () => ({
+      catalog: async () => catalog,
+      login: async () => {},
+      run: async () => {
+        starts++;
+        return [];
+      },
+      stop: async () => {},
+      dispose: async () => {},
+    }));
+    stableTaskIdentity(f.context);
+    await f.service.handle("configure", configured);
+    const task = (
+      await f.service.handle("task.create", {
+        request_id: randomUUID(),
+        title: "Immediate response",
+        prompt: "Inspect",
+        scope: configured.allowed_workspaces,
+        schedule: { type: "once", at: "2026-10-04T00:00:01.000Z" },
+      })
+    ).tasks![0]!;
+    await f.service.resume();
+    jest.advanceTimersByTime(1_000);
+    await flushTasks();
+    expect(
+      (await f.service.taskDetail({ task_id: task.id })).runs[0]!.status,
+    ).toBe("succeeded");
+    await Promise.all([f.service.resume(), f.service.resume()]);
+    expect(starts).toBe(1);
+    expect(
+      (await f.service.taskDetail({ task_id: task.id })).runs,
+    ).toHaveLength(1);
+  });
+
+  test.each([2, 3, 4])(
+    "a fresh task disconnecting during scope check %s requeues before any model admission",
+    async (disconnectAt) => {
+      jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+      const disposalGate = Promise.withResolvers<void>();
+      const offline = { connection_id: "offline", workspace_id: "ws" };
+      const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+      const children: {
+        done: ReturnType<typeof Promise.withResolvers<unknown[]>>;
+        disposed: boolean;
+      }[] = [];
+      const f = setup({}, () => {
+        const firstChild = children.length === 0;
+        const child = {
+          done: Promise.withResolvers<unknown[]>(),
+          disposed: false,
+        };
+        children.push(child);
+        return {
+          catalog: async () => catalog,
+          login: async () => {},
+          run: async (input) => {
+            inputs.push(input);
+            return child.done.promise;
+          },
+          stop: async () => child.done.resolve([]),
+          dispose: async () => {
+            if (firstChild) await disposalGate.promise;
+            child.disposed = true;
+            child.done.resolve([]);
+          },
+        };
+      });
+      stableTaskIdentity(f.context);
+      const capture = (refs: typeof configured.allowed_workspaces) =>
+        refs.map((ref) => ({ ...workspace, ...ref }));
+      f.context.captureScope = async (refs) => capture(refs);
+      let armed = false;
+      let blocked = false;
+      let checks = 0;
+      f.context.restoreScope = async (targets) => {
+        if (
+          targets.some(
+            (target) => target.connection_id === offline.connection_id,
+          )
+        ) {
+          checks++;
+          if (armed && checks === disconnectAt) blocked = true;
+          if (blocked)
+            throw new AssistantRecoveryNotReadyError(
+              "Private connection detail",
+            );
+        }
+        return capture(targets);
+      };
+      await f.service.handle("configure", {
+        ...configured,
+        allowed_workspaces: [...configured.allowed_workspaces, offline],
+      });
+      const first = (
+        await f.service.handle("task.create", {
+          request_id: randomUUID(),
+          title: "Fresh interrupted admission",
+          prompt: "Inspect the offline workspace",
+          scope: [offline],
+          schedule: { type: "once", at: "2026-10-04T00:00:01.000Z" },
+        })
+      ).tasks![0]!;
+      const second = (
+        await f.service.handle("task.create", {
+          request_id: randomUUID(),
+          title: "Ready workspace",
+          prompt: "Inspect the ready workspace",
+          scope: configured.allowed_workspaces,
+          schedule: { type: "interval", minutes: 1 },
+        })
+      ).tasks![0]!;
+      await f.service.resume();
+      checks = 0;
+      armed = true;
+      jest.advanceTimersByTime(1_000);
+      await flushTasks();
+      try {
+        expect(
+          (await f.service.taskDetail({ task_id: first.id })).runs[0]!.status,
+        ).toBe("running");
+        expect(inputs).toHaveLength(0);
+        expect(children[0]!.disposed).toBe(false);
+        await f.service.handle("task.pause", { task_id: second.id });
+        await f.service.handle("task.resume", { task_id: second.id });
+        expect(
+          (await f.service.taskDetail({ task_id: first.id })).runs[0]!.status,
+        ).toBe("running");
+      } finally {
+        disposalGate.resolve();
+      }
+      await flushTasks();
+      const waiting = await f.service.taskDetail({ task_id: first.id });
+      const original = waiting.runs[0]!;
+      expect(original.status).toBe("queued");
+      expect(original.started_at).toBeUndefined();
+      expect(original.finished_at).toBeUndefined();
+      expect(original.error).toContain("Waiting");
+      expect(original.error).not.toContain("Private connection detail");
+      expect(f.service.peek().error).toBeNull();
+      expect(
+        f.snapshots.every(
+          (snapshot) =>
+            !snapshot.tasks?.find((task) => task.id === first.id)?.last_run,
+        ),
+      ).toBe(true);
+      expect(inputs).toHaveLength(0);
+      expect(children).toHaveLength(1);
+      expect(children[0]!.disposed).toBe(true);
+      jest.advanceTimersByTime(4_000);
+      await flushTasks();
+      expect(children).toHaveLength(1);
+      await f.service.handle("task.run_now", { task_id: second.id });
+      jest.advanceTimersByTime(0);
+      await flushTasks();
+      expect(inputs).toHaveLength(1);
+      expect(inputs[0]!.text).toContain("Inspect the ready workspace");
+      armed = false;
+      blocked = false;
+      await Promise.all([f.service.resume(), f.service.resume()]);
+      await flushTasks();
+      expect(inputs).toHaveLength(1);
+      children.at(-1)!.done.resolve([]);
+      await flushTasks();
+      jest.advanceTimersByTime(0);
+      await flushTasks();
+      expect(inputs).toHaveLength(2);
+      expect(inputs[1]!.requestId).toBe(original.id);
+      expect(inputs[1]!.recover).toBe(false);
+      expect(inputs[1]!.entries).toEqual([]);
+      await Promise.all([f.service.resume(), f.service.resume()]);
+      expect(inputs).toHaveLength(2);
+      children.at(-1)!.done.resolve([]);
+      await flushTasks();
+      const finished = await f.service.taskDetail({ task_id: first.id });
+      expect(finished.runs).toHaveLength(1);
+      expect(finished.runs[0]!.id).toBe(original.id);
+      expect(finished.runs[0]!.scheduled_at).toBe(original.scheduled_at);
+      expect(finished.runs[0]!.status).toBe("succeeded");
+      expect(Date.parse(finished.runs[0]!.started_at!)).toBeGreaterThan(
+        Date.parse(original.scheduled_at),
+      );
+    },
+  );
+
   test.each([false, true])(
     "recovery waiting for a connection releases the task slot without losing checkpoints (disconnect after admission: %s)",
     async (disconnectAfterAdmission) => {
@@ -553,6 +740,32 @@ describe("Ranger scheduled task service", () => {
 });
 
 describe("bridge-global assistant", () => {
+  test("interactive not-ready errors remain sanitized and release admission for a retry", async () => {
+    const f = setup();
+    await f.service.handle("configure", configured);
+    const capture = f.context.captureScope;
+    f.context.captureScope = async () => {
+      throw new AssistantRecoveryNotReadyError("Private connection detail");
+    };
+    const params = { request_id: "interactive-retry", text: "Inspect" };
+    const error = await f.service
+      .handle("send", params)
+      .catch((error) => error);
+    expect(error).not.toBeInstanceOf(AssistantRecoveryNotReadyError);
+    expect(error.cause).toBeUndefined();
+    expect(error.message).toBe(
+      "The workspace scope or provider connection is unavailable",
+    );
+    expect(f.service.peek().running).toBe(false);
+    expect(JSON.stringify(f.snapshots)).not.toContain(
+      "Private connection detail",
+    );
+    f.context.captureScope = capture;
+    await f.service.handle("send", params);
+    await until(() => !f.service.peek().running);
+    expect(f.service.peek().messages.at(-1)?.text).toBe("Hello");
+  });
+
   test("operation receipts from another workspace or runtime are excluded from model context", async () => {
     const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
     const f = setup({

@@ -814,13 +814,22 @@ export function createAssistantService(options: {
       pendingRequest = undefined;
       publish(true);
       executeTurn(activeRun!, captured, controller);
-    } catch {
+    } catch (error) {
       state.running = false;
       turnController = undefined;
       requests = requests.filter((id) => id !== requestId);
       pendingRequest = undefined;
+      if (
+        options.taskRun &&
+        error instanceof AssistantRecoveryNotReadyError &&
+        !disposed &&
+        !controller.signal.aborted
+      )
+        // The scheduler owns this unadmitted occurrence; do not publish a terminal child.
+        throw error;
       publish(true);
       // Provider errors can contain credentials; expose only our fixed message.
+      // oxlint-disable-next-line preserve-caught-error -- Do not expose secrets through Error.cause.
       throw new Error(
         controller.signal.aborted
           ? "The Ranger request was stopped."
