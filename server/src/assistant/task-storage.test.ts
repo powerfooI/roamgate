@@ -175,6 +175,71 @@ test("SQLite round trips queryable plans and keeps admissions only for unfinishe
   expect(open(path).load()).toEqual(loaded);
 });
 
+test("a separate SQLite process can read while the writer saves", async () => {
+  const path = directory();
+  const storage = open(path);
+  const saved = state();
+  storage.save(saved);
+  const reader = `
+    import { Database } from "bun:sqlite";
+    let reading = true;
+    let reads = 0;
+    process.stdin.on("data", () => { reading = false; });
+    console.log("ready");
+    while (reading) {
+      const db = new Database(process.argv[1], { readonly: true });
+      try {
+        const rows = db.transaction(() => ({
+          tasks: db.query("SELECT id, status FROM tasks").all(),
+          runs: db.query("SELECT task_id FROM runs").all(),
+        }))();
+        if (rows.tasks.length !== 1 || rows.runs.length !== 2 ||
+            rows.runs.some(run => run.task_id !== rows.tasks[0].id))
+          throw new Error("Inconsistent task receipt");
+        reads++;
+      } finally {
+        db.close();
+      }
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    console.log(reads);
+  `;
+  const observed = Bun.spawn(
+    [process.execPath, "--eval", reader, join(path, "tasks.sqlite")],
+    { stdin: "pipe", stdout: "pipe", stderr: "pipe", timeout: 5_000 },
+  );
+  const stdout = observed.stdout.getReader();
+  try {
+    const ready = await stdout.read();
+    expect(new TextDecoder().decode(ready.value)).toBe("ready\n");
+    for (let index = 0; index < 200; index++) {
+      saved.tasks[0]!.task.status = index % 2 ? "active" : "paused";
+      storage.save(saved);
+    }
+    observed.stdin.write("stop\n");
+    observed.stdin.end();
+    const [exit, errors, reads] = await Promise.all([
+      observed.exited,
+      new Response(observed.stderr).text(),
+      (async () => {
+        let remaining = "";
+        for (;;) {
+          const next = await stdout.read();
+          if (next.done) return remaining;
+          remaining += new TextDecoder().decode(next.value);
+        }
+      })(),
+    ]);
+    expect(errors).toBe("");
+    expect(exit).toBe(0);
+    expect(Number(reads.trim())).toBeGreaterThan(0);
+  } finally {
+    observed.kill();
+    await observed.exited;
+    stdout.releaseLock();
+  }
+});
+
 test("deleting every plan preserves an authoritative initialized empty database", () => {
   const path = directory();
   const storage = open(path);
@@ -265,6 +330,9 @@ test("directory, database and WAL files are private and dispose closes the handl
   const storage = open(path);
   storage.save(state());
   if (process.platform !== "win32") {
+    for (const file of ["tasks.sqlite-wal", "tasks.sqlite-shm"])
+      chmodSync(join(path, file), 0o644);
+    storage.save(storage.load());
     expect(statSync(path).mode & 0o777).toBe(0o700);
     for (const file of ["tasks.sqlite", "tasks.sqlite-wal", "tasks.sqlite-shm"])
       expect(statSync(join(path, file)).mode & 0o777).toBe(0o600);
@@ -276,7 +344,14 @@ test("directory, database and WAL files are private and dispose closes the handl
   expect(open(path).load().tasks).toHaveLength(1);
 });
 
-test.each(["database", "wal", "hardlink"] as const)(
+test.each([
+  "database",
+  "wal",
+  "shm",
+  "journal",
+  "hardlink",
+  "sidecar-hardlink",
+] as const)(
   "%s indirection is rejected without changing the target file",
   (target) => {
     if (process.platform === "win32") return;
@@ -286,9 +361,13 @@ test.each(["database", "wal", "hardlink"] as const)(
     writeFileSync(outside, contents, { mode: 0o644 });
     const linked = join(
       path,
-      target === "wal" ? "tasks.sqlite-wal" : "tasks.sqlite",
+      target === "sidecar-hardlink"
+        ? "tasks.sqlite-shm"
+        : ["wal", "shm", "journal"].includes(target)
+          ? `tasks.sqlite-${target}`
+          : "tasks.sqlite",
     );
-    if (target === "hardlink") linkSync(outside, linked);
+    if (target.endsWith("hardlink")) linkSync(outside, linked);
     else symlinkSync(outside, linked);
     expect(() => open(path)).toThrow();
     expect(readFileSync(outside, "utf8")).toBe(contents);

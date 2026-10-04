@@ -81,6 +81,7 @@ const roots: string[] = [];
 const servers: net.Server[] = [];
 const sockets = new Set<net.Socket>();
 const controlCalls = new Map<string, string[]>();
+const endpointHellos = new Map<string, Promise<void>>();
 
 afterEach(async () => {
   for (const socket of sockets) socket.destroy();
@@ -94,6 +95,7 @@ afterEach(async () => {
       ),
   );
   controlCalls.clear();
+  endpointHellos.clear();
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -141,6 +143,9 @@ async function fakeHerdr(
 ): Promise<LocalConnectionProfile> {
   const controlPath = join(root, `${id}-control.sock`);
   const renderPath = join(root, `${id}-render.sock`);
+  const endpointHello = Promise.withResolvers<void>();
+  endpointHellos.set(id, endpointHello.promise);
+  let verified = false;
   await listen(
     net.createServer((socket) => {
       trackSocket(socket);
@@ -177,20 +182,61 @@ async function fakeHerdr(
     net.createServer((socket) => {
       trackSocket(socket);
       let input = Buffer.alloc(0);
+      let greeted = false;
       socket.on("data", (chunk) => {
+        if (greeted) return;
         input = Buffer.concat([input, Buffer.from(chunk)]);
         if (input.length < 4) return;
         const length = input.readUInt32LE(0);
         if (input.length < length + 4) return;
         const reader = new BinReader(input.subarray(4, length + 4));
-        expect(reader.variant()).toBe(0);
-        const protocol = reader.varint();
+        greeted = true;
+        const variant = reader.variant();
+        if (variant === 20) {
+          // Notifications and Ranger recovery use the same passive shell.
+          expect(verified).toBe(true);
+          expect(protocol).toBe(22);
+          expect(reader.string()).toBe("endpoint.hello.v1");
+          expect(JSON.parse(reader.string())).toMatchObject({
+            generation: 1,
+            surface_active: false,
+            surface_delta: false,
+            surface_reuse: false,
+          });
+          expect(reader.remaining).toBe(0);
+          for (const [kind, data] of [
+            [
+              "endpoint.welcome.v1",
+              {
+                generation: 1,
+                server_version: "0.9.1",
+                snapshot_codec: "shell.snapshot.v1",
+                surface_codec: "shell.surface.v1",
+                input_codec: "shell.input.semantic.v1",
+                blob_codec: "shell.blob.v1",
+              },
+            ],
+            ["shell.snapshot.v1", { boot_id: `boot-${id}`, revision: 1 }],
+          ] as const) {
+            const writer = new BinWriter();
+            writer.variant(20);
+            writer.string(kind);
+            writer.string(JSON.stringify(data));
+            socket.write(encodeFrame(writer.toBuffer()));
+          }
+          endpointHello.resolve();
+          return;
+        }
+        expect(variant).toBe(0);
+        const helloProtocol = reader.varint();
+        expect(protocol).toBe(helloProtocol);
         const writer = new BinWriter();
         writer.variant(0);
-        writer.varint(welcomeProtocol ?? protocol);
+        writer.varint(welcomeProtocol ?? helloProtocol);
         writer.varint(1);
         writer.option<string>(undefined, (value) => writer.string(value));
         socket.write(encodeFrame(writer.toBuffer()));
+        verified = (welcomeProtocol ?? helloProtocol) === helloProtocol;
       });
     }),
     renderPath,
@@ -298,6 +344,7 @@ test("production dispatcher isolates two local profiles and profile CRUD", async
     ROAMGATE_PASSWORD: password,
     PORT: "0",
     HERDR_GUI_CONNECTIONS_PATH: registryPath,
+    ROAMGATE_ASSISTANT_DIR: join(root, "assistant"),
   };
   delete env.HERDR_SOCKET_PATH;
   delete env.HERDR_CLIENT_SOCKET_PATH;
@@ -604,6 +651,8 @@ for (const { protocol, welcomeProtocol, accepted } of [
       HERDR_GUI_CONNECTIONS_PATH: join(root, "connections.json"),
       HERDR_SOCKET_PATH: profile.control_socket_path,
       HERDR_CLIENT_SOCKET_PATH: profile.client_socket_path,
+      ROAMGATE_ASSISTANT_DIR: join(root, "assistant"),
+      ROAMGATE_NOTIFICATION_SOURCE: "herdr",
     };
     delete env.HERDR_SSH_HOST;
     delete env.HERDR_SESSION;
@@ -649,6 +698,7 @@ for (const { protocol, welcomeProtocol, accepted } of [
       if (accepted) {
         expect(response.error).toBeUndefined();
         expect(response.result.state).toBe("ready");
+        if (protocol === 22) await endpointHellos.get("test");
       } else {
         expect(response.error?.message).toContain("protocol");
         expect(calls.filter((method) => method !== "ping")).toEqual([]);
@@ -708,7 +758,7 @@ test("production routing bootstraps only a verified empty session and serializes
     ROAMGATE_PASSWORD: password,
     PORT: "0",
     HERDR_GUI_CONNECTIONS_PATH: registryPath,
-    // The fake render socket models only the legacy hello, not endpoint shells.
+    ROAMGATE_ASSISTANT_DIR: join(root, "assistant"),
     ROAMGATE_NOTIFICATION_SOURCE: "status",
   };
   for (const key of [

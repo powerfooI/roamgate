@@ -6,6 +6,7 @@ import {
   existsSync,
   fchmodSync,
   fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
 } from "node:fs";
@@ -120,7 +121,12 @@ export function openTaskStorage(
     assertSafeDataPath(path);
     for (const sidecar of sidecars) {
       assertSafeDataPath(sidecar);
-      if (existsSync(sidecar)) privateFile(sidecar);
+      if (!existsSync(sidecar)) continue;
+      // Closing another fd on a live SQLite file can release its POSIX locks.
+      const stat = lstatSync(sidecar);
+      if (!stat.isFile() || stat.nlink !== 1)
+        throw new Error("Invalid Ranger task storage file");
+      chmodSync(sidecar, 0o600);
     }
   }
   protect();

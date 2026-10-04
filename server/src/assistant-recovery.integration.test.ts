@@ -395,7 +395,15 @@ globalThis.fetch = (input, init) => {
         result.reject(error);
       }
     };
-    const watcher = watch(dirname(path), () => void check());
+    // SQLite commit visibility can change without a directory event.
+    const watcher =
+      filename === "tasks.sqlite"
+        ? undefined
+        : watch(dirname(path), () => void check());
+    const poll =
+      filename === "tasks.sqlite"
+        ? setInterval(() => void check(), 25)
+        : undefined;
     const deadline = setTimeout(
       () => result.reject(new Error("Recovered Ranger state was not saved")),
       10_000,
@@ -404,7 +412,8 @@ globalThis.fetch = (input, init) => {
     try {
       return await result.promise;
     } finally {
-      watcher.close();
+      watcher?.close();
+      clearInterval(poll);
       clearTimeout(deadline);
     }
   }
