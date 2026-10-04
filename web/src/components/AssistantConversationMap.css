@@ -1,0 +1,101 @@
+.assistant-conversation-map {
+  position: relative;
+  flex: 0 0 32px;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  padding: 32px 5px;
+}
+
+.assistant-conversation-wave {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: min(100%, calc(var(--message-count) * 8px));
+  max-height: 400px;
+  border-radius: 5px;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+.assistant-conversation-wave:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.assistant-conversation-mark {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.assistant-conversation-mark::before {
+  content: "";
+  width: var(--mark-width);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--muted);
+  opacity: 0.4;
+  transition:
+    width 120ms ease,
+    background 120ms ease,
+    opacity 120ms ease;
+}
+
+.assistant-conversation-mark.is-user::before {
+  opacity: 0.65;
+}
+
+.assistant-conversation-mark.is-visible::before {
+  background: var(--accent);
+  opacity: 1;
+}
+
+.assistant-conversation-preview {
+  position: absolute;
+  right: calc(100% + 8px);
+  z-index: 1;
+  width: 220px;
+  max-width: calc(100vw - 80px);
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--viewer-border);
+  border-radius: 7px;
+  background: var(--viewer-panel-bg);
+  box-shadow: var(--shadow-tooltip);
+  color: var(--text);
+  font-size: 11px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.assistant-conversation-preview strong {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.assistant-conversation-preview strong > span {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.assistant-conversation-preview > span {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-conversation-mark::before {
+    transition: none;
+  }
+}

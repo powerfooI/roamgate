@@ -395,9 +395,8 @@
   display: none;
 }
 
-/* Thin position indicator for the strip's own horizontal scroll; the global
-   overlay scrollbar is excluded here because its thumb is too heavy for a
-   30px strip. */
+/* Keep the strip's position indicator visible independently of the global
+   overlay scrollbar, which fades after scrolling. */
 .agent-history-minimap-scrollbar {
   position: absolute;
   right: 10px;

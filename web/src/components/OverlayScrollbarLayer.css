@@ -7,28 +7,20 @@
 }
 
 .overlay-scrollbar-thumb {
+  /* Keep the drag target wide while matching the minimap's thin indicator. */
   position: absolute;
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: var(--overlay-scrollbar-thumb);
-  background-clip: padding-box;
+  border: 0;
+  background: transparent;
   opacity: 0;
   pointer-events: none;
   touch-action: none;
-  transition:
-    opacity 160ms ease,
-    background 120ms ease;
+  transition: opacity 160ms ease;
 }
 
 .overlay-scrollbar-layer.is-visible .overlay-scrollbar-thumb {
   opacity: 1;
   pointer-events: auto;
-}
-
-.overlay-scrollbar-thumb:hover,
-.overlay-scrollbar-thumb:active {
-  background: var(--overlay-scrollbar-thumb-hover);
 }
 
 .overlay-scrollbar-thumb.is-vertical {
@@ -37,4 +29,30 @@
 
 .overlay-scrollbar-thumb.is-horizontal {
   cursor: ew-resize;
+}
+
+.overlay-scrollbar-thumb::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  border-radius: 1.5px;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  pointer-events: none;
+  transition: background 120ms ease;
+}
+
+.overlay-scrollbar-thumb.is-vertical::before {
+  top: 0;
+  width: 3px;
+}
+
+.overlay-scrollbar-thumb.is-horizontal::before {
+  left: 0;
+  height: 3px;
+}
+
+.overlay-scrollbar-thumb:hover::before,
+.overlay-scrollbar-thumb:active::before {
+  background: color-mix(in srgb, var(--accent) 85%, transparent);
 }

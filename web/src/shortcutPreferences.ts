@@ -39,6 +39,7 @@ const LATE_SHORTCUT_IDS: ShortcutId[] = [
   "pane.zoom",
   "inspector.expand",
   "annotations.toggle",
+  "assistant.toggle",
   "annotations.copy",
   "annotations.prefill",
   "panes.search",

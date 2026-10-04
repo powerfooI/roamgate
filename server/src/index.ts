@@ -1,4 +1,5 @@
 import type { ServerWebSocket } from "bun";
+import { createAssistantContext } from "./assistant/context";
 import { isHtmlPath } from "../../shared/filePreview";
 import { DOWNLOAD_TIMEOUT_MS } from "./workspace/file-constants";
 import { canRevealFiles } from "./workspace/file-manager";
@@ -96,7 +97,7 @@ import {
 } from "./utils/logger";
 import { runProcessWithCodeTimeout, shQuote } from "./utils/process-utils";
 import { rpcLogLevel } from "./utils/rpc-logging";
-import { syncWorktreeBase } from "./worktree/create";
+import { createWorkspaceWorktree } from "./worktree/create";
 import {
   removeWorktreeWithRecovery,
   WORKTREE_REMOVE_TIMEOUT_MS,
@@ -400,6 +401,36 @@ const connectionManager = new ConnectionManager<LegacyConnectionRuntime>(
   },
   logger.child("connections"),
 );
+
+const assistantContext = createAssistantContext({
+  catalog: () => connectionProfiles.list(),
+  lease: (id) => connectionManager.readyRuntimeLease(id),
+  createWorktree: (runtime, params, isCurrent) =>
+    createWorkspaceWorktree(runtime, params, isCurrent),
+});
+let assistantServiceTask: Promise<
+  Awaited<
+    ReturnType<typeof import("./assistant/service").createAssistantService>
+  >
+> | null = null;
+function getAssistantService() {
+  assistantServiceTask ??= import("./assistant/service")
+    .then(({ createAssistantService }) =>
+      createAssistantService({
+        context: assistantContext,
+        publish: (snapshot) => {
+          const payload = JSON.stringify({ assistant: snapshot });
+          for (const ws of clients)
+            safeSend(ws, payload, "assistant", "assistant");
+        },
+      }),
+    )
+    .catch((error) => {
+      assistantServiceTask = null;
+      throw error;
+    });
+  return assistantServiceTask;
+}
 
 const { handleHerdrStatus, handleHerdrSetup } = createHerdrSetupHandlers({
   ping: () => {
@@ -722,6 +753,18 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     );
     return;
   }
+  if (method.startsWith("bridge.assistant.")) {
+    try {
+      const result =
+        method === "bridge.assistant.context"
+          ? await assistantContext.catalog()
+          : await (await getAssistantService()).handle(method, params ?? {});
+      sendReply({ id, result }, "assistant-rpc");
+    } catch (error) {
+      sendError("assistant-rpc-error", error);
+    }
+    return;
+  }
   if (method === "connections.list") {
     sendReply(
       {
@@ -830,7 +873,6 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     runGitPull,
     runWorkspaceGitFileAction,
     runWorkspaceGitRepoAction,
-    resolveWorkspaceGitRoot,
   } = connection.files;
   const { enrichWorkspacesWithGitStatus, invalidateGitStatus } =
     connection.status;
@@ -840,7 +882,6 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     runWorktreeRemovedHook,
     runWorktreeOpenedHook,
     sourceWorkspaceForWorktreeCreate,
-    runWorktreeSetupHook,
   } = connection.worktreeHooks;
   const {
     readHistory: readAgentMessageHistory,
@@ -1046,51 +1087,22 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
   }
   if (method === "worktree.create") {
     try {
-      const sourceWorkspace = await sourceWorkspaceForWorktreeCreate(
+      const result = await createWorkspaceWorktree(
+        connection,
         params ?? {},
-      );
-      const workspaceId = String(params?.workspace_id ?? "");
-      const baseSync = await syncWorktreeBase({
-        workspaceId,
-        resolveGitRoot: async (id) =>
-          resolveWorkspaceGitRoot({ workspace_id: id }),
-        host: sshHost(),
-        shQuote,
-        runProcessWithCodeTimeout,
-      });
-      const result = await herdr.call(method, {
-        ...(params ?? {}),
-        base: baseSync.commit,
-      });
-      // Herdr identifies the repository but not which of several workspaces
-      // for that repository initiated creation. Keep that GUI relationship.
-      await worktreeParents
-        .rememberWorktreeParent(result, workspaceId, requestIsCurrent)
-        .catch((error) => {
+        requestIsCurrent,
+        (error) => {
           if (!requestIsCurrent()) return;
           logger.warn("unable to persist worktree parent", {
             connection: connectionId,
             error: sanitizeConnectionError(error),
           });
-        });
-      const hookSourceWorkspace = sourceWorkspace
-        ? {
-            ...sourceWorkspace,
-            cwd:
-              sourceWorkspace?.worktree?.checkout_path ||
-              sourceWorkspace?.cwd ||
-              baseSync.root,
-          }
-        : { cwd: baseSync.root };
-      const setupHook = await runWorktreeSetupHook(result, hookSourceWorkspace);
+        },
+      );
       sendReply(
         {
           id,
-          result: {
-            ...result,
-            base_sync: baseSync,
-            setup_hook: setupHook,
-          },
+          result,
         },
         "worktree-create",
       );
@@ -1488,6 +1500,7 @@ function main() {
                   connection_scoped_http: true,
                   file_reveal: canRevealFiles(ws.remoteAddress),
                   connection_runtime_generation: true,
+                  embedded_assistant: true,
                   herdr_task_notifications:
                     config.taskNotificationSource === "herdr",
                 },
@@ -1660,6 +1673,9 @@ function stopManagerOnce(): Promise<void> {
   managerStopTask ??= Promise.all([
     connectionManager.stopAll(),
     cpuProfile?.stop(),
+    assistantServiceTask
+      ?.then((assistant) => assistant.dispose())
+      .catch(() => undefined),
   ]).then(() => undefined);
   return managerStopTask;
 }

@@ -196,6 +196,7 @@ const HERDR_EVENT_RESERVED_FIELDS = [
   "control",
   "terminal",
   "terminal_clipboard",
+  "assistant",
 ] as const;
 
 export function serializeHerdrEventEnvelope(

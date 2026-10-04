@@ -1,4 +1,5 @@
 import { defaultDataFile } from "./data-paths";
+import { roamgateEnv } from "./environment";
 import { dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 import { rename, rm, writeFile } from "node:fs/promises";
@@ -43,7 +44,7 @@ let settingsMutationQueue: Promise<void> = Promise.resolve();
 let temporaryFileSequence = 0;
 
 export function guiSettingsPath(): string {
-  return defaultDataFile("settings.json");
+  return roamgateEnv("SETTINGS_PATH") ?? defaultDataFile("settings.json");
 }
 
 function defaultGuiSettings(): GuiSettings {

@@ -103,6 +103,10 @@ export interface ServerSessionState {
 
 export type PopupInfo = NonNullable<PopupStatePush["popup"]>;
 
+export type WorkspaceSourceTarget = Omit<TaskNotificationTarget, "paneId"> & {
+  paneId?: string;
+};
+
 export interface State extends ServerSessionState {
   status: ConnectionStatus;
   connectionPaused: boolean;
@@ -2728,20 +2732,83 @@ export const store = {
   },
 
   focusTaskNotificationTarget(target: TaskNotificationTarget) {
+    return store.focusWorkspaceSource(target);
+  },
+
+  /** Navigate on the source's original runtime; never retry on a replacement. */
+  focusWorkspaceSource(target: WorkspaceSourceTarget): Promise<boolean> {
     if (!taskNotificationTargetIsCurrent(state, target)) {
-      return Promise.resolve(undefined);
+      return Promise.resolve(false);
     }
     if (
       target.connectionId !== state.activeConnectionId &&
       !selectConnectionNow(target.connectionId)
     ) {
-      return Promise.resolve(undefined);
+      return Promise.resolve(false);
     }
     if (
       !taskNotificationTargetIsCurrent(state, target) ||
       state.serverRuntimeGeneration !== target.runtimeGeneration
     ) {
-      return Promise.resolve(undefined);
+      return Promise.resolve(false);
+    }
+    if (!target.paneId) {
+      return action(
+        async (lease) => {
+          // A connection switch already starts a coalesced refresh. Read the
+          // authoritative list here instead of treating refresh() as a barrier.
+          const result = await lease.client.call("workspace.list");
+          if (
+            !leaseIsCurrent(lease) ||
+            !taskNotificationTargetIsCurrent(state, target)
+          )
+            return false;
+          const workspaces: Workspace[] = Array.isArray(result?.workspaces)
+            ? result.workspaces
+            : [];
+          if (
+            !workspaces.some(
+              (workspace) => workspace.workspace_id === target.workspaceId,
+            )
+          ) {
+            throw new Error("Source workspace is no longer available");
+          }
+          if (result.navigation_mode === "browser-local") {
+            setForConnection(lease, {
+              navigationMode: "browser-local",
+              ...projectBrowserNavigation(
+                selectBrowserTarget(
+                  state.browserNavigation,
+                  target.workspaceId,
+                ),
+                workspaces,
+                state.tabs,
+                state.panes,
+              ),
+            });
+            await refreshNow(lease);
+            return (
+              leaseIsCurrent(lease) &&
+              taskNotificationTargetIsCurrent(state, target)
+            );
+          }
+          return enqueueFocusAction(async () => {
+            if (
+              !leaseIsCurrent(lease) ||
+              !taskNotificationTargetIsCurrent(state, target)
+            )
+              return false;
+            await lease.client.call("workspace.focus", {
+              workspace_id: target.workspaceId,
+            });
+            return (
+              leaseIsCurrent(lease) &&
+              taskNotificationTargetIsCurrent(state, target)
+            );
+          });
+        },
+        { refresh: "immediate" },
+      ).then((opened) => opened === true);
     }
     if (state.navigationMode === "browser-local") {
       const navigation = state.browserNavigation;
@@ -2750,8 +2817,12 @@ export const store = {
           const result = await lease.client
             .call("pane.get", { pane_id: target.paneId })
             .catch(() => null);
-          if (!leaseIsCurrent(lease)) return;
-          if (!browserSelectionIsCurrent(navigation)) return refreshNow(lease);
+          if (
+            !leaseIsCurrent(lease) ||
+            !taskNotificationTargetIsCurrent(state, target)
+          )
+            return false;
+          if (!browserSelectionIsCurrent(navigation)) return false;
           if (result?.pane) adoptBrowserTarget(lease, result);
           else
             setForConnection(lease, {
@@ -2760,10 +2831,14 @@ export const store = {
                 target.workspaceId,
               ),
             });
-          return refreshNow(lease);
+          await refreshNow(lease);
+          return (
+            leaseIsCurrent(lease) &&
+            taskNotificationTargetIsCurrent(state, target)
+          );
         },
         { refresh: "none" },
-      );
+      ).then((opened) => opened === true);
     }
     const pendingFocusSeq = stampPendingFocusWorkspace(target.workspaceId);
     return action(
@@ -2779,26 +2854,36 @@ export const store = {
             // The pane may have closed after the notification was shown.
           }
 
+          if (
+            !leaseIsCurrent(lease) ||
+            !taskNotificationTargetIsCurrent(state, target)
+          )
+            return false;
+
           const workspaceId = pane?.workspace_id ?? target.workspaceId;
           await lease.client.call("workspace.focus", {
             workspace_id: workspaceId,
           });
-          if (!pane) return null;
+          if (!leaseIsCurrent(lease)) return false;
+          if (!pane) return true;
 
           try {
             await lease.client.call("tab.focus", { tab_id: pane.tab_id });
           } catch {
             // The pane or tab can close between pane.get and tab.focus.
-            return null;
+            return leaseIsCurrent(lease);
           }
           setForConnection(lease, { selectedPaneId: pane.pane_id });
-          return pane;
+          return (
+            leaseIsCurrent(lease) &&
+            taskNotificationTargetIsCurrent(state, target)
+          );
         }),
       {
         refresh: "immediate",
         pendingFocusWorkspaceSeq: pendingFocusSeq,
       },
-    );
+    ).then((opened) => opened === true);
   },
 
   createWorkspace(label?: string, cwd?: string) {

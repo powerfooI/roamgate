@@ -1114,6 +1114,186 @@ describe("connection-partitioned store state", () => {
   });
 });
 
+describe("workspace source navigation", () => {
+  function sourceFixture(mode: "shared" | "browser-local" = "shared") {
+    const previousState = store.get();
+    const originalConnection = bridge.connection;
+    const originalSetActiveConnection = bridge.setActiveConnection;
+    let activeConnectionId = "alpha";
+    let browserGeneration = 10;
+    const calls: {
+      connectionId: string;
+      method: string;
+      params: Record<string, unknown> | undefined;
+    }[] = [];
+    const workspace = {
+      ...partitionState().workspaces[0]!,
+      workspace_id: "beta-only",
+      label: "Beta source",
+      focused: true,
+    };
+    const target = {
+      connectionId: "beta",
+      runtimeGeneration: 1,
+      workspaceId: workspace.workspace_id,
+    };
+    let list = async (): Promise<unknown> => ({
+      workspaces: [workspace],
+      navigation_mode: mode,
+    });
+    bridge.connection = ((
+      connectionId = activeConnectionId,
+      runtimeGeneration = 1,
+    ) => {
+      const generation = browserGeneration;
+      const isCurrent = () =>
+        activeConnectionId === connectionId && browserGeneration === generation;
+      return {
+        connectionId,
+        generation,
+        serverRuntimeGeneration: runtimeGeneration,
+        isCurrent,
+        acceptsServerGeneration: (value: unknown) =>
+          value === runtimeGeneration,
+        call: async (method: string, params?: Record<string, unknown>) => {
+          calls.push({ connectionId, method, params });
+          if (method === "workspace.list") return list();
+          if (method === "tab.list") return { tabs: [] };
+          if (method === "pane.list") return { panes: [] };
+          if (method === "agent.list") return { agents: [] };
+          return {};
+        },
+      };
+    }) as typeof bridge.connection;
+    bridge.setActiveConnection = (connectionId: string) => {
+      if (connectionId !== activeConnectionId) {
+        activeConnectionId = connectionId;
+        browserGeneration++;
+      }
+      return browserGeneration;
+    };
+    const snapshot = partitionState();
+    delete snapshot.sessionsByConnectionId.beta;
+    __storeTesting.replaceState(snapshot);
+    return {
+      workspace,
+      target,
+      calls,
+      setList(value: typeof list) {
+        list = value;
+      },
+      restore() {
+        bridge.connection = originalConnection;
+        bridge.setActiveConnection = originalSetActiveConnection;
+        __storeTesting.replaceState(previousState);
+      },
+    };
+  }
+
+  test.each(["shared", "browser-local"] as const)(
+    "opens a first-visit %s source independently of cached workspace lists",
+    async (mode) => {
+      const f = sourceFixture(mode);
+      try {
+        expect(store.get().sessionsByConnectionId.beta).toBeUndefined();
+        expect(await store.focusWorkspaceSource(f.target)).toBe(true);
+        expect(store.get().activeConnectionId).toBe("beta");
+        expect(f.calls[0]).toMatchObject({
+          connectionId: "beta",
+          method: "workspace.list",
+        });
+        if (mode === "shared") {
+          expect(
+            f.calls.filter((call) => call.method === "workspace.focus"),
+          ).toEqual([
+            {
+              connectionId: "beta",
+              method: "workspace.focus",
+              params: { workspace_id: "beta-only" },
+            },
+          ]);
+        } else {
+          expect(store.get().browserNavigation.workspaceId).toBe("beta-only");
+          expect(
+            f.calls.some((call) => call.method === "workspace.focus"),
+          ).toBe(false);
+        }
+      } finally {
+        f.restore();
+      }
+    },
+  );
+
+  test("source validation does not await a coalesced refresh that is already in flight", async () => {
+    const f = sourceFixture();
+    const gate = Promise.withResolvers<unknown>();
+    let lists = 0;
+    f.setList(async () =>
+      ++lists === 1 ? gate.promise : { workspaces: [f.workspace] },
+    );
+    try {
+      store.selectConnection("beta");
+      const refresh = store.refresh();
+      expect(await store.focusWorkspaceSource(f.target)).toBe(true);
+      expect(f.calls.some((call) => call.method === "workspace.focus")).toBe(
+        true,
+      );
+      gate.resolve({ workspaces: [f.workspace] });
+      await refresh;
+    } finally {
+      gate.resolve({ workspaces: [] });
+      f.restore();
+    }
+  });
+
+  test.each(["switch", "replacement"] as const)(
+    "a concurrent %s cannot redirect source focus to another connection or generation",
+    async (change) => {
+      const f = sourceFixture();
+      const gate = Promise.withResolvers<unknown>();
+      f.setList(() => gate.promise);
+      try {
+        const opening = store.focusWorkspaceSource(f.target);
+        if (change === "switch") store.selectConnection("alpha");
+        else {
+          const current = store.get();
+          __storeTesting.replaceState({
+            ...current,
+            serverRuntimeGeneration: 2,
+            connections: current.connections.map((connection) =>
+              connection.id === "beta"
+                ? { ...connection, generation: 2 }
+                : connection,
+            ),
+          });
+        }
+        gate.resolve({ workspaces: [f.workspace] });
+        expect(await opening).toBe(false);
+        expect(f.calls.some((call) => call.method === "workspace.focus")).toBe(
+          false,
+        );
+      } finally {
+        gate.resolve({ workspaces: [] });
+        f.restore();
+      }
+    },
+  );
+
+  test("missing source workspaces fail without issuing a focus command", async () => {
+    const f = sourceFixture();
+    f.setList(async () => ({ workspaces: [] }));
+    try {
+      expect(await store.focusWorkspaceSource(f.target)).toBe(false);
+      expect(store.get().error).toBe("Source workspace is no longer available");
+      expect(f.calls.some((call) => call.method === "workspace.focus")).toBe(
+        false,
+      );
+    } finally {
+      f.restore();
+    }
+  });
+});
+
 describe("stabilizeRefreshPatch", () => {
   test("returns null when a refresh reproduces the current state", () => {
     const snapshot = partitionState();

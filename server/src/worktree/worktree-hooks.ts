@@ -32,10 +32,16 @@ export type WorktreeHookEvent = (typeof WORKTREE_HOOK_EVENTS)[number];
 export type WorktreeHookRunResult = {
   event: WorktreeHookEvent;
   status: "skipped" | "succeeded" | "failed";
+  reason?: "setup_hook_changed" | "hooks_enabled_changed";
   exit_code?: number;
   stdout?: string;
   stderr?: string;
   error?: string;
+};
+
+export type WorktreeHookExpectation = {
+  command: string | null;
+  enabled: boolean;
 };
 
 type WorktreeHook = "setup" | "opened" | "teardown" | "removed";
@@ -175,11 +181,23 @@ export function createWorktreeHookRunner(args: {
     sourceCheckoutPath?: string;
     cwdPath?: string;
     repoSettingsKey?: string | null;
+    expected?: WorktreeHookExpectation;
+    isCurrent?: () => boolean;
   }): Promise<WorktreeHookRunResult> {
     const event = worktreeHookEvent(hookArgs.hook);
+    const assertCurrent = () => {
+      if (hookArgs.isCurrent && !hookArgs.isCurrent())
+        throw new Error("The worktree target changed.");
+    };
+    assertCurrent();
     if (!hookArgs.checkoutPath) return { event, status: "skipped" };
     const hooksEnabled = args.hooksEnabled ?? repoWorktreeHooksEnabled;
-    if (!(await hooksEnabled(hookArgs.repoSettingsKey))) {
+    const enabled = await hooksEnabled(hookArgs.repoSettingsKey);
+    assertCurrent();
+    if (hookArgs.expected && enabled !== hookArgs.expected.enabled) {
+      return { event, status: "skipped", reason: "hooks_enabled_changed" };
+    }
+    if (!enabled && !hookArgs.expected) {
       return { event, status: "skipped" };
     }
 
@@ -190,16 +208,30 @@ export function createWorktreeHookRunner(args: {
         hookArgs.sourceCheckoutPath,
       );
     } catch (e) {
+      if (hookArgs.expected)
+        return { event, status: "skipped", reason: "setup_hook_changed" };
       return {
         event,
         status: "failed",
         error: (e as Error).message,
       };
     }
-    const command = loaded?.config[hookArgs.hook];
-    if (!loaded || typeof command !== "string" || !command.trim()) {
+    assertCurrent();
+    const command = loaded?.config[hookArgs.hook] ?? null;
+    if (hookArgs.expected && command !== hookArgs.expected.command) {
+      return { event, status: "skipped", reason: "setup_hook_changed" };
+    }
+    if (!enabled || !loaded || typeof command !== "string" || !command.trim()) {
       return { event, status: "skipped" };
     }
+    if (
+      hookArgs.expected &&
+      (await hooksEnabled(hookArgs.repoSettingsKey)) !==
+        hookArgs.expected.enabled
+    ) {
+      return { event, status: "skipped", reason: "hooks_enabled_changed" };
+    }
+    assertCurrent();
 
     const env = shellEnvAssignments({
       PASEO_HOOK: hookArgs.hook,
@@ -345,8 +377,12 @@ export function createWorktreeHookRunner(args: {
   async function runWorktreeSetupHook(
     result: any,
     sourceWorkspace: any | null,
+    expected?: WorktreeHookExpectation,
+    isCurrent?: () => boolean,
   ): Promise<WorktreeHookRunResult> {
     const workspace = await resolveCreatedWorktreeWorkspace(result);
+    if (isCurrent && !isCurrent())
+      throw new Error("The worktree target changed.");
     if (!workspace?.worktree?.is_linked_worktree) {
       return { event: "worktree.created", status: "skipped" };
     }
@@ -357,6 +393,8 @@ export function createWorktreeHookRunner(args: {
         ? workspaceCheckoutPath(sourceWorkspace)
         : workspaceSourceCheckoutPath(workspace),
       repoSettingsKey: repoSettingsKey(workspace),
+      expected,
+      isCurrent,
     });
   }
 

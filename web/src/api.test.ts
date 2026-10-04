@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import type { AssistantSnapshot } from "../../shared/assistant";
 import {
   Bridge,
   type ConnectionStatus,
@@ -143,6 +144,60 @@ describe("browser logout", () => {
     response.resolve(new Response(null, { status: 204 }));
     expect(await navigated.promise).toBe("/login");
   });
+});
+
+test("assistant pushes stay global and reject malformed or scoped envelopes", () => {
+  class AssistantSocket extends HangingWebSocket {
+    static instance: AssistantSocket;
+    constructor() {
+      super();
+      AssistantSocket.instance = this;
+    }
+  }
+  installBrowserGlobals(AssistantSocket as unknown as typeof WebSocket);
+  const bridge = createTestBridge(1000);
+  bridge.connect();
+  const socket = AssistantSocket.instance;
+  socket.readyState = WebSocket.OPEN;
+  const snapshot: AssistantSnapshot = {
+    instance_id: "instance",
+    revision: 1,
+    config: {
+      provider: "",
+      model: "",
+      credential_source: "assistant",
+      allowed_workspaces: [],
+    },
+    providers: [],
+    models: [],
+    messages: [],
+    running: false,
+    error: null,
+    auth: null,
+  };
+  const received: AssistantSnapshot[] = [];
+  const unsubscribe = bridge.onAssistant((value) => received.push(value));
+  const push = (value: unknown) =>
+    socket.onmessage?.({ data: JSON.stringify(value) } as MessageEvent);
+  push({ assistant: snapshot });
+  expect(received).toHaveLength(0);
+  push({
+    hello: true,
+    bridge_protocol_version: 2,
+    default_connection_id: "alpha",
+    capabilities: { connection_id: true, embedded_assistant: true },
+  });
+  push({ assistant: { ...snapshot, messages: [{}] } });
+  push({ assistant: snapshot, connection_id: "alpha" });
+  push({ assistant: snapshot, connection_generation: 2 });
+  push({ assistant: snapshot, event: "workspace.created", data: {} });
+  expect(received).toHaveLength(0);
+  bridge.setActiveConnection("beta");
+  push({ assistant: snapshot });
+  expect(received).toEqual([snapshot]);
+  unsubscribe();
+  push({ assistant: snapshot });
+  expect(received).toHaveLength(1);
 });
 
 describe("bridge connection lifecycle", () => {

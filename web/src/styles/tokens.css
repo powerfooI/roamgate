@@ -76,8 +76,6 @@
   --shadow-modal: 0 18px 48px rgba(0, 0, 0, 0.5);
   --shadow-tooltip: 0 10px 28px rgba(0, 0, 0, 0.38);
   --modal-backdrop: rgba(0, 0, 0, 0.56);
-  --overlay-scrollbar-thumb: rgba(165, 176, 210, 0.62);
-  --overlay-scrollbar-thumb-hover: rgba(196, 207, 238, 0.86);
 }
 
 :root[data-theme="light"] {
@@ -138,8 +136,6 @@
   --shadow-modal: 0 18px 48px rgba(31, 47, 102, 0.18);
   --shadow-tooltip: 0 10px 28px rgba(31, 47, 102, 0.2);
   --modal-backdrop: rgba(31, 47, 102, 0.28);
-  --overlay-scrollbar-thumb: rgba(72, 84, 126, 0.5);
-  --overlay-scrollbar-thumb-hover: rgba(46, 74, 148, 0.76);
 }
 
 :root[data-accent="teal"] {

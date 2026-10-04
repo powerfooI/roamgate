@@ -30,6 +30,11 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             {
+              // Global assistant and workspace clients share this startup transport.
+              name: "bridge-client",
+              test: /src[\\/](?:api|connectionHttp|useConnectionClient)\.tsx?$/,
+            },
+            {
               // These startup preferences share storage; keep their small
               // helpers together instead of adding utility-only requests.
               name: "browser-preferences",

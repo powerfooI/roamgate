@@ -22,6 +22,66 @@ import {
 } from "./server-config";
 
 describe("authentication configuration", () => {
+  test("compiled authentication reads runtime NODE_ENV instead of the build value", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roamgate-compiled-auth-"));
+    try {
+      const entry = join(dir, "entry.ts");
+      const executable = join(
+        dir,
+        process.platform === "win32" ? "config.exe" : "config",
+      );
+      writeFileSync(
+        entry,
+        `import { loadServerConfig } from ${JSON.stringify(join(import.meta.dir, "server-config.ts"))}; console.log(JSON.stringify(loadServerConfig("test")));`,
+      );
+      const built = Bun.spawnSync(
+        [
+          process.execPath,
+          "build",
+          "--compile",
+          "--minify",
+          "--no-compile-autoload-dotenv",
+          "--no-compile-autoload-bunfig",
+          entry,
+          "--outfile",
+          executable,
+        ],
+        {
+          env: { ...process.env, NODE_ENV: "development" },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      if (built.exitCode !== 0) throw new Error(built.stderr.toString());
+      for (const [nodeEnv, host, authRequired] of [
+        ["production", "127.0.0.1", true],
+        ["development", "127.0.0.1", false],
+        ["development", "0.0.0.0", true],
+        [undefined, "127.0.0.1", true],
+      ] as const) {
+        const environment = { ...process.env };
+        if (nodeEnv === undefined) delete environment.NODE_ENV;
+        else environment.NODE_ENV = nodeEnv;
+        const result = Bun.spawnSync(
+          [executable, "--host", host, "--password", "compiled-test-password"],
+          {
+            env: environment,
+            stdout: "pipe",
+            stderr: "pipe",
+          },
+        );
+        expect(result.exitCode).toBe(0);
+        const loaded = JSON.parse(result.stdout.toString());
+        expect(loaded.authRequired).toBe(authRequired);
+        expect(loaded.password).toBe(
+          authRequired ? "compiled-test-password" : "",
+        );
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("production requires authentication and persists a token on every listen address", () => {
     const dir = mkdtempSync(join(tmpdir(), "roamgate-auth-config-"));
     try {

@@ -120,7 +120,10 @@ function measureScrollbars(
   const horizontal = horizontalGeometry
     ? {
         ...horizontalGeometry,
-        top: (bottom - TRACK_INSET - THUMB_SIZE - layerRect.top) / scaleY,
+        // Use the tab bar's existing bottom padding without changing its height.
+        top:
+          (bottom - TRACK_INSET - THUMB_SIZE - layerRect.top) / scaleY +
+          (target.matches(".tabbar-tabs") ? 4 : 0),
         left: (horizontalGeometry.start - layerRect.left) / scaleX,
         width: horizontalGeometry.size / scaleX,
         height: THUMB_SIZE / scaleY,

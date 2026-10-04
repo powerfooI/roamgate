@@ -924,26 +924,28 @@ html:not([data-layout="mobile"])
 
 /* Container queries cannot change the container itself. Wrap below the same
    available-width threshold without measuring the viewport in JavaScript. */
-.workspace-surfaces.has-annotations {
+.workspace-surfaces:is(.has-annotations, .has-assistant) {
   flex-wrap: wrap;
 }
 
-.workspace-surfaces.has-annotations > .workspace-stage {
+.workspace-surfaces:is(.has-annotations, .has-assistant) > .workspace-stage {
   flex-basis: 560px;
   height: 100%;
 }
 
-.workspace-surfaces.has-annotations > .annotation-panel {
+.workspace-surfaces.has-annotations > .annotation-panel,
+.workspace-surfaces.has-assistant > .assistant-panel {
   height: 100%;
 }
 
 @container workspace-surfaces (max-width: 900px) {
-  .workspace-surfaces.has-annotations > .workspace-stage {
+  .workspace-surfaces:is(.has-annotations, .has-assistant) > .workspace-stage {
     flex-basis: 100%;
     height: calc(55% - 4px);
   }
 
-  .workspace-surfaces.has-annotations > .annotation-panel {
+  .workspace-surfaces.has-annotations > .annotation-panel,
+  .workspace-surfaces.has-assistant > .assistant-panel {
     flex-basis: 100%;
     height: calc(45% - 4px);
   }
@@ -956,14 +958,18 @@ html:not([data-layout="mobile"])
 
   .workspace-surfaces > .workspace-stage,
   .workspace-surfaces.has-annotations > .workspace-stage,
-  .workspace-surfaces.has-annotations > .annotation-panel {
+  .workspace-surfaces.has-annotations > .annotation-panel,
+  .workspace-surfaces.has-assistant > .workspace-stage,
+  .workspace-surfaces.has-assistant > .assistant-panel {
     flex: 1 1 100%;
     height: 100%;
     border-radius: 0;
   }
 
   .body.mobile-view-annotations .workspace-stage,
-  .body:not(.mobile-view-annotations) .workspace-surfaces > .annotation-panel {
+  .body:not(.mobile-view-annotations) .workspace-surfaces > .annotation-panel,
+  .body.mobile-view-assistant .workspace-stage,
+  .body:not(.mobile-view-assistant) .workspace-surfaces > .assistant-panel {
     display: none;
   }
 

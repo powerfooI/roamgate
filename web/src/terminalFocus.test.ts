@@ -36,11 +36,25 @@ describe("terminalFocusBlockedByOverlay", () => {
     expect(
       terminalFocusBlockedByOverlay(
         elementMatching([
-          '[data-radix-popper-content-wrapper], .modal-backdrop, .workspace-tree-panel, .workspace-inspector, .annotation-panel, .tabbar-utilities, .mobile-nav, .pane-jump-backdrop, .popup-overlay-backdrop, .pane-drag-handle, [role="dialog"], [role="menu"]',
+          '[data-radix-popper-content-wrapper], .modal-backdrop, .workspace-tree-panel, .workspace-inspector, .annotation-panel, .assistant-panel, .tabbar-utilities, .mobile-nav, .pane-jump-backdrop, .popup-overlay-backdrop, .pane-drag-handle, [role="dialog"], [role="menu"]',
         ]),
         doc,
       ),
     ).toBe(true);
+  });
+
+  test("blocks Ranger focus without blocking a terminal outside the panel", () => {
+    const doc = docWithOpenPopper(false);
+    const rangerElement = {
+      closest: (selector: string) =>
+        selector.split(", ").includes(".assistant-panel")
+          ? ({} as Element)
+          : null,
+    };
+    expect(terminalFocusBlockedByOverlay(rangerElement, doc)).toBe(true);
+    expect(terminalFocusBlockedByOverlay(elementMatching(null), doc)).toBe(
+      false,
+    );
   });
 
   test("allows refocusing with no overlay and no focused element", () => {

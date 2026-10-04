@@ -93,6 +93,24 @@
   flex: 0 0 auto;
 }
 
+.assistant-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+
+.assistant-entry-running {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+html[data-layout="mobile"] .assistant-entry-label {
+  display: none;
+}
+
 .topbar-button:hover,
 .topbar-button.is-active {
   background: var(--topbar-control-hover-bg);

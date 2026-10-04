@@ -24,6 +24,7 @@ const base = {
   "inspector.toggle": ["Ctrl+Alt+Shift+B"],
   "inspector.expand": ["Ctrl+Alt+Shift+Enter"],
   "annotations.toggle": ["Ctrl+Alt+A"],
+  "assistant.toggle": ["Ctrl+Alt+Shift+A"],
   "zen.toggle": ["Ctrl+Alt+Z"],
   "panes.recent": ["Ctrl+Alt+J"],
   "plugin.herdrFloat.toggle": ["Ctrl+Alt+F"],
@@ -107,6 +108,7 @@ export function defaultShortcutBindings(
       "inspector.toggle": ["Meta+Shift+B"],
       "inspector.expand": ["Alt+Meta+Enter"],
       "annotations.toggle": ["Alt+Meta+A"],
+      "assistant.toggle": ["Alt+Meta+Shift+A"],
       "zen.toggle": ["Meta+Shift+Z"],
       "panes.recent": ["Ctrl+Tab", "Ctrl+Shift+Tab"],
       // Meta+F is the system Find shortcut on macOS; use the Ctrl+Meta

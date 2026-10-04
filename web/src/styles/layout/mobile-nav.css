@@ -3,6 +3,12 @@
   display: none;
 }
 
+:where(html[data-layout="mobile"])
+  .app.assistant-view
+  :is(.mobile-nav, .mobile-terminal-controls, .mobile-composer-shortcut) {
+  display: none;
+}
+
 /* Keep mobile styling in sync with the saved layout and URL override. */
 :where(html[data-layout="mobile"]) {
   .mobile-nav {

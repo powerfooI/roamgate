@@ -10,6 +10,7 @@ const descriptions: [ShortcutId, string, string][] = [
   ["inspector.toggle", "Toggle the Workspace Inspector", "Global"],
   ["inspector.expand", "Expand or restore the Inspector on desktop", "Global"],
   ["annotations.toggle", "Toggle Annotations", "Global"],
+  ["assistant.toggle", "Toggle Ranger", "Global"],
   ["zen.toggle", "Toggle Zen mode on desktop", "Global"],
   ["panes.recent", "Open the recent pane switcher", "Global"],
   ["plugin.herdrFloat.toggle", "Toggle the Herdr Float popup shell", "Global"],

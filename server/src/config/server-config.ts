@@ -226,8 +226,11 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
 
   const host = String(args.host ?? process.env.HOST ?? "127.0.0.1");
   const port = Number(args.port ?? process.env.PORT ?? 8787);
+  // Bun inlines direct process.env.NODE_ENV reads when compiling. Authentication
+  // must use the running process's environment, not the build environment.
+  const { NODE_ENV: nodeEnvironment } = process.env;
   const authRequired =
-    process.env.NODE_ENV !== "development" ||
+    nodeEnvironment !== "development" ||
     !["127.0.0.1", "localhost", "::1"].includes(host);
   let tls: ServerConfig["tls"];
   try {

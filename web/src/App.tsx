@@ -34,6 +34,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
+  Compass,
   FileDiff,
   FolderTree,
   GitCommitHorizontal,
@@ -97,6 +98,8 @@ import {
 } from "./components/fileExplorerResources";
 import { type ActiveFilePreviewSelection } from "./components/FilePreviewContent";
 import { AnnotationPanel } from "./components/AnnotationPanel";
+import { assistantActionExecuting, useAssistantState } from "./assistant";
+import type { AssistantSource } from "../../shared/assistant";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import { MobileTabSheet } from "./components/MobileTabSheet";
 import { requestClosePane, requestCloseTab, TabBar } from "./components/TabBar";
@@ -200,6 +203,14 @@ import "./styles/layout/topbar.css";
 import "./styles/layout/sidebar.css";
 import "./styles/layout/toast.css";
 import "./styles/layout/mobile-nav.css";
+import "./components/AssistantPanel.css";
+import "./components/markdown.css";
+
+const AssistantPanel = lazyWithReload("assistant", () =>
+  import("./components/AssistantPanel").then((module) => ({
+    default: module.AssistantPanel,
+  })),
+);
 
 const WorkspaceInspectorHost = lazyWithReload("workspace-inspector", () =>
   import("./components/WorkspaceInspectorHost").then((module) => ({
@@ -330,7 +341,12 @@ function ToastMark({
 }
 
 export type Theme = ThemePreference;
-type MobileView = "workspaces" | "session" | "annotations" | InspectorView;
+type MobileView =
+  | "workspaces"
+  | "session"
+  | "annotations"
+  | "assistant"
+  | InspectorView;
 type OpenInspectorOptions = {
   entry?: FileExplorerEntry;
   path?: string;
@@ -1249,6 +1265,7 @@ function TerminalPaneLayout({
 
 export default function App() {
   useShortcutPreferences();
+  const { snapshot: assistantSnapshot } = useAssistantState();
   const s = useStoreSelector(
     (state) => ({
       activeConnectionId: state.activeConnectionId,
@@ -1278,6 +1295,14 @@ export default function App() {
   }, [s.activeConnectionId, s.connectionGeneration]);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [mobileView, setMobileView] = useState<MobileView>("session");
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantMounted, setAssistantMounted] = useState(false);
+  const [assistantFloating, setAssistantFloating] = useState(
+    () => roamgateLocalStorage.getItem("assistantPanelMode") !== "fixed",
+  );
+  const assistantVisible =
+    assistantOpen && (!mobile || mobileView === "assistant");
+  const assistantDocked = assistantVisible && (mobile || !assistantFloating);
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
   const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() =>
     loadSystemTheme(),
@@ -1368,6 +1393,9 @@ export default function App() {
     update: updateAnnotationDraft,
   } = useReviewAnnotationDraft(resourceUiKey);
   const [annotationsOpen, setAnnotationsOpen] = useState(false);
+  useEffect(() => {
+    if (annotationsOpen) setAssistantOpen(false);
+  }, [annotationsOpen]);
   const [annotationsFloating, setAnnotationsFloating] = useState(
     () => roamgateLocalStorage.getItem("annotationPanelMode") !== "fixed",
   );
@@ -1851,6 +1879,79 @@ export default function App() {
     }
     openAnnotations();
   }, [annotationsOpen, mobile, mobileView, openAnnotations]);
+  const toggleAssistant = useCallback(() => {
+    if (assistantVisible) {
+      setAssistantOpen(false);
+      if (mobile) setMobileView("session");
+    } else {
+      setAnnotationsOpen(false);
+      setAssistantOpen(true);
+      setAssistantMounted(true);
+      if (mobile) setMobileView("assistant");
+    }
+  }, [assistantVisible, mobile]);
+  const closeAssistant = () => {
+    setAssistantOpen(false);
+    if (mobile && mobileView === "assistant") setMobileView("session");
+    const terminal = mobile
+      ? null
+      : document.querySelector<HTMLElement>(
+          ".pane-layout-cell.is-active .xterm-helper-textarea, .pane-switcher-layout .xterm-helper-textarea, .workspace-terminal-surface > .terminal-shell .xterm-helper-textarea",
+        );
+    (
+      terminal ?? document.querySelector<HTMLElement>(".assistant-entry")
+    )?.focus();
+  };
+  const toggleAssistantFloating = () => {
+    const next = !assistantFloating;
+    setAssistantFloating(next);
+    try {
+      roamgateLocalStorage.setItem(
+        "assistantPanelMode",
+        next ? "floating" : "fixed",
+      );
+    } catch {
+      store.notify({
+        kind: "error",
+        message: "Ranger layout could not be saved",
+      });
+    }
+  };
+  const openAssistantSource = async (source: AssistantSource) => {
+    const isCurrent = () =>
+      store
+        .get()
+        .connections.some(
+          (connection) =>
+            connection.id === source.connection_id &&
+            connection.generation === source.runtime_generation &&
+            connection.state === "ready",
+        );
+    try {
+      if (!isCurrent())
+        throw new Error(
+          "This source connection is no longer available. Ask Ranger to read it again.",
+        );
+      const opened = await store.focusWorkspaceSource({
+        connectionId: source.connection_id,
+        runtimeGeneration: source.runtime_generation,
+        workspaceId: source.workspace_id,
+        paneId: source.pane_id,
+      });
+      if (!opened || !isCurrent())
+        throw new Error("This source connection changed while opening it.");
+      if (mobile) {
+        setAssistantOpen(false);
+        setMobileView("session");
+      }
+    } catch (error) {
+      store.notify({
+        kind: "error",
+        message: "Could not open Ranger source",
+        detail: (error as Error).message,
+      });
+    }
+  };
   const reanchorFileAnnotations = useCallback(
     (path: string, text: string) => {
       if (!inspectorState || !connectionClient.isCurrent()) return;
@@ -2625,7 +2726,7 @@ export default function App() {
     setPaneJumpOpen(false);
     setPaneJumpIndex(0);
     setPaneJumpSearch(null);
-    setMobileView("session");
+    setMobileView((current) => (current === "assistant" ? current : "session"));
   }, [commitInspectorState, resourceUiKey, setActiveFilePreview]);
 
   useEffect(() => {
@@ -2638,9 +2739,16 @@ export default function App() {
   useEffect(() => {
     if (!mobile) return;
     const current = inspectorStateRef.current;
-    if (!annotationsOpen)
-      setMobileView(current?.open ? current.view : "session");
-  }, [annotationsOpen, mobile]);
+    setMobileView(
+      annotationsOpen
+        ? "annotations"
+        : assistantOpen
+          ? "assistant"
+          : current?.open
+            ? current.view
+            : "session",
+    );
+  }, [annotationsOpen, assistantOpen, mobile]);
   useLayoutEffect(() => {
     if (!annotationScope || annotationWorkspace) return;
     selectAnnotationDraft(null);
@@ -3124,6 +3232,13 @@ export default function App() {
         if (!e.repeat) toggleAnnotations();
         return;
       }
+      if (shortcutMatches(e, "assistant.toggle")) {
+        if (isEditableElement(e.target)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) toggleAssistant();
+        return;
+      }
       const fileExplorerShortcut = shortcutMatches(e, "files.toggle");
       if (fileExplorerShortcut) {
         if (isEditableElement(e.target)) return;
@@ -3193,6 +3308,7 @@ export default function App() {
     selectPaneJumpIndex,
     setInspectorExpanded,
     toggleAnnotations,
+    toggleAssistant,
     toggleDiffViewer,
     toggleFileExplorer,
     toggleSidebar,
@@ -3311,6 +3427,10 @@ export default function App() {
         if (key === null || key === "annotationPanelMode")
           setAnnotationsFloating(
             roamgateLocalStorage.getItem("annotationPanelMode") !== "fixed",
+          );
+        if (key === null || key === "assistantPanelMode")
+          setAssistantFloating(
+            roamgateLocalStorage.getItem("assistantPanelMode") !== "fixed",
           );
         if (key === null || key === MOBILE_CONTROLS_PLACEMENT_STORAGE_KEY)
           setMobileControlsPlacement(readMobileControlsPlacement());
@@ -3565,7 +3685,7 @@ export default function App() {
       ref={appRef}
       className={`app ${sidebarHidden && !mobile ? "sidebar-hidden" : ""} ${
         zenMode && !mobile ? "zen" : ""
-      } ${mobileControlsCollapsed ? "mobile-controls-collapsed" : ""} ${
+      } ${mobile && assistantVisible ? "assistant-view" : ""} ${mobileControlsCollapsed ? "mobile-controls-collapsed" : ""} ${
         mobileControlsPlacement.side === "left" ? "mobile-controls-left" : ""
       }`}
       style={
@@ -3592,6 +3712,26 @@ export default function App() {
         </div>
         <div className="topbar-actions">
           <div className="topbar-command-group">
+            <button
+              type="button"
+              className={`topbar-button assistant-entry ${assistantVisible ? "is-active" : ""}`}
+              title={shortcutTitle("Ranger", "assistant.toggle")}
+              aria-label={
+                assistantSnapshot?.running ||
+                assistantActionExecuting(assistantSnapshot)
+                  ? "Ranger is working"
+                  : "Open Ranger"
+              }
+              aria-pressed={assistantVisible}
+              onClick={toggleAssistant}
+            >
+              <Compass size={15} aria-hidden="true" />
+              <span className="assistant-entry-label">Ranger</span>
+              {assistantSnapshot?.running ||
+              assistantActionExecuting(assistantSnapshot) ? (
+                <span className="assistant-entry-running" aria-hidden="true" />
+              ) : null}
+            </button>
             <CommandCombobox
               key={`${resourceUiKey}:commands`}
               onOpenFileExplorer={openFileExplorer}
@@ -3983,7 +4123,7 @@ export default function App() {
             onToggleAnnotations={toggleAnnotations}
           />
           <div
-            className={`workspace-surfaces ${annotationsDocked ? "has-annotations" : ""}`}
+            className={`workspace-surfaces ${annotationsDocked ? "has-annotations" : ""} ${assistantDocked ? "has-assistant" : ""}`}
           >
             <div
               ref={inspectorStageRef}
@@ -4152,6 +4292,31 @@ export default function App() {
               onCopy={() => void copyFeedback()}
               onSend={(paneId) => void sendFeedback(paneId)}
             />
+            {assistantMounted ? (
+              <Suspense
+                fallback={
+                  assistantVisible ? (
+                    <aside
+                      className={`assistant-panel ${assistantFloating && !mobile ? "is-floating" : ""} ${mobile ? "is-mobile" : ""}`}
+                      aria-label="Ranger"
+                    >
+                      <div className="assistant-panel-empty">
+                        Loading Ranger...
+                      </div>
+                    </aside>
+                  ) : null
+                }
+              >
+                <AssistantPanel
+                  open={assistantVisible}
+                  floating={assistantFloating && !mobile}
+                  mobile={mobile}
+                  onClose={closeAssistant}
+                  onToggleFloating={toggleAssistantFloating}
+                  onOpenSource={(source) => void openAssistantSource(source)}
+                />
+              </Suspense>
+            ) : null}
           </div>
         </main>
       </div>

@@ -16,6 +16,7 @@
 /* ===== tab bar (top of main) ===== */
 .tabbar {
   flex: 0 0 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -23,10 +24,20 @@
   background: var(--shell-panel);
   border: 1px solid var(--shell-border);
   border-radius: 10px;
+  overflow: hidden;
+}
+
+.tabbar-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   overflow-x: auto;
 }
 
 .tabbar-tab {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -49,13 +60,13 @@
   transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 
-.tabbar.is-reordering {
+.tabbar-tabs.is-reordering {
   cursor: grabbing;
   user-select: none;
   -webkit-user-select: none;
 }
 
-.tabbar.is-reordering .tabbar-tab {
+.tabbar-tabs.is-reordering .tabbar-tab {
   cursor: grabbing;
 }
 
@@ -144,6 +155,7 @@
 }
 
 .tabbar-add {
+  flex: 0 0 auto;
   width: 26px;
   height: 26px;
   padding: 0;
@@ -163,14 +175,7 @@
   color: var(--text);
 }
 
-.tabbar-spacer {
-  min-width: 12px;
-  flex: 1 1 auto;
-}
-
 .tabbar-utilities {
-  position: sticky;
-  right: 0;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;

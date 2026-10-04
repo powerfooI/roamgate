@@ -257,96 +257,108 @@ export function TabBar({
     <>
       {showTabStrip ? (
         <div className="tabbar">
-          {tabs.map((t) => {
-            const name =
-              t.label && t.label !== String(t.number)
-                ? t.label
-                : `Tab ${t.number}`;
-            const agentSummary = summarizeTabAgents(s.panes, t.tab_id);
-            const pinned = pinnedTabIds.has(t.tab_id);
-            const reorderHandlers = reorder.handlers(t.tab_id);
-            return (
-              <div
-                key={t.tab_id}
-                ref={reorder.register(t.tab_id)}
-                {...reorderHandlers}
-                onPointerDown={
-                  s.tabMoveSupported ? reorderHandlers.onPointerDown : undefined
-                }
-                className={`tabbar-tab ${t.focused ? "is-active" : ""} ${
-                  pinned ? "is-pinned" : ""
-                }`}
-                onClick={() => {
-                  store.focusTab(t.tab_id);
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setMenu({ tab: t, x: e.clientX, y: e.clientY });
-                }}
-                title={t.tab_id}
-              >
-                {agentSummary ? (
-                  <span
-                    className="tabbar-agent-marker"
-                    title={`${agentSummary.primaryAgent} · ${agentSummary.status}${
-                      agentSummary.additionalAgents > 0
-                        ? ` · ${agentSummary.additionalAgents} more agent${
-                            agentSummary.additionalAgents === 1 ? "" : "s"
-                          }`
-                        : ""
-                    }`}
-                    aria-label={`${agentSummary.primaryAgent}, status ${agentSummary.status}`}
-                  >
-                    <AgentStatusIcon
-                      agent={agentSummary.primaryAgent}
-                      status={agentSummary.status}
-                    />
-                    {agentSummary.additionalAgents > 0 ? (
-                      <span className="tabbar-agent-more">
-                        +{agentSummary.additionalAgents}
-                      </span>
-                    ) : null}
-                  </span>
-                ) : null}
-                <TabLongPressTarget
-                  tab={t}
-                  onOpenMenu={(x, y) => setMenu({ tab: t, x, y })}
+          <div className="tabbar-tabs">
+            {tabs.map((t) => {
+              const name =
+                t.label && t.label !== String(t.number)
+                  ? t.label
+                  : `Tab ${t.number}`;
+              const agentSummary = summarizeTabAgents(s.panes, t.tab_id);
+              const pinned = pinnedTabIds.has(t.tab_id);
+              const reorderHandlers = reorder.handlers(t.tab_id);
+              return (
+                <div
+                  key={t.tab_id}
+                  ref={reorder.register(t.tab_id)}
+                  {...reorderHandlers}
+                  onPointerDown={
+                    s.tabMoveSupported
+                      ? reorderHandlers.onPointerDown
+                      : undefined
+                  }
+                  className={`tabbar-tab ${t.focused ? "is-active" : ""} ${
+                    pinned ? "is-pinned" : ""
+                  }`}
+                  onClick={() => {
+                    store.focusTab(t.tab_id);
+                  }}
+                  onDoubleClick={(e) => {
+                    if (
+                      (e.target as Element).closest("button") ||
+                      e.currentTarget.matches(".is-dragging, .is-settling")
+                    )
+                      return;
+                    e.preventDefault();
+                    setPendingRenameTab(t);
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setMenu({ tab: t, x: e.clientX, y: e.clientY });
+                  }}
+                  title={t.tab_id}
                 >
-                  <span className="tabbar-name">{name}</span>
-                </TabLongPressTarget>
-                {pinned ? (
-                  <Pin
-                    className="tabbar-pin"
-                    size={11}
-                    fill="currentColor"
-                    aria-label="Pinned"
-                  />
-                ) : (
-                  <button
-                    className="tabbar-close"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPendingCloseTabId(t.tab_id);
-                    }}
-                    title="Close tab"
+                  {agentSummary ? (
+                    <span
+                      className="tabbar-agent-marker"
+                      title={`${agentSummary.primaryAgent} · ${agentSummary.status}${
+                        agentSummary.additionalAgents > 0
+                          ? ` · ${agentSummary.additionalAgents} more agent${
+                              agentSummary.additionalAgents === 1 ? "" : "s"
+                            }`
+                          : ""
+                      }`}
+                      aria-label={`${agentSummary.primaryAgent}, status ${agentSummary.status}`}
+                    >
+                      <AgentStatusIcon
+                        agent={agentSummary.primaryAgent}
+                        status={agentSummary.status}
+                      />
+                      {agentSummary.additionalAgents > 0 ? (
+                        <span className="tabbar-agent-more">
+                          +{agentSummary.additionalAgents}
+                        </span>
+                      ) : null}
+                    </span>
+                  ) : null}
+                  <TabLongPressTarget
+                    tab={t}
+                    onOpenMenu={(x, y) => setMenu({ tab: t, x, y })}
                   >
-                    ×
-                  </button>
-                )}
-              </div>
-            );
-          })}
-          <button
-            className="tabbar-add"
-            onClick={() => {
-              store.createTab(focusedWs.workspace_id);
-            }}
-            disabled={!!createReason}
-            title={createReason ?? shortcutTitle("New tab", "tab.create")}
-          >
-            +
-          </button>
-          <span className="tabbar-spacer" />
+                    <span className="tabbar-name">{name}</span>
+                  </TabLongPressTarget>
+                  {pinned ? (
+                    <Pin
+                      className="tabbar-pin"
+                      size={11}
+                      fill="currentColor"
+                      aria-label="Pinned"
+                    />
+                  ) : (
+                    <button
+                      className="tabbar-close"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPendingCloseTabId(t.tab_id);
+                      }}
+                      title="Close tab"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            <button
+              className="tabbar-add"
+              onClick={() => {
+                store.createTab(focusedWs.workspace_id);
+              }}
+              disabled={!!createReason}
+              title={createReason ?? shortcutTitle("New tab", "tab.create")}
+            >
+              +
+            </button>
+          </div>
           <div className="tabbar-utilities">
             <button
               type="button"

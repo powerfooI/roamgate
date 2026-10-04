@@ -355,6 +355,54 @@ roamgate --host 0.0.0.0 --port 8443 \
 - Protect keys and keep them out of Git. Issuance/renewal is external; restart
   after replacement. Services need absolute paths in their environment file.
 
+## Ranger model connection
+
+Open the global **Ranger** window and its **Settings** button. Choose
+**Ranger connection** or **Shared Pi credentials**, select a provider, and use the available **Sign in**
+or **Enter API key** action. Complete the provider's web/device-code or manual
+authorization prompt in the window, choose a default model, select allowed
+workspaces, and **Save connection**. Only the selected workspaces are eligible
+for the chat's per-question reading scope; the default is empty.
+
+**Provider** lists OAuth logins and API keys from the selected credential
+source. Click a saved provider to select it, or expand **Connect another provider**
+to choose one without saved credentials and log in from the window. **Refresh**
+reads changes made outside the window. These labels report stored
+credentials, not a successful live connection test; credentials are checked or
+refreshed when used.
+**Search providers** filters saved and other providers by name or ID, ignoring
+case. Matching providers without saved credentials expand automatically;
+filtering does not change the selected provider.
+
+Ranger runs as the Roamgate bridge's OS account, including when the browser
+is on a phone or a workspace uses SSH. Provider credentials therefore belong on
+the bridge host. Separate Ranger credentials live in
+`~/.config/roamgate/assistant/auth.json` or
+`%APPDATA%\roamgate\assistant\auth.json`; configuration, the active conversation,
+model context, and history summaries live beside them in `state.json`. Inactive
+conversations live in private `sessions/<UUID>.json` files. Back up the whole
+assistant directory to retain saved chats and credentials. These files may
+contain secrets or workspace content. Keep them private and use one bridge
+process per data directory.
+`ROAMGATE_ASSISTANT_DIR` overrides this directory; the legacy
+`HERDR_GUI_ASSISTANT_DIR` alias is also accepted.
+
+**Shared Pi credentials** explicitly opts into Pi's existing credential store
+for that bridge account. Signing in or entering an API key in this mode updates
+that store, so Pi can also use the saved credentials. The separate **Ranger connection**
+keeps its own store. Neither mode requires terminal interaction to log in.
+The catalog uses credentials saved in Pi's `auth.json`;
+environment-only API keys and custom Pi models are not imported.
+Pi's extensions, skills, project instructions, and
+built-in write/command tools are not loaded into Ranger.
+
+For remote bridge deployments, follow the provider's displayed device-code or
+manual authorization flow. A browser's localhost callback points to the browser
+machine; it does not automatically reach the bridge host. Cancelling a login
+does not disconnect the bridge or its Herdr profiles. See
+[Ranger behavior](../FEATURES.md#ranger) and
+[tool and session contracts](ARCHITECTURE.md#ranger).
+
 ## Web Push notifications
 
 1. Use trusted HTTPS; on iOS/iPadOS 16.4+, open the installed Home Screen app.
@@ -482,6 +530,11 @@ retires routing and blocks edits rather than letting memory/disk disagree.
 only the runtime/tunnel, never Herdr/workspaces. SSH retries transient failures,
 not auth/host-key/permanent protocol errors. There is no idle cleanup or aggregate
 resource budget; disconnect unused profiles.
+
+GUI preferences and worktree source relationships live in
+`~/.config/roamgate/settings.json` (Windows: `%APPDATA%\roamgate\settings.json`).
+Use `ROAMGATE_SETTINGS_PATH` to give another bridge its own settings file;
+`HERDR_GUI_SETTINGS_PATH` remains a supported alias.
 
 Explicit CLI/environment connection settings create a read-only `legacy-default`
 profile. Change those settings to edit it. Old browser preferences migrate once

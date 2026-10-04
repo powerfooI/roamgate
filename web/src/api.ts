@@ -2,6 +2,10 @@ import {
   validateRemoteSocketPath,
   validateSshDestination,
 } from "./sshProfileValidation";
+import {
+  isAssistantSnapshot,
+  type AssistantSnapshot,
+} from "../../shared/assistant";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
@@ -161,6 +165,7 @@ export interface BridgeHello {
     file_reveal?: boolean;
     /** Task notifications follow Herdr's semantic notifications, not pane status. */
     herdr_task_notifications?: boolean;
+    embedded_assistant?: boolean;
     [key: string]: unknown;
   };
 }
@@ -337,6 +342,7 @@ function isBridgeHello(value: unknown): value is BridgeHello {
     "control",
     "terminal",
     "terminal_clipboard",
+    "assistant",
   ]) {
     if (Object.prototype.hasOwnProperty.call(message, field)) return false;
   }
@@ -347,6 +353,7 @@ function isBridgeHello(value: unknown): value is BridgeHello {
     "connection_runtime_generation",
     "herdr_task_notifications",
     "file_reveal",
+    "embedded_assistant",
   ]) {
     const value = capabilities[capability];
     if (value !== undefined && typeof value !== "boolean") return false;
@@ -366,6 +373,7 @@ export class Bridge {
   private seq = 0;
   private pending = new Map<string, Pending>();
   private eventHandlers = new Set<(e: HerdrEventMsg) => void>();
+  private assistantHandlers = new Set<(snapshot: AssistantSnapshot) => void>();
   private terminalHandlers = new Set<(t: TerminalPush) => void>();
   private terminalClipboardHandlers = new Set<
     (clipboard: TerminalClipboardPush) => void
@@ -722,6 +730,7 @@ export class Bridge {
     const hasTerminalClosed = owns("terminal_closed");
     const hasPopup = owns("popup");
     const hasControl = owns("control");
+    const hasAssistant = owns("assistant");
     const kindCount = [
       hasHello,
       hasReply,
@@ -731,6 +740,7 @@ export class Bridge {
       hasTerminalClosed,
       hasPopup,
       hasControl,
+      hasAssistant,
     ].filter(Boolean).length;
     if (kindCount !== 1) return;
 
@@ -753,6 +763,18 @@ export class Bridge {
     }
 
     if (!this.helloAcceptedForSocket) return;
+
+    if (hasAssistant) {
+      if (
+        this._hello?.capabilities.embedded_assistant !== true ||
+        owns("connection_id") ||
+        owns("connection_generation") ||
+        !isAssistantSnapshot(msg.assistant)
+      )
+        return;
+      this.assistantHandlers.forEach((handler) => handler(msg.assistant));
+      return;
+    }
 
     if (hasReply) {
       const hasResult = owns("result");
@@ -1080,6 +1102,11 @@ export class Bridge {
   onEvent(cb: (event: HerdrEventMsg) => void): () => void {
     this.eventHandlers.add(cb);
     return () => this.eventHandlers.delete(cb);
+  }
+
+  onAssistant(cb: (snapshot: AssistantSnapshot) => void): () => void {
+    this.assistantHandlers.add(cb);
+    return () => this.assistantHandlers.delete(cb);
   }
 
   onTerminal(cb: (terminal: TerminalPush) => void): () => void {

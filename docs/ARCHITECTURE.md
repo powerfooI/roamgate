@@ -371,6 +371,110 @@ available version. CLI commands have five-second timeouts; missing binaries,
 failed SSH commands, malformed output, and version mismatches leave missing
 metadata unknown without failing the list. There is no remote-to-local fallback.
 
+## Ranger
+
+The bridge owns one Pi SDK assistant service, independent of the selected Herdr
+connection. Authenticated browsers share its configuration, saved conversations,
+active conversation, and single active turn. `bridge.assistant.*` RPC and dedicated
+assistant snapshot pushes are
+bridge-global; snapshots carry a service instance ID and monotonically increasing
+revision. The browser reconciles pushes and replies, retires old instances, and
+fetches state after reconnect without replaying sends. Request IDs deduplicate
+explicit retries. Hiding the window only changes presentation; stopping work is
+a separate RPC.
+
+Model credentials default to the separate Roamgate Ranger store. Reusing the
+bridge OS account's Pi credentials requires an explicit source choice. Login
+captures that choice and updates only the selected store; configuration changes
+are blocked until login completes or is cancelled. Provider prompts and authorization URLs stay out
+of conversation history and persisted snapshots; provider credentials remain on
+the bridge host. [Deployment](DEPLOYMENT.md#ranger-model-connection) owns paths
+and setup instructions.
+
+The protocol-independent tool catalog in `server/src/assistant/tools.ts` owns
+tool names, descriptions, and JSON schemas. `callWorkspaceTool` validates the
+named tool and arguments before invoking a reader bound to the service's
+approved turn scope. Its result keeps text and sources separate; the Pi adapter
+formats that result for the model. Adapters share this execution entry point and
+the existing context reads, including cancellation and safe error handling.
+The catalog does not grant workspace access: adapters must authorize and capture
+the scope on the server before binding a reader. Runtime leases remain private
+to the context layer.
+
+The model receives `workspace_status`, `workspace_history`, `workspace_diff`,
+and `workspace_terminal`, plus six proposal tools for workspace creation,
+worktree creation, tab creation, pane splitting, agent startup, and agent prompts. Proposal tools only prepare
+previews; they cannot execute operations. Built-in tools and discovered extensions, skills,
+prompts, and project instruction files are disabled. Evidence is bounded and
+treated as untrusted content. The service validates the selected turn scope
+against explicitly allowed connection/workspace pairs; none are allowed by
+default. Allowed and per-turn scopes each contain at most 64 workspace pairs.
+Each turn captures runtime identity/generation and rechecks its leases
+before and after reads. A replaced runtime or vanished workspace fails without
+falling back to another host or workspace.
+
+`workspace_diff` lists working-tree changes when `path` is omitted. To read a
+listed file, pass its `path` and `kind`: `staged`, `unstaged`, `untracked`, or
+`conflicted`. Omitting `kind` reads unstaged changes.
+
+`workspace_terminal` reads the selected pane's recent output, including its active
+agent output, through Herdr `pane.read`. The model can choose `lines` from 1 to
+1,000; omitting it reads 120 lines. The response identifies its requested line
+window and retains the newest 32,000 characters when the text budget is exceeded,
+with an explicit truncation warning. Reads allow 25 seconds for Herdr to collect
+supported idle agents' application history and restore their viewport. Available
+history depends on Herdr support and agent state; increasing the requested line
+window does not guarantee recovery of every application-owned response.
+
+Each proposal captures its original runtime lease and exact target. Agent
+operations also recheck the pane occupant before execution. Tab creation uses
+Herdr's default terminal tab in the workspace's verified directory. Pane splitting
+pins the source tab, pane, terminal, working directory, and right/down direction;
+confirmation rechecks these identities before changing the layout. Result reads
+verify the created tab or pane and include its identifiers in the receipt.
+Models can read `workspace_status` after confirmation before proposing an agent
+start in a newly created pane. Authenticated bridge
+browsers can confirm or cancel the shared preview through `action.confirm` and
+`action.cancel`. Confirmation accepts only the proposal ID, never new parameters.
+The service saves an executing receipt before starting an operation and admits
+only one operation at a time. Duplicate confirmations return the same receipt.
+Result reads verify workspace creation and agent startup; prompt delivery is
+reported separately from whether the agent completed the requested task. Failed
+or uncertain operations are not automatically retried.
+
+Worktree creation shares the ordinary UI's base synchronization, parent tracking,
+and setup-hook execution. A changed setup command requires fresh confirmation;
+an already-created worktree can therefore have a partial setup result. New
+questions or configuration changes retire pending previews. On bridge restart,
+pending previews become cancelled and executing receipts become uncertain;
+captured execution closures are never restored. Confirmed results clear retained
+model context and are supplied as receipts in subsequent questions. Creating a
+workspace does not add it to the allowed scope.
+
+Sources carry their workspace, runtime generation, kind, and read time. They
+describe evidence at that time rather than live workspace state; browser source
+navigation rechecks runtime generation. Configuration, transcript, deduplication
+IDs, and model context are persisted in private bridge data. Changing allowed
+workspaces, turn scope, or captured runtime generation clears retained model
+context before the next turn. **New chat** archives the current nonempty
+conversation and starts a new transcript and model context. `select_session`
+restores a saved conversation's transcript, model context, and deduplication IDs
+while keeping the current global configuration. New chats and switches require an
+idle service and retire pending action previews; archived actions never replay.
+Snapshots include the active session ID and summaries for the history list. A
+send may include that session ID to reject a stale browser's submission after
+another device changes the active conversation. A bridge restart restores saved
+history but does not restart an interrupted turn. Unsent drafts stay in
+browser-tab memory, keyed by conversation.
+
+Each retained transcript is limited to the newest 80 messages and 1 MB of serialized
+UTF-8 data. Answers are capped at 32,000 characters, 64 tool activities, and 64
+sources each. Retained model context above 1 MB is cleared before another turn;
+the displayed transcript can remain available after that reset. The active state
+and history summaries live in `state.json`; inactive conversations are stored in
+private `sessions/<UUID>.json` files. Existing single-conversation state is
+migrated without clearing its messages.
+
 ## Task notifications
 
 With the default `herdr` source, each runtime keeps one passive endpoint shell

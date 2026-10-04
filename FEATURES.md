@@ -8,6 +8,7 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
 
 - Create, rename, pin, switch, and close workspaces/tabs. Linked Git worktrees
   group under their repository; pins and collapsed groups stay in this browser.
+  Double-click a tab to rename it, or use its context menu.
 - Pinned tabs lead the tab strip and cannot be closed from Roamgate; their
   panes still close while another pane remains. Herdr keeps tab ids across
   restarts, so pins persist until the tab closes elsewhere, such as in the TUI.
@@ -164,6 +165,64 @@ for a remote pane. Other ID/directory fallbacks remain local and require
 accessible transcripts. Muse token totals use per-run provider routing; when a
 cached-token convention is unknown, totals show `-` rather than an estimate.
 See [History synchronization](docs/HISTORY.md).
+
+## Ranger
+
+Ranger is an experimental workspace management assistant.
+
+Open **Ranger** from the global topbar button or its configurable keyboard
+shortcut. Desktop uses a floating window like Annotations; **Pin Ranger**
+reserves space beside the current workspace. Mobile uses a full chat surface.
+Use **Maximize Ranger** to fill the workspace area and **Restore Ranger** (or
+Escape) to return to the previous layout.
+The conversation stays available when switching workspaces or connections.
+
+- Connect a provider and choose a model through the window's **Settings** button.
+  Use a separate Ranger connection or explicitly reuse the bridge account's
+  saved Pi credentials with **Shared Pi credentials**. Select a saved provider or
+  expand **Connect another provider**; both credential sources support sign-in
+  and API-key entry in the window. See [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
+- Allow workspaces in Settings, then choose the **Reading scope** for each
+  question. **Select all** adds the currently available workspaces; **Clear**
+  removes every selection. Use **Save connection** to apply permission changes.
+  No workspaces are authorized by default, and new workspaces need to be
+  selected separately. The scope stays fixed while Ranger streams an answer.
+- Expand **Work performed** to inspect context reads. Ranger can read
+  workspace status, agent history, changes, and recent terminal output. Source
+  links show when the evidence was read and open the corresponding workspace
+  or inspector view; unavailable or replaced connections require fresh evidence.
+  Ranger chooses how many recent terminal lines to read (1-1,000; default 120),
+  with the newest 32,000 characters retained if the output exceeds its budget.
+- Ask Ranger to create a workspace, worktree, or terminal tab, split a pane to
+  the right or below, start an agent in a pane, or send a prompt and supporting
+  context to an agent. Each operation
+  appears as a preview with its host, workspace, parameters, and full text to be
+  sent. **Confirm action** executes that exact proposal; **Cancel** dismisses it.
+  Tab and split previews show the working directory and source pane when needed;
+  completion receipts identify the new tab or pane. Ask Ranger to read the updated
+  status before starting an agent there.
+  Worktree previews include configured setup hooks. Results distinguish verified
+  completion from partial or uncertain outcomes. An uncertain operation must be
+  checked at its target before proposing another one; reconnects never replay it.
+  Newly created workspaces must be explicitly allowed before Ranger can use them.
+- Closing the window hides it while work continues; the topbar indicator shows
+  activity. **Stop** cancels the current turn. **New chat** saves the current
+  conversation and starts an empty one, keeping the model connection and workspace
+  permissions. **History** lists saved conversations by their first question;
+  select one to read its messages and continue chatting. Switching chats retires
+  unconfirmed action previews.
+- The wave bar on the right marks messages and highlights the visible portion
+  of the conversation. Hover to preview a message, click to jump, or focus it
+  and use Up/Down, Home, and End. Jumping back pauses automatic following until
+  you return to the bottom or send another message.
+
+The bridge stores saved conversations and one active chat shared by its
+authenticated browsers/devices; messages survive bridge restarts. A reconnect
+fetches current progress without resending a question. Unsent drafts stay in the
+current browser tab's memory, separately for each conversation.
+Workspace permissions cover both reads and confirmed management operations.
+Ordinary Roamgate access still grants the
+[administrative authority](SECURITY.md#trust-model) described by its trust model.
 
 ## Git Worktree Lifecycle
 
@@ -390,6 +449,7 @@ Common defaults (Linux/Android exceptions follow):
 | Workspace Inspector | `Cmd+Shift+B` | `Ctrl+Alt+Shift+B` |
 | Expand / restore Inspector (desktop) | `Cmd+Option+Enter` | `Ctrl+Alt+Shift+Enter` |
 | Annotations | `Cmd+Option+A` | `Ctrl+Alt+A` |
+| Ranger | `Cmd+Option+Shift+A` | `Ctrl+Alt+Shift+A` |
 | Zen mode (desktop) | `Cmd+Shift+Z` | `Ctrl+Alt+Z` |
 | Recent pane switcher | `Ctrl+Tab` | `Ctrl+Alt+J` |
 | Search panes | `Alt+K` | `Alt+K` |
