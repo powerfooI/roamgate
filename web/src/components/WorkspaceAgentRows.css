@@ -108,6 +108,22 @@
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+.agent-row.is-nested.is-selected {
+  box-shadow: none;
+}
+
+.agent-row.is-nested.is-selected::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
 .agent-info {
   min-width: 0;
   flex: 1;
