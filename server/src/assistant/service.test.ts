@@ -340,6 +340,154 @@ describe("Ranger scheduled task service", () => {
     await flushTasks();
   });
 
+  test.each([false, true])(
+    "recovery waiting for a connection releases the task slot without losing checkpoints (disconnect after admission: %s)",
+    async (disconnectAfterAdmission) => {
+      jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+      const offline = { connection_id: "offline", workspace_id: "ws" };
+      const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+      const children: {
+        done: ReturnType<typeof Promise.withResolvers<unknown[]>>;
+        disposed: boolean;
+      }[] = [];
+      const checkpoint = [{ saved_read: "already completed" }];
+      const createDriver = (): AssistantDriver => {
+        const child = {
+          done: Promise.withResolvers<unknown[]>(),
+          disposed: false,
+        };
+        children.push(child);
+        return {
+          catalog: async () => catalog,
+          login: async () => {},
+          run: async (input) => {
+            inputs.push(input);
+            input.checkpoint?.(checkpoint);
+            return child.done.promise;
+          },
+          stop: async () => {
+            child.done.resolve(checkpoint);
+          },
+          dispose: async () => {
+            child.disposed = true;
+            child.done.resolve(checkpoint);
+          },
+        };
+      };
+      const f = setup({}, createDriver);
+      stableTaskIdentity(f.context);
+      const capture = (refs: typeof configured.allowed_workspaces) =>
+        refs.map((ref) => ({ ...workspace, ...ref }));
+      f.context.captureScope = async (refs) => capture(refs);
+      let ready = true;
+      let restoreChecks = 0;
+      f.context.restoreScope = async (targets) => {
+        if (
+          targets.some(
+            (target) => target.connection_id === offline.connection_id,
+          )
+        ) {
+          restoreChecks++;
+          if (!ready && !(disconnectAfterAdmission && restoreChecks === 1))
+            throw new AssistantRecoveryNotReadyError(
+              "Original connection is not ready",
+            );
+        }
+        return capture(targets);
+      };
+      await f.service.handle("configure", {
+        ...configured,
+        allowed_workspaces: [...configured.allowed_workspaces, offline],
+      });
+      const first = (
+        await f.service.handle("task.create", {
+          request_id: randomUUID(),
+          title: "Interrupted original run",
+          prompt: "Inspect the offline workspace",
+          scope: [offline],
+          schedule: { type: "once", at: "2026-10-04T00:00:01.000Z" },
+        })
+      ).tasks![0]!;
+      const second = (
+        await f.service.handle("task.create", {
+          request_id: randomUUID(),
+          title: "Ready workspace",
+          prompt: "Inspect the ready workspace",
+          scope: configured.allowed_workspaces,
+          schedule: { type: "interval", minutes: 1 },
+        })
+      ).tasks![0]!;
+      await f.service.resume();
+      jest.advanceTimersByTime(1_000);
+      await flushTasks();
+      expect(inputs).toHaveLength(1);
+      const original = (await f.service.taskDetail({ task_id: first.id }))
+        .runs[0]!;
+      await f.service.handle("task.pause", { task_id: first.id });
+      await f.service.handle("task.run_now", { task_id: second.id });
+      await f.service.dispose();
+      ready = false;
+      restoreChecks = 0;
+      const restored = createAssistantService({
+        directory: f.directory,
+        context: f.context,
+        driver: f.driver,
+        createDriver,
+        publish: () => {},
+      });
+      services.push(restored);
+      await restored.resume();
+      await flushTasks();
+      const waiting = await restored.taskDetail({
+        task_id: first.id,
+        run_id: original.id,
+      });
+      expect(waiting.run?.status).toBe("queued");
+      expect(waiting.run?.started_at).toBe(original.started_at);
+      expect(waiting.run?.finished_at).toBeUndefined();
+      expect(waiting.run?.error).toContain("Waiting");
+      expect(inputs).toHaveLength(1);
+      if (disconnectAfterAdmission) expect(children[1]!.disposed).toBe(true);
+      const statePath = join(
+        f.directory,
+        "tasks",
+        first.id,
+        "runs",
+        original.id,
+        "state.json",
+      );
+      const saved = JSON.parse(readFileSync(statePath, "utf8"));
+      expect(saved.active_run.request_id).toBe(original.id);
+      expect(saved.entries).toEqual(checkpoint);
+      jest.advanceTimersByTime(0);
+      await flushTasks();
+      expect(inputs).toHaveLength(2);
+      const healthy = inputs[1]!;
+      expect(healthy.text).toContain("Inspect the ready workspace");
+      ready = true;
+      await Promise.all([restored.resume(), restored.resume()]);
+      await flushTasks();
+      expect(inputs).toHaveLength(2);
+      children.at(-1)!.done.resolve([]);
+      await flushTasks();
+      jest.advanceTimersByTime(0);
+      await flushTasks();
+      expect(inputs).toHaveLength(3);
+      expect(inputs[2]!.requestId).toBe(original.id);
+      expect(inputs[2]!.recover).toBe(true);
+      expect(inputs[2]!.entries).toEqual(checkpoint);
+      await Promise.all([restored.resume(), restored.resume()]);
+      expect(inputs).toHaveLength(3);
+      children.at(-1)!.done.resolve(checkpoint);
+      await flushTasks();
+      const finished = await restored.taskDetail({ task_id: first.id });
+      expect(finished.runs).toHaveLength(1);
+      expect(finished.runs[0]!.status).toBe("succeeded");
+      expect(finished.runs[0]!.started_at).toBe(original.started_at);
+      expect(finished.task.status).toBe("paused");
+    },
+  );
+
   test("workspace identity reuse and global permission tightening fail closed throughout a child read", async () => {
     jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
     const done = Promise.withResolvers<unknown[]>();

@@ -1106,6 +1106,8 @@ export function createAssistantService(options: {
         persist();
       }
       publish(true);
+      if (options.taskRun && error instanceof AssistantRecoveryNotReadyError)
+        throw error;
     } finally {
       recovering = false;
     }

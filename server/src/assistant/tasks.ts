@@ -464,7 +464,7 @@ export function createAssistantTasks(options: {
         const run = current(entry);
         if (
           run?.status === "queued" &&
-          (entry.task.status === "active" || run.manual)
+          (entry.task.status === "active" || run.manual || run.started_at)
         )
           due.push(retryAt.get(run.id) ?? Date.now());
       }
@@ -532,15 +532,14 @@ export function createAssistantTasks(options: {
     admissions.set(run.id, admission);
     let child: ScheduledChild | undefined;
     try {
-      if (!recover)
-        change(() => {
-          retryAt.delete(run.id);
-          run.status = "running";
-          run.started_at = now();
-          run.error = null;
-        });
+      change(() => {
+        retryAt.delete(run.id);
+        run.status = "running";
+        run.started_at ??= now();
+        run.error = null;
+      });
       if (!validPrepared(run)) throw new Error("Invalid task admission");
-      if (!recover) await validate(run, admission.signal);
+      await validate(run, admission.signal);
       if (disposed || !["running", "waiting"].includes(run.status)) {
         if (busy === run.id) busy = undefined;
         return;
@@ -560,15 +559,18 @@ export function createAssistantTasks(options: {
     } catch (error) {
       if (!disposed && run.status !== "stopped") {
         if (
-          !recover &&
-          !child &&
+          (!child || recover) &&
           error instanceof AssistantRecoveryNotReadyError
         ) {
+          await child?.dispose();
+          children.delete(run.id);
+          if (disposed || !["running", "waiting"].includes(run.status)) return;
           change(() => {
             run.status = "queued";
             run.error =
               "Waiting for the original workspace connection to become ready.";
-            delete run.started_at;
+            // An admitted run must retain its checkpoint and original start time.
+            if (!recover) delete run.started_at;
           });
           retryAt.set(run.id, Date.now() + 5_000);
           return;
@@ -607,7 +609,10 @@ export function createAssistantTasks(options: {
           entry.task.next_run_at =
             next === null ? null : new Date(next).toISOString();
           const active = current(entry);
-          if (active && (active.status !== "queued" || active.manual))
+          if (
+            active &&
+            (active.status !== "queued" || active.manual || active.started_at)
+          )
             entry.due_at ??= scheduled;
           else if (active) continue;
           else queue(entry, scheduled);
@@ -623,12 +628,17 @@ export function createAssistantTasks(options: {
               (run) =>
                 run.status === "queued" &&
                 (retryAt.get(run.id) ?? 0) <= time &&
-                (entry.task.status === "active" || run.manual),
+                (entry.task.status === "active" ||
+                  run.manual ||
+                  !!run.started_at),
             )
             .map((run) => ({ entry, run })),
         )
         .sort((a, b) => a.run.scheduled_at.localeCompare(b.run.scheduled_at));
-      if (queued[0]) track(launch(queued[0].entry, queued[0].run, false));
+      if (queued[0])
+        track(
+          launch(queued[0].entry, queued[0].run, !!queued[0].run.started_at),
+        );
     }
     arm();
   }

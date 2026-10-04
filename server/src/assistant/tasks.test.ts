@@ -552,6 +552,98 @@ test.each(["ready", "replaced"] as const)(
   },
 );
 
+test.each(["ready", "cancelled", "replaced"] as const)(
+  "queued recovery survives another restart with a %s target",
+  async (target) => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    let ready = true;
+    const validate = async () => {
+      if (!ready) throw new AssistantRecoveryNotReadyError("Not ready");
+    };
+    const f = fixture(undefined, validate);
+    const task = await f.manager.create(
+      prepared({ type: "once", at: "2026-10-04T00:01:00.000Z" }),
+      randomUUID(),
+    );
+    await f.manager.resume();
+    jest.advanceTimersByTime(60_000);
+    await flush();
+    const original = f.manager.detail(task.id).runs[0]!;
+    await f.manager.dispose();
+    ready = false;
+    const waiting = fixture(f.directory, validate);
+    await waiting.manager.resume();
+    await flush();
+    expect(waiting.runs).toHaveLength(0);
+    expect(waiting.manager.detail(task.id).runs[0]!.status).toBe("queued");
+    expect(waiting.manager.detail(task.id).runs[0]!.started_at).toBe(
+      original.started_at,
+    );
+    await waiting.manager.dispose();
+    const restored = fixture(f.directory, validate);
+    await restored.manager.resume();
+    await flush();
+    expect(restored.runs).toHaveLength(0);
+    if (target === "cancelled")
+      await restored.manager.control("cancel", task.id);
+    restored.deny(target === "replaced");
+    ready = true;
+    await restored.manager.resume();
+    await flush();
+    const receipt = restored.manager.detail(task.id).runs[0]!;
+    expect(receipt.id).toBe(original.id);
+    expect(receipt.started_at).toBe(original.started_at);
+    expect(restored.manager.detail(task.id).runs).toHaveLength(1);
+    if (target === "ready") {
+      expect(restored.runs).toHaveLength(1);
+      expect(restored.runs[0]!.recover).toBe(true);
+      expect(receipt.status).toBe("running");
+    } else {
+      expect(restored.runs).toHaveLength(0);
+      expect(receipt.status).toBe(
+        target === "cancelled" ? "stopped" : "failed",
+      );
+    }
+  },
+);
+
+test("recovery queued during disconnection retains one coalesced occurrence after the interrupted run", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const task = await f.manager.create(prepared(), randomUUID());
+  await f.manager.resume();
+  jest.advanceTimersByTime(60_000);
+  await flush();
+  const original = f.manager.detail(task.id).runs[0]!;
+  await f.manager.dispose();
+  let ready = false;
+  const restored = fixture(f.directory, async () => {
+    if (!ready) throw new AssistantRecoveryNotReadyError("Not ready");
+  });
+  await restored.manager.resume();
+  await flush();
+  jest.advanceTimersByTime(240_000);
+  await flush();
+  expect(restored.manager.detail(task.id).runs).toHaveLength(1);
+  expect(restored.manager.detail(task.id).runs[0]!.status).toBe("queued");
+  ready = true;
+  await restored.manager.resume();
+  await flush();
+  expect(restored.runs).toHaveLength(1);
+  expect(restored.runs[0]!.run.id).toBe(original.id);
+  expect(restored.runs[0]!.recover).toBe(true);
+  restored.runs[0]!.complete();
+  jest.advanceTimersByTime(0);
+  await flush();
+  expect(restored.runs).toHaveLength(2);
+  expect(restored.runs[1]!.recover).toBe(false);
+  expect(restored.runs[1]!.run.scheduled_at).toBe("2026-10-04T00:02:00.000Z");
+  expect(restored.manager.detail(task.id).runs).toHaveLength(2);
+  expect(restored.manager.detail(task.id).task.next_run_at).toBe(
+    "2026-10-04T00:06:00.000Z",
+  );
+});
+
 test("completed history retains only receipts, caps at 20 runs and reloads large prompts", async () => {
   jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
   const f = fixture();

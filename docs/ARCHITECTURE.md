@@ -510,8 +510,12 @@ original identities and current global workspace permissions before reading or
 proposing operations. Schedule execution never confirms a management operation.
 
 One scheduled model run is admitted at a time; interactive chat has a separate
-service. A run waiting for operation confirmation retains its service and blocks
-new runs of the same task, while other tasks can proceed. Restart cancels those
+service. Interrupted runs waiting for their original connections return to the
+queue and release the model slot. Their original start time and checkpoint
+directory are retained so the next admission resumes the same run, including
+while its schedule is paused. A run waiting for operation confirmation retains
+its service and blocks new runs of the same task, while other tasks can proceed.
+Restart cancels those
 previews under the ordinary receipt rules. A task has at most one outstanding
 run; overdue occurrences are combined rather than replayed in a backlog.
 Interval schedules preserve their cadence, daily schedules use explicit IANA
