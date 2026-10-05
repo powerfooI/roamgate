@@ -4003,7 +4003,7 @@ export default function App() {
               activateTerminalSurface();
               setTerminalComposerOpen(true);
             });
-            // Focus inside the tap gesture so iOS can open its IME keyboard.
+            // Give the dock focus; Composer's editor opens the keyboard on tap.
             document
               .querySelector<HTMLElement>(".terminal-composer")
               ?.focus({ preventScroll: true });

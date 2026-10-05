@@ -294,6 +294,7 @@ async function registerDomTests() {
     if (root) await act(async () => root?.unmount());
     root = null;
     clearTerminalComposerDraft(draftKey);
+    document.documentElement.classList.remove("keyboard-open");
     document.body.replaceChildren();
     await browser.happyDOM.whenAsyncComplete();
   });
@@ -370,8 +371,8 @@ async function registerDomTests() {
     ).toHaveLength(before);
   }
   async function typeGesture() {
-    // Match MobileSheetHandle's Type click: open+commit, then synchronously focus
-    // the dock root, whose handler routes focus, all in one gesture.
+    // Match App's Type click: open+commit, then synchronously focus the dock
+    // root, whose handler routes Direct focus, all in one gesture.
     await act(async () => {
       flushSync(() => {
         open = true;
@@ -513,6 +514,8 @@ async function registerDomTests() {
       '[aria-label="Terminal input draft"]',
     )!;
     await act(async () => {
+      document.documentElement.classList.add("keyboard-open");
+      editor.focus();
       Object.getOwnPropertyDescriptor(
         browser.HTMLTextAreaElement.prototype,
         "value",
@@ -650,13 +653,27 @@ async function registerDomTests() {
     },
   );
 
-  test("Type focuses the native draft immediately for default Composer", async () => {
+  test("Type keeps Composer neutral until its native draft is explicitly focused", async () => {
     await mount();
     await typeGesture();
     expect(selectedMode()).toBe("composer");
     expect(document.activeElement).toBe(
-      container.querySelector('[aria-label="Terminal input draft"]'),
+      container.querySelector(".terminal-composer"),
     );
+    const editor = container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Terminal input draft"]',
+    )!;
+    act(() => editor.focus());
+    expect(document.activeElement).toBe(editor);
+    act(() => editor.blur());
+    const focused = document.activeElement;
+    await frame(false);
+    swipe();
+    await frame(false, "output after keyboard dismissal");
+    expect(scrollCalls()).toHaveLength(1);
+    expect(document.activeElement).toBe(focused);
+    act(() => editor.focus());
+    expect(document.activeElement).toBe(editor);
     expect(savedMode()).toBeNull();
     expectInputBlocked();
     expect(currentTerminal().focusCount).toBe(0);

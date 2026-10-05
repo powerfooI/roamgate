@@ -67,6 +67,8 @@ test.each(["claude", "grok-build", "agy"])(
     Object.defineProperty(globalThis, "document", {
       configurable: true,
       value: {
+        addEventListener() {},
+        removeEventListener() {},
         get activeElement() {
           return activeElement;
         },
@@ -375,13 +377,15 @@ test.each(["claude", "grok-build", "agy"])(
       invoke(find("children", "Replace draft"), "onClick");
       const selected = terminalComposerCommands(agent)[1];
       expect(draft).toBe(`${selected.name} `);
-      expect(activeElement).toBe(textarea);
+      expect(activeElement).toBe(
+        nodes.get("terminal-composer-commands-toggle")!,
+      );
       expect(textarea.selectionStart).toBe(selected.name.length + 1);
 
       // A pending confirmation may not discard a draft changed asynchronously.
       invoke(commands(), "onClick", { detail: 0 });
       invoke(option(), "onClick");
-      expect(activeElement).toBe(textarea);
+      expect(activeElement).toBe(group);
       const staleConfirm = find("children", "Replace draft");
       drafts.writeTerminalComposerDraft(
         "command-interaction",
@@ -428,7 +432,7 @@ test.each(["claude", "grok-build", "agy"])(
       expect(onSubmit).not.toHaveBeenCalled();
       expect(onRunShortcut).not.toHaveBeenCalled();
 
-      // Native radio switches keep the draft/caret and own touch input focus.
+      // Native radio switches keep the draft/caret; Composer waits for input.
       const changeMode = (next: TerminalInputMode, detail = 1) =>
         invoke(find("value", next), "onChange", { nativeEvent: { detail } });
       textarea.setSelectionRange(2, 5);
@@ -478,8 +482,10 @@ test.each(["claude", "grok-build", "agy"])(
             element.props.className === "terminal-composer-shortcut-spacer",
         ),
       ).toHaveLength(shortcutRows.flat().filter((slot) => !slot).length);
+      activeElement = {};
+      const composerRadioFocus = activeElement;
       changeMode("composer");
-      expect(activeElement).toBe(textarea);
+      expect(activeElement).toBe(composerRadioFocus);
       expect(textarea.selectionStart).toBe(2);
       expect(textarea.selectionEnd).toBe(5);
       expect(draft).toBe("new upload or edit");
@@ -534,10 +540,12 @@ test.each(["claude", "grok-build", "agy"])(
       expect(modeChoices).toEqual(choicesBeforeCommands);
       // Neither Composer nor an unavailable Direct mode forwards dock focus.
       onFocusDirect.mockClear();
+      activeElement = dockTarget;
       invoke(find("className", "terminal-composer"), "onFocus", {
         target: dockTarget,
         currentTarget: dockTarget,
       });
+      expect(activeElement).toBe(dockTarget);
       mode = "direct";
       render();
       invoke(find("className", "terminal-composer"), "onFocus", {

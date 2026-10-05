@@ -426,7 +426,9 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   Direct sends keys immediately through the terminal's keyboard input and
   preserves the Composer draft. Explicit mode switches are remembered per
   browser, including after reload; reopening input restores that choice
-  (Composer by default). **Type** opens the keyboard in the restored mode.
+  (Composer by default). Composer opens the keyboard only when its editor is
+  tapped; opening the dock, scrolling, and shortcut actions leave it closed.
+  **Type** opens the keyboard immediately when restoring Direct.
   Connection and pane safety resets return the live dock to Composer
   without changing the saved choice. Shortcut keys act on the terminal in either mode.
 - In the mobile composer, the **terminal command icon (`>_`)** opens a floating

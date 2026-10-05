@@ -60,6 +60,7 @@ async function registerDomTests() {
     if (root) await act(async () => root?.unmount());
     root = null;
     document.body.replaceChildren();
+    document.documentElement.classList.remove("keyboard-open");
     await browser.happyDOM.whenAsyncComplete();
   });
   afterAll(async () => {
@@ -85,6 +86,7 @@ async function registerDomTests() {
     start = 5,
     end = 11,
     shortcuts = false,
+    agent?: string,
   ) {
     const connection = `upload-dom-${++serial}`;
     drafts.activateTerminalComposerDraftScope(connection, 1);
@@ -117,6 +119,7 @@ async function registerDomTests() {
           },
           onFocusDirect: () => directInput.focus(),
           directDisabled: false,
+          agent,
           shortcutRows: shortcuts ? defaultMobileTerminalShortcutRows() : [],
           onRunShortcut: () => {},
           onClose: () => {},
@@ -215,6 +218,106 @@ async function registerDomTests() {
       directInput,
     };
   }
+
+  test("dock actions and async completions leave the editor blurred", async () => {
+    const h = await mount("left SELECT right", 5, 11, true);
+    const dock = container.querySelector<HTMLElement>(".terminal-composer")!;
+    await act(async () => dock.focus());
+    expect(document.activeElement).toBe(dock);
+    await h.setMode("direct");
+    expect(document.activeElement).toBe(h.directInput);
+    await h.setMode("composer");
+    expect(document.activeElement).not.toBe(h.textarea());
+
+    await h.select(5, 11);
+    await h.paste();
+    const shortcut = container.querySelector<HTMLButtonElement>(
+      ".terminal-composer-shortcuts button",
+    )!;
+    const touch = (target: Element) =>
+      target.dispatchEvent(
+        new browser.PointerEvent("pointerdown", {
+          bubbles: true,
+          pointerType: "touch",
+        }) as unknown as PointerEvent,
+      );
+    document.documentElement.classList.add("keyboard-open");
+    await act(async () => touch(shortcut));
+    expect(document.activeElement).toBe(h.textarea());
+    document.documentElement.classList.remove("keyboard-open");
+    await act(async () => touch(h.textarea()));
+    expect(document.activeElement).toBe(h.textarea());
+    await act(async () => touch(h.directInput));
+    expect(document.activeElement).not.toBe(h.textarea());
+    await h.select(5, 11);
+    await act(async () => touch(shortcut));
+    expect(document.activeElement).not.toBe(h.textarea());
+    await act(async () => {
+      dock.focus();
+      dock.dispatchEvent(
+        new browser.Event("scroll", {
+          bubbles: true,
+        }) as unknown as Event,
+      );
+      shortcut.click();
+      container
+        .querySelector<HTMLButtonElement>(
+          ".terminal-composer-shortcuts-toggle",
+        )!
+        .click();
+    });
+    expect(document.activeElement).toBe(dock);
+    await act(async () => h.uploads[0].resolve("/A.png"));
+    expect(document.activeElement).toBe(dock);
+    expect(h.textarea().value).toBe("left /A.png  right");
+    expect([h.textarea().selectionStart, h.textarea().selectionEnd]).toEqual([
+      12, 12,
+    ]);
+
+    const send = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Send draft to the terminal"]',
+    )!;
+    await act(async () => {
+      send.focus();
+      send.click();
+    });
+    expect(h.sent).toEqual(["left /A.png  right"]);
+    expect(document.activeElement).not.toBe(h.textarea());
+    await h.select(0);
+    expect(document.activeElement).toBe(h.textarea());
+  });
+
+  test("commands preserve active editing and otherwise return focus to Commands", async () => {
+    const h = await mount("", 0, 0, false, "codex");
+    const commands = container.querySelector<HTMLButtonElement>(
+      ".terminal-composer-commands-toggle",
+    )!;
+    await act(async () => commands.click());
+    expect(document.activeElement).toBe(
+      container.querySelector(".terminal-composer-commands"),
+    );
+    const chooseFirst = () =>
+      container
+        .querySelector<HTMLButtonElement>(
+          ".terminal-composer-command-list button",
+        )!
+        .click();
+    await act(async () => chooseFirst());
+    expect(h.textarea().value).toBe("/model ");
+    expect([h.textarea().selectionStart, h.textarea().selectionEnd]).toEqual([
+      7, 7,
+    ]);
+    expect(document.activeElement).toBe(commands);
+
+    await h.edit("/", 1);
+    await act(async () => chooseFirst());
+    expect(h.textarea().value).toBe("/model ");
+    expect(document.activeElement).toBe(h.textarea());
+    expect([h.textarea().selectionStart, h.textarea().selectionEnd]).toEqual([
+      7, 7,
+    ]);
+    expect(h.sent).toEqual([]);
+  });
 
   test("other-tab shortcut visibility changes preserve the active draft and caret", async () => {
     const key = "roamgate:terminalComposerShortcutsOpen.v1";

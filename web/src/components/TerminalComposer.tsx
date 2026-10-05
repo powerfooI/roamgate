@@ -173,11 +173,24 @@ export function TerminalComposer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composingRef = useRef(false);
-  const focusSelectionAfterInsertRef = useRef(false);
-  const activeDraftKeyRef = useRef(draftKey);
-  activeDraftKeyRef.current = draftKey;
-  const modeRef = useRef(mode);
-  modeRef.current = mode;
+
+  useEffect(() => {
+    const blurDismissedKeyboard = (event: PointerEvent) => {
+      const textarea = textareaRef.current;
+      // Dismissing a phone keyboard can leave its editor focused. Retire that
+      // focus before another touch can reopen it; an input tap stays native.
+      if (
+        event.pointerType === "touch" &&
+        event.target !== textarea &&
+        !document.documentElement.classList.contains("keyboard-open") &&
+        document.activeElement === textarea
+      )
+        textarea?.blur();
+    };
+    document.addEventListener("pointerdown", blurDismissedKeyboard, true);
+    return () =>
+      document.removeEventListener("pointerdown", blurDismissedKeyboard, true);
+  }, []);
 
   // Load the incoming pane's draft and subscribe to updates from async work
   // that may outlive an earlier composer mount for this pane.
@@ -211,10 +224,7 @@ export function TerminalComposer({
   useEffect(() => {
     const textarea = textareaRef.current;
     const selection = readTerminalComposerSelection(draftKey);
-    const shouldFocus = focusSelectionAfterInsertRef.current;
-    focusSelectionAfterInsertRef.current = false;
     if (!textarea || !selection || mode !== "composer") return;
-    if (shouldFocus) textarea.focus({ preventScroll: true });
     textarea.setSelectionRange(selection.start, selection.end);
   }, [draftKey, text, mode]);
 
@@ -243,15 +253,6 @@ export function TerminalComposer({
     );
   };
 
-  const insertAtCaret = (targetDraftKey: string, insertion: string) => {
-    focusSelectionAfterInsertRef.current =
-      activeDraftKeyRef.current === targetDraftKey;
-    // The shared caret advances synchronously with each insertion. The DOM
-    // can still have the previous selection until React commits, or move to
-    // the end when a hidden Direct-mode textarea receives its new value.
-    insertIntoTerminalComposerDraft(targetDraftKey, insertion);
-  };
-
   const uploadAndInsert = async (
     files: File[],
     upload: (file: File) => Promise<string>,
@@ -262,7 +263,10 @@ export function TerminalComposer({
     try {
       const paths: string[] = [];
       for (const file of files) paths.push(await upload(file));
-      insertAtCaret(uploadDraftKey, terminalUploadedPathsText(paths));
+      insertIntoTerminalComposerDraft(
+        uploadDraftKey,
+        terminalUploadedPathsText(paths),
+      );
     } catch (error) {
       onError(error instanceof Error ? error.message : "File upload failed");
     } finally {
@@ -306,11 +310,6 @@ export function TerminalComposer({
       onError(error instanceof Error ? error.message : "Failed to send input");
     } finally {
       finishTerminalComposerSubmission(submittedDraftKey);
-      if (
-        modeRef.current === "composer" &&
-        activeDraftKeyRef.current === submittedDraftKey
-      )
-        textareaRef.current?.focus({ preventScroll: true });
     }
   };
 
@@ -335,11 +334,10 @@ export function TerminalComposer({
   };
 
   const closeCommandPicker = () => {
-    const target = commandEditorFocused()
-      ? textareaRef.current
-      : commandsButtonRef.current;
+    const editorFocused = commandEditorFocused();
     dismissCommands();
-    target?.focus({ preventScroll: true });
+    if (!editorFocused)
+      commandsButtonRef.current?.focus({ preventScroll: true });
   };
 
   const selectCommand = (command: ComposerCommand, confirmed = false) => {
@@ -370,10 +368,10 @@ export function TerminalComposer({
     if (!next) return;
     writeTerminalComposerDraft(draftKey, next.text);
     writeTerminalComposerSelection(draftKey, next.start, next.end);
-    focusSelectionAfterInsertRef.current = true;
+    const editorFocused = commandEditorFocused();
     dismissCommands();
-    // Also restore focus/selection when choosing the already-present command.
-    textarea?.focus({ preventScroll: true });
+    if (!editorFocused)
+      commandsButtonRef.current?.focus({ preventScroll: true });
     textarea?.setSelectionRange(next.start, next.end);
   };
 
@@ -431,12 +429,10 @@ export function TerminalComposer({
         aria-label="Terminal input"
         tabIndex={-1}
         onFocus={(event) => {
-          // Type focuses the dock synchronously within its tap gesture. Mode
-          // restoration alone must never activate a live terminal session.
+          // Composer dock/background focus stays neutral. Only its native
+          // editor opens the keyboard; Direct retains its explicit handoff.
           if (event.target !== event.currentTarget) return;
-          if (mode === "composer")
-            textareaRef.current?.focus({ preventScroll: true });
-          else if (!directDisabled) onFocusDirect();
+          if (mode === "direct" && !directDisabled) onFocusDirect();
         }}
       >
         <div className="terminal-composer-toolbar">
@@ -463,11 +459,7 @@ export function TerminalComposer({
                       dismissCommands();
                       onModeChange(nextMode, true);
                     });
-                    if (focusInput) {
-                      if (nextMode === "composer")
-                        textareaRef.current?.focus({ preventScroll: true });
-                      else onFocusDirect();
-                    }
+                    if (focusInput && nextMode === "direct") onFocusDirect();
                   }}
                 />
                 <span>{nextMode === "composer" ? "Composer" : "Direct"}</span>
@@ -774,7 +766,7 @@ export function TerminalComposer({
             if (isWorkspacePathDrag(e.dataTransfer)) {
               e.preventDefault();
               const path = workspacePathFromDrag(e.dataTransfer);
-              if (path) insertAtCaret(draftKey, path);
+              if (path) insertIntoTerminalComposerDraft(draftKey, path);
               return;
             }
             if (!isNativeFileDrag(e.dataTransfer)) return;
