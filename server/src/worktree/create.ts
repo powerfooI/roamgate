@@ -45,9 +45,14 @@ export async function createWorkspaceWorktree(
   isCurrent: () => boolean,
   parentWarning: (error: unknown) => void = () => {},
   syncBase = syncWorktreeBase,
+  beforeDispatch?: () => void,
 ) {
   const assertCurrent = () => {
     if (!isCurrent()) throw new Error("The worktree target changed.");
+  };
+  const beforeSend = () => {
+    assertCurrent();
+    beforeDispatch?.();
   };
   assertCurrent();
   const {
@@ -91,7 +96,7 @@ export async function createWorkspaceWorktree(
     host: runtime.sshHost(),
     shQuote,
     runProcessWithCodeTimeout: async (argv, timeout) => {
-      assertCurrent();
+      beforeSend();
       const result = await runProcessWithCodeTimeout(argv, timeout);
       assertCurrent();
       return result;
@@ -114,7 +119,7 @@ export async function createWorkspaceWorktree(
     "worktree.create",
     rpcParams,
     undefined,
-    assertCurrent,
+    beforeSend,
   );
   assertCurrent();
   let parentTrackingFailed = false;

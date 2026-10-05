@@ -35,6 +35,7 @@ export type AssistantWorktreeCreator = (
   runtime: LegacyConnectionRuntime,
   params: Record<string, unknown>,
   isCurrent: () => boolean,
+  beforeDispatch: () => void,
 ) => Promise<unknown>;
 
 class DispatchNotSentError extends Error {}
@@ -448,7 +449,7 @@ export async function prepareAssistantAction(args: {
             detail:
               "A worktree for this branch already exists. No duplicate was created; inspect the existing checkout.",
           };
-        const response = await dispatch(() =>
+        const response = await dispatch((beforeDispatch) =>
           args.createWorktree!(
             runtime,
             {
@@ -461,6 +462,7 @@ export async function prepareAssistantAction(args: {
               expected_source_root: root,
             },
             isCurrent,
+            beforeDispatch,
           ),
         );
         const created =
@@ -848,17 +850,25 @@ export async function prepareAssistantAction(args: {
             const isCurrent = () =>
               lease.isCurrent() && (!authorized || authorized());
             const result = await perform(async (operation) => {
-              const beforeSend = () => {
-                if (!isCurrent()) {
-                  dispatched = false;
+              const assertAuthorized = () => {
+                if (!isCurrent())
                   throw new DispatchNotSentError(
                     "Action authorization expired before dispatch",
                   );
-                }
               };
-              beforeSend();
-              dispatched = true;
-              return read(() => operation(beforeSend));
+              assertAuthorized();
+              try {
+                return await read(() =>
+                  operation(() => {
+                    assertAuthorized();
+                    dispatched = true;
+                  }),
+                );
+              } catch (error) {
+                if (!dispatched)
+                  throw new DispatchNotSentError("Action was not dispatched");
+                throw error;
+              }
             }, isCurrent);
             check();
             return result;
@@ -866,7 +876,7 @@ export async function prepareAssistantAction(args: {
             return {
               status: dispatched ? "uncertain" : "failed",
               detail: dispatched
-                ? "The operation was sent, but its final state could not be verified. Inspect the target before retrying."
+                ? "The operation started, but its final state could not be verified. Inspect the target before retrying."
                 : authorized && !authorized()
                   ? "Automatic approval was disabled before dispatch. Nothing was sent."
                   : "The target changed or the operation is unavailable. Nothing was sent; prepare a new preview.",

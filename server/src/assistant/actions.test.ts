@@ -1,6 +1,7 @@
 import { describe, expect, jest, mock, test } from "bun:test";
 import type { AssistantActionKind } from "../../../shared/assistant";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
+import { createWorkspaceWorktree } from "../worktree/create";
 import { createAssistantContext } from "./context";
 
 const ref = { connection_id: "local", workspace_id: "w1" };
@@ -195,8 +196,10 @@ function fixture(paneId = "w1:p1") {
       _runtime: LegacyConnectionRuntime,
       params: Record<string, unknown>,
       isCurrent: () => boolean,
+      beforeDispatch: () => void,
     ): Promise<any> => {
       if (!isCurrent()) throw new Error("retired");
+      beforeDispatch();
       mutations.push("worktree.flow");
       const workspace = {
         workspace_id: "w2",
@@ -231,6 +234,7 @@ function fixture(paneId = "w1:p1") {
   });
   return {
     context,
+    runtime,
     call,
     lease,
     mutations,
@@ -339,9 +343,135 @@ describe("confirmed Ranger action targets", () => {
     await fetching.promise;
     allowed = false;
     release.resolve();
-    await pending;
+    expect(await pending).toEqual({
+      status: "failed",
+      detail:
+        "Automatic approval was disabled before dispatch. Nothing was sent.",
+    });
     expect(f.mutations).toEqual([]);
   });
+
+  test.each(["preflight", "sync", "connect", "sent"] as const)(
+    "worktree permission revoked at %s reports whether execution actually started",
+    async (stage) => {
+      const f = fixture();
+      const prepared = await f.prepare("create_worktree", {
+        branch: "feature/revoked",
+      });
+      const reached = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const pause = async () => {
+        reached.resolve();
+        await release.promise;
+      };
+      f.runtime.worktreeHooks.sourceWorkspaceForWorktreeCreate = async () =>
+        null;
+      f.createWorktree.mockImplementation(
+        (runtime, params, isCurrent, beforeDispatch) =>
+          createWorkspaceWorktree(
+            runtime,
+            params,
+            isCurrent,
+            undefined,
+            async (args) => {
+              const { root } = await args.resolveGitRoot(args.workspaceId);
+              if (stage === "sync") {
+                await args.runProcessWithCodeTimeout(
+                  [process.execPath, "-e", ""],
+                  10_000,
+                );
+                f.mutations.push("base.sync");
+              }
+              if (stage === "preflight" || stage === "sync") await pause();
+              return {
+                workspace_id: args.workspaceId,
+                root,
+                base: "origin/main",
+                commit: "a".repeat(40),
+                command: "synthetic sync",
+                stdout: "",
+                stderr: "",
+              };
+            },
+            beforeDispatch,
+          ),
+      );
+      const original = f.call.getMockImplementation()!;
+      f.call.mockImplementation(async (method, params, timeout, beforeSend) => {
+        if (method !== "worktree.create")
+          return original(method, params, timeout, beforeSend);
+        if (stage === "connect") await pause();
+        beforeSend?.();
+        f.mutations.push(method);
+        if (stage === "sent") await pause();
+        throw new Error("Synthetic lost reply");
+      });
+      let allowed = true;
+      const pending = prepared.execute(() => allowed);
+      await reached.promise;
+      allowed = false;
+      release.resolve();
+      const result = await pending;
+      const started = stage === "sync" || stage === "sent";
+      expect(result.status).toBe(started ? "uncertain" : "failed");
+      expect(result.detail).toContain(
+        started ? "operation started" : "Nothing was sent",
+      );
+      expect(f.mutations).toEqual(
+        stage === "sync"
+          ? ["base.sync"]
+          : stage === "sent"
+            ? ["worktree.create"]
+            : [],
+      );
+      expect(await prepared.execute()).toBe(result);
+    },
+  );
+
+  test.each([
+    "create_workspace",
+    "create_tab",
+    "split_pane",
+    "start_agent",
+    "send_prompt",
+  ] as const)(
+    "native %s failure before sending does not enter lost-reply recovery",
+    async (kind) => {
+      const f = fixture();
+      if (kind === "send_prompt") f.useAgent();
+      const params =
+        kind === "create_workspace"
+          ? { label: "New" }
+          : kind === "split_pane"
+            ? { pane_id: "w1:p1", direction: "right" }
+            : kind === "start_agent"
+              ? { pane_id: "w1:p1", agent: "pi" }
+              : kind === "send_prompt"
+                ? { pane_id: "w1:p1", prompt: "Review" }
+                : {};
+      const prepared = await f.prepare(kind, params);
+      const method = {
+        create_workspace: "workspace.create",
+        create_tab: "tab.create",
+        split_pane: "pane.split",
+        start_agent: "agent.start",
+        send_prompt: "agent.prompt",
+      }[kind];
+      const original = f.call.getMockImplementation()!;
+      f.call.mockImplementation(async (name, ...args) => {
+        if (name === method) throw new Error("ECONNREFUSED: synthetic socket");
+        return original(name, ...args);
+      });
+      const result = await prepared.execute();
+      expect(result.status).toBe("failed");
+      expect(result.detail).toContain("Nothing was sent");
+      expect(f.mutations).toEqual([]);
+      expect(await prepared.execute()).toBe(result);
+      expect(
+        f.call.mock.calls.filter(([name]) => name === method),
+      ).toHaveLength(1);
+    },
+  );
 
   test("tab creation stays in the approved workspace and runs once after preview", async () => {
     const f = fixture();
@@ -502,12 +632,14 @@ describe("confirmed Ranger action targets", () => {
         kind === "split_pane" ? { pane_id: "w1:p1", direction: "right" } : {},
       );
       const original = f.call.getMockImplementation()!;
-      f.call.mockImplementation(async (method, params = {}) => {
-        const result = await original(method, params);
-        if (method === "tab.create" || method === "pane.split")
-          throw new Error("timeout SECRET /private/socket");
-        return result;
-      });
+      f.call.mockImplementation(
+        async (method, params = {}, timeout, beforeSend) => {
+          const result = await original(method, params, timeout, beforeSend);
+          if (method === "tab.create" || method === "pane.split")
+            throw new Error("timeout SECRET /private/socket");
+          return result;
+        },
+      );
       const result = await prepared.execute();
       expect(result.status).toBe("uncertain");
       expect(JSON.stringify(result)).not.toContain("SECRET");
@@ -533,20 +665,23 @@ describe("confirmed Ranger action targets", () => {
           kind === "split_pane" ? { pane_id: "w1:p1", direction: "right" } : {},
         );
         const original = f.call.getMockImplementation()!;
-        f.call.mockImplementation(async (method, params = {}) => {
-          const result = await original(method, params);
-          if (method !== "tab.create" && method !== "pane.split") return result;
-          const newPane = result.root_pane ?? result.pane;
-          const returned = structuredClone(result);
-          if (change === "workspace") newPane.workspace_id = "w2";
-          else if (change === "tab") newPane.tab_id = "w1:t9";
-          else if (change === "directory") newPane.cwd = "/wrong";
-          else if (change === "terminal") newPane.terminal_id = "replacement";
-          else if (change === "reused") newPane.terminal_id = "term1";
-          else if (change === "missing") f.panes.pop();
-          else f.retire();
-          return returned;
-        });
+        f.call.mockImplementation(
+          async (method, params = {}, timeout, beforeSend) => {
+            const result = await original(method, params, timeout, beforeSend);
+            if (method !== "tab.create" && method !== "pane.split")
+              return result;
+            const newPane = result.root_pane ?? result.pane;
+            const returned = structuredClone(result);
+            if (change === "workspace") newPane.workspace_id = "w2";
+            else if (change === "tab") newPane.tab_id = "w1:t9";
+            else if (change === "directory") newPane.cwd = "/wrong";
+            else if (change === "terminal") newPane.terminal_id = "replacement";
+            else if (change === "reused") newPane.terminal_id = "term1";
+            else if (change === "missing") f.panes.pop();
+            else f.retire();
+            return returned;
+          },
+        );
         const result = await prepared.execute();
         expect(result.status).toBe("uncertain");
         expect(await prepared.execute()).toBe(result);
@@ -687,11 +822,14 @@ describe("confirmed Ranger action targets", () => {
     const f = fixture();
     const prepared = await f.prepare("create_workspace", { label: "New" });
     const original = f.call.getMockImplementation()!;
-    f.call.mockImplementation(async (method, params = {}) => {
-      if (method !== "workspace.create") return original(method, params);
-      await original(method, params);
-      throw new Error("connection closed: SECRET /private/socket");
-    });
+    f.call.mockImplementation(
+      async (method, params = {}, timeout, beforeSend) => {
+        if (method !== "workspace.create")
+          return original(method, params, timeout, beforeSend);
+        await original(method, params, timeout, beforeSend);
+        throw new Error("connection closed: SECRET /private/socket");
+      },
+    );
     expect((await prepared.execute()).status).toBe("succeeded");
     await prepared.execute();
     expect(f.mutations).toEqual(["workspace.create"]);
@@ -704,11 +842,15 @@ describe("confirmed Ranger action targets", () => {
     const f = fixture();
     const prepared = await f.prepare("create_workspace", { label: "New" });
     const original = f.call.getMockImplementation()!;
-    f.call.mockImplementation(async (method, params = {}) => {
-      if (method !== "workspace.create") return original(method, params);
-      f.mutations.push(method);
-      throw new Error("timeout: SECRET /private/socket");
-    });
+    f.call.mockImplementation(
+      async (method, params = {}, timeout, beforeSend) => {
+        if (method !== "workspace.create")
+          return original(method, params, timeout, beforeSend);
+        beforeSend?.();
+        f.mutations.push(method);
+        throw new Error("timeout: SECRET /private/socket");
+      },
+    );
     const result = await prepared.execute();
     expect(result.status).toBe("uncertain");
     expect(JSON.stringify(result)).not.toContain("SECRET");
@@ -838,19 +980,21 @@ describe("confirmed Ranger action targets", () => {
       });
       const polled = deferred<void>();
       const original = f.call.getMockImplementation()!;
-      f.call.mockImplementation(async (method, params = {}) => {
-        const response = await original(method, params);
-        if (method === "agent.start") {
-          Object.assign(f.agent, {
-            launch_pending: true,
-            interactive_ready: false,
-          });
-          return { ...response, agent: { ...f.agent } };
-        }
-        if (method === "agent.get" && f.agent.interactive_ready === false)
-          polled.resolve();
-        return response;
-      });
+      f.call.mockImplementation(
+        async (method, params = {}, timeout, beforeSend) => {
+          const response = await original(method, params, timeout, beforeSend);
+          if (method === "agent.start") {
+            Object.assign(f.agent, {
+              launch_pending: true,
+              interactive_ready: false,
+            });
+            return { ...response, agent: { ...f.agent } };
+          }
+          if (method === "agent.get" && f.agent.interactive_ready === false)
+            polled.resolve();
+          return response;
+        },
+      );
       let finished = false;
       const executing = prepared.execute().then((result) => {
         finished = true;
@@ -888,16 +1032,18 @@ describe("confirmed Ranger action targets", () => {
         agent: "pi",
       });
       const original = f.call.getMockImplementation()!;
-      f.call.mockImplementation(async (method, params = {}) => {
-        const response = await original(method, params);
-        if (method === "agent.start")
-          Object.assign(f.agent, {
-            agent_status: state === "blocked" ? "blocked" : "done",
-            interactive_ready: false,
-            launch_pending: state === "blocked",
-          });
-        return response;
-      });
+      f.call.mockImplementation(
+        async (method, params = {}, timeout, beforeSend) => {
+          const response = await original(method, params, timeout, beforeSend);
+          if (method === "agent.start")
+            Object.assign(f.agent, {
+              agent_status: state === "blocked" ? "blocked" : "done",
+              interactive_ready: false,
+              launch_pending: state === "blocked",
+            });
+          return response;
+        },
+      );
       const result = await prepared.execute();
       expect(result.status).toBe("failed");
       expect(result.detail).toContain("startup was attempted");
@@ -918,16 +1064,23 @@ describe("confirmed Ranger action targets", () => {
         });
         const polled = deferred<void>();
         const original = f.call.getMockImplementation()!;
-        f.call.mockImplementation(async (method, params = {}) => {
-          const response = await original(method, params);
-          if (method === "agent.start")
-            Object.assign(f.agent, {
-              interactive_ready: false,
-              launch_pending: true,
-            });
-          if (method === "agent.get") polled.resolve();
-          return response;
-        });
+        f.call.mockImplementation(
+          async (method, params = {}, timeout, beforeSend) => {
+            const response = await original(
+              method,
+              params,
+              timeout,
+              beforeSend,
+            );
+            if (method === "agent.start")
+              Object.assign(f.agent, {
+                interactive_ready: false,
+                launch_pending: true,
+              });
+            if (method === "agent.get") polled.resolve();
+            return response;
+          },
+        );
         const executing = prepared.execute();
         await polled.promise;
         for (let index = 0; index < 10; index++) await Promise.resolve();
@@ -1024,10 +1177,14 @@ describe("confirmed Ranger action targets", () => {
       prompt: "Review",
     });
     const original = f.call.getMockImplementation()!;
-    f.call.mockImplementation(async (method, params = {}) => {
-      if (method !== "agent.prompt") return original(method, params);
-      throw new Error("agent_blocked: SECRET /private/session");
-    });
+    f.call.mockImplementation(
+      async (method, params = {}, timeout, beforeSend) => {
+        if (method !== "agent.prompt")
+          return original(method, params, timeout, beforeSend);
+        beforeSend?.();
+        throw new Error("agent_blocked: SECRET /private/session");
+      },
+    );
     const result = await prepared.execute();
     expect(result.status).toBe("failed");
     expect(result.detail).toContain("No prompt was submitted");
@@ -1039,14 +1196,17 @@ describe("confirmed Ranger action targets", () => {
       const f = fixture();
       const prepared = await f.prepare("create_workspace", { label: "New" });
       const original = f.call.getMockImplementation()!;
-      f.call.mockImplementation(async (method, params = {}) => {
-        const result = await original(method, params);
-        if (
-          method === (stage === "before" ? "workspace.get" : "workspace.create")
-        )
-          f.retire();
-        return result;
-      });
+      f.call.mockImplementation(
+        async (method, params = {}, timeout, beforeSend) => {
+          const result = await original(method, params, timeout, beforeSend);
+          if (
+            method ===
+            (stage === "before" ? "workspace.get" : "workspace.create")
+          )
+            f.retire();
+          return result;
+        },
+      );
       const result = await prepared.execute();
       expect(result.status).toBe(stage === "before" ? "failed" : "uncertain");
       expect(f.mutations).toEqual(
