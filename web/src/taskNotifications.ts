@@ -1,6 +1,7 @@
 export const TASK_NOTIFICATION_ACTIVATE_EVENT =
   "roamgate:task-notification-activate";
-const NOTIFICATION_WORKER = "/task-notifications-sw.js";
+// Bump when the notification payload contract changes.
+const NOTIFICATION_WORKER = "/task-notifications-sw.js?v=2";
 const NOTIFICATION_HASH = "#roamgate-task=";
 
 export interface TaskNotificationTarget {
@@ -94,20 +95,41 @@ export async function prepareTaskNotifications(): Promise<ServiceWorkerRegistrat
   if (typeof navigator === "undefined" || !navigator.serviceWorker) return null;
   const serviceWorker = navigator.serviceWorker;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const lifecycle = new AbortController();
   try {
     return await Promise.race([
       (async () => {
         let registration = await serviceWorker.getRegistration("/");
-        if (
-          registration?.active?.scriptURL !==
-          new URL(NOTIFICATION_WORKER, window.location.origin).href
-        ) {
+        const workerURL = new URL(NOTIFICATION_WORKER, window.location.origin)
+          .href;
+        if (registration?.active?.scriptURL !== workerURL) {
           registration = await serviceWorker.register(NOTIFICATION_WORKER, {
             updateViaCache: "none",
           });
         }
+        const worker =
+          registration.installing ??
+          registration.waiting ??
+          registration.active;
+        if (worker && worker.state !== "activated") {
+          await new Promise<void>((resolve, reject) => {
+            const stateChanged = () => {
+              if (worker.state === "activated") resolve();
+              else if (worker.state === "redundant")
+                reject(
+                  new Error(
+                    "The notification service worker could not activate.",
+                  ),
+                );
+            };
+            worker.addEventListener("statechange", stateChanged, {
+              signal: lifecycle.signal,
+            });
+            stateChanged();
+          });
+        }
         if (!registration.active) await serviceWorker.ready;
-        if (!registration.active) {
+        if (registration.active?.scriptURL !== workerURL) {
           throw new Error(
             "The notification service worker could not activate.",
           );
@@ -130,6 +152,7 @@ export async function prepareTaskNotifications(): Promise<ServiceWorkerRegistrat
     ]);
   } finally {
     clearTimeout(timer);
+    lifecycle.abort();
   }
 }
 

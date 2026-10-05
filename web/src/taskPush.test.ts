@@ -68,7 +68,10 @@ function fixture() {
       }),
     },
     registration: {
-      active: { scriptURL: origin + "/task-notifications-sw.js" },
+      active: {
+        scriptURL: origin + "/task-notifications-sw.js?v=2",
+        state: "activated",
+      },
       showNotification() {},
       pushManager: {
         getSubscription: async () => f.existing,

@@ -459,6 +459,10 @@ Corrupt data is preserved and push disabled rather than silently rotating keys.
 After intentional key replacement, reopen/toggle notifications to re-enroll.
 Browser profiles/subscriptions are device-specific.
 
+After upgrading Roamgate, reopen or reload each browser/PWA once to activate the
+current notification worker. Until then, an older worker can show a Ranger alert
+but open only the app instead of its task run when clicked.
+
 Delivery needs outbound HTTPS to Apple (`*.push.apple.com`), Google
 (`fcm.googleapis.com`), Mozilla (`*.push.services.mozilla.com`), or Windows
 (`*.notify.windows.com`); other providers are rejected. No public inbound endpoint

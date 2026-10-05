@@ -54,7 +54,10 @@ async function withBrowser(
 
 function registration() {
   return {
-    active: { scriptURL: origin + "/task-notifications-sw.js" },
+    active: {
+      scriptURL: origin + "/task-notifications-sw.js?v=2",
+      state: "activated" as ServiceWorkerState,
+    },
     showNotification: mock(async () => {}),
   };
 }
@@ -195,7 +198,7 @@ describe("task notification transport", () => {
       await Promise.resolve();
       await Promise.resolve();
       expect(active.showNotification).not.toHaveBeenCalled();
-      expect(register).toHaveBeenCalledWith("/task-notifications-sw.js", {
+      expect(register).toHaveBeenCalledWith("/task-notifications-sw.js?v=2", {
         updateViaCache: "none",
       });
       pending.active = active.active;
@@ -204,6 +207,114 @@ describe("task notification transport", () => {
       expect(active.showNotification).not.toHaveBeenCalled();
     });
   });
+
+  test("upgrades the legacy worker before delivery even when ready already resolves", async () => {
+    const replacement = Object.assign(new EventTarget(), {
+      scriptURL: origin + "/task-notifications-sw.js?v=2",
+      state: "installing" as ServiceWorkerState,
+    });
+    const active = {
+      ...registration(),
+      active: {
+        scriptURL: origin + "/task-notifications-sw.js",
+        state: "activated" as ServiceWorkerState,
+      },
+      installing: replacement as typeof replacement | null,
+    };
+    const registered = Promise.withResolvers<void>();
+    const register = mock(async () => {
+      registered.resolve();
+      return active;
+    });
+    const addListener = mock(replacement.addEventListener.bind(replacement));
+    replacement.addEventListener = addListener;
+    await withBrowser(
+      {
+        navigator: {
+          serviceWorker: {
+            getRegistration: async () => active,
+            register,
+            ready: Promise.resolve(active),
+          },
+        },
+      },
+      async () => {
+        const showing = showTaskNotification(
+          "Ranger update",
+          {},
+          target,
+          () => true,
+        );
+        await registered.promise;
+        await Promise.resolve();
+        expect(register).toHaveBeenCalledWith("/task-notifications-sw.js?v=2", {
+          updateViaCache: "none",
+        });
+        for (const state of ["installed", "activating"] as const) {
+          replacement.state = state;
+          replacement.dispatchEvent(new Event("statechange"));
+          await Promise.resolve();
+          expect(active.showNotification).not.toHaveBeenCalled();
+        }
+        replacement.state = "activated";
+        active.active = replacement;
+        active.installing = null;
+        replacement.dispatchEvent(new Event("statechange"));
+        await showing;
+        expect(active.showNotification).toHaveBeenCalledTimes(1);
+        expect(
+          (addListener.mock.calls[0]?.[2] as AddEventListenerOptions)?.signal
+            ?.aborted,
+        ).toBe(true);
+        await prepareTaskNotifications();
+        expect(register).toHaveBeenCalledTimes(1);
+      },
+    );
+  });
+
+  test.each(["redundant", "timeout"])(
+    "rejects a replacement that becomes %s and removes its listener",
+    async (failure) => {
+      jest.useFakeTimers();
+      try {
+        const worker = Object.assign(new EventTarget(), {
+          state: "installing" as ServiceWorkerState,
+        });
+        const addListener = mock(worker.addEventListener.bind(worker));
+        worker.addEventListener = addListener;
+        const active = { ...registration(), installing: worker };
+        await withBrowser(
+          {
+            navigator: {
+              serviceWorker: { getRegistration: async () => active },
+            },
+          },
+          async () => {
+            const preparing = prepareTaskNotifications().catch(
+              (error) => error,
+            );
+            await Promise.resolve();
+            if (failure === "redundant") {
+              worker.state = "redundant";
+              worker.dispatchEvent(new Event("statechange"));
+            } else jest.advanceTimersByTime(10_000);
+            expect((await preparing).message).toContain(
+              failure === "redundant"
+                ? "could not activate"
+                : "did not become ready",
+            );
+            expect(
+              (addListener.mock.calls[0]?.[2] as AddEventListenerOptions)
+                ?.signal?.aborted,
+            ).toBe(true);
+            expect(active.showNotification).not.toHaveBeenCalled();
+          },
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
 
   test("keeps the page notification fallback and its click handler", async () => {
     const notification = { close() {}, onclick: null };
