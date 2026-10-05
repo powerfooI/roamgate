@@ -1424,6 +1424,112 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       ).not.toBeNull();
       await React.act(async () => button("Ranger settings").click());
       expect(container.querySelector(".assistant-panel-settings")).toBeNull();
+      await React.act(async () => button("Ranger settings").click());
+      const customForm = () =>
+        container.querySelector<HTMLFormElement>(
+          '[aria-label="Custom model connection"]',
+        )!;
+      const customInput = (label: string) =>
+        customForm().querySelector<HTMLInputElement>(
+          `[aria-label="${label}"]`,
+        )!;
+      expect(customInput("Custom API key").type).toBe("password");
+      expect(customInput("Custom API key").required).toBe(true);
+      await React.act(async () => {
+        for (const [label, value] of [
+          ["Custom provider ID", "my-provider"],
+          ["Custom API base URL", "https://example.com/v1"],
+          ["Custom model ID", "my-model"],
+          ["Custom API key", "synthetic-key"],
+        ]) {
+          const input = customInput(label);
+          Object.getOwnPropertyDescriptor(
+            browser.HTMLInputElement.prototype,
+            "value",
+          )!.set!.call(input, value);
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      });
+      call.mockRejectedValueOnce(new Error("Custom model could not be saved"));
+      const submitCustom = async () =>
+        React.act(async () =>
+          customForm().dispatchEvent(
+            new Event("submit", { bubbles: true, cancelable: true }),
+          ),
+        );
+      await submitCustom();
+      expect(customInput("Custom API key").value).toBe("synthetic-key");
+      expect(
+        container.querySelector(".assistant-error")?.textContent,
+      ).toContain("Custom model could not be saved");
+      clientState.snapshot.providers.push({
+        id: "my-provider",
+        label: "my-provider",
+        configured: true,
+        methods: ["api_key"],
+        custom: {
+          base_url: "https://example.com/v1",
+          api: "openai-completions",
+        },
+      });
+      clientState.snapshot.models.push({
+        provider: "my-provider",
+        id: "my-model",
+        label: "my-model",
+      });
+      call.mockImplementation(async () => clientState.snapshot);
+      await submitCustom();
+      expect(call).toHaveBeenLastCalledWith("configure_model", {
+        provider: "my-provider",
+        model: "my-model",
+        base_url: "https://example.com/v1",
+        api: "openai-completions",
+        api_key: "synthetic-key",
+        credential_source: "assistant",
+      });
+      expect(customInput("Custom API key").value).toBe("");
+      expect(customInput("Custom API key").required).toBe(false);
+      expect(customInput("Custom API base URL").value).toBe(
+        "https://example.com/v1",
+      );
+      expect(customInput("Custom model ID").value).toBe("my-model");
+      expect(button("Save connection").disabled).toBe(false);
+      clientState.snapshot.providers[
+        clientState.snapshot.providers.length - 1
+      ]!.custom = {
+        base_url: "https://refreshed.example.com/v1",
+        api: "openai-responses",
+      };
+      await render();
+      expect(customInput("Custom API base URL").value).toBe(
+        "https://refreshed.example.com/v1",
+      );
+      clientState.snapshot.models[
+        clientState.snapshot.models.length - 1
+      ]!.custom = {
+        base_url: "https://model-override.example.com/v1",
+        api: "anthropic-messages",
+      };
+      await render();
+      expect(customInput("Custom API base URL").value).toBe(
+        "https://model-override.example.com/v1",
+      );
+      await submitCustom();
+      expect(
+        call.mock.calls[call.mock.calls.length - 1]?.[1],
+      ).not.toHaveProperty("api_key");
+      expect(call.mock.calls[call.mock.calls.length - 1]?.[1]).toMatchObject({
+        base_url: "https://model-override.example.com/v1",
+        api: "anthropic-messages",
+      });
+      await React.act(async () => button("Save connection").click());
+      expect(call).toHaveBeenLastCalledWith("configure", {
+        config: {
+          ...clientState.snapshot.config,
+          provider: "my-provider",
+          model: "my-model",
+        },
+      });
     } finally {
       await React.act(async () => root.unmount());
       for (const spy of [context, state, send, call]) spy.mockRestore();

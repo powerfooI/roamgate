@@ -422,10 +422,17 @@
   background: var(--accent-soft);
 }
 
-.assistant-other-providers > summary {
+.assistant-other-providers > summary,
+.assistant-custom-model > summary {
   color: var(--accent);
   font-size: 11px;
   cursor: pointer;
+}
+
+.assistant-custom-model > form {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .assistant-other-providers .assistant-provider-list {

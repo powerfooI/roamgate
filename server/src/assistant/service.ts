@@ -25,6 +25,8 @@ import type {
 } from "../../../shared/assistant";
 import {
   ASSISTANT_MAX_WORKSPACES,
+  isAssistantModelApi,
+  isAssistantModelEndpoint,
   isAssistantSnapshot,
 } from "../../../shared/assistant";
 import { assertSafeDataPath, dataRoot } from "../config/data-paths";
@@ -258,6 +260,7 @@ export function createAssistantService(options: {
   let migrateSavedState = false;
   let disposed = false;
   let changing = false;
+  let modelChanging = false;
   let run: Promise<void> | undefined;
   let activeRun: SavedRun | undefined;
   let recovering = false;
@@ -1267,6 +1270,10 @@ export function createAssistantService(options: {
     signal?: AbortSignal,
   ) {
     signal?.throwIfAborted();
+    if (modelChanging)
+      throw new AssistantRecoveryNotReadyError(
+        "The model connection is changing.",
+      );
     const allowed = new Set(state.config.allowed_workspaces.map(refKey));
     if (
       !prepared.targets.length ||
@@ -1277,6 +1284,10 @@ export function createAssistantService(options: {
     const available = await driver.catalog(prepared.config.credential_source);
     await context.restoreScope(prepared.targets, signal);
     signal?.throwIfAborted();
+    if (modelChanging)
+      throw new AssistantRecoveryNotReadyError(
+        "The model connection is changing.",
+      );
     if (
       disposed ||
       prepared.targets.some(
@@ -1507,6 +1518,81 @@ export function createAssistantService(options: {
             state.error = "The provider catalog could not be loaded.";
           }
           break;
+        case "configure_model": {
+          idle();
+          if (
+            tasks
+              ?.summaries()
+              .some((task) => task.current_run?.status === "running")
+          )
+            throw new Error(
+              "Stop the running Ranger task before editing a model connection.",
+            );
+          changing = true;
+          modelChanging = true;
+          try {
+            if (
+              !driver.configureModel ||
+              params.credential_source !== state.config.credential_source ||
+              Object.keys(params).some(
+                (key) =>
+                  ![
+                    "provider",
+                    "model",
+                    "base_url",
+                    "api",
+                    "api_key",
+                    "credential_source",
+                  ].includes(key),
+              )
+            )
+              throw new Error("Invalid model connection");
+            const provider = string(params.provider, "provider", 64).trim();
+            const model = string(params.model, "model").trim();
+            const base_url = string(params.base_url, "base URL", 2000).trim();
+            if (
+              !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/.test(provider) ||
+              /[\u0000-\u001f\u007f]/.test(model) ||
+              !isAssistantModelEndpoint(base_url) ||
+              !isAssistantModelApi(params.api)
+            )
+              throw new Error("Invalid model connection");
+            const api_key =
+              params.api_key === undefined
+                ? undefined
+                : string(params.api_key, "API key", 10_000);
+            if (
+              api_key &&
+              (api_key.trimStart().startsWith("!") || api_key.includes("$"))
+            )
+              throw new Error("Enter a literal API key");
+            await driver.configureModel(
+              {
+                provider,
+                model,
+                base_url,
+                api: params.api,
+                api_key,
+                credential_source: state.config.credential_source,
+              },
+              writeSaved,
+            );
+            if (disposed) throw new Error("Ranger unavailable");
+            await catalog();
+            state.error = null;
+            modelChanging = false;
+            await tasks?.revalidate();
+            publish(true);
+          } catch {
+            throw new Error(
+              "The model connection could not be saved. Check the custom provider, endpoint, model and API key.",
+            );
+          } finally {
+            changing = false;
+            modelChanging = false;
+          }
+          break;
+        }
         case "configure": {
           idle();
           const next = config(

@@ -364,6 +364,16 @@ authorization prompt in the window, choose a default model, select allowed
 workspaces, and **Save connection**. Only the selected workspaces are eligible
 for the chat's per-question reading scope; the default is empty.
 
+For a compatible endpoint, expand **Configure custom model** and enter a unique
+provider ID, API format, API base URL, model ID, and API key. Supported formats
+are OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages. Use a
+dummy key for an unauthenticated local server. **Save custom model** selects the
+saved model; then select allowed workspaces and **Save connection**. Select a
+custom provider and model to **Edit custom model**; a blank key keeps its existing
+key. Stop running tasks before changing a model connection.
+Use a separate provider ID for a different endpoint so existing providers keep
+their connection settings.
+
 **Provider** lists OAuth logins and API keys from the selected credential
 source. Click a saved provider to select it, or expand **Connect another provider**
 to choose one without saved credentials and log in from the window. **Refresh**
@@ -378,7 +388,8 @@ Ranger runs as the Roamgate bridge's OS account, including when the browser
 is on a phone or a workspace uses SSH. Provider credentials therefore belong on
 the bridge host. Separate Ranger credentials live in
 `~/.config/roamgate/assistant/auth.json` or
-`%APPDATA%\roamgate\assistant\auth.json`; configuration, the active conversation,
+`%APPDATA%\roamgate\assistant\auth.json`; custom endpoints live in `models.json`
+beside them. Configuration, the active conversation,
 model context, and history summaries live beside them in `state.json`. Inactive
 conversations live in private `sessions/<UUID>.json` files. Durable execution
 state and tool results live in `durable/<UUID>/execution.sqlite`. Stop the bridge
@@ -427,8 +438,11 @@ removes its saved runs. There is no aggregate byte quota for durable stores.
 for that bridge account. Signing in or entering an API key in this mode updates
 that store, so Pi can also use the saved credentials. The separate **Ranger connection**
 keeps its own store. Neither mode requires terminal interaction to log in.
-The catalog uses credentials saved in Pi's `auth.json`;
-environment-only API keys and custom Pi models are not imported.
+The catalog uses credentials saved in Pi's `auth.json` and compatible endpoints
+in Pi's `models.json`. Custom model changes in shared mode update that file.
+**Refresh** rereads both files. Environment-only credentials for built-in
+providers are not imported. Model-file keys may use Pi's environment or command
+syntax; entering a key in **Configure custom model** accepts literal keys only.
 Pi's extensions, skills, project instructions, and
 built-in write/command tools are not loaded into Ranger.
 

@@ -181,7 +181,9 @@ The conversation stays available when switching workspaces or connections.
   Use a separate Ranger connection or explicitly reuse the bridge account's
   saved Pi credentials with **Shared Pi credentials**. Select a saved provider or
   expand **Connect another provider**; both credential sources support sign-in
-  and API-key entry in the window. See [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
+  and API-key entry in the window. **Configure custom model** connects compatible
+  endpoints by API address, format, key, and model ID. Shared mode also reads
+  Pi's custom models. See [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
 - Allow workspaces in Settings, then choose the **Reading scope** for each
   question. **Select all** adds the currently available workspaces; **Clear**
   removes every selection. Use **Save connection** to apply permission changes.

@@ -22,6 +22,7 @@ import {
   type AssistantAction,
   type AssistantAuthState,
   type AssistantConfig,
+  type AssistantModelConnection,
   type AssistantSnapshot,
   type AssistantSource,
   type AssistantWorkspace,
@@ -100,6 +101,144 @@ function credentialStatus(provider: AssistantSnapshot["providers"][number]) {
     : provider.credential_method === "api_key"
       ? "API key saved"
       : "Credentials saved";
+}
+
+function AssistantModelForm({
+  config,
+  provider,
+  providers,
+  selectedModel,
+  tasksRunning,
+  onSave,
+}: {
+  config: AssistantConfig;
+  provider: AssistantSnapshot["providers"][number] | undefined;
+  providers: AssistantSnapshot["providers"];
+  selectedModel: AssistantSnapshot["models"][number] | undefined;
+  tasksRunning: boolean;
+  onSave(input: AssistantModelConnection): Promise<boolean>;
+}) {
+  const custom = selectedModel?.custom ?? provider?.custom;
+  const [providerId, setProviderId] = useState(
+    custom ? (provider?.id ?? "") : "",
+  );
+  const [model, setModel] = useState(custom ? config.model : "");
+  const [baseUrl, setBaseUrl] = useState(custom?.base_url ?? "");
+  const [api, setApi] = useState(custom?.api ?? "openai-completions");
+  const [apiKey, setApiKey] = useState("");
+  const keySaved = providers.some(
+    (item) => item.id === providerId.trim() && item.configured,
+  );
+  return (
+    <details className="assistant-custom-model">
+      <summary>
+        {custom ? "Edit custom model" : "Configure custom model"}
+      </summary>
+      <form
+        aria-label="Custom model connection"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (tasksRunning) return;
+          if (
+            await onSave({
+              provider: providerId.trim(),
+              model: model.trim(),
+              base_url: baseUrl.trim(),
+              api,
+              ...(apiKey ? { api_key: apiKey } : {}),
+              credential_source: config.credential_source,
+            })
+          )
+            setApiKey("");
+        }}
+      >
+        <label className="form-field">
+          <span>Provider ID</span>
+          <input
+            aria-label="Custom provider ID"
+            required
+            maxLength={64}
+            pattern="[a-zA-Z0-9][a-zA-Z0-9_.:-]*"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="my-provider"
+            value={providerId}
+            onChange={(event) => setProviderId(event.currentTarget.value)}
+          />
+        </label>
+        <label className="form-field">
+          <span>API format</span>
+          <ThemedSelect
+            aria-label="Custom API format"
+            value={api}
+            options={[
+              { value: "openai-completions", label: "OpenAI Chat Completions" },
+              { value: "openai-responses", label: "OpenAI Responses" },
+              { value: "anthropic-messages", label: "Anthropic Messages" },
+            ]}
+            onChange={(value) => setApi(value as typeof api)}
+          />
+        </label>
+        <label className="form-field">
+          <span>API base URL</span>
+          <input
+            type="url"
+            aria-label="Custom API base URL"
+            required
+            maxLength={2000}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="https://api.example.com/v1"
+            value={baseUrl}
+            onChange={(event) => setBaseUrl(event.currentTarget.value)}
+          />
+        </label>
+        <label className="form-field">
+          <span>Model ID</span>
+          <input
+            aria-label="Custom model ID"
+            required
+            maxLength={500}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="your-model-id"
+            value={model}
+            onChange={(event) => setModel(event.currentTarget.value)}
+          />
+        </label>
+        <label className="form-field">
+          <span>API key</span>
+          <input
+            type="password"
+            aria-label="Custom API key"
+            required={!keySaved}
+            maxLength={10000}
+            autoComplete="new-password"
+            spellCheck={false}
+            placeholder={
+              keySaved ? "Leave blank to keep the saved key" : "API key"
+            }
+            value={apiKey}
+            onChange={(event) => setApiKey(event.currentTarget.value)}
+          />
+        </label>
+        <p className="assistant-hint">
+          {config.credential_source === "pi"
+            ? "Saved to Pi on the bridge host and shared with Pi."
+            : "Saved for Ranger on the bridge host."}{" "}
+          For a local server without authentication, enter a dummy key.
+        </p>
+        {tasksRunning ? (
+          <p className="assistant-hint">
+            Stop running tasks before changing a model connection.
+          </p>
+        ) : null}
+        <button type="submit" disabled={tasksRunning}>
+          Save custom model
+        </button>
+      </form>
+    </details>
+  );
 }
 
 const actionNames: Record<AssistantAction["kind"], string> = {
@@ -685,6 +824,10 @@ export function AssistantPanel({
   const modelOptions = (snapshot?.models ?? [])
     .filter((model) => model.provider === config?.provider)
     .map((model) => ({ value: model.id, label: model.label }));
+  const selectedModel = snapshot?.models.find(
+    (model) =>
+      model.provider === config?.provider && model.id === config?.model,
+  );
   const permittedWorkspaces = workspaces.filter(
     (workspace) =>
       !!snapshot &&
@@ -879,13 +1022,13 @@ export function AssistantPanel({
                       value: "assistant",
                       label: "Ranger connection",
                       description:
-                        "Save Ranger logins and API keys separately from Pi.",
+                        "Save Ranger logins, API keys and custom models separately from Pi.",
                     },
                     {
                       value: "pi",
                       label: "Shared Pi credentials",
                       description:
-                        "Use Pi's saved logins and API keys. New logins and keys are also saved to Pi.",
+                        "Use Pi's saved logins, API keys and custom models. Changes are also saved to Pi.",
                     },
                   ] as const
                 ).map((item) => (
@@ -919,6 +1062,34 @@ export function AssistantPanel({
                 ))}
               </div>
             </div>
+            <AssistantModelForm
+              key={JSON.stringify([
+                config.credential_source,
+                provider?.id,
+                config.model,
+                provider?.custom,
+                selectedModel?.custom,
+              ])}
+              config={config}
+              provider={provider}
+              providers={snapshot.providers}
+              selectedModel={selectedModel}
+              tasksRunning={
+                snapshot.tasks?.some(
+                  (task) => task.current_run?.status === "running",
+                ) ?? false
+              }
+              onSave={async (input) => {
+                if (!(await run("configure_model", input))) return false;
+                setConfig({
+                  ...config,
+                  provider: input.provider,
+                  model: input.model,
+                });
+                setProviderSearch("");
+                return true;
+              }}
+            />
             <div
               className="assistant-providers"
               role="group"
