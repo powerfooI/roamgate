@@ -1,4 +1,4 @@
-import { ChevronLeft, ExternalLink, LoaderCircle, Plus } from "lucide-react";
+import { ChevronLeft, LoaderCircle, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   ASSISTANT_MAX_WORKSPACES,
@@ -16,7 +16,7 @@ import {
 import { callAssistant, getAssistantTask } from "../assistant";
 import type { RangerTaskNotificationTarget } from "../taskNotifications";
 import { formatUiDateTime } from "../uiLocale";
-import { ActionCard } from "./AssistantPanel";
+import { ActionCard, AssistantMessageActivity } from "./AssistantPanel";
 import { MarkdownPreview } from "./markdown";
 import { ConfirmDialog } from "./ModalDialogs";
 import { ThemedSelect } from "./ThemedSelect";
@@ -128,6 +128,7 @@ function TaskForm({
   workspaces,
   busy,
   ready,
+  highPermission = false,
   onSave,
   onCancel,
   onOpenSettings,
@@ -137,6 +138,7 @@ function TaskForm({
   workspaces: AssistantWorkspace[];
   busy: boolean;
   ready: boolean;
+  highPermission?: boolean;
   onSave: (input: AssistantTaskInput) => Promise<void>;
   onCancel: () => void;
   onOpenSettings: () => void;
@@ -232,8 +234,11 @@ function TaskForm({
         </button>
       </div>
       <p className="assistant-hint">
-        Tasks run on the bridge in their own conversations. Workspace actions
-        always need your confirmation.
+        Tasks run on the bridge in their own conversations. Saving uses the
+        current permission mode:{" "}
+        {highPermission
+          ? "high permission. Supported workspace operations execute automatically while the global mode stays enabled."
+          : "manual. Workspace operations need your confirmation."}
       </p>
       {!ready ? (
         <div className="assistant-setup-notice">
@@ -355,57 +360,59 @@ function TaskForm({
         )}
         <fieldset className="assistant-task-scope">
           <legend>Workspaces</legend>
-          {choices.map((workspace) => {
-            const checked = scope.some(
-              (ref) => workspaceKey(ref) === workspaceKey(workspace),
-            );
-            const available = workspaces.some(
-              (ref) => workspaceKey(ref) === workspaceKey(workspace),
-            );
-            return (
-              <label
-                key={workspaceKey(workspace)}
-                className="assistant-workspace-choice"
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  disabled={
-                    !checked &&
-                    (!available || scope.length >= ASSISTANT_MAX_WORKSPACES)
-                  }
-                  onChange={() =>
-                    setScope(
-                      checked
-                        ? scope.filter(
-                            (ref) =>
-                              workspaceKey(ref) !== workspaceKey(workspace),
-                          )
-                        : [
-                            ...scope,
-                            {
-                              connection_id: workspace.connection_id,
-                              workspace_id: workspace.workspace_id,
-                            },
-                          ],
-                    )
-                  }
-                />
-                <span>
-                  {workspace.label}
-                  <small>
-                    {workspace.connection_label}
-                    {available ? "" : " / Unavailable or no longer allowed"}
-                  </small>
-                </span>
-              </label>
-            );
-          })}
-          {!choices.length ? (
-            <span className="assistant-hint">
-              Allow connected workspaces in Ranger settings first.
-            </span>
-          ) : null}
+          <div className="assistant-workspaces">
+            {choices.map((workspace) => {
+              const checked = scope.some(
+                (ref) => workspaceKey(ref) === workspaceKey(workspace),
+              );
+              const available = workspaces.some(
+                (ref) => workspaceKey(ref) === workspaceKey(workspace),
+              );
+              return (
+                <label
+                  key={workspaceKey(workspace)}
+                  className="assistant-workspace-choice"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={
+                      !checked &&
+                      (!available || scope.length >= ASSISTANT_MAX_WORKSPACES)
+                    }
+                    onChange={() =>
+                      setScope(
+                        checked
+                          ? scope.filter(
+                              (ref) =>
+                                workspaceKey(ref) !== workspaceKey(workspace),
+                            )
+                          : [
+                              ...scope,
+                              {
+                                connection_id: workspace.connection_id,
+                                workspace_id: workspace.workspace_id,
+                              },
+                            ],
+                      )
+                    }
+                  />
+                  <span>
+                    {workspace.label}
+                    <small>
+                      {workspace.connection_label}
+                      {available ? "" : " / Unavailable or no longer allowed"}
+                    </small>
+                  </span>
+                </label>
+              );
+            })}
+            {!choices.length ? (
+              <span className="assistant-hint">
+                Allow connected workspaces in Ranger settings first.
+              </span>
+            ) : null}
+          </div>
         </fieldset>
       </fieldset>
       {error ? (
@@ -644,6 +651,7 @@ export function AssistantTasks({
           workspaces={workspaces}
           busy={busy || !connected}
           ready={ready}
+          highPermission={snapshot.config.approval_mode === "auto"}
           onOpenSettings={onOpenSettings}
           onCancel={() => setEditor(null)}
           onSave={async (input) => {
@@ -796,6 +804,13 @@ export function AssistantTasks({
                 <summary>Task prompt</summary>
                 <p>{task.prompt}</p>
               </details>
+              <span className="assistant-hint">
+                {task.approval_mode === "auto"
+                  ? snapshot.config.approval_mode === "auto"
+                    ? "High permission: supported operations execute automatically"
+                    : "High permission saved; global mode is off, so operations need confirmation"
+                  : "Manual permission: operations need confirmation"}
+              </span>
               <span className="assistant-hint">
                 {task.notification_mode === "agent"
                   ? "Ranger decides when to notify"
@@ -968,42 +983,18 @@ export function AssistantTasks({
                           }
                         />
                       ))}
-                      {message.tools.length ? (
-                        <details className="assistant-tools">
-                          <summary>
-                            Work performed ({message.tools.length})
-                          </summary>
-                          <ul>
-                            {message.tools.map((tool) => (
-                              <li key={tool.id}>
-                                <span>{tool.name}</span>
-                                <span
-                                  className={`assistant-tool-state is-${tool.status}`}
-                                >
-                                  {tool.status}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </details>
-                      ) : null}
-                      {message.sources.length ? (
-                        <div className="assistant-sources" aria-label="Sources">
-                          {message.sources.map((source) => (
-                            <button
-                              type="button"
-                              key={source.id}
-                              onClick={() => onOpenSource(source)}
-                            >
-                              <span>
-                                <ExternalLink size={12} /> {source.title}
-                              </span>
-                              <small>
-                                Read {formatUiDateTime(source.read_at)}
-                              </small>
-                            </button>
-                          ))}
-                        </div>
+                      {message.tools.length || message.sources.length ? (
+                        <AssistantMessageActivity
+                          message={message}
+                          running={
+                            selectedRun.status === "running" &&
+                            message ===
+                              selectedRun.messages[
+                                selectedRun.messages.length - 1
+                              ]
+                          }
+                          onOpenSource={onOpenSource}
+                        />
                       ) : null}
                     </section>
                   ))}

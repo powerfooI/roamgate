@@ -403,8 +403,10 @@ to the context layer.
 
 The model receives `workspace_status`, `workspace_history`, `workspace_diff`,
 and `workspace_terminal`, plus six proposal tools for workspace creation,
-worktree creation, tab creation, pane splitting, agent startup, and agent prompts. Proposal tools only prepare
-previews; they cannot execute operations. Built-in tools and discovered extensions, skills,
+worktree creation, tab creation, pane splitting, agent startup, and agent prompts.
+By default, proposal tools prepare previews for user confirmation. In explicitly
+enabled high-permission mode, the service executes the same validated operations
+and returns their actual receipts to the model. Built-in tools and discovered extensions, skills,
 prompts, and project instruction files are disabled. Evidence is bounded and
 treated as untrusted content. The service validates the selected turn scope
 against explicitly allowed connection/workspace pairs; none are allowed by
@@ -442,13 +444,27 @@ Result reads verify workspace creation and agent startup; prompt delivery is
 reported separately from whether the agent completed the requested task. Failed
 or uncertain operations are not automatically retried.
 
+`configure_approval` persists the global `approval_mode` independently of model
+and workspace configuration; missing values mean `manual`. Ordinary `configure`
+preserves the live mode, so stale browser settings cannot re-enable it. Automatic
+execution requires both the admitted turn's mode and the current global mode to
+be `auto`, checked after preparation and immediately before execution. Switching
+back to `manual` is allowed during a turn and prevents subsequent automatic
+operations. Already dispatched effects retain their ordinary receipt semantics.
+Automatic action and task-creation tools execute sequentially and remain unsafe
+to replay. Revocation before action reservation leaves a pending preview; a
+reserved action rejected before dispatch returns a failed receipt stating that
+nothing was sent. Automatically
+created schedules return confirmed task receipts through the same tool path.
+
 Worktree creation shares the ordinary UI's base synchronization, parent tracking,
 and setup-hook execution. A changed setup command requires fresh confirmation;
 an already-created worktree can therefore have a partial setup result. New
 questions or configuration changes retire pending previews. On bridge restart,
 pending previews become cancelled and executing receipts become uncertain;
-captured execution closures are never restored. Confirmed results clear retained
-model context and are supplied as receipts in subsequent questions. Creating a
+captured execution closures are never restored. Manually confirmed results clear
+retained model context and are supplied as receipts in subsequent questions;
+automatic results are returned within the active durable turn. Creating a
 workspace does not add it to the allowed scope.
 
 Sources carry their workspace, runtime generation, kind, and read time. They
@@ -507,7 +523,11 @@ Each run uses the ordinary send,
 durable resume, and Stop paths with its own transcript and execution directory;
 credential lookup remains in the main assistant directory. Runs verify the
 original identities and current global workspace permissions before reading or
-proposing operations. Schedule execution never confirms a management operation.
+proposing operations. Automatic management execution additionally requires the
+task's saved `approval_mode` and the live global mode to both be `auto`. Existing
+manual tasks are not escalated when the global mode changes; editing a task
+captures the currently selected mode for future runs. Disabling the global mode
+also revokes automatic execution in existing task children.
 
 One scheduled model run is admitted at a time; interactive chat has a separate
 service. Interrupted runs waiting for their original connections return to the

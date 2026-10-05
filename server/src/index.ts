@@ -427,8 +427,15 @@ const assistantContext = createAssistantContext({
           ];
     return createHash("sha256").update(JSON.stringify(target)).digest("hex");
   },
-  createWorktree: (runtime, params, isCurrent) =>
-    createWorkspaceWorktree(runtime, params, isCurrent),
+  createWorktree: (runtime, params, isCurrent, beforeDispatch) =>
+    createWorkspaceWorktree(
+      runtime,
+      params,
+      isCurrent,
+      undefined,
+      undefined,
+      beforeDispatch,
+    ),
 });
 let assistantServiceTask: Promise<
   Awaited<

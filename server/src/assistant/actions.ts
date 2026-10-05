@@ -24,7 +24,7 @@ export type AssistantActionResult = {
 };
 export type PreparedAssistantAction = {
   preview: AssistantActionPreview;
-  execute(): Promise<AssistantActionResult>;
+  execute(authorized?: () => boolean): Promise<AssistantActionResult>;
 };
 export type AssistantActionLease = {
   runtime: LegacyConnectionRuntime;
@@ -35,7 +35,10 @@ export type AssistantWorktreeCreator = (
   runtime: LegacyConnectionRuntime,
   params: Record<string, unknown>,
   isCurrent: () => boolean,
+  beforeDispatch: () => void,
 ) => Promise<unknown>;
+
+class DispatchNotSentError extends Error {}
 
 function text(value: unknown, max = 200): string {
   if (
@@ -309,7 +312,10 @@ export async function prepareAssistantAction(args: {
     let previewParams: Record<string, string>;
     let summary: string;
     let perform: (
-      dispatch: (operation: () => Promise<unknown>) => Promise<unknown>,
+      dispatch: (
+        operation: (beforeSend: () => void) => Promise<unknown>,
+      ) => Promise<unknown>,
+      isCurrent: () => boolean,
     ) => Promise<AssistantActionResult>;
     if (kind === "create_workspace") {
       const label = text(params.label);
@@ -342,7 +348,7 @@ export async function prepareAssistantAction(args: {
         const previousIds = new Set(before.map((item) => item.workspace_id));
         let response: unknown;
         try {
-          response = await dispatch(() =>
+          response = await dispatch((beforeSend) =>
             runtime.herdr.call(
               "workspace.create",
               {
@@ -352,9 +358,11 @@ export async function prepareAssistantAction(args: {
                 focus: false,
               },
               30_000,
+              beforeSend,
             ),
           );
-        } catch {
+        } catch (error) {
+          if (error instanceof DispatchNotSentError) throw error;
           /* A lost reply may still have created the workspace. Verify before any retry. */
         }
         const returnedId =
@@ -423,7 +431,7 @@ export async function prepareAssistantAction(args: {
       };
       summary =
         "Fetch origin's default branch, create its worktree, save the source relationship, and run the displayed setup hook if enabled. Focus will stay unchanged.";
-      perform = async (dispatch) => {
+      perform = async (dispatch, isCurrent) => {
         const actualRoot = await read(() =>
           runtime.files.resolveWorkspaceGitRoot({
             workspace_id: target.workspace_id,
@@ -441,7 +449,7 @@ export async function prepareAssistantAction(args: {
             detail:
               "A worktree for this branch already exists. No duplicate was created; inspect the existing checkout.",
           };
-        const response = await dispatch(() =>
+        const response = await dispatch((beforeDispatch) =>
           args.createWorktree!(
             runtime,
             {
@@ -453,7 +461,8 @@ export async function prepareAssistantAction(args: {
               expected_hooks_enabled: hooks.enabled,
               expected_source_root: root,
             },
-            () => lease.isCurrent(),
+            isCurrent,
+            beforeDispatch,
           ),
         );
         const created =
@@ -522,11 +531,12 @@ export async function prepareAssistantAction(args: {
               }))
         )
           throw new Error("Source directory changed");
-        const response = await dispatch(() =>
+        const response = await dispatch((beforeSend) =>
           runtime.herdr.call(
             "tab.create",
             { workspace_id: target.workspace_id, cwd, focus: false },
             30_000,
+            beforeSend,
           ),
         );
         if (
@@ -573,7 +583,7 @@ export async function prepareAssistantAction(args: {
         const previous = await panes();
         if (JSON.stringify(await pane(paneId)) !== JSON.stringify(source))
           throw new Error("Source pane or directory changed");
-        const response = await dispatch(() =>
+        const response = await dispatch((beforeSend) =>
           runtime.herdr.call(
             "pane.split",
             {
@@ -583,6 +593,7 @@ export async function prepareAssistantAction(args: {
               focus: false,
             },
             30_000,
+            beforeSend,
           ),
         );
         if (
@@ -656,7 +667,7 @@ export async function prepareAssistantAction(args: {
           const deadline = Date.now() + 60_000;
           let response: unknown;
           try {
-            response = await dispatch(() =>
+            response = await dispatch((beforeSend) =>
               runtime.herdr.call(
                 "agent.start",
                 {
@@ -666,9 +677,11 @@ export async function prepareAssistantAction(args: {
                   timeout_ms: 60_000,
                 },
                 65_000,
+                beforeSend,
               ),
             );
-          } catch {
+          } catch (error) {
+            if (error instanceof DispatchNotSentError) throw error;
             /* Inspect the pane after a lost startup reply; never launch twice. */
           }
           if (
@@ -773,11 +786,12 @@ export async function prepareAssistantAction(args: {
             throw new Error("Pane occupant changed");
           let result: unknown;
           try {
-            result = await dispatch(() =>
+            result = await dispatch((beforeSend) =>
               runtime.herdr.call(
                 "agent.prompt",
                 { target: paneId, text: prompt },
                 5000,
+                beforeSend,
               ),
             );
           } catch (error) {
@@ -825,7 +839,7 @@ export async function prepareAssistantAction(args: {
     let execution: Promise<AssistantActionResult> | undefined;
     return Object.freeze({
       preview,
-      execute() {
+      execute(authorized?: () => boolean) {
         // The service persists admission before calling this one-shot closure.
         execution ??= (async () => {
           let dispatched = false;
@@ -833,19 +847,39 @@ export async function prepareAssistantAction(args: {
             check();
             if (workspaceIdentity(await workspace()) !== frozenWorkspace)
               throw new Error("Source workspace changed");
+            const isCurrent = () =>
+              lease.isCurrent() && (!authorized || authorized());
             const result = await perform(async (operation) => {
-              check();
-              dispatched = true;
-              return read(operation);
-            });
+              const assertAuthorized = () => {
+                if (!isCurrent())
+                  throw new DispatchNotSentError(
+                    "Action authorization expired before dispatch",
+                  );
+              };
+              assertAuthorized();
+              try {
+                return await read(() =>
+                  operation(() => {
+                    assertAuthorized();
+                    dispatched = true;
+                  }),
+                );
+              } catch (error) {
+                if (!dispatched)
+                  throw new DispatchNotSentError("Action was not dispatched");
+                throw error;
+              }
+            }, isCurrent);
             check();
             return result;
           } catch {
             return {
               status: dispatched ? "uncertain" : "failed",
               detail: dispatched
-                ? "The operation was sent, but its final state could not be verified. Inspect the target before retrying."
-                : "The target changed or the operation is unavailable. Nothing was sent; prepare a new preview.",
+                ? "The operation started, but its final state could not be verified. Inspect the target before retrying."
+                : authorized && !authorized()
+                  ? "Automatic approval was disabled before dispatch. Nothing was sent."
+                  : "The target changed or the operation is unavailable. Nothing was sent; prepare a new preview.",
             } satisfies AssistantActionResult;
           }
         })();
