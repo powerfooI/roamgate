@@ -16,7 +16,52 @@ export type AssistantConfig = {
   model: string;
   credential_source: "assistant" | "pi";
   allowed_workspaces: AssistantWorkspaceRef[];
+  approval_mode?: "manual" | "auto";
 };
+
+export const ASSISTANT_MODEL_APIS = [
+  "openai-completions",
+  "openai-responses",
+  "anthropic-messages",
+] as const;
+export type AssistantModelApi = (typeof ASSISTANT_MODEL_APIS)[number];
+export type AssistantModelConnection = {
+  provider: string;
+  model: string;
+  base_url: string;
+  api: AssistantModelApi;
+  api_key?: string;
+  credential_source: AssistantConfig["credential_source"];
+};
+
+export function isAssistantModelApi(
+  value: unknown,
+): value is AssistantModelApi {
+  return ASSISTANT_MODEL_APIS.some((api) => api === value);
+}
+
+export function isAssistantModelEndpoint(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length > 2000 ||
+    /[\u0000-\u0020\u007f]/.test(value)
+  )
+    return false;
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "https:" || url.protocol === "http:") &&
+      !!url.hostname &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      !value.includes("$")
+    );
+  } catch {
+    return false;
+  }
+}
 
 export type AssistantSource = AssistantWorkspaceRef & {
   id: string;
@@ -142,6 +187,7 @@ export type AssistantTask = AssistantTaskInput & {
   next_run_at: string | null;
   workspaces: AssistantWorkspace[];
   model: { provider: string; id: string };
+  approval_mode?: "manual" | "auto";
   current_run?: AssistantTaskRun;
   last_run?: AssistantTaskRun;
 };
@@ -198,8 +244,14 @@ export type AssistantSnapshot = {
     methods: ("api_key" | "oauth")[];
     configured: boolean;
     credential_method?: "api_key" | "oauth";
+    custom?: { base_url: string; api: AssistantModelApi };
   }[];
-  models: { provider: string; id: string; label: string }[];
+  models: {
+    provider: string;
+    id: string;
+    label: string;
+    custom?: { base_url: string; api: AssistantModelApi };
+  }[];
   messages: AssistantMessage[];
   running: boolean;
   error: string | null;
@@ -306,6 +358,9 @@ function task(value: unknown): value is AssistantTask {
   const data: Record<string, unknown> = value;
   return (
     text(data.id) &&
+    (data.approval_mode === undefined ||
+      data.approval_mode === "manual" ||
+      data.approval_mode === "auto") &&
     !!data.id &&
     ["active", "paused", "cancelled"].includes(String(data.status)) &&
     timestamp(data.created_at) &&
@@ -495,6 +550,9 @@ export function isAssistantSnapshot(
     !text(config.provider) ||
     !text(config.model) ||
     !["assistant", "pi"].includes(String(config.credential_source)) ||
+    (config.approval_mode !== undefined &&
+      config.approval_mode !== "manual" &&
+      config.approval_mode !== "auto") ||
     !Array.isArray(config.allowed_workspaces) ||
     !config.allowed_workspaces.every(workspaceRef) ||
     !Array.isArray(value.providers) ||
@@ -507,6 +565,10 @@ export function isAssistantSnapshot(
         (provider.credential_method === undefined ||
           provider.credential_method === "api_key" ||
           provider.credential_method === "oauth") &&
+        (provider.custom === undefined ||
+          (record(provider.custom) &&
+            isAssistantModelEndpoint(provider.custom.base_url) &&
+            isAssistantModelApi(provider.custom.api))) &&
         Array.isArray(provider.methods) &&
         provider.methods.every(
           (method) => method === "api_key" || method === "oauth",
@@ -518,7 +580,11 @@ export function isAssistantSnapshot(
         record(model) &&
         text(model.provider) &&
         text(model.id) &&
-        text(model.label),
+        text(model.label) &&
+        (model.custom === undefined ||
+          (record(model.custom) &&
+            isAssistantModelEndpoint(model.custom.base_url) &&
+            isAssistantModelApi(model.custom.api))),
     ) ||
     (value.tasks !== undefined &&
       (!Array.isArray(value.tasks) ||

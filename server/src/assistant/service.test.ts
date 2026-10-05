@@ -24,6 +24,7 @@ import {
 } from "./context";
 import { type AssistantDriver, createPiDriver } from "./pi-driver";
 import { createAssistantService } from "./service";
+import type { PreparedAssistantAction } from "./actions";
 
 const workspace: AssistantWorkspace = {
   connection_id: "local",
@@ -150,7 +151,483 @@ async function flushTasks() {
   for (let index = 0; index < 60; index++) await Promise.resolve();
 }
 
+function permissionAction(
+  execute: PreparedAssistantAction["execute"],
+): PreparedAssistantAction {
+  return {
+    preview: {
+      ...workspace,
+      workspace_label: workspace.label,
+      kind: "create_tab",
+      summary: "Create a tab",
+      params: { cwd: "/repo" },
+    },
+    execute,
+  };
+}
+
+describe("Ranger approval policy", () => {
+  test("auto actions and schedules return real receipts and retain durable admission", async () => {
+    const pointer = [{ type: "ranger-durable", id: randomUUID() }];
+    let writes = 0;
+    const receipts: Record<string, unknown>[] = [];
+    const f = setup({
+      run: async (input) => {
+        expect(input.config.approval_mode).toBe("auto");
+        input.checkpoint!(pointer);
+        receipts.push(
+          JSON.parse(
+            (
+              await input.propose!(
+                "create_tab",
+                configured.allowed_workspaces[0]!,
+              )
+            ).text,
+          ),
+        );
+        receipts.push(
+          JSON.parse(
+            (
+              await input.task!("create", {
+                title: "Read later",
+                prompt: "Read verified status",
+                scope: configured.allowed_workspaces,
+                schedule: {
+                  type: "once",
+                  at: new Date(Date.now() + 3_600_000).toISOString(),
+                },
+              })
+            ).text,
+          ),
+        );
+        input.message("Verified tab and schedule created.");
+        return pointer;
+      },
+    });
+    stableTaskIdentity(f.context);
+    f.context.prepareAction = async () =>
+      permissionAction(async () => {
+        writes++;
+        const saved = JSON.parse(
+          readFileSync(join(f.directory, "state.json"), "utf8"),
+        );
+        expect(saved.messages.at(-1).actions[0].status).toBe("executing");
+        expect(saved.entries).toEqual(pointer);
+        expect(saved.active_run.request_id).toBe("automatic");
+        return { status: "succeeded", detail: "Verified new pane p2" };
+      });
+    await f.service.handle("configure", { config: configured });
+    expect(f.service.peek().config.approval_mode).toBeUndefined();
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    await f.service.handle("send", {
+      request_id: "automatic",
+      text: "Create a tab and schedule",
+    });
+    await until(() => !f.service.peek().running);
+    expect(writes).toBe(1);
+    expect(receipts[0]).toMatchObject({
+      status: "succeeded",
+      detail: "Verified new pane p2",
+    });
+    expect(receipts[1]).toMatchObject({ status: "confirmed" });
+    expect(f.service.peek().tasks?.[0]?.approval_mode).toBe("auto");
+    expect(f.service.peek().messages.at(-1)?.text).toContain("Verified");
+    expect(isAssistantSnapshot(f.service.peek())).toBe(true);
+  });
+
+  test("revoking during action preparation leaves a pending receipt and blocks later effects", async () => {
+    const preparing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let writes = 0;
+    let receipt = "";
+    const f = setup({
+      run: async (input) => {
+        receipt = (
+          await input.propose!("create_tab", configured.allowed_workspaces[0]!)
+        ).text;
+        return [];
+      },
+    });
+    f.context.prepareAction = async () => {
+      preparing.resolve();
+      await release.promise;
+      return permissionAction(async () => {
+        writes++;
+        return { status: "succeeded", detail: "Created" };
+      });
+    };
+    await f.service.handle("configure", { config: configured });
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    await f.service.handle("send", { request_id: "revoke", text: "Create" });
+    await preparing.promise;
+    await expect(
+      f.service.handle("configure_approval", { approval_mode: "auto" }),
+    ).rejects.toThrow("busy");
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    release.resolve();
+    await until(() => !f.service.peek().running);
+    expect(JSON.parse(receipt).status).toBe("pending");
+    expect(writes).toBe(0);
+  });
+
+  // Preparation, proposal creation, and automatic confirmation revalidate.
+  test.each([1, 2, 3])(
+    "revoking during task validation %i keeps manual confirmation manual after re-enabling auto",
+    async (validation) => {
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const childFinished = Promise.withResolvers<void>();
+      let preparing = false;
+      let checks = 0;
+      let writes = 0;
+      let receipt = "";
+      const f = setup(
+        {
+          catalog: async () => {
+            if (preparing && ++checks === validation) {
+              entered.resolve();
+              await release.promise;
+            }
+            return catalog;
+          },
+          run: async (input) => {
+            preparing = true;
+            receipt = (
+              await input.task!("create", {
+                title: "Create later",
+                prompt: "Create a tab",
+                scope: configured.allowed_workspaces,
+                schedule: {
+                  type: "once",
+                  at: new Date(Date.now() + 3_600_000).toISOString(),
+                },
+              })
+            ).text;
+            return [];
+          },
+        },
+        () => ({
+          catalog: async () => catalog,
+          login: async () => {},
+          stop: async () => {},
+          dispose: async () => {},
+          run: async (input) => {
+            expect(input.config.approval_mode).toBe("manual");
+            await input.propose!(
+              "create_tab",
+              configured.allowed_workspaces[0]!,
+            );
+            childFinished.resolve();
+            return [];
+          },
+        }),
+      );
+      stableTaskIdentity(f.context);
+      f.context.prepareAction = async () =>
+        permissionAction(async () => {
+          writes++;
+          return { status: "succeeded", detail: "Created" };
+        });
+      await f.service.handle("configure", { config: configured });
+      await f.service.handle("configure_approval", { approval_mode: "auto" });
+      await f.service.handle("send", {
+        request_id: "revoke-task",
+        text: "Schedule a tab",
+      });
+      await entered.promise;
+      await f.service.handle("configure_approval", {
+        approval_mode: "manual",
+      });
+      release.resolve();
+      await until(() => !f.service.peek().running);
+      const proposal = JSON.parse(receipt);
+      expect(proposal.status).toBe("pending");
+      await f.service.handle("task.confirm_proposal", {
+        proposal_id: proposal.id,
+      });
+      const task = f.service.peek().tasks![0]!;
+      expect(task.approval_mode).toBe("manual");
+      await f.service.handle("configure_approval", { approval_mode: "auto" });
+      jest.useFakeTimers();
+      await f.service.resume();
+      await f.service.handle("task.run_now", { task_id: task.id });
+      jest.advanceTimersByTime(0);
+      await childFinished.promise;
+      expect(writes).toBe(0);
+    },
+  );
+
+  test("failed revocation preserves live action and streamed message references", async () => {
+    const executing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const f = setup({
+      run: async (input) => {
+        input.delta("Before ");
+        await input.propose!("create_tab", configured.allowed_workspaces[0]!);
+        input.delta("after");
+        return [];
+      },
+    });
+    f.context.prepareAction = async () =>
+      permissionAction(async () => {
+        executing.resolve();
+        await release.promise;
+        return { status: "succeeded", detail: "Verified" };
+      });
+    await f.service.handle("configure", { config: configured });
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    await f.service.handle("send", {
+      request_id: "failed-revoke",
+      text: "Create",
+    });
+    await executing.promise;
+    const path = join(f.directory, "state.json");
+    renameSync(path, `${path}.backup`);
+    mkdirSync(path);
+    try {
+      await expect(
+        f.service.handle("configure_approval", { approval_mode: "manual" }),
+      ).rejects.toThrow("could not be saved");
+      expect(f.service.peek().config.approval_mode).toBe("auto");
+    } finally {
+      rmSync(path, { recursive: true });
+      renameSync(`${path}.backup`, path);
+      release.resolve();
+    }
+    await until(() => !f.service.peek().running);
+    expect(f.service.peek().messages.at(-1)?.actions?.[0]?.status).toBe(
+      "succeeded",
+    );
+    expect(f.service.peek().messages.at(-1)?.text).toBe("Before after");
+    expect(
+      JSON.parse(readFileSync(path, "utf8")).messages.at(-1).actions[0].status,
+    ).toBe("succeeded");
+  });
+
+  test("Stop retains an outstanding automatic effect until its receipt settles", async () => {
+    const executing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const f = setup({
+      run: async (input) => {
+        const effect = input.propose!(
+          "create_tab",
+          configured.allowed_workspaces[0]!,
+        );
+        await Promise.race([
+          effect,
+          new Promise<void>((resolve) =>
+            input.signal.addEventListener("abort", () => resolve(), {
+              once: true,
+            }),
+          ),
+        ]);
+        return [];
+      },
+    });
+    f.context.prepareAction = async () =>
+      permissionAction(async () => {
+        executing.resolve();
+        await release.promise;
+        return { status: "succeeded", detail: "Created before Stop" };
+      });
+    await f.service.handle("configure", { config: configured });
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    await f.service.handle("send", { request_id: "stop-auto", text: "Create" });
+    await executing.promise;
+    await f.service.handle("stop", {});
+    expect(f.service.peek().running).toBe(false);
+    expect(f.service.peek().messages.at(-1)?.actions?.[0]?.status).toBe(
+      "executing",
+    );
+    await expect(f.service.handle("new_session", {})).rejects.toThrow("busy");
+    await expect(
+      f.service.handle("configure", { config: configured }),
+    ).rejects.toThrow("busy");
+    release.resolve();
+    await until(
+      () =>
+        f.service.peek().messages.at(-1)?.actions?.[0]?.status === "succeeded",
+    );
+    expect(
+      JSON.parse(
+        readFileSync(join(f.directory, "state.json"), "utf8"),
+      ).messages.at(-1).actions[0].status,
+    ).toBe("succeeded");
+    await f.service.handle("new_session", {});
+  });
+
+  test("a delayed connection save preserves the latest permission mode", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const f = setup();
+    await f.service.handle("configure", { config: configured });
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    f.driver.catalog = async () => {
+      entered.resolve();
+      await release.promise;
+      return catalog;
+    };
+    const saving = f.service.handle("configure", {
+      config: { ...configured, approval_mode: "auto" },
+    });
+    await entered.promise;
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    release.resolve();
+    await saving;
+    expect(f.service.peek().config.approval_mode).toBe("manual");
+    await f.service.handle("configure", {
+      config: { ...configured, approval_mode: "auto" },
+    });
+    expect(f.service.peek().config.approval_mode).toBe("manual");
+  });
+
+  test("scheduled tasks require both their saved auto policy and current global permission", async () => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-05T00:00:00Z") });
+    const policies: (string | undefined)[] = [];
+    const thirdTurn = Promise.withResolvers<void>();
+    const releaseThird = Promise.withResolvers<void>();
+    let writes = 0;
+    const f = setup({}, () => ({
+      catalog: async () => catalog,
+      login: async () => {},
+      stop: async () => {},
+      dispose: async () => {},
+      run: async (input) => {
+        policies.push(input.config.approval_mode);
+        if (policies.length === 3) {
+          thirdTurn.resolve();
+          await releaseThird.promise;
+        }
+        await input.propose!("create_tab", configured.allowed_workspaces[0]!);
+        return [];
+      },
+    }));
+    stableTaskIdentity(f.context);
+    f.context.prepareAction = async () =>
+      permissionAction(async () => {
+        writes++;
+        return { status: "succeeded", detail: "Created" };
+      });
+    await f.service.handle("configure", { config: configured });
+    const create = async (title: string) => {
+      await f.service.handle("task.create", {
+        request_id: randomUUID(),
+        title,
+        prompt: "Create tab",
+        scope: configured.allowed_workspaces,
+        schedule: { type: "interval", minutes: 60 },
+      });
+      return f.service.peek().tasks!.find((task) => task.title === title)!.id;
+    };
+    const oldManual = await create("Old manual");
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    const savedAuto = await create("Saved auto");
+    expect(
+      f.service.peek().tasks!.find((task) => task.id === savedAuto)
+        ?.approval_mode,
+    ).toBe("auto");
+    await f.service.resume();
+    const run = async (id: string) => {
+      await f.service.handle("task.run_now", { task_id: id });
+      jest.advanceTimersByTime(0);
+      await flushTasks();
+    };
+    await run(oldManual);
+    expect(writes).toBe(0);
+    const waiting = await f.service.taskDetail({
+      task_id: oldManual,
+      run_id: f.service.peek().tasks!.find((task) => task.id === oldManual)!
+        .current_run!.id,
+    });
+    expect(waiting.task.current_run?.status).toBe("waiting");
+    await f.service.handle("task.action.cancel", {
+      task_id: oldManual,
+      run_id: waiting.task.current_run!.id,
+      action_id: waiting.run!.messages.at(-1)!.actions![0]!.id,
+    });
+    await flushTasks();
+    await run(savedAuto);
+    expect(writes).toBe(1);
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    await run(savedAuto);
+    await thirdTurn.promise;
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    releaseThird.resolve();
+    await flushTasks();
+    expect(writes).toBe(1);
+    expect(policies).toEqual(["manual", "auto", "manual"]);
+  });
+});
+
 describe("Ranger scheduled task service", () => {
+  test("model connection edits defer task admission and cannot replace credentials during an active task", async () => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-05T00:00:00Z") });
+    const editing = Promise.withResolvers<void>();
+    const saved = Promise.withResolvers<void>();
+    const finished = Promise.withResolvers<void>();
+    let calls = 0;
+    const f = setup(
+      {
+        configureModel: async () => {
+          editing.resolve();
+          await saved.promise;
+        },
+      },
+      () => ({
+        catalog: async () => catalog,
+        login: async () => {},
+        stop: async () => {
+          finished.resolve();
+        },
+        dispose: async () => {
+          finished.resolve();
+        },
+        run: async (input) => {
+          calls++;
+          await finished.promise;
+          input.message("Done");
+          return [];
+        },
+      }),
+    );
+    stableTaskIdentity(f.context);
+    await f.service.handle("configure", configured);
+    const task = await f.service.handle("task.create", {
+      request_id: randomUUID(),
+      title: "Scheduled check",
+      prompt: "Check later",
+      scope: configured.allowed_workspaces,
+      schedule: { type: "interval", minutes: 60 },
+    });
+    await f.service.resume();
+    await f.service.handle("task.run_now", { task_id: task.tasks![0].id });
+    const connection = {
+      provider: "custom-endpoint",
+      model: "model",
+      base_url: "http://localhost:1234/v1",
+      api: "openai-completions",
+      api_key: "synthetic-key",
+      credential_source: "assistant",
+    };
+    const edit = f.service.handle("configure_model", connection);
+    await editing.promise;
+    jest.advanceTimersByTime(0);
+    for (let count = 0; count < 5; count++) await flushTasks();
+    expect(calls).toBe(0);
+    expect(f.service.peek().tasks![0].current_run?.status).toBe("queued");
+    saved.resolve();
+    await edit;
+    jest.advanceTimersByTime(5000);
+    for (let count = 0; count < 5; count++) await flushTasks();
+    expect(calls).toBe(1);
+    expect(f.service.peek().tasks![0].current_run?.status).toBe("running");
+    await expect(
+      f.service.handle("configure_model", connection),
+    ).rejects.toThrow("Stop the running Ranger task");
+    finished.resolve();
+    for (let count = 0; count < 5; count++) await flushTasks();
+  });
+
   test("confirmed monitoring tasks send custom notifications and retain context without routine poll alerts", async () => {
     jest.useFakeTimers({ now: Date.parse("2026-10-05T00:00:00Z") });
     const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
@@ -1961,6 +2438,212 @@ describe("bridge-global assistant", () => {
     expect(JSON.stringify(refreshed)).not.toContain("synthetic-access");
     expect(JSON.stringify(refreshed)).not.toContain("synthetic-refresh");
     await driver.dispose();
+  });
+
+  test("custom model connections validate input, preserve configuration, and use their saved endpoint and key", async () => {
+    const f = setup();
+    Object.assign(f.driver, createPiDriver(f.directory));
+    const requests: { path: string; key: string | null }[] = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        requests.push({
+          path: new URL(request.url).pathname,
+          key: request.headers.get("x-api-key"),
+        });
+        await request.json();
+        const events = [
+          {
+            type: "message_start",
+            message: {
+              id: "custom-answer",
+              type: "message",
+              role: "assistant",
+              model: "local-model",
+              content: [],
+              stop_reason: null,
+              stop_sequence: null,
+              usage: { input_tokens: 1, output_tokens: 0 },
+            },
+          },
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "text", text: "" },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "Custom model answer." },
+          },
+          { type: "content_block_stop", index: 0 },
+          {
+            type: "message_delta",
+            delta: { stop_reason: "end_turn", stop_sequence: null },
+            usage: { output_tokens: 4 },
+          },
+          { type: "message_stop" },
+        ];
+        return new Response(
+          events
+            .map(
+              (event) =>
+                `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+            )
+            .join(""),
+          { headers: { "Content-Type": "text/event-stream" } },
+        );
+      },
+    });
+    const input = {
+      provider: "Local.test",
+      model: "local-model",
+      base_url: server.url.href,
+      api: "anthropic-messages",
+      api_key: "synthetic-first-key",
+      credential_source: "assistant",
+    };
+    const path = join(f.directory, "models.json");
+    try {
+      await expect(
+        f.service.handle("configure_model", { ...input, api_key: undefined }),
+      ).rejects.toThrow("could not be saved");
+      const connected = await f.service.handle("configure_model", input);
+      expect(connected.config.provider).toBe("");
+      expect(
+        connected.providers.find((provider) => provider.id === input.provider),
+      ).toMatchObject({
+        configured: true,
+        credential_method: "api_key",
+        custom: { base_url: server.url.href, api: "anthropic-messages" },
+      });
+      const saved = JSON.parse(readFileSync(path, "utf8"));
+      expect(saved.providers[input.provider].models).toEqual([
+        { id: input.model },
+      ]);
+      expect(readFileSync(path, "utf8")).not.toContain(input.api_key);
+      saved.providers.other = {
+        baseUrl: "http://localhost:1234/v1",
+        api: "openai-completions",
+        apiKey: "synthetic-other-key",
+        models: [{ id: "other-model" }],
+      };
+      saved.providers[input.provider].apiKey = "synthetic-imported-key";
+      saved.providers[input.provider].models = [
+        {
+          id: input.model,
+          name: "Local model",
+          contextWindow: 8192,
+          baseUrl: "http://localhost:1",
+          api: "openai-completions",
+        },
+        { id: "second-model" },
+      ];
+      writeFileSync(path, JSON.stringify(saved));
+      expect(
+        (await f.service.snapshot()).models.find(
+          (model) => model.id === input.model,
+        )?.custom,
+      ).toEqual({ base_url: "http://localhost:1", api: "openai-completions" });
+      const key = "synthetic-replacement-key";
+      await f.service.handle("configure_model", { ...input, api_key: key });
+      const updated = JSON.parse(readFileSync(path, "utf8"));
+      expect(updated.providers.other).toEqual(saved.providers.other);
+      expect(updated.providers[input.provider].baseUrl).toBe(
+        saved.providers[input.provider].baseUrl,
+      );
+      expect(updated.providers[input.provider].api).toBe(
+        saved.providers[input.provider].api,
+      );
+      expect(updated.providers[input.provider].models).toEqual([
+        {
+          ...saved.providers[input.provider].models[0],
+          baseUrl: server.url.href,
+          api: input.api,
+        },
+        { id: "second-model" },
+      ]);
+      await f.service.handle("configure_model", {
+        ...input,
+        api_key: undefined,
+      });
+      expect(
+        JSON.parse(readFileSync(join(f.directory, "auth.json"), "utf8"))[
+          input.provider
+        ].key,
+      ).toBe(key);
+      const before = readFileSync(path, "utf8");
+      for (const invalid of [
+        { provider: "anthropic" },
+        { provider: "__proto__" },
+        { base_url: "javascript:secret-value" },
+        { base_url: "https://secret:password@example.com" },
+        { base_url: "https://example.com?api_key=secret-value" },
+        { api: "unsupported" },
+        { api_key: "!touch secret-value" },
+        { api_key: "$SECRET_VALUE" },
+        { credential_source: "pi" },
+      ]) {
+        await expect(
+          f.service.handle("configure_model", { ...input, ...invalid }),
+        ).rejects.toThrow("could not be saved");
+        expect(readFileSync(path, "utf8")).toBe(before);
+      }
+      await f.service.handle("configure", {
+        ...configured,
+        provider: input.provider,
+        model: input.model,
+      });
+      await f.service.handle("send", {
+        request_id: "custom-first",
+        text: "Say hello",
+      });
+      await until(() => !f.service.peek().running);
+      expect(f.service.peek().messages.at(-1)?.text).toBe(
+        "Custom model answer.",
+      );
+      updated.providers[input.provider].baseUrl = `${server.url.href}refreshed`;
+      updated.providers[input.provider].models.push({ id: "external-model" });
+      writeFileSync(path, JSON.stringify(updated));
+      expect(
+        (await f.service.snapshot()).models.some(
+          (model) => model.id === "external-model",
+        ),
+      ).toBe(true);
+      await f.service.handle("configure", {
+        ...configured,
+        provider: input.provider,
+        model: "external-model",
+      });
+      await f.service.handle("send", {
+        request_id: "custom-refreshed",
+        text: "Say hello again",
+      });
+      await until(() => !f.service.peek().running);
+      expect(requests).toEqual([
+        { path: "/v1/messages", key },
+        { path: "/refreshed/v1/messages", key },
+      ]);
+      expect(JSON.stringify(f.snapshots)).not.toContain(key);
+      expect(
+        readFileSync(join(f.directory, "state.json"), "utf8"),
+      ).not.toContain(key);
+      if (process.platform !== "win32") {
+        expect(statSync(path).mode & 0o777).toBe(0o600);
+        expect(statSync(join(f.directory, "auth.json")).mode & 0o777).toBe(
+          0o600,
+        );
+      }
+      writeFileSync(path, "private-malformed-model-configuration");
+      expect((await f.service.snapshot()).error).toBe(
+        "The provider catalog could not be loaded.",
+      );
+      expect(JSON.stringify(f.snapshots)).not.toContain("private-malformed");
+    } finally {
+      await f.service.dispose();
+      server.stop(true);
+    }
   });
 
   test("validates optional credential metadata while retaining old snapshot compatibility", async () => {

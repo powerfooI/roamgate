@@ -933,6 +933,10 @@ html:not([data-layout="mobile"])
   height: 100%;
 }
 
+.workspace-surfaces.has-assistant > .workspace-stage {
+  flex-basis: 0;
+}
+
 .workspace-surfaces.has-annotations > .annotation-panel,
 .workspace-surfaces.has-assistant > .assistant-panel {
   height: 100%;

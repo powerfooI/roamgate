@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -284,6 +285,59 @@ test("task tools use shared credentials with isolated durable storage and never 
         entry.model?.some((message) => message.role === "toolResult"),
       ),
     ).toBe(true);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("automatic model tools receive verified receipts and continue with the new pane", async () => {
+  const target = { connection_id: "local", workspace_id: "workspace" };
+  const receipt = JSON.stringify({
+    status: "succeeded",
+    detail: "Verified pane w1:p2",
+  });
+  const f = await durableFixture((index) =>
+    modelReply(
+      index,
+      index === 1
+        ? [
+            ...toolUse("propose_tab_create", "tab", target, 0),
+            ...finish("tool_use"),
+          ]
+        : index === 2
+          ? [
+              ...toolUse(
+                "propose_agent_start",
+                "agent",
+                { ...target, pane_id: "w1:p2", agent: "pi" },
+                0,
+              ),
+              ...finish("tool_use"),
+            ]
+          : [...text("Verified tab and agent created."), ...finish("end_turn")],
+    ),
+  );
+  const calls: string[] = [];
+  try {
+    await f.createDriver().run(
+      f.input({
+        config: { ...f.input().config, approval_mode: "auto" },
+        propose: async (kind, params) => {
+          calls.push(kind);
+          if (kind === "start_agent") expect(params.pane_id).toBe("w1:p2");
+          return { text: receipt };
+        },
+      }),
+    );
+    expect(calls).toEqual(["create_tab", "start_agent"]);
+    expect(f.requests).toHaveLength(3);
+    expect(JSON.stringify(f.requests[1]?.messages)).toContain(
+      "Verified pane w1:p2",
+    );
+    expect(JSON.stringify(f.requests[0])).toContain("High-permission mode");
+    expect(JSON.stringify(f.requests[0]?.tools)).not.toContain(
+      "does not create it",
+    );
   } finally {
     await f.cleanup();
   }
@@ -681,19 +735,19 @@ test("SQLite pauses a committed partial without aborting the durable submission 
   }
 }, 3000);
 
-test.each(["read", "proposal", "notification"] as const)(
+test.each(["read", "proposal", "automatic", "notification"] as const)(
   "interrupted %s tools follow their declared replay policy",
   async (kind) => {
     const name =
       kind === "read"
         ? "workspace_status"
-        : kind === "proposal"
+        : kind === "proposal" || kind === "automatic"
           ? "propose_agent_prompt"
           : "send_user_notification";
     const params =
       kind === "read"
         ? {}
-        : kind === "proposal"
+        : kind === "proposal" || kind === "automatic"
           ? {
               connection_id: "local",
               workspace_id: "workspace",
@@ -737,6 +791,11 @@ test.each(["read", "proposal", "notification"] as const)(
       const first = f.createDriver();
       const pending = first.run(
         f.input({
+          ...(kind === "automatic"
+            ? {
+                config: { ...f.input().config, approval_mode: "auto" as const },
+              }
+            : {}),
           checkpoint: (entries) => {
             pointer = entries;
           },
@@ -752,6 +811,11 @@ test.each(["read", "proposal", "notification"] as const)(
       const states: string[] = [];
       await second.run(
         f.input({
+          ...(kind === "automatic"
+            ? {
+                config: { ...f.input().config, approval_mode: "auto" as const },
+              }
+            : {}),
           entries: pointer,
           recover: true,
           read: callback,
@@ -889,6 +953,7 @@ test.each(["SDK loading", "runtime creation"])(
       }
       return {
         ...pi,
+        getAgentDir: () => directory,
         ModelRuntime: {
           create: async (
             options: import("@earendil-works/pi-coding-agent").CreateModelRuntimeOptions,
@@ -925,8 +990,8 @@ test.each(["SDK loading", "runtime creation"])(
       expect(recovered.providers.length).toBeGreaterThan(0);
       expect(await driver.catalog("assistant")).toEqual(recovered);
       expect(await driver.catalog("pi")).toEqual(otherSource);
-      expect(loads).toBe(3);
-      expect(creations).toBe(failure === "SDK loading" ? 2 : 3);
+      expect(loads).toBe(5);
+      expect(creations).toBe(failure === "SDK loading" ? 4 : 5);
     } finally {
       await driver.dispose();
       rmSync(directory, { recursive: true, force: true });
@@ -951,6 +1016,7 @@ test("Pi login saves to the selected credential store without changing other pro
     async () =>
       ({
         ...pi,
+        getAgentDir: () => directory,
         ModelRuntime: {
           create: async (
             options: import("@earendil-works/pi-coding-agent").CreateModelRuntimeOptions,
@@ -1005,11 +1071,92 @@ test("Pi login saves to the selected credential store without changing other pro
       ).rejects.toThrow();
       expect(readFileSync(path, "utf8")).toBe(before);
     }
-    expect(authPaths).toEqual([rangerAuth, undefined]);
+    expect(authPaths).toEqual([rangerAuth, rangerAuth, undefined, undefined]);
     expect(() => readFileSync(sentinel)).toThrow();
     expect(JSON.parse(readFileSync(rangerAuth, "utf8")).anthropic.key).toBe(
       "synthetic-assistant-key",
     );
+  } finally {
+    await driver.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("custom model catalogs isolate Ranger and Pi configuration while task runs share the Ranger connection", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "roamgate-custom-models-"));
+  const ranger = join(directory, "ranger");
+  const shared = join(directory, "pi");
+  mkdirSync(ranger);
+  mkdirSync(shared);
+  const sentinel = join(directory, "executed");
+  const configuration = (provider: string, key: string) => ({
+    providers: {
+      [provider]: {
+        baseUrl: "http://127.0.0.1:1234/v1",
+        api: "openai-completions",
+        apiKey: key,
+        models: [{ id: "local-model" }],
+      },
+    },
+  });
+  writeFileSync(
+    join(ranger, "models.json"),
+    JSON.stringify(configuration("private", `!touch '${sentinel}'`)),
+  );
+  writeFileSync(
+    join(shared, "models.json"),
+    JSON.stringify(configuration("shared", "synthetic-shared-key")),
+  );
+  const pi = await import("@earendil-works/pi-coding-agent");
+  const driver = createPiDriver(
+    join(directory, "task-run"),
+    async () =>
+      ({
+        ...pi,
+        getAgentDir: () => shared,
+        ModelRuntime: {
+          create: (
+            options: import("@earendil-works/pi-coding-agent").CreateModelRuntimeOptions,
+          ) =>
+            pi.ModelRuntime.create({
+              ...options,
+              authPath: options.authPath ?? join(shared, "auth.json"),
+            }),
+        },
+      }) as unknown as typeof pi,
+    ranger,
+  );
+  try {
+    expect((await driver.catalog("assistant")).models).toMatchObject([
+      { provider: "private", id: "local-model", label: "local-model" },
+    ]);
+    expect((await driver.catalog("pi")).models).toMatchObject([
+      { provider: "shared", id: "local-model", label: "local-model" },
+    ]);
+    expect(() => readFileSync(sentinel)).toThrow();
+    writeFileSync(
+      join(ranger, "models.json"),
+      '{ // Pi comments\n "providers": {"private": {"baseUrl":"http://localhost:4567/v1","api":"openai-responses","apiKey":"synthetic-private-key","models":[{"id":"changed"},],}},}',
+    );
+    const refreshed = await driver.catalog("assistant");
+    expect(refreshed.models).toMatchObject([
+      { provider: "private", id: "changed", label: "changed" },
+    ]);
+    expect(
+      refreshed.providers.find((provider) => provider.id === "private")?.custom,
+    ).toEqual({
+      base_url: "http://localhost:4567/v1",
+      api: "openai-responses",
+    });
+    expect(JSON.stringify(refreshed)).not.toContain("synthetic-private-key");
+    expect((await driver.catalog("pi")).models[0]?.id).toBe("local-model");
+    const before = readFileSync(join(ranger, "models.json"), "utf8");
+    writeFileSync(join(ranger, "models.json"), "invalid-secret-json");
+    await expect(driver.catalog("assistant")).rejects.toThrow();
+    expect(readFileSync(join(ranger, "models.json"), "utf8")).toBe(
+      "invalid-secret-json",
+    );
+    writeFileSync(join(ranger, "models.json"), before);
   } finally {
     await driver.dispose();
     rmSync(directory, { recursive: true, force: true });

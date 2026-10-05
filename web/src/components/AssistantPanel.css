@@ -1,5 +1,6 @@
 .assistant-panel {
-  flex: 0 0 clamp(300px, 30%, 380px);
+  position: relative;
+  flex: 0 0 min(var(--assistant-panel-width, 380px), 100%);
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -17,7 +18,28 @@
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(380px, 100%);
+  width: min(var(--assistant-panel-width, 380px), 100%);
+}
+
+.assistant-panel-resizer {
+  position: absolute;
+  z-index: 2;
+  inset: 0 auto 0 0;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.assistant-panel-resizer:hover,
+.assistant-panel-resizer:focus-visible {
+  outline: none;
+  background: var(--accent-hover);
+}
+
+@container workspace-surfaces (max-width: 900px) {
+  .assistant-panel-resizer {
+    display: none;
+  }
 }
 
 .workspace-surfaces > .assistant-panel.is-maximized:not(.is-mobile) {
@@ -219,6 +241,7 @@
 
 .assistant-panel-settings {
   display: grid;
+  grid-auto-rows: max-content;
   align-content: start;
   gap: 10px;
 }
@@ -422,16 +445,34 @@
   background: var(--accent-soft);
 }
 
-.assistant-other-providers > summary {
+.assistant-other-providers > summary,
+.assistant-custom-model > summary {
   color: var(--accent);
   font-size: 11px;
   cursor: pointer;
+}
+
+.assistant-custom-model > form {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .assistant-other-providers .assistant-provider-list {
   max-height: 240px;
   overflow-y: auto;
   margin-top: 7px;
+}
+
+.assistant-panel .assistant-workspaces {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr));
+  align-content: start;
+  gap: 6px 12px;
+  max-height: min(240px, 35dvh);
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .assistant-workspace-choice {
@@ -882,6 +923,7 @@
 .assistant-sources {
   display: grid;
   gap: 5px;
+  margin-top: 8px;
 }
 
 .assistant-sources button {
@@ -926,11 +968,10 @@
 
 .assistant-scope-picker[open] {
   display: grid;
-  max-height: 190px;
-  overflow: auto;
 }
 
 .assistant-scope-picker fieldset {
+  max-height: min(150px, 25dvh);
   padding-top: 8px;
 }
 
@@ -978,6 +1019,11 @@
 
 .assistant-panel.is-mobile .assistant-icon-button {
   min-width: 44px;
+}
+
+.assistant-panel.is-mobile .assistant-workspace-choice {
+  min-height: 44px;
+  align-items: center;
 }
 
 .assistant-panel.is-mobile .assistant-panel-footer {

@@ -307,6 +307,11 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
     try {
       await ui.render();
       await ui.click("New task");
+      expect(
+        ui.container.querySelector(
+          ".assistant-task-scope .assistant-workspaces",
+        ),
+      ).not.toBeNull();
       expect(document.activeElement?.getAttribute("aria-label")).toBe(
         "Task name",
       );
@@ -698,6 +703,12 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
       expect(ui.get).toHaveBeenLastCalledWith("b", "current");
       expect(ui.container.textContent).toContain("Waiting for approval");
       expect(ui.container.textContent).toContain("workspace_status");
+      const activity =
+        ui.container.querySelector<HTMLDetailsElement>(".assistant-tools")!;
+      expect(activity.open).toBe(false);
+      expect(activity.querySelector(".assistant-sources")).not.toBeNull();
+      await React.act(async () => activity.querySelector("summary")!.click());
+      expect(activity.open).toBe(true);
       expect(ui.button("Confirm action").disabled).toBe(false);
       await React.act(async () =>
         ui.container
