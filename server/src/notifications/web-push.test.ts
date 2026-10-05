@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import webpush from "web-push";
+import type { AssistantTaskNotification } from "../../../shared/assistant";
 import {
   createWebPushService,
   taskPushPayload,
@@ -42,6 +43,13 @@ const task: PushTask = {
   workspaceId: "w1",
   paneId: "p1",
   agent: "Example agent",
+};
+const rangerTask: AssistantTaskNotification = {
+  task_id: "e68b82c6-0d6b-4083-b6b3-c3a7de983f94",
+  run_id: "9023a84e-e705-4c34-bcce-77c951e2de56",
+  status: "succeeded",
+  title: "Ranger task completed",
+  body: "Check agent progress",
 };
 function request(
   method = "GET",
@@ -694,4 +702,48 @@ test("push payload uses Herdr text and tolerates pane-less alerts", () => {
     tag: JSON.stringify(["roamgate-task", "alpha", 3, "codex needs input"]),
     target: null,
   });
+});
+
+test("Ranger push preserves notification text and links to the durable task run", () => {
+  expect(taskPushPayload(rangerTask)).toEqual({
+    title: rangerTask.title,
+    body: rangerTask.body,
+    tag: JSON.stringify([
+      "roamgate-ranger-task",
+      rangerTask.task_id,
+      rangerTask.run_id,
+    ]),
+    target: {
+      type: "ranger_task",
+      taskId: rangerTask.task_id,
+      runId: rangerTask.run_id,
+    },
+  });
+});
+
+test("Ranger success uses completion preferences; failures and waiting use attention preferences", async () => {
+  const send = mock(async () => ({ statusCode: 201, body: "", headers: {} }));
+  const f = fixture(send);
+  try {
+    const completed = device("completed");
+    completed.preferences.blocked = false;
+    const blocked = device("blocked");
+    blocked.preferences.completed = false;
+    for (const item of [completed, blocked])
+      await f.service.handle(request("POST", item));
+    f.service.notify(rangerTask, () => false);
+    expect(send).not.toHaveBeenCalled();
+    for (const status of ["succeeded", "failed", "waiting"] as const) {
+      const notification = { ...rangerTask, status };
+      f.service.notify(notification, () => true);
+      expect(send).toHaveBeenLastCalledWith(
+        status === "succeeded" ? completed.subscription : blocked.subscription,
+        JSON.stringify(taskPushPayload(notification)),
+        expect.anything(),
+      );
+    }
+    expect(send).toHaveBeenCalledTimes(3);
+  } finally {
+    f.cleanup();
+  }
 });

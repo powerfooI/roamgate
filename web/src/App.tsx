@@ -1,5 +1,12 @@
 import { createPortal, flushSync } from "react-dom";
-import { listenForTaskNotificationActivation } from "./taskNotifications";
+import { bridge } from "./api";
+import {
+  listenForTaskNotificationActivation,
+  isNotificationTarget,
+  isRangerTaskNotificationTarget,
+  type NotificationTarget,
+  type RangerTaskNotificationTarget,
+} from "./taskNotifications";
 import { useReviewAnnotationDraft } from "./useReviewAnnotationDraft";
 import {
   annotationDraftStorageKey,
@@ -137,13 +144,11 @@ import {
   paneSearchEntries,
 } from "./paneJump";
 import {
-  isTaskNotificationTarget,
   type Notice,
   noticeAutoDismissDelay,
   shallowEqual,
   store,
   TASK_NOTIFICATION_ACTIVATE_EVENT,
-  type TaskNotificationTarget,
   taskNotificationTargetFromNotice,
   taskNotificationTargetIsCurrent,
   useStoreSelector,
@@ -1297,6 +1302,12 @@ export default function App() {
   const [mobileView, setMobileView] = useState<MobileView>("session");
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantMounted, setAssistantMounted] = useState(false);
+  const [assistantTaskTarget, setAssistantTaskTarget] =
+    useState<RangerTaskNotificationTarget | null>(null);
+  const consumeAssistantTaskTarget = useCallback(
+    () => setAssistantTaskTarget(null),
+    [],
+  );
   const [assistantFloating, setAssistantFloating] = useState(
     () => roamgateLocalStorage.getItem("assistantPanelMode") !== "fixed",
   );
@@ -2407,12 +2418,20 @@ export default function App() {
     [connectionClient, openFileExplorerFile],
   );
   const openNotificationTarget = useCallback(
-    (target: TaskNotificationTarget) => {
+    (target: NotificationTarget) => {
+      if (isRangerTaskNotificationTarget(target)) {
+        setAssistantTaskTarget({ ...target });
+        setAnnotationsOpen(false);
+        setAssistantOpen(true);
+        setAssistantMounted(true);
+        if (mobile) setMobileView("assistant");
+        return;
+      }
       if (!inspectorStateRef.current?.open) activateTerminalSurface();
       setSidebarHidden(false);
       void store.focusTaskNotificationTarget(target);
     },
-    [activateTerminalSurface],
+    [activateTerminalSurface, mobile],
   );
   const handleNoticeAction = useCallback(
     (notice: Notice) => {
@@ -2435,42 +2454,58 @@ export default function App() {
         );
         return;
       }
-      const target = taskNotificationTargetFromNotice(notice);
+      const rangerTarget = {
+        type: "ranger_task",
+        taskId: notice.actionRangerTaskId,
+        runId: notice.actionRangerRunId,
+      };
+      const target = isRangerTaskNotificationTarget(rangerTarget)
+        ? rangerTarget
+        : taskNotificationTargetFromNotice(notice);
       store.clearNotice();
       if (target) openNotificationTarget(target);
     },
     [openNotificationTarget],
   );
-  const pendingNotificationRef = useRef<TaskNotificationTarget | null>(null);
+  const pendingNotificationRef = useRef<NotificationTarget | null>(null);
   useEffect(() => {
     const activatePending = () => {
       const target = pendingNotificationRef.current;
       const snapshot = store.get();
       if (
         !target ||
-        snapshot.status !== "connected" ||
-        !snapshot.connections.length
+        (isRangerTaskNotificationTarget(target)
+          ? bridge.status !== "connected"
+          : snapshot.status !== "connected" || !snapshot.connections.length)
       )
         return;
       pendingNotificationRef.current = null;
-      if (!taskNotificationTargetIsCurrent(snapshot, target)) return;
+      if (
+        !isRangerTaskNotificationTarget(target) &&
+        !taskNotificationTargetIsCurrent(snapshot, target)
+      )
+        return;
       openNotificationTarget(target);
       const notice = store.get().notice;
       if (
-        notice?.actionConnectionId === target.connectionId &&
-        notice.actionRuntimeGeneration === target.runtimeGeneration &&
-        notice.actionPaneId === target.paneId
+        notice &&
+        (isRangerTaskNotificationTarget(target)
+          ? notice.actionRangerTaskId === target.taskId &&
+            notice.actionRangerRunId === target.runId
+          : notice.actionConnectionId === target.connectionId &&
+            notice.actionRuntimeGeneration === target.runtimeGeneration &&
+            notice.actionPaneId === target.paneId)
       ) {
         store.clearNotice();
       }
     };
-    const receive = (target: TaskNotificationTarget) => {
+    const receive = (target: NotificationTarget) => {
       pendingNotificationRef.current = target;
       activatePending();
     };
     const handleSystemNotification = (event: Event) => {
       const target = (event as CustomEvent<unknown>).detail;
-      if (isTaskNotificationTarget(target)) receive(target);
+      if (isNotificationTarget(target)) receive(target);
     };
     const unsubscribe = store.subscribe(activatePending);
     const stopWorkerNotifications =
@@ -4311,6 +4346,8 @@ export default function App() {
                   open={assistantVisible}
                   floating={assistantFloating && !mobile}
                   mobile={mobile}
+                  requestedTask={assistantTaskTarget}
+                  onRequestedTaskHandled={consumeAssistantTaskTarget}
                   onClose={closeAssistant}
                   onToggleFloating={toggleAssistantFloating}
                   onOpenSource={(source) => void openAssistantSource(source)}

@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   AssistantSnapshot,
+  AssistantTaskNotification,
   AssistantWorkspace,
 } from "../../../shared/assistant";
 import { isAssistantSnapshot } from "../../../shared/assistant";
@@ -57,6 +58,7 @@ function setup(
   const directory = mkdtempSync(join(tmpdir(), "roamgate-assistant-"));
   temporary.push(directory);
   const snapshots: AssistantSnapshot[] = [];
+  const notifications: AssistantTaskNotification[] = [];
   const reads: {
     scope: AssistantWorkspace[];
     params: Record<string, unknown>;
@@ -102,9 +104,18 @@ function setup(
     driver,
     createDriver: childDriver ? () => childDriver() : undefined,
     publish: (snapshot) => snapshots.push(snapshot),
+    notify: (notification) => notifications.push(notification),
   });
   services.push(service);
-  return { service, directory, snapshots, reads, context, driver };
+  return {
+    service,
+    directory,
+    snapshots,
+    notifications,
+    reads,
+    context,
+    driver,
+  };
 }
 async function until(check: () => boolean) {
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -140,6 +151,174 @@ async function flushTasks() {
 }
 
 describe("Ranger scheduled task service", () => {
+  test("confirmed monitoring tasks send custom notifications and retain context without routine poll alerts", async () => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-05T00:00:00Z") });
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const results: unknown[] = [];
+    const f = setup(
+      {
+        run: async (input) => {
+          expect(input.notify).toBeUndefined();
+          input.message("Monitoring schedule can be proposed in chat.");
+          return [];
+        },
+      },
+      () => ({
+        catalog: async () => catalog,
+        login: async () => {},
+        stop: async () => {},
+        dispose: async () => {},
+        run: async (input) => {
+          inputs.push(input);
+          await input.read("status", {});
+          const result = await input.notify!({
+            event_key:
+              inputs.length < 3
+                ? "pane-1:turn-7:completed"
+                : "pane-1:turn-8:blocked",
+            kind: inputs.length < 3 ? "completed" : "attention",
+            title:
+              inputs.length < 3
+                ? "Agent finished verification"
+                : "Agent needs your decision",
+            body:
+              inputs.length < 3
+                ? "The tests passed. Open the task to review the evidence."
+                : "The Agent needs input before continuing.",
+          });
+          results.push(JSON.parse(result.text));
+          input.message("Checked Agent state and notification outcome.");
+          return [];
+        },
+      }),
+    );
+    stableTaskIdentity(f.context);
+    await f.service.handle("configure", { config: configured });
+    await f.service.handle("send", {
+      text: "Monitor later",
+      request_id: "monitor-chat",
+    });
+    await flushTasks();
+    expect(f.notifications).toEqual([]);
+    const created = await f.service.handle("task.create", {
+      request_id: randomUUID(),
+      title: "Monitor Agent",
+      prompt:
+        "Notify only when the Agent finishes verification or needs input.",
+      scope: configured.allowed_workspaces,
+      schedule: { type: "interval", minutes: 60 },
+      notification_mode: "agent",
+    });
+    const taskId = created.tasks![0]!.id;
+    await f.service.resume();
+    for (let index = 0; index < 3; index++) {
+      await f.service.handle("task.run_now", { task_id: taskId });
+      jest.advanceTimersByTime(0);
+      for (let count = 0; count < 5; count++) await flushTasks();
+      expect(f.service.peek().tasks![0].last_run?.status).toBe("succeeded");
+    }
+    expect(results).toEqual([
+      { accepted: true, delivery: "best_effort" },
+      { accepted: false, reason: "already_notified" },
+      { accepted: true, delivery: "best_effort" },
+    ]);
+    expect(f.notifications).toHaveLength(2);
+    expect(f.notifications[0]).toMatchObject({
+      task_id: taskId,
+      run_id: inputs[0].requestId,
+      status: "succeeded",
+      title: "Agent finished verification",
+    });
+    expect(f.notifications[1]).toMatchObject({
+      task_id: taskId,
+      run_id: inputs[2].requestId,
+      status: "waiting",
+      title: "Agent needs your decision",
+    });
+    expect(inputs[1].text).toContain("pane-1:turn-7:completed");
+    expect(inputs[1].text).toContain("The tests passed.");
+    await expect(
+      inputs[2].notify!({
+        event_key: "too-late",
+        kind: "attention",
+        title: "Late notice",
+        body: "Must not send after completion.",
+      }),
+    ).rejects.toThrow("no longer active");
+    expect(f.notifications).toHaveLength(2);
+  });
+  test("notifications recheck workspace identity after awaiting the provider catalog", async () => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-05T00:00:00Z") });
+    const pendingCatalog = Promise.withResolvers<typeof catalog>();
+    const done = Promise.withResolvers<unknown[]>();
+    let delayCatalog = false;
+    let catalogEntered = false;
+    let input: Parameters<AssistantDriver["run"]>[0] | undefined;
+    const f = setup(
+      {
+        catalog: async () => {
+          if (!delayCatalog) return catalog;
+          catalogEntered = true;
+          return pendingCatalog.promise;
+        },
+      },
+      () => ({
+        catalog: async () => catalog,
+        login: async () => {},
+        stop: async () => {
+          done.resolve([]);
+        },
+        dispose: async () => {
+          done.resolve([]);
+        },
+        run: async (value) => {
+          input = value;
+          return done.promise;
+        },
+      }),
+    );
+    stableTaskIdentity(f.context);
+    await f.service.handle("configure", { config: configured });
+    const created = await f.service.handle("task.create", {
+      request_id: randomUUID(),
+      title: "Identity guard",
+      prompt: "Notify when the Agent finishes.",
+      scope: configured.allowed_workspaces,
+      schedule: { type: "interval", minutes: 60 },
+      notification_mode: "agent",
+    });
+    await f.service.resume();
+    await f.service.handle("task.run_now", { task_id: created.tasks![0]!.id });
+    jest.advanceTimersByTime(0);
+    await flushTasks();
+    expect(input).toBeDefined();
+    const notification = {
+      event_key: "agent-turn-1-completed",
+      kind: "completed" as const,
+      title: "Agent finished",
+      body: "Open Ranger to review the result.",
+    };
+    delayCatalog = true;
+    const attempt = input!.notify!(notification);
+    await flushTasks();
+    expect(catalogEntered).toBe(true);
+    const restore = f.context.restoreScope!;
+    f.context.restoreScope = async () => {
+      throw new Error("The original workspace identity changed");
+    };
+    pendingCatalog.resolve(catalog);
+    await expect(attempt).rejects.toThrow();
+    expect(f.notifications).toEqual([]);
+    f.context.restoreScope = restore;
+    delayCatalog = false;
+    expect(JSON.parse((await input!.notify!(notification)).text)).toEqual({
+      accepted: true,
+      delivery: "best_effort",
+    });
+    expect(f.notifications).toHaveLength(1);
+    done.resolve([]);
+    await flushTasks();
+  });
   test("task tools filter the current turn, freeze proposals and require explicit confirmation", async () => {
     let listed = "";
     const pointer = [{ type: "ranger-durable", id: randomUUID() }];
@@ -325,6 +504,15 @@ describe("Ranger scheduled task service", () => {
     expect(waiting.run?.messages.at(-1)?.text).toBe("Scheduled answer");
     expect(f.service.peek().messages.at(-1)?.text).toBe("Main chat answer");
     expect(writes).toBe(0);
+    expect(f.notifications).toEqual([
+      {
+        task_id: taskId,
+        run_id: childInputs[0]!.requestId!,
+        status: "waiting",
+        title: "Ranger task needs confirmation",
+        body: "Independent run: needs your confirmation. Open Ranger to review the pending action.",
+      },
+    ]);
     const action = waiting.run!.messages.at(-1)!.actions![0]!;
     await f.service.handle("task.action.confirm", {
       task_id: taskId,
@@ -338,6 +526,10 @@ describe("Ranger scheduled task service", () => {
     ).toBe("succeeded");
     mainDone.resolve([]);
     await flushTasks();
+    expect(f.notifications.map((notification) => notification.status)).toEqual([
+      "waiting",
+      "succeeded",
+    ]);
   });
 
   test("a model that completes during child admission still records its final receipt once", async () => {

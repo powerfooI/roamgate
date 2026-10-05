@@ -1,6 +1,9 @@
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import type { AssistantSource } from "../../../shared/assistant";
+import type {
+  AssistantNotificationInput,
+  AssistantSource,
+} from "../../../shared/assistant";
 
 export const ASSISTANT_DEFAULT_TERMINAL_LINES = 120;
 export const ASSISTANT_MAX_TERMINAL_LINES = 1000;
@@ -25,6 +28,10 @@ export type TaskToolKind = "list" | "create";
 export type TaskToolHandler = (
   kind: TaskToolKind,
   params: Record<string, unknown>,
+  signal?: AbortSignal,
+) => Promise<WorkspaceToolResult>;
+export type NotificationToolSender = (
+  input: AssistantNotificationInput,
   signal?: AbortSignal,
 ) => Promise<WorkspaceToolResult>;
 
@@ -97,11 +104,14 @@ export const taskTools = [
     kind: "create",
     label: "Propose a scheduled task",
     description:
-      "Propose a Ranger task with an exact prompt, authorized workspace scope and schedule. A once schedule uses a future UTC ISO 8601 timestamp ending in Z. A daily schedule uses HH:mm and an IANA timezone; skipped DST times do not run and repeated times run once. An interval starts the given number of minutes after confirmation. Returns a pending preview: the task is enabled only when the user clicks Confirm. Scheduled tasks may read and propose operations; they never automatically confirm management actions. Ask the user if their schedule or timezone is ambiguous.",
+      "Propose a Ranger task with an exact prompt, authorized workspace scope and schedule. A once schedule uses a future UTC ISO 8601 timestamp ending in Z. A daily schedule uses HH:mm and an IANA timezone; skipped DST times do not run and repeated times run once. An interval starts the given number of minutes after confirmation. Choose notification_mode agent for monitoring and follow-up requests: Ranger can notify only on meaningful requested outcomes or needed input, with its own title and body. The default status mode sends fixed run status notifications. Returns a pending preview: the task is enabled only when the user clicks Confirm. Scheduled tasks may read and propose operations; they never automatically confirm management actions. Ask the user if their schedule or timezone is ambiguous.",
     parameters: Type.Object(
       {
         title: Type.String({ minLength: 1, maxLength: 100 }),
         prompt: Type.String({ minLength: 1, maxLength: 32_000 }),
+        notification_mode: Type.Optional(
+          Type.Union([Type.Literal("status"), Type.Literal("agent")]),
+        ),
         scope: Type.Array(
           Type.Object(actionTarget, { additionalProperties: false }),
           { minItems: 1, maxItems: 64 },
@@ -127,6 +137,27 @@ export const taskTools = [
             { additionalProperties: false },
           ),
         ]),
+      },
+      { additionalProperties: false },
+    ),
+  },
+] as const;
+
+export const notificationTools = [
+  {
+    name: "send_user_notification",
+    label: "Notify the user",
+    description:
+      "Request a notification for a meaningful outcome or needed user input covered by this confirmed task. Use completed for verified success and attention for failure or required user input. event_key must identify the same Agent session and observed outcome across runs; reuse the exact key for an unchanged event and consult prior notification receipts. Use a concise title and body grounded in fresh workspace evidence, without credentials or authorization URLs. The server chooses the recipient and task link. A receipt records acceptance or deduplication, never proof of device delivery. Stay quiet while the monitored state is unchanged or non-actionable.",
+    parameters: Type.Object(
+      {
+        event_key: Type.String({ minLength: 1, maxLength: 200 }),
+        kind: Type.Union([
+          Type.Literal("completed"),
+          Type.Literal("attention"),
+        ]),
+        title: Type.String({ minLength: 1, maxLength: 200 }),
+        body: Type.String({ minLength: 1, maxLength: 400 }),
       },
       { additionalProperties: false },
     ),
@@ -289,5 +320,29 @@ export async function callTaskTool(
     throw new Error(
       "Task unavailable, invalid, or outside the authorized scope.",
     );
+  }
+}
+
+/** The sender is bound to the current confirmed scheduled task and its user. */
+export async function callNotificationTool(
+  name: string,
+  params: unknown,
+  send: NotificationToolSender,
+  signal?: AbortSignal,
+): Promise<WorkspaceToolResult> {
+  const tool = notificationTools.find((entry) => entry.name === name);
+  if (!tool) throw new Error("Unknown notification tool.");
+  if (!Value.Check(tool.parameters, params))
+    throw new Error("Invalid notification tool parameters.");
+  const input = params as AssistantNotificationInput;
+  if (!input.event_key.trim() || !input.title.trim() || !input.body.trim())
+    throw new Error("Invalid notification tool parameters.");
+  try {
+    signal?.throwIfAborted();
+    const result = await send(input, signal);
+    signal?.throwIfAborted();
+    return result;
+  } catch {
+    throw new Error("Notification unavailable or outside the authorized task.");
   }
 }

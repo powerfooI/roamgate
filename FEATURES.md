@@ -235,6 +235,24 @@ and tool activity for each run; reopening Tasks shows the current progress.
 Daily schedules skip nonexistent daylight-saving times and run only once at a
 repeated time. Missed occurrences are combined into one run after restart.
 
+Enable **Task notifications** to receive Ranger alerts. The task's
+**Notifications** setting defaults to **Notify when each run finishes**.
+Choose **Let Ranger decide** for monitoring: routine successful checks stay
+quiet, and Ranger can send a custom title and message when the condition in
+your task prompt warrants attention. Failed Ranger runs and pending action
+confirmations still use fixed alerts in either mode.
+
+For example, ask Ranger to check an Agent every minute and notify you only
+when its work finishes or fails, then confirm the proposed task. Ranger reads
+the authorized workspace context and reports the evidence it finds; an idle
+Agent alone does not establish success. Each run can issue one custom notice,
+and repeated events are deduplicated across checks and restarts.
+**Task completed** controls completion alerts; **Task needs attention** controls
+attention alerts. Click **Open Ranger task** or a system notification to view
+the associated run. Web Push delivers alerts with the page closed while the
+bridge is running. Stopped or cancelled runs and already recorded results stay
+silent.
+
 **Pause** prevents future runs without interrupting the current run.
 **Stop run** ends only the current run. **Cancel task** ends current work and
 future scheduling while preserving its history. **Run now** starts an extra run;

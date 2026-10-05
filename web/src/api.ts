@@ -4,7 +4,9 @@ import {
 } from "./sshProfileValidation";
 import {
   isAssistantSnapshot,
+  isAssistantTaskNotification,
   type AssistantSnapshot,
+  type AssistantTaskNotification,
 } from "../../shared/assistant";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
@@ -343,6 +345,7 @@ function isBridgeHello(value: unknown): value is BridgeHello {
     "terminal",
     "terminal_clipboard",
     "assistant",
+    "assistant_notification",
   ]) {
     if (Object.prototype.hasOwnProperty.call(message, field)) return false;
   }
@@ -374,6 +377,9 @@ export class Bridge {
   private pending = new Map<string, Pending>();
   private eventHandlers = new Set<(e: HerdrEventMsg) => void>();
   private assistantHandlers = new Set<(snapshot: AssistantSnapshot) => void>();
+  private assistantNotificationHandlers = new Set<
+    (notification: AssistantTaskNotification) => void
+  >();
   private terminalHandlers = new Set<(t: TerminalPush) => void>();
   private terminalClipboardHandlers = new Set<
     (clipboard: TerminalClipboardPush) => void
@@ -731,6 +737,7 @@ export class Bridge {
     const hasPopup = owns("popup");
     const hasControl = owns("control");
     const hasAssistant = owns("assistant");
+    const hasAssistantNotification = owns("assistant_notification");
     const kindCount = [
       hasHello,
       hasReply,
@@ -741,6 +748,7 @@ export class Bridge {
       hasPopup,
       hasControl,
       hasAssistant,
+      hasAssistantNotification,
     ].filter(Boolean).length;
     if (kindCount !== 1) return;
 
@@ -773,6 +781,20 @@ export class Bridge {
       )
         return;
       this.assistantHandlers.forEach((handler) => handler(msg.assistant));
+      return;
+    }
+
+    if (hasAssistantNotification) {
+      if (
+        this._hello?.capabilities.embedded_assistant !== true ||
+        owns("connection_id") ||
+        owns("connection_generation") ||
+        !isAssistantTaskNotification(msg.assistant_notification)
+      )
+        return;
+      this.assistantNotificationHandlers.forEach((handler) =>
+        handler(msg.assistant_notification),
+      );
       return;
     }
 
@@ -1107,6 +1129,13 @@ export class Bridge {
   onAssistant(cb: (snapshot: AssistantSnapshot) => void): () => void {
     this.assistantHandlers.add(cb);
     return () => this.assistantHandlers.delete(cb);
+  }
+
+  onAssistantNotification(
+    cb: (notification: AssistantTaskNotification) => void,
+  ): () => void {
+    this.assistantNotificationHandlers.add(cb);
+    return () => this.assistantNotificationHandlers.delete(cb);
   }
 
   onTerminal(cb: (terminal: TerminalPush) => void): () => void {

@@ -3,8 +3,10 @@ import {
   type ActionToolProposer,
   actionTools,
   callActionTool,
+  callNotificationTool,
   callTaskTool,
   callWorkspaceTool,
+  notificationTools,
   type WorkspaceToolReader,
   type WorkspaceToolResult,
   workspaceTools,
@@ -25,6 +27,14 @@ test("task tools validate the published schedule and reject effects outside the 
   expect(await callTaskTool("propose_ranger_task", proposal, handle)).toEqual({
     text: "Pending preview",
   });
+  for (const notification_mode of ["status", "agent"])
+    await expect(
+      callTaskTool(
+        "propose_ranger_task",
+        { ...proposal, notification_mode },
+        handle,
+      ),
+    ).resolves.toEqual({ text: "Pending preview" });
   for (const params of [
     { ...proposal, execute: true },
     { ...proposal, scope: [] },
@@ -33,6 +43,8 @@ test("task tools validate the published schedule and reject effects outside the 
       schedule: { type: "daily", time: "25:00", timezone: "UTC" },
     },
     { ...proposal, schedule: { type: "interval", minutes: 0 } },
+    { ...proposal, notification_mode: "always" },
+    { ...proposal, notification_mode: null },
   ])
     await expect(
       callTaskTool("propose_ranger_task", params, handle),
@@ -45,7 +57,126 @@ test("task tools validate the published schedule and reject effects outside the 
   await expect(
     callTaskTool("list_ranger_tasks", {}, handle, controller.signal),
   ).rejects.toThrow("Task unavailable");
-  expect(calls).toBe(1);
+  expect(calls).toBe(3);
+});
+
+test("notification tool accepts bounded custom content without model-controlled destinations", async () => {
+  const input = {
+    event_key: "agent-session-1:verified-success",
+    kind: "completed" as const,
+    title: "Agent completed the release check",
+    body: "The workspace history confirms the checks passed. Review the result.",
+  };
+  const signal = new AbortController().signal;
+  const receipt = {
+    text: '{"accepted":true,"event_key":"agent-session-1:verified-success"}',
+  };
+  let sends = 0;
+  expect(notificationTools).toHaveLength(1);
+  expect(
+    JSON.parse(JSON.stringify(notificationTools[0]?.parameters)),
+  ).toMatchObject({
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      event_key: { type: "string", minLength: 1, maxLength: 200 },
+      title: { type: "string", minLength: 1, maxLength: 200 },
+      body: { type: "string", minLength: 1, maxLength: 400 },
+    },
+    required: ["event_key", "kind", "title", "body"],
+  });
+  expect(
+    await callNotificationTool(
+      "send_user_notification",
+      input,
+      async (actualInput, actualSignal) => {
+        sends++;
+        expect(actualInput).toBe(input);
+        expect(actualSignal).toBe(signal);
+        return receipt;
+      },
+      signal,
+    ),
+  ).toBe(receipt);
+  const send = async () => {
+    sends++;
+    return receipt;
+  };
+  await expect(
+    callNotificationTool("notify_user", input, send),
+  ).rejects.toThrow("Unknown notification tool.");
+  for (const params of [
+    null,
+    [],
+    { ...input, event_key: "" },
+    { ...input, event_key: " " },
+    { ...input, event_key: "a".repeat(201) },
+    { ...input, kind: "failed" },
+    { ...input, title: "" },
+    { ...input, title: " " },
+    { ...input, title: "a".repeat(201) },
+    { ...input, body: "" },
+    { ...input, body: " " },
+    { ...input, body: "a".repeat(401) },
+    { ...input, url: "https://example.com" },
+    { ...input, destination: "other-user" },
+    { ...input, user_id: "other-user" },
+    { ...input, task_id: "other-task" },
+    { ...input, run_id: "other-run" },
+    { ...input, connection_id: "outside-scope" },
+    { ...input, workspace_id: "outside-scope" },
+  ])
+    await expect(
+      callNotificationTool("send_user_notification", params, send),
+    ).rejects.toThrow("Invalid notification tool parameters.");
+  expect(sends).toBe(1);
+});
+
+test("notification cancellation blocks sending and late results while errors stay private", async () => {
+  const input = {
+    event_key: "agent-session-1:needs-input",
+    kind: "attention" as const,
+    title: "Agent needs input",
+    body: "Choose the deployment target in the agent pane.",
+  };
+  const controller = new AbortController();
+  const message = "Notification unavailable or outside the authorized task.";
+  let sends = 0;
+  await expect(
+    callNotificationTool(
+      "send_user_notification",
+      input,
+      async (_input, signal) => {
+        sends++;
+        expect(signal).toBe(controller.signal);
+        controller.abort(new Error("synthetic-private-secret"));
+        return { text: "late receipt" };
+      },
+      controller.signal,
+    ),
+  ).rejects.toThrow(message);
+  await expect(
+    callNotificationTool(
+      "send_user_notification",
+      input,
+      async () => {
+        sends++;
+        return { text: "must not send" };
+      },
+      controller.signal,
+    ),
+  ).rejects.toThrow(message);
+  expect(sends).toBe(1);
+  try {
+    await callNotificationTool("send_user_notification", input, async () => {
+      throw new Error("synthetic-private-secret");
+    });
+    throw new Error("expected failure");
+  } catch (error) {
+    expect((error as Error).message).toBe(message);
+    expect((error as Error).cause).toBeUndefined();
+    expect(String(error)).not.toContain("synthetic-private-secret");
+  }
 });
 
 test("the tool directory is JSON Schema and named calls preserve structured results", async () => {

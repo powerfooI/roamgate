@@ -528,6 +528,39 @@ Cancelled tasks can be deleted. Up to 50 tasks and the latest 20 runs per task a
 retained. List snapshots contain task and run summaries; full run transcripts are
 fetched separately through `bridge.assistant.task.get`.
 
+After a task state change commits, transitions to `succeeded`, `failed`, or
+`waiting` emit a dedicated global `assistant_notification` push and Web Push
+with fixed text and the task/run UUIDs. Success uses the `completed` notification
+preference; failures and confirmation requests use `blocked`. Repeated states,
+initial history, Stop, and Cancel do not emit alerts. Delivery is best effort;
+notification failures do not change task results, and alerts are not replayed
+after downtime. Click targets open the specific Ranger run independently of the
+selected connection. Notification text includes the task title and fixed status
+guidance; prompts and provider errors stay in the run transcript.
+
+Confirmed scheduled runs also expose `send_user_notification`, with a bounded
+title, body, `completed`/`attention` kind and stable event key. Interactive chats
+propose a monitoring schedule; they do not expose the sending tool. The service
+binds delivery to its own current task/run UUIDs and revalidates the original
+workspace identities, current permissions and cancellation before accepting a
+notice. Models cannot choose recipients, URLs or another task's target.
+Notification kind describes the observed Agent outcome or need for attention,
+independently of whether the Ranger check itself succeeds.
+
+Task `notification_mode` defaults to `status`. In `agent` mode, routine
+successful checks are silent. A custom notice also replaces the fixed success
+alert for that run; fixed failures and confirmation requests remain available.
+Each task retains its latest 100 custom notification receipts. The original
+target identity hash scopes event-key deduplication and the history supplied to
+subsequent runs, so editing a task's scope cannot expose earlier workspace
+content to its new model scope. A run accepts at most one custom notice.
+Receipts commit before dispatch; repeated keys within the retained history do
+not dispatch again. Pi marks the tool sequential and unsafe to replay, so an
+interrupted delivery can be lost but is not automatically repeated. Tool results
+report acceptance with best-effort delivery, never confirmation that a device
+displayed the notice. Notification receipts remain after their run transcripts
+are pruned and are removed with the task.
+
 ## Task notifications
 
 With the default `herdr` source, each runtime keeps one passive endpoint shell

@@ -4,11 +4,14 @@ import {
   subscribeLocalStorage,
 } from "./browserStorage";
 import { syncTaskPush, type TaskNotificationPreferences } from "./taskPush";
+import { type AssistantTaskNotification } from "../../shared/assistant";
 import {
   isTaskNotificationTarget,
   prepareTaskNotifications,
   showTaskNotification,
   type TaskNotificationTarget,
+  type NotificationTarget,
+  type RangerTaskNotificationTarget,
 } from "./taskNotifications";
 export {
   bindTaskNotificationActivation,
@@ -142,6 +145,8 @@ export interface Notice {
   actionRuntimeGeneration?: number;
   actionWorkspaceId?: string;
   actionPaneId?: string;
+  actionRangerTaskId?: string;
+  actionRangerRunId?: string;
   actionClipboardText?: string;
   id?: number;
 }
@@ -876,8 +881,11 @@ function maybeShowBrowserTaskNotification(
   title: string,
   body: string,
   tag: string,
-  scope: Pick<TaskNotificationTarget, "connectionId" | "runtimeGeneration">,
-  target: TaskNotificationTarget | null,
+  scope: Pick<
+    TaskNotificationTarget,
+    "connectionId" | "runtimeGeneration"
+  > | null,
+  target: NotificationTarget | null,
 ) {
   if (
     !state.taskNotificationsEnabled ||
@@ -902,7 +910,7 @@ function maybeShowBrowserTaskNotification(
     () =>
       state.taskNotificationsEnabled &&
       version === taskNotificationPreferenceVersion &&
-      taskNotificationTargetIsCurrent(state, scope),
+      (scope === null || taskNotificationTargetIsCurrent(state, scope)),
   ).catch((error) => reportTaskNotificationFailure(error, version));
 }
 
@@ -1096,6 +1104,43 @@ function notifyHerdrTask(
           notification.title,
         ]),
     scope,
+    target,
+  );
+}
+
+function notifyRangerTask(notification: AssistantTaskNotification) {
+  const kind = notification.status === "succeeded" ? "completed" : "blocked";
+  if (
+    !state.taskNotificationsEnabled ||
+    !state.taskNotificationPreferences[kind]
+  )
+    return;
+  const target: RangerTaskNotificationTarget = {
+    type: "ranger_task",
+    taskId: notification.task_id,
+    runId: notification.run_id,
+  };
+  set({
+    notice: {
+      kind:
+        notification.status === "failed"
+          ? "error"
+          : notification.status === "succeeded"
+            ? "success"
+            : "info",
+      message: notification.title,
+      detail: notification.body,
+      actionLabel: "Open Ranger task",
+      actionRangerTaskId: target.taskId,
+      actionRangerRunId: target.runId,
+      autoDismissMs: TASK_COMPLETED_TOAST_DISMISS_MS,
+    },
+  });
+  maybeShowBrowserTaskNotification(
+    notification.title,
+    notification.body,
+    JSON.stringify(["roamgate-ranger-task", target.taskId, target.runId]),
+    null,
     target,
   );
 }
@@ -2403,6 +2448,7 @@ export const store = {
     });
     bridge.onStatus(handleBridgeStatus);
     bridge.onEvent(handleHerdrEvent);
+    bridge.onAssistantNotification(notifyRangerTask);
     bridge.onPopup(handlePopupPush);
     bridge.onControl((control) => {
       if (control.type === "pause_connection") {
@@ -3928,6 +3974,7 @@ export const store = {
 
 /** Test-only singleton seam for deterministic deferred production-store tests. */
 export const __storeTesting = {
+  notifyRangerTask,
   handleBridgeStatus,
   handleHerdrEvent,
   startUpdatePolling,

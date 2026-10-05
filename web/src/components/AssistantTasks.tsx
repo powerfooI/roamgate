@@ -14,6 +14,7 @@ import {
   isAssistantTaskInput,
 } from "../../../shared/assistant";
 import { callAssistant, getAssistantTask } from "../assistant";
+import type { RangerTaskNotificationTarget } from "../taskNotifications";
 import { formatUiDateTime } from "../uiLocale";
 import { ActionCard } from "./AssistantPanel";
 import { MarkdownPreview } from "./markdown";
@@ -77,6 +78,11 @@ export function TaskProposalCard({
         <summary>Task prompt</summary>
         <p>{proposal.prompt}</p>
       </details>
+      <span className="assistant-hint">
+        {proposal.notification_mode === "agent"
+          ? "Ranger decides when to notify"
+          : "Notify when each run finishes"}
+      </span>
       {proposal.status === "pending" ? (
         <>
           <p className="assistant-hint">
@@ -137,6 +143,9 @@ function TaskForm({
 }) {
   const [title, setTitle] = useState(task?.title ?? "");
   const [prompt, setPrompt] = useState(task?.prompt ?? "");
+  const [notificationMode, setNotificationMode] = useState<"status" | "agent">(
+    task?.notification_mode ?? "status",
+  );
   const [scope, setScope] = useState<AssistantWorkspaceRef[]>(
     task?.scope ?? [],
   );
@@ -196,6 +205,10 @@ function TaskForm({
           prompt: prompt.trim(),
           scope,
           schedule,
+          ...(notificationMode === "agent" ||
+          task?.notification_mode !== undefined
+            ? { notification_mode: notificationMode }
+            : {}),
         };
         if (!isAssistantTaskInput(input)) {
           setError(
@@ -255,6 +268,26 @@ function TaskForm({
             onChange={(event) => setPrompt(event.currentTarget.value)}
           />
         </label>
+        <div className="form-field">
+          <span>Notifications</span>
+          <ThemedSelect
+            aria-label="Task notifications"
+            value={notificationMode}
+            options={[
+              { value: "status", label: "Notify when each run finishes" },
+              { value: "agent", label: "Let Ranger decide" },
+            ]}
+            disabled={busy}
+            onChange={(value) =>
+              setNotificationMode(value as "status" | "agent")
+            }
+          />
+          <small className="assistant-hint">
+            Ranger can send a custom notice when needed. Let Ranger decide keeps
+            routine checks quiet; failed runs and action confirmations still
+            notify.
+          </small>
+        </div>
         <div className="form-field">
           <span>Schedule</span>
           <ThemedSelect
@@ -409,6 +442,8 @@ function TaskForm({
 
 export function AssistantTasks({
   active = true,
+  requestedTask,
+  onRequestedTaskHandled,
   snapshot,
   connected,
   workspaces,
@@ -416,6 +451,8 @@ export function AssistantTasks({
   onOpenSource,
 }: {
   active?: boolean;
+  requestedTask?: RangerTaskNotificationTarget | null;
+  onRequestedTaskHandled?: () => void;
   snapshot: AssistantSnapshot;
   connected: boolean;
   workspaces: AssistantWorkspace[];
@@ -443,6 +480,26 @@ export function AssistantTasks({
   );
   const summary = tasks.find((task) => task.id === selectedId);
   const selectedAvailable = !!summary;
+  const requestedTaskAvailable =
+    !!requestedTask && tasks.some((task) => task.id === requestedTask.taskId);
+  useEffect(() => {
+    if (!requestedTask) return;
+    cancelDetailRequest.current?.();
+    setSelectedId(null);
+    setRunId(undefined);
+    setDetail(null);
+    setEditor(null);
+    setConfirmation(null);
+    onRequestedTaskHandled?.();
+    if (!requestedTaskAvailable) {
+      setError("This Ranger task is no longer available.");
+      return;
+    }
+    setSelectedId(requestedTask.taskId);
+    setRunId(requestedTask.runId);
+    setError(null);
+    setRefresh((value) => value + 1);
+  }, [requestedTask, requestedTaskAvailable, onRequestedTaskHandled]);
   const signature = summary
     ? JSON.stringify([
         summary.updated_at,
@@ -739,6 +796,11 @@ export function AssistantTasks({
                 <summary>Task prompt</summary>
                 <p>{task.prompt}</p>
               </details>
+              <span className="assistant-hint">
+                {task.notification_mode === "agent"
+                  ? "Ranger decides when to notify"
+                  : "Notify when each run finishes"}
+              </span>
               <div className="assistant-task-buttons">
                 <button
                   type="button"

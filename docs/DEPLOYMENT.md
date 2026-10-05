@@ -412,6 +412,10 @@ timezone; daylight-saving gaps are skipped and overlaps fire only once.
 Plans, proposals, deduplication records and run receipts live in `tasks.sqlite`,
 with private per-run state under `tasks/<task UUID>/runs/<run UUID>/`. The task
 database and Pi Durable databases use WAL mode with `synchronous = FULL`.
+The task database upgrades schema 1 to schema 2 automatically and transactionally
+to store notification modes and custom-notification receipts. Older builds
+cannot open the upgraded task database. If you need rollback, back up the Ranger
+data directory while the bridge is stopped before upgrading.
 An invalid database disables task scheduling instead of discarding saved plans.
 Task runs share the selected bridge credential store; credentials are not copied
 into run directories. Include
@@ -438,7 +442,7 @@ does not disconnect the bridge or its Herdr profiles. See
 ## Web Push notifications
 
 1. Use trusted HTTPS; on iOS/iPadOS 16.4+, open the installed Home Screen app.
-2. Enable **Task notifications**, grant permission, and choose **Agent needs input**
+2. Enable **Task notifications**, grant permission, and choose **Task needs attention**
    and/or **Task completed**. **Background push** confirms enrollment; existing
    local-only users should toggle off/on once.
 
@@ -478,8 +482,40 @@ already-accepted messages may arrive. Server-wide disable retains the registry
 for reuse when re-enabled. Password changes do not revoke device subscriptions.
 
 **Active page only** is the fallback when push is unavailable; do not rely on it
-while suspended/closed. Encrypted payloads contain agent names/routing IDs, not
-terminal output, and may appear on lock screens.
+while suspended/closed. Encrypted payloads contain notification text and routing
+IDs, including Ranger's custom titles and messages, and may appear on lock
+screens.
+
+### Local notification testing
+
+HTTP loopback origins such as `http://localhost` and `http://127.0.0.1` are
+[secure contexts](https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Secure_Contexts)
+and can test browser notifications and Web Push without local TLS. With
+`bun run dev:web`, the Vite origin on port 5173 proxies the bridge on port 8788.
+For a bridge on another port, run `bun run build:web` and open that bridge's URL
+directly. Use an isolated data directory and browser origin for test permissions,
+subscriptions and Ranger tasks.
+
+Enable **Task notifications** in the test browser, then ask Ranger to propose
+a monitoring task using **Let Ranger decide** and confirm it. **Run now** exercises
+the task and its notification; click the alert to verify the exact run opens.
+Repeat the same observed event to check deduplication. To isolate active-page
+system delivery, first turn notifications off to revoke an existing subscription,
+set `ROAMGATE_WEB_PUSH_SUBJECT=''`, restart the bridge and enable notifications.
+To test closed-page delivery, restore the default subject,
+restart and re-enroll until **Background push** appears, then close the test
+origin's pages while leaving the bridge and Herdr running. Browser and OS
+notification permissions and outbound access to the push provider still apply.
+
+The reproducible local-model integration test covers proposal, confirmation,
+scheduled execution, custom text and deduplication across a bridge restart:
+
+```sh
+bun test server/src/assistant-recovery.integration.test.ts --test-name-pattern 'confirmed Ranger proposals schedule custom notifications'
+```
+
+It uses the real Pi driver and bridge with a scripted model transport and fixture
+Herdr sockets. It does not establish browser or system notification delivery.
 
 ## Logging
 

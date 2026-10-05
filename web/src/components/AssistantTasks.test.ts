@@ -9,6 +9,7 @@ import type {
   AssistantTaskProposal,
 } from "../../../shared/assistant";
 import * as assistant from "../assistant";
+import type { RangerTaskNotificationTarget } from "../taskNotifications";
 import { AssistantTasks, TaskProposalCard } from "./AssistantTasks";
 import * as select from "./ThemedSelect";
 
@@ -99,7 +100,7 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
     expect(code).toBe(0);
   }, 15_000);
 } else {
-  async function install() {
+  async function install(consumeRequests = false) {
     const { Window } = await import("happy-dom");
     const browser = new Window({ url: "http://localhost" });
     const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -129,6 +130,7 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
     const root = createRoot(container);
     let current = snapshot();
     let active = true;
+    let currentRequested: RangerTaskNotificationTarget | null = null;
     const details = new Map<string, AssistantTaskDetail>();
     const get = spyOn(assistant, "getAssistantTask").mockImplementation(
       async (id) => {
@@ -192,10 +194,18 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
     );
     const source = mock(() => {});
     const settings = mock(() => {});
+    const requestedHandled = mock(() => {
+      currentRequested = null;
+      renderCurrent();
+    });
     const renderCurrent = () =>
       root.render(
         React.createElement(AssistantTasks, {
           active,
+          requestedTask: currentRequested,
+          onRequestedTaskHandled: consumeRequests
+            ? requestedHandled
+            : undefined,
           snapshot: current,
           connected: true,
           workspaces: [workspace],
@@ -203,9 +213,14 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
           onOpenSource: source,
         }),
       );
-    const render = async (value = current, visible = active) => {
+    const render = async (
+      value = current,
+      visible = active,
+      requestedTask = currentRequested,
+    ) => {
       current = value;
       active = visible;
+      currentRequested = requestedTask;
       await React.act(async () => renderCurrent());
     };
     const button = (name: string, parent: ParentNode = container) => {
@@ -262,6 +277,7 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
       call,
       source,
       settings,
+      requestedHandled,
       render,
       button,
       click,
@@ -269,6 +285,9 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
       submit,
       get current() {
         return current;
+      },
+      get requestedTask() {
+        return currentRequested;
       },
       async close() {
         jest.useRealTimers();
@@ -333,12 +352,14 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
       ).toContain("valid schedule");
       expect(ui.call).toHaveBeenCalledTimes(2);
       await ui.input("Task timezone", "Europe/Paris");
+      await ui.input("Task notifications", "agent");
       await ui.submit();
       expect(ui.call).toHaveBeenLastCalledWith(
         "task.update",
         expect.objectContaining({
           task_id: "new",
           schedule: { type: "daily", time: "03:40", timezone: "Europe/Paris" },
+          notification_mode: "agent",
         }),
       );
       await ui.render();
@@ -346,6 +367,12 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
       await ui.render();
       await ui.click("Edit");
       expect(ui.container.textContent).toContain("stay paused after saving");
+      expect(
+        ui.container.querySelector<HTMLSelectElement>(
+          '[aria-label="Task notifications"]',
+        )?.value,
+      ).toBe("agent");
+      await ui.input("Task notifications", "status");
       await ui.input("Task schedule", "interval");
       await ui.input("Interval minutes", "1.5");
       await ui.submit();
@@ -357,6 +384,7 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
         expect.objectContaining({
           task_id: "new",
           schedule: { type: "interval", minutes: 15 },
+          notification_mode: "status",
         }),
       );
       expect(ui.current.tasks?.[0].status).toBe("paused");
@@ -401,6 +429,174 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
         task_id: "new",
       });
       expect(ui.current.tasks).toEqual([]);
+    } finally {
+      await ui.close();
+    }
+  });
+
+  test("notification requests open their historical run and refresh repeated or different targets", async () => {
+    const ui = await install();
+    try {
+      const running = run("a", "current", "running");
+      const older = run("a", "older");
+      const other = run("b", "other", "failed");
+      const a = task("a", { current_run: running });
+      const b = task("b", { last_run: other });
+      const target: RangerTaskNotificationTarget = {
+        type: "ranger_task",
+        taskId: "a",
+        runId: "older",
+      };
+      ui.get.mockImplementation(async (id, runId) => {
+        const selected = id === "a" ? older : other;
+        expect(runId).toBe(selected.id);
+        return {
+          task: id === "a" ? a : b,
+          runs: id === "a" ? [running, older] : [other],
+          run: {
+            ...selected,
+            messages: [
+              {
+                id: "output",
+                role: "assistant",
+                text: `${selected.id} notification result`,
+                sent_at: now,
+                tools: [],
+                sources: [],
+              },
+            ],
+          },
+        };
+      });
+      await ui.render(snapshot([a, b]), true, target);
+      expect(ui.get).toHaveBeenLastCalledWith("a", "older");
+      expect(ui.container.textContent).toContain("older notification result");
+      expect(
+        ui.container.querySelector<HTMLSelectElement>('[aria-label="Task run"]')
+          ?.value,
+      ).toBe("older");
+      await ui.click("All tasks");
+      await ui.click("New task");
+      expect(ui.container.querySelector("form")).not.toBeNull();
+      const reads = ui.get.mock.calls.length;
+      await ui.render(ui.current, true, { ...target });
+      expect(ui.get).toHaveBeenCalledTimes(reads + 1);
+      expect(ui.container.querySelector("form")).toBeNull();
+      expect(ui.container.textContent).toContain("older notification result");
+      await ui.render(ui.current, true, {
+        type: "ranger_task",
+        taskId: "b",
+        runId: "other",
+      });
+      expect(ui.get).toHaveBeenLastCalledWith("b", "other");
+      expect(ui.container.textContent).toContain("other notification result");
+      expect(ui.container.textContent).not.toContain(
+        "older notification result",
+      );
+      await ui.render(ui.current, false);
+      await ui.render(ui.current, true);
+      expect(ui.get).toHaveBeenLastCalledWith("b", "other");
+      expect(ui.container.textContent).toContain("other notification result");
+    } finally {
+      await ui.close();
+    }
+  });
+
+  test("handled notifications do not interrupt later task navigation when their task disappears", async () => {
+    const ui = await install(true);
+    try {
+      const a = task("a");
+      const b = task("b");
+      const old = run("b", "old");
+      ui.details.set("b", {
+        task: b,
+        runs: [old],
+        run: { ...old, messages: [] },
+      });
+      await ui.render(snapshot([a, b]), true, {
+        type: "ranger_task",
+        taskId: "b",
+        runId: "old",
+      });
+      expect(ui.get).toHaveBeenLastCalledWith("b", "old");
+      expect(ui.requestedHandled).toHaveBeenCalledTimes(1);
+      expect(ui.requestedTask).toBeNull();
+      await ui.click("All tasks");
+      await React.act(async () =>
+        ui.container
+          .querySelector<HTMLButtonElement>(".assistant-task-row")!
+          .click(),
+      );
+      expect(ui.get).toHaveBeenLastCalledWith("a", undefined);
+      expect(
+        ui.container.querySelector(".assistant-task-heading h3")?.textContent,
+      ).toBe("Task a");
+      await ui.render(snapshot([a]));
+      expect(
+        ui.container.querySelector(".assistant-task-heading h3")?.textContent,
+      ).toBe("Task a");
+      expect(ui.container.querySelector('[role="alert"]')).toBeNull();
+      expect(ui.requestedHandled).toHaveBeenCalledTimes(1);
+      expect(ui.get).toHaveBeenLastCalledWith("a", undefined);
+    } finally {
+      await ui.close();
+    }
+  });
+
+  test("missing tasks and expired runs report notification errors without stale output", async () => {
+    const ui = await install();
+    try {
+      const a = task("a");
+      const request = (
+        taskId: string,
+        runId: string,
+      ): RangerTaskNotificationTarget => ({
+        type: "ranger_task",
+        taskId,
+        runId,
+      });
+      await ui.render(snapshot([a]), true, request("missing", "old"));
+      expect(ui.get).not.toHaveBeenCalled();
+      expect(
+        ui.container.querySelector('[role="alert"]')?.textContent,
+      ).toContain("no longer available");
+      ui.get.mockRejectedValueOnce(new Error("Task run not found"));
+      await ui.render(ui.current, true, request("a", "expired"));
+      expect(ui.get).toHaveBeenLastCalledWith("a", "expired");
+      expect(
+        ui.container.querySelector('[role="alert"]')?.textContent,
+      ).toContain("Task run not found");
+      expect(ui.container.querySelector(".assistant-task-run")).toBeNull();
+
+      const pending = Promise.withResolvers<AssistantTaskDetail>();
+      ui.get.mockImplementationOnce(() => pending.promise);
+      await ui.render(ui.current, true, request("a", "pending"));
+      await ui.render(ui.current, true, request("missing", "old"));
+      await React.act(async () =>
+        pending.resolve({
+          task: a,
+          runs: [run("a", "pending")],
+          run: {
+            ...run("a", "pending"),
+            messages: [
+              {
+                id: "stale",
+                role: "assistant",
+                text: "Stale notification output",
+                sent_at: now,
+                tools: [],
+                sources: [],
+              },
+            ],
+          },
+        }),
+      );
+      expect(
+        ui.container.querySelector('[role="alert"]')?.textContent,
+      ).toContain("no longer available");
+      expect(ui.container.textContent).not.toContain(
+        "Stale notification output",
+      );
     } finally {
       await ui.close();
     }

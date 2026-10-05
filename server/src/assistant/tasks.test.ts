@@ -10,7 +10,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AssistantSnapshot } from "../../../shared/assistant";
+import type {
+  AssistantNotificationInput,
+  AssistantNotificationReceipt,
+  AssistantSnapshot,
+  AssistantTaskNotification,
+} from "../../../shared/assistant";
 import { AssistantRecoveryNotReadyError } from "./context";
 import { openTaskStorage } from "./task-storage";
 import {
@@ -33,6 +38,443 @@ afterEach(async () => {
 async function flush() {
   for (let index = 0; index < 30; index++) await Promise.resolve();
 }
+
+const customNotification = (
+  event_key = "agent-work-1:completed",
+): AssistantNotificationInput => ({
+  event_key,
+  kind: "completed",
+  title: "Agent finished the requested work",
+  body: "The tests passed. Open Ranger to review the evidence.",
+});
+
+async function startRun(f: ReturnType<typeof fixture>, taskId: string) {
+  await f.manager.control("run_now", taskId);
+  jest.advanceTimersByTime(0);
+  await flush();
+  return f.runs.at(-1)!;
+}
+
+test("custom task notifications persist before dispatch, deduplicate across runs and restart, and cap each run", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  let acceptedReceipt: AssistantNotificationReceipt[] = [];
+  const f = fixture(undefined, undefined, () => {
+    const storage = openTaskStorage(f.directory, validateSavedTasks);
+    try {
+      acceptedReceipt = storage.load().tasks[0]!.notifications ?? [];
+    } finally {
+      storage.close();
+    }
+  });
+  const task = await f.manager.create(prepared(), randomUUID());
+  await f.manager.resume();
+  const first = await startRun(f, task.id);
+  const accepted = await f.manager.notifyRun(
+    task.id,
+    first.run.id,
+    customNotification(),
+  );
+  expect(JSON.parse(accepted.text)).toEqual({
+    accepted: true,
+    delivery: "best_effort",
+  });
+  expect(acceptedReceipt).toEqual([
+    {
+      ...customNotification(),
+      scope_key: expect.stringMatching(/^[a-f0-9]{64}$/),
+      run_id: first.run.id,
+      created_at: expect.any(String),
+    },
+  ]);
+  expect(Number.isFinite(Date.parse(acceptedReceipt[0]!.created_at))).toBe(
+    true,
+  );
+  expect(f.notifications).toEqual([
+    {
+      task_id: task.id,
+      run_id: first.run.id,
+      status: "succeeded",
+      title: customNotification().title,
+      body: customNotification().body,
+    },
+  ]);
+  expect(
+    JSON.parse(
+      (await f.manager.notifyRun(task.id, first.run.id, customNotification()))
+        .text,
+    ),
+  ).toEqual({ accepted: false, reason: "already_notified" });
+  expect(
+    JSON.parse(
+      (
+        await f.manager.notifyRun(
+          task.id,
+          first.run.id,
+          customNotification("another-event"),
+        )
+      ).text,
+    ),
+  ).toEqual({ accepted: false, reason: "run_limit" });
+  first.complete();
+  expect(f.notifications).toHaveLength(1);
+  await f.manager.dispose();
+
+  const restored = fixture(f.directory);
+  await restored.manager.resume();
+  const second = await startRun(restored, task.id);
+  expect(
+    JSON.parse(
+      (
+        await restored.manager.notifyRun(
+          task.id,
+          second.run.id,
+          customNotification(),
+        )
+      ).text,
+    ),
+  ).toEqual({ accepted: false, reason: "already_notified" });
+  const attention = {
+    ...customNotification("agent-work-2:attention"),
+    kind: "attention" as const,
+  };
+  expect(
+    JSON.parse(
+      (await restored.manager.notifyRun(task.id, second.run.id, attention))
+        .text,
+    ),
+  ).toEqual({ accepted: true, delivery: "best_effort" });
+  expect(restored.notifications).toEqual([
+    {
+      task_id: task.id,
+      run_id: second.run.id,
+      status: "waiting",
+      title: attention.title,
+      body: attention.body,
+    },
+  ]);
+  const history = restored.manager.notificationHistory(task.id);
+  expect(history).toHaveLength(2);
+  history[0]!.event_key = "modified";
+  expect(restored.manager.notificationHistory(task.id)[0]!.event_key).toBe(
+    customNotification().event_key,
+  );
+});
+
+test("agent notification mode keeps successful polls quiet and retains failure and confirmation alerts", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const input = prepared();
+  input.input.notification_mode = "agent";
+  const task = await f.manager.create(input, randomUUID());
+  await f.manager.resume();
+  const first = await startRun(f, task.id);
+  input.input.notification_mode = "status";
+  await f.manager.update(task.id, input);
+  first.complete();
+  expect(f.notifications).toEqual([]);
+  const second = await startRun(f, task.id);
+  second.complete();
+  expect(f.notifications.map((notification) => notification.status)).toEqual([
+    "succeeded",
+  ]);
+  input.input.notification_mode = "agent";
+  await f.manager.update(task.id, input);
+  const failed = await startRun(f, task.id);
+  failed.complete(false, "Model unavailable");
+  const waiting = await startRun(f, task.id);
+  waiting.complete(true);
+  expect(f.notifications.map((notification) => notification.status)).toEqual([
+    "succeeded",
+    "failed",
+    "waiting",
+  ]);
+});
+
+test("scope changes isolate notification history and event deduplication while a running task keeps its original scope", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const task = await f.manager.create(prepared(), randomUUID());
+  await f.manager.resume();
+  const first = await startRun(f, task.id);
+  await f.manager.notifyRun(task.id, first.run.id, customNotification());
+  const replacement = prepared();
+  for (const refs of [
+    replacement.input.scope,
+    replacement.config.allowed_workspaces,
+    replacement.workspaces,
+    replacement.targets,
+  ])
+    refs[0]!.workspace_id = "other-workspace";
+  replacement.targets[0]!.workspace_identity = "c".repeat(64);
+  await f.manager.update(task.id, replacement);
+  expect(f.manager.notificationHistory(task.id)).toEqual([]);
+  expect(f.manager.notificationHistory(task.id, first.run.id)).toHaveLength(1);
+  first.complete();
+  const second = await startRun(f, task.id);
+  const result = await f.manager.notifyRun(
+    task.id,
+    second.run.id,
+    customNotification(),
+  );
+  expect(JSON.parse(result.text).accepted).toBe(true);
+  expect(f.manager.notificationHistory(task.id, second.run.id)).toEqual(
+    f.manager.notificationHistory(task.id),
+  );
+  expect(f.manager.notificationHistory(task.id)[0]!.run_id).toBe(second.run.id);
+  expect(f.notifications).toHaveLength(2);
+  await f.manager.dispose();
+  const restored = fixture(f.directory);
+  expect(restored.manager.notificationHistory(task.id)).toHaveLength(1);
+});
+
+test("notification history retains the latest 100 events independently of pruned runs", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const task = await f.manager.create(prepared(), randomUUID());
+  await f.manager.resume();
+  for (let index = 0; index < 101; index++) {
+    const run = await startRun(f, task.id);
+    await f.manager.notifyRun(
+      task.id,
+      run.run.id,
+      customNotification(`work-${index}`),
+    );
+    run.complete();
+    await flush();
+  }
+  expect(f.manager.detail(task.id).runs).toHaveLength(20);
+  const history = f.manager.notificationHistory(task.id);
+  expect(history).toHaveLength(100);
+  expect(history[0]!.event_key).toBe("work-1");
+  expect(history.at(-1)!.event_key).toBe("work-100");
+  await f.manager.dispose();
+  expect(fixture(f.directory).manager.notificationHistory(task.id)).toEqual(
+    history,
+  );
+});
+
+test("custom notification save failures do not emit and delivery failures keep a non-replayable receipt", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture(undefined, undefined, () => {
+    throw new Error("Delivery failed");
+  });
+  const task = await f.manager.create(prepared(), randomUUID());
+  await f.manager.resume();
+  const run = await startRun(f, task.id);
+  f.fail(true);
+  await expect(
+    f.manager.notifyRun(task.id, run.run.id, customNotification()),
+  ).rejects.toThrow("could not be saved");
+  expect(f.notifications).toEqual([]);
+  expect(f.manager.notificationHistory(task.id)).toEqual([]);
+  f.fail(false);
+  const result = await f.manager.notifyRun(
+    task.id,
+    run.run.id,
+    customNotification(),
+  );
+  expect(JSON.parse(result.text)).toEqual({
+    accepted: true,
+    delivery: "best_effort",
+  });
+  expect(f.notifications).toHaveLength(1);
+  expect(f.manager.notificationHistory(task.id)).toHaveLength(1);
+  expect(
+    JSON.parse(
+      (await f.manager.notifyRun(task.id, run.run.id, customNotification()))
+        .text,
+    ),
+  ).toEqual({ accepted: false, reason: "already_notified" });
+});
+
+test.each(["stop", "cancel", "revoke", "complete", "abort"] as const)(
+  "%s during a notification permission check cannot emit an alert",
+  async (operation) => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    let block = false;
+    let revoked = false;
+    const began = Promise.withResolvers<void>();
+    const checked = Promise.withResolvers<void>();
+    const f = fixture(undefined, async () => {
+      if (!block) return;
+      began.resolve();
+      await checked.promise;
+      if (revoked) throw new Error("Permission revoked");
+    });
+    const task = await f.manager.create(prepared(), randomUUID());
+    await f.manager.resume();
+    const run = await startRun(f, task.id);
+    block = true;
+    const abort = new AbortController();
+    const sending = f.manager
+      .notifyRun(task.id, run.run.id, customNotification(), abort.signal)
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await began.promise;
+    if (operation === "stop" || operation === "cancel")
+      await f.manager.control(operation, task.id);
+    else if (operation === "complete") run.complete();
+    else if (operation === "abort") abort.abort();
+    else revoked = true;
+    checked.resolve();
+    expect(await sending).toBeInstanceOf(Error);
+    expect(f.manager.notificationHistory(task.id)).toEqual([]);
+    expect(
+      f.notifications.filter(
+        (notification) => notification.title === customNotification().title,
+      ),
+    ).toEqual([]);
+  },
+);
+
+test("task inputs and saved notification history reject invalid modes and receipts", () => {
+  const input = prepared().input;
+  expect(validateTaskInput(input)).toEqual(input);
+  expect(
+    validateTaskInput({ ...input, notification_mode: "agent" })
+      .notification_mode,
+  ).toBe("agent");
+  expect(() =>
+    validateTaskInput({ ...input, notification_mode: "quiet" }),
+  ).toThrow("Invalid task input");
+  const now = "2026-10-04T00:00:00.000Z";
+  const notification = {
+    ...customNotification(),
+    scope_key: "a".repeat(64),
+    run_id: randomUUID(),
+    created_at: now,
+  };
+  const saved = {
+    tasks: [
+      {
+        ...prepared(),
+        task: {
+          id: randomUUID(),
+          status: "active" as const,
+          created_at: now,
+          updated_at: now,
+          next_run_at: now,
+        },
+        runs: [],
+        notifications: [notification],
+      },
+    ],
+    proposals: [],
+    requests: [],
+  };
+  expect(validateSavedTasks(saved)).toEqual(saved);
+  for (const invalid of [
+    { ...notification, event_key: " " },
+    { ...notification, event_key: "x".repeat(201) },
+    { ...notification, title: "x".repeat(201) },
+    { ...notification, body: "" },
+    { ...notification, body: "x".repeat(401) },
+    { ...notification, kind: "failed" },
+    { ...notification, run_id: "invalid" },
+    { ...notification, created_at: "invalid" },
+    { ...notification, scope_key: "invalid" },
+  ]) {
+    expect(() =>
+      validateSavedTasks({
+        ...saved,
+        tasks: [{ ...saved.tasks[0]!, notifications: [invalid] }],
+      }),
+    ).toThrow("Invalid saved tasks");
+  }
+  expect(() =>
+    validateSavedTasks({
+      ...saved,
+      tasks: [
+        { ...saved.tasks[0]!, notifications: [notification, notification] },
+      ],
+    }),
+  ).toThrow("Invalid saved tasks");
+  expect(() =>
+    validateSavedTasks({
+      ...saved,
+      tasks: [
+        {
+          ...saved.tasks[0]!,
+          notifications: Array.from({ length: 101 }, (_, index) => ({
+            ...notification,
+            event_key: String(index),
+          })),
+        },
+      ],
+    }),
+  ).toThrow("Invalid saved tasks");
+});
+
+test("saved task proposals validate their displayed input against the confirmed input with status as the default mode", () => {
+  const input = prepared();
+  const proposal = {
+    ...input.input,
+    id: randomUUID(),
+    status: "pending" as const,
+    created_at: "2026-10-04T00:00:00.000Z",
+  };
+  const saved = {
+    tasks: [],
+    proposals: [{ prepared: input, proposal }],
+    requests: [],
+  };
+  expect(validateSavedTasks(saved)).toEqual(saved);
+  for (const explicitDefault of [
+    {
+      prepared: input,
+      proposal: { ...proposal, notification_mode: "status" as const },
+    },
+    {
+      prepared: {
+        ...input,
+        input: { ...input.input, notification_mode: "status" as const },
+      },
+      proposal,
+    },
+    {
+      prepared: {
+        ...input,
+        input: { ...input.input, notification_mode: "agent" as const },
+      },
+      proposal: { ...proposal, notification_mode: "agent" as const },
+    },
+  ])
+    expect(
+      validateSavedTasks({ ...saved, proposals: [explicitDefault] }).proposals,
+    ).toEqual([explicitDefault]);
+  for (const changes of [
+    { notification_mode: "invalid" },
+    { notification_mode: "agent" },
+    { title: "Another title" },
+    { prompt: "Another prompt" },
+    { scope: [{ connection_id: "local", workspace_id: "another-workspace" }] },
+    { schedule: { type: "interval", minutes: 2 } },
+    { title: "" },
+    { scope: [] },
+  ])
+    expect(() =>
+      validateSavedTasks({
+        ...saved,
+        proposals: [{ prepared: input, proposal: { ...proposal, ...changes } }],
+      }),
+    ).toThrow("Invalid saved tasks");
+  expect(() =>
+    validateSavedTasks({
+      ...saved,
+      proposals: [
+        {
+          prepared: {
+            ...input,
+            input: { ...input.input, notification_mode: "agent" },
+          },
+          proposal,
+        },
+      ],
+    }),
+  ).toThrow("Invalid saved tasks");
+});
 const prepared = (
   schedule: PreparedTask["input"]["schedule"] = {
     type: "interval",
@@ -76,6 +518,7 @@ function fixture(
     signal: AbortSignal | undefined,
     prepared: PreparedTask,
   ) => Promise<void>,
+  notify?: (notification: AssistantTaskNotification) => void,
 ) {
   const directory = existing ?? mkdtempSync(join(tmpdir(), "roamgate-tasks-"));
   if (!existing) directories.push(directory);
@@ -89,12 +532,18 @@ function fixture(
     disposed: boolean;
     stopGate?: ReturnType<typeof Promise.withResolvers<void>>;
     disposeGate?: ReturnType<typeof Promise.withResolvers<void>>;
-    complete(pending?: boolean): void;
+    complete(pending?: boolean, error?: string | null): void;
   }[] = [];
   let deny = false;
+  let startFailure = false;
+  const notifications: AssistantTaskNotification[] = [];
   const manager = createAssistantTasks({
     directory,
     publish: () => {},
+    notify: (notification) => {
+      notifications.push(notification);
+      notify?.(notification);
+    },
     validate: async (_prepared, signal) => {
       if (deny) throw new Error("Original identity replaced");
       await validation?.(signal, _prepared);
@@ -125,8 +574,9 @@ function fixture(
         disposeGate: undefined as
           | ReturnType<typeof Promise.withResolvers<void>>
           | undefined,
-        complete(pending = false) {
+        complete(pending = false, error: string | null = null) {
           snapshot.running = false;
+          snapshot.error = error;
           snapshot.messages = [
             {
               id: "answer",
@@ -173,6 +623,7 @@ function fixture(
           } finally {
             db.close();
           }
+          if (startFailure) throw new Error("Private child startup error");
           snapshot.running = true;
           publish(snapshot);
         },
@@ -206,6 +657,7 @@ function fixture(
     directory,
     manager,
     runs,
+    notifications,
     fail: (value: boolean) => {
       const db = new Database(join(directory, "tasks.sqlite"));
       try {
@@ -221,8 +673,110 @@ function fixture(
     deny: (value: boolean) => {
       deny = value;
     },
+    failStart: () => {
+      startFailure = true;
+    },
   };
 }
+
+test("task notifications describe persisted transitions once with the original run title", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const input = prepared();
+  const task = await f.manager.create(input, randomUUID());
+  await f.manager.resume();
+  await f.manager.control("run_now", task.id);
+  jest.advanceTimersByTime(0);
+  await flush();
+  expect(f.notifications).toEqual([]);
+  input.input.title = "Edited task title";
+  await f.manager.update(task.id, input);
+  const child = f.runs[0]!;
+  child.complete(true);
+  child.complete(true);
+  await f.manager.control("pause", task.id);
+  expect(f.notifications).toEqual([
+    {
+      task_id: task.id,
+      run_id: child.run.id,
+      status: "waiting",
+      title: "Ranger task needs confirmation",
+      body: "Check workspace: needs your confirmation. Open Ranger to review the pending action.",
+    },
+  ]);
+  child.complete();
+  child.complete();
+  expect(f.notifications[1]).toEqual({
+    task_id: task.id,
+    run_id: child.run.id,
+    status: "succeeded",
+    title: "Ranger task completed",
+    body: "Check workspace: completed successfully.",
+  });
+  expect(f.notifications).toHaveLength(2);
+  await f.manager.control("run_now", task.id);
+  jest.advanceTimersByTime(0);
+  await flush();
+  const failed = f.runs[1]!;
+  failed.complete(false, "Private model error and prompt");
+  expect(f.notifications[2]).toEqual({
+    task_id: task.id,
+    run_id: failed.run.id,
+    status: "failed",
+    title: "Ranger task failed",
+    body: "Edited task title: failed. Open Ranger to review the task.",
+  });
+  expect(f.notifications).toHaveLength(3);
+});
+
+test.each(["admission", "child"] as const)(
+  "%s startup failures notify after saving a failed receipt",
+  async (failure) => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    const f = fixture();
+    const task = await f.manager.create(prepared(), randomUUID());
+    await f.manager.resume();
+    await f.manager.control("run_now", task.id);
+    if (failure === "admission") f.deny(true);
+    else f.failStart();
+    jest.advanceTimersByTime(0);
+    await flush();
+    const run = f.manager.detail(task.id).runs[0]!;
+    expect(run.status).toBe("failed");
+    expect(f.notifications).toEqual([
+      {
+        task_id: task.id,
+        run_id: run.id,
+        status: "failed",
+        title: "Ranger task failed",
+        body: "Check workspace: failed. Open Ranger to review the task.",
+      },
+    ]);
+    const restored = fixture(f.directory);
+    await restored.manager.resume();
+    expect(restored.notifications).toEqual([]);
+  },
+);
+
+test("notification delivery errors do not change a saved task outcome", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture(undefined, undefined, () => {
+    throw new Error("Notification delivery failed");
+  });
+  const task = await f.manager.create(prepared(), randomUUID());
+  await f.manager.resume();
+  await f.manager.control("run_now", task.id);
+  jest.advanceTimersByTime(0);
+  await flush();
+  f.runs[0]!.complete();
+  expect(f.manager.detail(task.id).runs[0]!.status).toBe("succeeded");
+  expect(f.manager.error()).toBeNull();
+  expect(f.notifications).toHaveLength(1);
+  await f.manager.control("run_now", task.id);
+  jest.advanceTimersByTime(0);
+  await flush();
+  expect(f.runs).toHaveLength(2);
+});
 
 test("once admission is durable, immutable and isolated; restart keeps one original run", async () => {
   jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
@@ -345,6 +899,15 @@ test.each(["interval", "once"] as const)(
       manual: false,
     });
     expect(restored.runs[0]!.run.id).not.toBe(expiredId);
+    expect(restored.notifications).toEqual([
+      {
+        task_id: task.id,
+        run_id: expiredId,
+        status: "failed",
+        title: "Ranger task failed",
+        body: "Check workspace: failed. Open Ranger to review the task.",
+      },
+    ]);
     expect(restored.runs[0]!.recover).toBe(false);
     expect(restored.manager.detail(task.id).task.next_run_at).toBe(nextRunAt);
     restored.runs[0]!.complete();
@@ -358,6 +921,7 @@ test.each(["interval", "once"] as const)(
     await restarted.manager.resume();
     await flush();
     expect(restarted.runs).toHaveLength(0);
+    expect(restarted.notifications).toEqual([]);
     expect(
       restarted.manager.detail(task.id).runs.map((run) => run.status),
     ).toEqual(["succeeded", "failed"]);
@@ -487,6 +1051,7 @@ test("pause preserves a running child; manual runs and stop preserve the schedul
   f.fail(false);
   await f.manager.control("cancel", task.id);
   expect(f.runs[1]!.stopped).toBe(true);
+  expect(f.notifications).toEqual([]);
   await expect(f.manager.control("resume", task.id)).rejects.toThrow(
     "cancelled",
   );
@@ -896,11 +1461,15 @@ test("successful explicit Resume recovers a save failure without replaying an al
   f.fail(true);
   f.runs[0]!.complete();
   expect(f.manager.error()).toContain("Scheduling is paused");
+  expect(f.notifications).toEqual([]);
   f.fail(false);
   await f.manager.control("resume", task.id);
   expect(f.manager.error()).toBeNull();
   expect(f.manager.detail(task.id).runs[0]!.status).toBe("succeeded");
   expect(f.runs).toHaveLength(1);
+  expect(f.notifications).toHaveLength(1);
+  await f.manager.control("resume", task.id);
+  expect(f.notifications).toHaveLength(1);
   await f.manager.control("run_now", task.id);
   jest.advanceTimersByTime(0);
   await flush();

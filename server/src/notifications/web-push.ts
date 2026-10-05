@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import webpush from "web-push";
+import type { AssistantTaskNotification } from "../../../shared/assistant";
 import {
   assertSafeDataPath,
   dataRoot,
@@ -37,6 +38,7 @@ export interface PushTask extends TaskEvent {
   connectionLabel?: string;
   runtimeGeneration: number;
 }
+type PushNotification = PushTask | AssistantTaskNotification;
 const MAX_DEVICES = 128;
 const MAX_BODY_BYTES = 16 * 1024;
 
@@ -45,7 +47,18 @@ function clip(value: string, max = 80) {
 }
 
 /** The JSON message the service worker renders for one device delivery. */
-export function taskPushPayload(task: PushTask) {
+export function taskPushPayload(task: PushNotification) {
+  if ("task_id" in task)
+    return {
+      title: task.title,
+      body: task.body,
+      tag: JSON.stringify(["roamgate-ranger-task", task.task_id, task.run_id]),
+      target: {
+        type: "ranger_task",
+        taskId: task.task_id,
+        runId: task.run_id,
+      },
+    };
   const target =
     task.workspaceId && task.paneId
       ? {
@@ -80,6 +93,14 @@ export function taskPushPayload(task: PushTask) {
     ]),
     target,
   };
+}
+
+function notificationPreference(task: PushNotification): keyof PushPreferences {
+  return "task_id" in task
+    ? task.status === "succeeded"
+      ? "completed"
+      : "blocked"
+    : task.kind;
 }
 
 /** Only browser push providers are valid outbound destinations, never arbitrary URLs. */
@@ -187,7 +208,7 @@ export function createWebPushService(
   let stopped = false;
   const queue: Array<{
     device: Device;
-    task: PushTask;
+    task: PushNotification;
     isCurrent: () => boolean;
   }> = [];
   let active = 0;
@@ -262,7 +283,7 @@ export function createWebPushService(
       stopped ||
       !registry?.devices.includes(device) ||
       !isCurrent() ||
-      !device.preferences[task.kind]
+      !device.preferences[notificationPreference(task)]
     )
       return;
     try {
@@ -371,10 +392,10 @@ export function createWebPushService(
       }
       return Response.json({ ok: true }, { headers });
     },
-    notify(task: PushTask, isCurrent: () => boolean) {
+    notify(task: PushNotification, isCurrent: () => boolean) {
       if (!registry || stopped || !isCurrent()) return;
       for (const device of registry.devices) {
-        if (!device.preferences[task.kind]) continue;
+        if (!device.preferences[notificationPreference(task)]) continue;
         if (queue.length >= 256) {
           warn("Web Push queue is full; notification dropped.");
           break;

@@ -445,6 +445,14 @@ function getAssistantService() {
           for (const ws of clients)
             safeSend(ws, payload, "assistant", "assistant");
         },
+        notify: (notification) => {
+          const payload = JSON.stringify({
+            assistant_notification: notification,
+          });
+          for (const ws of clients)
+            safeSend(ws, payload, "assistant_notification");
+          webPush.notify(notification, () => true);
+        },
       }),
     )
     .catch((error) => {

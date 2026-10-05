@@ -11,6 +11,7 @@ import type {
   AssistantSnapshot,
   AssistantTaskDetail,
   AssistantTaskInput,
+  AssistantTaskNotification,
 } from "../../shared/assistant";
 import { BinReader, BinWriter, encodeFrame } from "./bridge/bincode";
 import type { LocalConnectionProfile } from "./connections/profiles";
@@ -88,7 +89,11 @@ function tool(name: string, id: string, input: object, index: number) {
 }
 
 async function fixture(
-  options: { interrupt?: boolean; propose?: boolean } = {},
+  options: {
+    interrupt?: boolean;
+    propose?: boolean;
+    notifications?: boolean;
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "roamgate-recovery-"));
   const assistantDirectory = join(root, "ranger");
@@ -105,7 +110,10 @@ async function fixture(
   const browsers: WebSocket[] = [];
   const stopBridges: (() => Promise<void>)[] = [];
   const calls: { method: string; params?: Record<string, unknown> }[] = [];
-  const requests: { messages: { role: string; content: unknown }[] }[] = [];
+  const requests: {
+    messages: { role: string; content: unknown }[];
+    tools?: { name: string }[];
+  }[] = [];
   const requestWaiters = new Set<() => void>();
   const continued = Promise.withResolvers<void>();
   const model = Bun.serve({
@@ -130,27 +138,100 @@ async function fixture(
         );
       }
       if (index === 3) continued.resolve();
+      const notificationIndex = index - 2;
       const response =
-        index === 1
+        options.notifications && index <= 2
           ? [
               start(index),
-              ...tool("workspace_status", "completed-status", {}, 0),
-              ...(options.propose === false
-                ? []
-                : tool(
-                    "propose_tab_create",
-                    "pending-tab",
-                    { connection_id: "healthy", workspace_id: "w1" },
-                    1,
-                  )),
-              ...finish("tool_use"),
+              ...(index === 1
+                ? [
+                    ...tool(
+                      "propose_ranger_task",
+                      "monitor-task-proposal",
+                      {
+                        title: "Monitor Agent",
+                        prompt:
+                          "Inspect the authorized Agent. Notify when verification finishes or the Agent needs input, and stay quiet for an unchanged outcome.",
+                        scope: [
+                          { connection_id: "healthy", workspace_id: "w1" },
+                        ],
+                        schedule: {
+                          type: "once",
+                          at: new Date(Date.now() + 1500).toISOString(),
+                        },
+                        notification_mode: "agent",
+                      },
+                      0,
+                    ),
+                    ...finish("tool_use"),
+                  ]
+                : [
+                    ...text("Confirm the task to enable the Agent check."),
+                    { type: "content_block_stop", index: 0 },
+                    ...finish("end_turn"),
+                  ]),
             ]
-          : [
-              start(index),
-              ...text(ANSWER),
-              { type: "content_block_stop", index: 0 },
-              ...finish("end_turn"),
-            ];
+          : options.notifications
+            ? [
+                start(index),
+                ...(notificationIndex % 3 === 1
+                  ? [
+                      ...tool("workspace_status", `status-${index}`, {}, 0),
+                      ...finish("tool_use"),
+                    ]
+                  : notificationIndex % 3 === 2
+                    ? [
+                        ...tool(
+                          "send_user_notification",
+                          `notify-${index}`,
+                          {
+                            event_key:
+                              notificationIndex < 7
+                                ? "agent-turn-7-completed"
+                                : "agent-turn-8-needs-input",
+                            kind:
+                              notificationIndex < 7 ? "completed" : "attention",
+                            title:
+                              notificationIndex < 7
+                                ? "Agent verification passed"
+                                : "Agent needs a decision",
+                            body:
+                              notificationIndex < 7
+                                ? "The Agent's verification finished. Review the result in Ranger."
+                                : "The Agent cannot continue until you choose an option.",
+                          },
+                          0,
+                        ),
+                        ...finish("tool_use"),
+                      ]
+                    : [
+                        ...text(
+                          "Inspected Agent status and notification receipt.",
+                        ),
+                        { type: "content_block_stop", index: 0 },
+                        ...finish("end_turn"),
+                      ]),
+              ]
+            : index === 1
+              ? [
+                  start(index),
+                  ...tool("workspace_status", "completed-status", {}, 0),
+                  ...(options.propose === false
+                    ? []
+                    : tool(
+                        "propose_tab_create",
+                        "pending-tab",
+                        { connection_id: "healthy", workspace_id: "w1" },
+                        1,
+                      )),
+                  ...finish("tool_use"),
+                ]
+              : [
+                  start(index),
+                  ...text(ANSWER),
+                  { type: "content_block_stop", index: 0 },
+                  ...finish("end_turn"),
+                ];
       return new Response(events(response), {
         headers: { "content-type": "text/event-stream" },
       });
@@ -478,10 +559,13 @@ async function browser(base: string, browsers: WebSocket[]) {
     ReturnType<typeof Promise.withResolvers<any>>
   >();
   const pushes: AssistantSnapshot[] = [];
+  const notifications: AssistantTaskNotification[] = [];
   const waiters = new Set<(snapshot: AssistantSnapshot) => void>();
   socket.onmessage = (event) => {
     const value = JSON.parse(String(event.data));
     if (value.hello) hello.resolve();
+    if (value.assistant_notification)
+      notifications.push(value.assistant_notification);
     if (typeof value.id === "string") pending.get(value.id)?.resolve(value);
     if (value.assistant) {
       pushes.push(value.assistant);
@@ -536,7 +620,7 @@ async function browser(base: string, browsers: WebSocket[]) {
       clearTimeout(timeout);
     }
   }
-  return { rpc, until, close: () => socket.close() };
+  return { rpc, until, notifications, close: () => socket.close() };
 }
 
 async function configureRanger(client: Awaited<ReturnType<typeof browser>>) {
@@ -576,6 +660,185 @@ async function createTask(
   expect(task).toBeDefined();
   return task!;
 }
+
+test("confirmed Ranger proposals schedule custom notifications and deduplicate polling across bridge restart", async () => {
+  if (process.platform === "win32") return;
+  const f = await fixture({
+    interrupt: false,
+    notifications: true,
+  });
+  try {
+    const first = await f.startBridge();
+    const client = await browser(first.base, f.browsers);
+    await configureRanger(client);
+    await client.rpc("bridge.assistant.send", {
+      text: "Check the Agent shortly. Notify me when verification finishes or the Agent needs input, and stay quiet for an unchanged outcome.",
+      request_id: "propose-agent-monitor",
+    });
+    const proposed = await client.until(
+      (snapshot) =>
+        !snapshot.running &&
+        snapshot.messages.some((message) =>
+          message.task_proposals?.some(
+            (proposal) => proposal.status === "pending",
+          ),
+        ),
+    );
+    const proposal = proposed.messages.flatMap(
+      (message) => message.task_proposals ?? [],
+    )[0]!;
+    expect(proposed.error).toBeNull();
+    expect(proposed.tasks).toEqual([]);
+    expect(client.notifications).toEqual([]);
+    expect(proposal.notification_mode).toBe("agent");
+    expect(proposal.scope).toEqual([
+      { connection_id: "healthy", workspace_id: "w1" },
+    ]);
+    expect(proposal.schedule.type).toBe("once");
+    expect(f.requests).toHaveLength(2);
+    expect(
+      f.requests[0]!.tools?.some((tool) => tool.name === "propose_ranger_task"),
+    ).toBe(true);
+    expect(
+      f.requests[0]!.tools?.some(
+        (tool) => tool.name === "send_user_notification",
+      ),
+    ).toBe(false);
+    const confirmed: AssistantSnapshot = await client.rpc(
+      "bridge.assistant.task.confirm_proposal",
+      { proposal_id: proposal.id },
+    );
+    const task = confirmed.tasks![0]!;
+    expect(task).toMatchObject({
+      title: proposal.title,
+      prompt: proposal.prompt,
+      scope: proposal.scope,
+      schedule: proposal.schedule,
+      notification_mode: "agent",
+      status: "active",
+    });
+    expect(
+      confirmed.messages.flatMap((message) => message.task_proposals ?? []),
+    ).toContainEqual({
+      ...proposal,
+      status: "confirmed",
+      task_id: task.id,
+    });
+    // The confirmed deadline starts the first read; no manual run RPC is sent.
+    const completed = await client.until(
+      (snapshot) =>
+        snapshot.tasks?.some(
+          (item) =>
+            item.id === task.id && item.last_run?.status === "succeeded",
+        ) === true,
+    );
+    const runId = completed.tasks!.find((item) => item.id === task.id)!
+      .last_run!.id;
+    expect(client.notifications).toEqual([
+      {
+        task_id: task.id,
+        run_id: runId,
+        status: "succeeded",
+        title: "Agent verification passed",
+        body: "The Agent's verification finished. Review the result in Ranger.",
+      },
+    ]);
+    const detail: AssistantTaskDetail = await client.rpc(
+      "bridge.assistant.task.get",
+      {
+        task_id: task.id,
+        run_id: runId,
+      },
+    );
+    expect(task.next_run_at).not.toBeNull();
+    expect(detail.run?.scheduled_at).toBe(task.next_run_at!);
+    const answer = detail.run!.messages.find(
+      (message) => message.role === "assistant",
+    )!;
+    expect(answer.tools.map((tool) => tool.name)).toEqual([
+      "workspace_status",
+      "send_user_notification",
+    ]);
+    expect(answer.sources).toHaveLength(1);
+    expect(answer.sources[0]).toMatchObject({
+      kind: "status",
+      connection_id: "healthy",
+      workspace_id: "w1",
+    });
+    expect(
+      f.requests[2]!.tools?.some(
+        (tool) => tool.name === "send_user_notification",
+      ),
+    ).toBe(true);
+    const receipt = f.requests[4]!.messages.flatMap((message) =>
+      Array.isArray(message.content) ? message.content : [],
+    ).find(
+      (block) =>
+        block.type === "tool_result" && block.tool_use_id === "notify-4",
+    );
+    expect(JSON.parse(receipt.content)).toEqual({
+      accepted: true,
+      delivery: "best_effort",
+    });
+    await first.kill("SIGTERM");
+    const second = await f.startBridge();
+    const restored = await browser(second.base, f.browsers);
+    const saved: AssistantSnapshot = await restored.rpc("bridge.assistant.get");
+    expect(
+      saved.tasks!.find((item) => item.id === task.id)!.notification_mode,
+    ).toBe("agent");
+    expect(restored.notifications).toEqual([]);
+    await restored.rpc("bridge.assistant.task.run_now", { task_id: task.id });
+    const duplicate = await restored.until(
+      (snapshot) =>
+        snapshot.tasks?.some(
+          (item) =>
+            item.id === task.id &&
+            item.last_run?.status === "succeeded" &&
+            item.last_run.id !== runId,
+        ) === true,
+    );
+    const duplicateId = duplicate.tasks!.find((item) => item.id === task.id)!
+      .last_run!.id;
+    expect(restored.notifications).toEqual([]);
+    expect(JSON.stringify(f.requests[5]!.messages)).toContain(
+      "agent-turn-7-completed",
+    );
+    expect(JSON.stringify(f.requests[7]!.messages)).toContain(
+      "already_notified",
+    );
+    await restored.rpc("bridge.assistant.task.run_now", { task_id: task.id });
+    const changed = await restored.until(
+      (snapshot) =>
+        snapshot.tasks?.some(
+          (item) =>
+            item.id === task.id &&
+            item.last_run?.status === "succeeded" &&
+            item.last_run.id !== runId &&
+            item.last_run.id !== duplicateId,
+        ) === true,
+    );
+    expect(restored.notifications).toEqual([
+      {
+        task_id: task.id,
+        run_id: changed.tasks!.find((item) => item.id === task.id)!.last_run!
+          .id,
+        status: "waiting",
+        title: "Agent needs a decision",
+        body: "The Agent cannot continue until you choose an option.",
+      },
+    ]);
+    expect(f.requests).toHaveLength(11);
+    expect(
+      f.calls.filter(
+        (call) =>
+          call.method === "pane.list" && call.params?.workspace_id === "w1",
+      ),
+    ).toHaveLength(3);
+  } finally {
+    await f.dispose();
+  }
+}, 60_000);
 
 test.each(["SIGKILL", "SIGTERM"] as const)(
   "Ranger automatically resumes after %s without replaying completed reads or pending actions",
@@ -843,6 +1106,15 @@ test("task RPCs manage paused manual runs and preserve cancellation across resta
       (task) => task.id === interval.id,
     )!;
     expect(finishedTask.status).toBe("paused");
+    expect(client.notifications).toEqual([
+      {
+        task_id: interval.id,
+        run_id: finishedTask.last_run!.id,
+        status: "succeeded",
+        title: "Ranger task completed",
+        body: "Manual interval check: completed successfully.",
+      },
+    ]);
     const detail: AssistantTaskDetail = await client.rpc(
       "bridge.assistant.task.get",
       {
@@ -903,6 +1175,11 @@ test("task RPCs manage paused manual runs and preserve cancellation across resta
     expect(pausedDetail.runs).toHaveLength(1);
     expect(f.requests).toHaveLength(3);
     expect((await restored.rpc("bridge.assistant.get")).messages).toEqual([]);
+    expect(
+      restored.notifications.filter(
+        (notification) => notification.task_id === interval.id,
+      ),
+    ).toEqual([]);
   } finally {
     await f.dispose();
   }

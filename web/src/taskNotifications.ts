@@ -10,12 +10,46 @@ export interface TaskNotificationTarget {
   paneId: string;
 }
 
+export interface RangerTaskNotificationTarget {
+  type: "ranger_task";
+  taskId: string;
+  runId: string;
+}
+
+export type NotificationTarget =
+  | TaskNotificationTarget
+  | RangerTaskNotificationTarget;
+
+export function isRangerTaskNotificationTarget(
+  value: unknown,
+): value is RangerTaskNotificationTarget {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const target = value as Partial<RangerTaskNotificationTarget>;
+  const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
+  return (
+    target.type === "ranger_task" &&
+    typeof target.taskId === "string" &&
+    uuid.test(target.taskId) &&
+    typeof target.runId === "string" &&
+    uuid.test(target.runId)
+  );
+}
+
+export function isNotificationTarget(
+  value: unknown,
+): value is NotificationTarget {
+  return (
+    isRangerTaskNotificationTarget(value) || isTaskNotificationTarget(value)
+  );
+}
+
 export function isTaskNotificationTarget(
   value: unknown,
 ): value is TaskNotificationTarget {
-  if (!value || typeof value !== "object") return false;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const target = value as Partial<TaskNotificationTarget>;
   return (
+    !("type" in target) &&
     typeof target.connectionId === "string" &&
     target.connectionId.length > 0 &&
     typeof target.runtimeGeneration === "number" &&
@@ -28,18 +62,15 @@ export function isTaskNotificationTarget(
   );
 }
 
-/** Connect a system notification click to the in-app pane navigation path. */
-export function bindTaskNotificationActivation(
+/** Connect a system notification click to its in-app navigation path. */
+export function bindTaskNotificationActivation<T extends NotificationTarget>(
   notification: Pick<Notification, "close" | "onclick">,
-  target: TaskNotificationTarget,
-  activate: (target: TaskNotificationTarget) => void = (nextTarget) => {
+  target: T,
+  activate: (target: T) => void = (nextTarget) => {
     window.dispatchEvent(
-      new CustomEvent<TaskNotificationTarget>(
-        TASK_NOTIFICATION_ACTIVATE_EVENT,
-        {
-          detail: nextTarget,
-        },
-      ),
+      new CustomEvent<NotificationTarget>(TASK_NOTIFICATION_ACTIVATE_EVENT, {
+        detail: nextTarget,
+      }),
     );
   },
   focusWindow: () => void = () => window.focus(),
@@ -102,11 +133,11 @@ export async function prepareTaskNotifications(): Promise<ServiceWorkerRegistrat
   }
 }
 
-/** A null target (a notification not tied to a pane) only focuses the app. */
+/** A notification without a target only focuses the app. */
 export async function showTaskNotification(
   title: string,
   options: NotificationOptions,
-  target: TaskNotificationTarget | null,
+  target: NotificationTarget | null,
   isCurrent: () => boolean,
 ): Promise<void> {
   const registration = await prepareTaskNotifications();
@@ -129,13 +160,13 @@ export async function showTaskNotification(
 
 /** Route worker clicks and newly opened notification windows through the same UI. */
 export function listenForTaskNotificationActivation(
-  activate: (target: TaskNotificationTarget) => void,
+  activate: (target: NotificationTarget) => void,
 ): () => void {
   const receive = (event: MessageEvent) => {
     if (
       event.origin !== window.location.origin ||
       event.data?.type !== TASK_NOTIFICATION_ACTIVATE_EVENT ||
-      !isTaskNotificationTarget(event.data.target)
+      !isNotificationTarget(event.data.target)
     )
       return;
     activate(event.data.target);
@@ -150,7 +181,7 @@ export function listenForTaskNotificationActivation(
     );
     try {
       const target: unknown = JSON.parse(decodeURIComponent(encoded));
-      if (isTaskNotificationTarget(target)) activate(target);
+      if (isNotificationTarget(target)) activate(target);
     } catch {
       // A malformed or stale deep link must not interrupt app startup.
     }

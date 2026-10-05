@@ -3,8 +3,31 @@ import {
   isAssistantMessage,
   isAssistantTaskDetail,
   isAssistantTaskInput,
+  isAssistantTaskNotification,
   type AssistantTaskDetail,
 } from "./assistant";
+
+test("Ranger notification envelopes require a string status and bounded task targets", () => {
+  const notification = {
+    task_id: "11111111-1111-4111-8111-111111111111",
+    run_id: "22222222-2222-4222-8222-222222222222",
+    status: "succeeded",
+    title: "Agent finished",
+    body: "Review its verification result in Ranger.",
+  };
+  for (const status of ["succeeded", "failed", "waiting"])
+    expect(isAssistantTaskNotification({ ...notification, status })).toBe(true);
+  for (const status of [["succeeded"], null, "stopped"])
+    expect(isAssistantTaskNotification({ ...notification, status })).toBe(
+      false,
+    );
+  expect(
+    isAssistantTaskNotification({ ...notification, run_id: "other" }),
+  ).toBe(false);
+  expect(
+    isAssistantTaskNotification({ ...notification, body: "x".repeat(401) }),
+  ).toBe(false);
+});
 
 test("task details bind run records to the selected task and validate stored outputs", () => {
   const input = {
@@ -42,6 +65,10 @@ test("task details bind run records to the selected task and validate stored out
     run: { ...run, messages: [] },
   };
   expect(isAssistantTaskDetail(detail)).toBe(true);
+  for (const notification_mode of ["status", "agent"])
+    expect(isAssistantTaskInput({ ...input, notification_mode })).toBe(true);
+  for (const notification_mode of ["always", "", null, true])
+    expect(isAssistantTaskInput({ ...input, notification_mode })).toBe(false);
   expect(
     isAssistantTaskDetail({
       ...detail,

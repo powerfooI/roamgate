@@ -8,8 +8,10 @@ import {
 import * as assistant from "../assistant";
 import type { ConnectionSummary } from "../api";
 import * as storeModule from "../store";
+import type { RangerTaskNotificationTarget } from "../taskNotifications";
 import { terminalFocusBlockedByOverlay } from "../terminalFocus";
 import { AssistantPanel, assistantAuthUrl } from "./AssistantPanel";
+import * as taskControls from "./AssistantTasks";
 
 test("assistant sign-in links only open explicit http or https destinations", () => {
   expect(assistantAuthUrl("https://example.com/device?code=test")).toBe(
@@ -47,6 +49,205 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
     expect(code).toBe(0);
   }, 15_000);
 } else {
+  test("task notification requests switch Ranger from settings or history and reopen repeated targets", async () => {
+    const { Window } = await import("happy-dom");
+    const browser = new Window({ url: "http://localhost" });
+    const originals = new Map<string, PropertyDescriptor | undefined>();
+    for (const [key, value] of Object.entries({
+      window: browser,
+      document: browser.document,
+      navigator: browser.navigator,
+      HTMLElement: browser.HTMLElement,
+      Element: browser.Element,
+      Node: browser.Node,
+      Event: browser.Event,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    })) {
+      originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+      Object.defineProperty(globalThis, key, {
+        value,
+        configurable: true,
+        writable: true,
+      });
+    }
+    const { createRoot } = await import("react-dom/client");
+    const { bridge } = await import("../api");
+    const snapshot: AssistantSnapshot = {
+      instance_id: "bridge",
+      revision: 1,
+      session_id: "session-one",
+      sessions: [
+        {
+          id: "session-one",
+          title: "Current chat",
+          created_at: "2026-10-04T00:00:00Z",
+          updated_at: "2026-10-04T00:00:00Z",
+          message_count: 0,
+        },
+      ],
+      config: {
+        provider: "provider",
+        model: "model",
+        credential_source: "assistant",
+        allowed_workspaces: [],
+      },
+      providers: [
+        {
+          id: "provider",
+          label: "Provider",
+          methods: [],
+          configured: true,
+        },
+      ],
+      models: [{ provider: "provider", id: "model", label: "Model" }],
+      messages: [],
+      running: false,
+      error: null,
+      auth: null,
+      tasks: [],
+    };
+    const clientState: ReturnType<typeof assistant.useAssistantState> = {
+      snapshot,
+      loading: false,
+      error: null,
+      connectionStatus: "connected",
+      supported: true,
+      draft: "",
+    };
+    const state = spyOn(assistant, "useAssistantState").mockImplementation(
+      () => clientState,
+    );
+    const context = spyOn(bridge, "call").mockResolvedValue({ workspaces: [] });
+    const handled = mock(() => {});
+    const tasks = spyOn(taskControls, "AssistantTasks").mockImplementation(
+      ({ active, requestedTask, onRequestedTaskHandled }) => {
+        React.useEffect(() => {
+          if (requestedTask) onRequestedTaskHandled?.();
+        }, [requestedTask, onRequestedTaskHandled]);
+        return React.createElement("div", {
+          "aria-label": "Ranger tasks",
+          hidden: !active,
+          "data-task": requestedTask?.taskId,
+          "data-run": requestedTask?.runId,
+        });
+      },
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const render = async (
+      requestedTask: RangerTaskNotificationTarget | null = null,
+    ) => {
+      await React.act(async () =>
+        root.render(
+          React.createElement(AssistantPanel, {
+            open: true,
+            floating: true,
+            mobile: false,
+            requestedTask,
+            onRequestedTaskHandled: handled,
+            onClose() {},
+            onToggleFloating() {},
+            onOpenSource() {},
+          }),
+        ),
+      );
+    };
+    const button = (label: string) => {
+      const found = Array.from(
+        container.querySelectorAll<HTMLButtonElement>("button"),
+      ).find(
+        (item) =>
+          item.getAttribute("aria-label") === label ||
+          item.textContent?.trim() === label,
+      );
+      if (!found) throw new Error(`Missing button ${label}`);
+      return found;
+    };
+    const click = async (label: string) => {
+      await React.act(async () => button(label).click());
+    };
+    const target: RangerTaskNotificationTarget = {
+      type: "ranger_task",
+      taskId: "task-one",
+      runId: "old-run",
+    };
+    const taskView = () =>
+      container.querySelector<HTMLElement>('[aria-label="Ranger tasks"]')!;
+    try {
+      await render();
+      await click("Ranger settings");
+      expect(
+        container.querySelector(".assistant-panel-settings"),
+      ).not.toBeNull();
+      await render(target);
+      expect(button("Tasks").getAttribute("aria-pressed")).toBe("true");
+      expect(container.querySelector(".assistant-panel-settings")).toBeNull();
+      expect(taskView().hidden).toBe(false);
+      expect(taskView().dataset.task).toBe("task-one");
+      expect(taskView().dataset.run).toBe("old-run");
+
+      await click("Chat");
+      await click("Ranger chat history");
+      expect(container.querySelector(".assistant-chat-history")).not.toBeNull();
+      await render({ ...target });
+      expect(container.querySelector(".assistant-chat-history")).toBeNull();
+      expect(button("Tasks").getAttribute("aria-pressed")).toBe("true");
+      await click("Chat");
+      expect(button("Ranger chat history").getAttribute("aria-expanded")).toBe(
+        "false",
+      );
+      await click("Ranger settings");
+      await render({ ...target, taskId: "task-two", runId: "new-run" });
+      expect(container.querySelector(".assistant-panel-settings")).toBeNull();
+      expect(taskView().hidden).toBe(false);
+      expect(taskView().dataset.task).toBe("task-two");
+      expect(taskView().dataset.run).toBe("new-run");
+
+      const consumed = handled.mock.calls.length;
+      const pendingTarget: RangerTaskNotificationTarget = {
+        type: "ranger_task",
+        taskId: "fresh-task",
+        runId: "fresh-run",
+      };
+      clientState.loading = true;
+      await render(pendingTarget);
+      expect(taskView().dataset.task).toBeUndefined();
+      expect(handled).toHaveBeenCalledTimes(consumed);
+      clientState.loading = false;
+      clientState.connectionStatus = "disconnected";
+      await render(pendingTarget);
+      expect(taskView().dataset.task).toBeUndefined();
+      expect(handled).toHaveBeenCalledTimes(consumed);
+      clientState.connectionStatus = "connected";
+      clientState.loading = true;
+      await render(pendingTarget);
+      expect(taskView().dataset.task).toBeUndefined();
+      expect(handled).toHaveBeenCalledTimes(consumed);
+      const refreshed = { ...snapshot, revision: 2 };
+      clientState.snapshot = refreshed;
+      clientState.loading = false;
+      await render(pendingTarget);
+      expect(taskView().hidden).toBe(false);
+      expect(taskView().dataset.task).toBe("fresh-task");
+      expect(taskView().dataset.run).toBe("fresh-run");
+      expect(tasks.mock.calls[tasks.mock.calls.length - 1]?.[0].snapshot).toBe(
+        refreshed,
+      );
+      expect(handled).toHaveBeenCalledTimes(consumed + 1);
+    } finally {
+      await React.act(async () => root.unmount());
+      tasks.mockRestore();
+      context.mockRestore();
+      state.mockRestore();
+      await browser.happyDOM.close();
+      for (const [key, descriptor] of originals) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else Reflect.deleteProperty(globalThis, key);
+      }
+    }
+  });
+
   test("Ranger refreshes workspace context when a host becomes ready without resetting edits", async () => {
     const { Window } = await import("happy-dom");
     const browser = new Window({ url: "http://localhost" });

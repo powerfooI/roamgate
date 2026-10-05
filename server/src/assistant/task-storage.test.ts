@@ -136,6 +136,123 @@ const empty = (): SavedTaskState => ({
   requests: [],
 });
 
+function createVersionOne(path: string, saved: SavedTaskState) {
+  const db = new Database(join(path, "tasks.sqlite"), { create: true });
+  try {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE tasks (
+          id TEXT PRIMARY KEY, position INTEGER NOT NULL,
+          status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          next_run_at TEXT, due_at TEXT,
+          title TEXT NOT NULL, prompt TEXT NOT NULL, scope TEXT NOT NULL,
+          schedule TEXT NOT NULL, config TEXT NOT NULL,
+          targets TEXT NOT NULL, workspaces TEXT NOT NULL
+        ) STRICT;
+        CREATE TABLE runs (
+          id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
+          position INTEGER NOT NULL, status TEXT NOT NULL, scheduled_at TEXT NOT NULL,
+          started_at TEXT, finished_at TEXT, error TEXT, manual INTEGER NOT NULL,
+          admission TEXT
+        ) STRICT;
+        CREATE INDEX runs_task ON runs(task_id, position);
+        CREATE TABLE proposals (
+          id TEXT PRIMARY KEY, position INTEGER NOT NULL, status TEXT NOT NULL,
+          created_at TEXT NOT NULL, task_id TEXT,
+          input TEXT NOT NULL, prepared TEXT NOT NULL
+        ) STRICT;
+        CREATE TABLE requests (
+          id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
+          position INTEGER NOT NULL
+        ) STRICT;
+        PRAGMA user_version = 1;
+      `);
+      for (const [position, entry] of saved.tasks.entries()) {
+        const { task, input, config, targets, workspaces } = entry;
+        db.query(
+          "INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ).run(
+          task.id,
+          position,
+          task.status,
+          task.created_at,
+          task.updated_at,
+          task.next_run_at,
+          entry.due_at ?? null,
+          input.title,
+          input.prompt,
+          JSON.stringify(input.scope),
+          JSON.stringify(input.schedule),
+          JSON.stringify(config),
+          JSON.stringify(targets),
+          JSON.stringify(workspaces),
+        );
+        for (const [position, run] of entry.runs.entries()) {
+          const admission = ["queued", "running", "waiting"].includes(
+            run.status,
+          )
+            ? {
+                input: run.input,
+                config: run.config,
+                targets: run.targets,
+                workspaces: run.workspaces,
+              }
+            : null;
+          db.query(
+            "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          ).run(
+            run.id,
+            task.id,
+            position,
+            run.status,
+            run.scheduled_at,
+            run.started_at ?? null,
+            run.finished_at ?? null,
+            run.error,
+            Number(run.manual),
+            admission ? JSON.stringify(admission) : null,
+          );
+        }
+      }
+      for (const [
+        position,
+        { proposal, prepared },
+      ] of saved.proposals.entries()) {
+        const { id, status, created_at, task_id, ...input } = proposal;
+        db.query("INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+          id,
+          position,
+          status,
+          created_at,
+          task_id ?? null,
+          JSON.stringify(input),
+          JSON.stringify(prepared),
+        );
+      }
+      for (const [position, request] of saved.requests.entries())
+        db.query("INSERT INTO requests VALUES (?, ?, ?)").run(
+          request.id,
+          request.task_id,
+          position,
+        );
+    }).immediate();
+  } finally {
+    db.close(true);
+  }
+}
+
+function notification(saved: SavedTaskState) {
+  return {
+    event_key: "agent-completed",
+    kind: "completed" as const,
+    title: "Agent finished",
+    body: "All requested work was verified successfully.",
+    scope_key: "c".repeat(64),
+    run_id: saved.tasks[0]!.runs[1]!.id,
+    created_at: "2026-10-04T00:00:00.000Z",
+  };
+}
+
 test("SQLite round trips queryable plans and keeps admissions only for unfinished runs", () => {
   const path = directory();
   const saved = state();
@@ -152,7 +269,7 @@ test("SQLite round trips queryable plans and keeps admissions only for unfinishe
     expect(db.query("PRAGMA journal_mode").get()).toEqual({
       journal_mode: "wal",
     });
-    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 1 });
+    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 2 });
     expect(db.query("SELECT id, status, title FROM tasks").get()).toEqual({
       id: saved.tasks[0]!.task.id,
       status: "active",
@@ -174,6 +291,118 @@ test("SQLite round trips queryable plans and keeps admissions only for unfinishe
   storage.close();
   expect(open(path).load()).toEqual(loaded);
 });
+
+test("version one migrates every table and retains the default notification behavior", () => {
+  const path = directory();
+  const saved = state();
+  saved.proposals[0]!.proposal.status = "confirmed";
+  saved.proposals[0]!.proposal.task_id = saved.tasks[0]!.task.id;
+  createVersionOne(path, saved);
+  const storage = open(path);
+  const loaded = storage.load();
+  const expected = structuredClone(saved);
+  const finished = expected.tasks[0]!.runs[1]!;
+  delete finished.input;
+  delete finished.config;
+  delete finished.targets;
+  delete finished.workspaces;
+  expect(loaded).toEqual(expected);
+  expect(loaded.tasks[0]!.notifications).toBeUndefined();
+  inspect(path, (db) => {
+    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 2 });
+    expect(
+      db.query("SELECT notification_mode, notifications FROM tasks").get(),
+    ).toEqual({ notification_mode: null, notifications: "[]" });
+  });
+  loaded.tasks[0]!.input.notification_mode = "agent";
+  loaded.tasks[0]!.notifications = [notification(saved)];
+  storage.save(loaded);
+  storage.close();
+  expect(open(path).load()).toEqual(loaded);
+});
+
+test("agent mode and notification receipts survive reload and pruning their source run", () => {
+  const path = directory();
+  const saved = state();
+  const entry = saved.tasks[0]!;
+  entry.input.notification_mode = "agent";
+  entry.runs[0]!.input!.notification_mode = "agent";
+  entry.notifications = [notification(saved)];
+  saved.proposals[0]!.prepared.input.notification_mode = "agent";
+  saved.proposals[0]!.proposal.notification_mode = "agent";
+  const storage = open(path);
+  storage.save(saved);
+  const loaded = storage.load();
+  expect(loaded.tasks[0]!.input.notification_mode).toBe("agent");
+  expect(loaded.tasks[0]!.runs[0]!.input!.notification_mode).toBe("agent");
+  expect(loaded.tasks[0]!.notifications).toEqual(entry.notifications);
+  expect(loaded.proposals).toEqual(saved.proposals);
+  loaded.tasks[0]!.runs = [loaded.tasks[0]!.runs[0]!];
+  storage.save(loaded);
+  storage.close();
+  expect(open(path).load()).toEqual(loaded);
+  inspect(path, (db) =>
+    expect(
+      db.query("SELECT notification_mode, notifications FROM tasks").get(),
+    ).toEqual({
+      notification_mode: "agent",
+      notifications: JSON.stringify(entry.notifications),
+    }),
+  );
+});
+
+test.each([undefined, "status"] as const)(
+  "default notification mode %s retains its original optional shape",
+  (mode) => {
+    const path = directory();
+    const saved = state();
+    if (mode) saved.tasks[0]!.input.notification_mode = mode;
+    const storage = open(path);
+    storage.save(saved);
+    expect(storage.load().tasks[0]!.input).toEqual(saved.tasks[0]!.input);
+    expect(storage.load().tasks[0]!.notifications).toBeUndefined();
+    inspect(path, (db) =>
+      expect(db.query("SELECT notification_mode FROM tasks").get()).toEqual({
+        notification_mode: mode ?? null,
+      }),
+    );
+  },
+);
+
+test.each(["duplicate-column", "invalid-row", "missing-table"] as const)(
+  "a version one %s failure rolls back the entire migration",
+  (damage) => {
+    const path = directory();
+    createVersionOne(path, state());
+    inspect(path, (db) =>
+      db.exec(
+        damage === "duplicate-column"
+          ? "ALTER TABLE tasks ADD COLUMN notifications TEXT NOT NULL DEFAULT '[]'"
+          : damage === "missing-table"
+            ? "DROP TABLE requests"
+            : "UPDATE runs SET admission = NULL WHERE status = 'running'",
+      ),
+    );
+    const original = inspect(path, (db) => ({
+      columns: db.query("PRAGMA table_info(tasks)").all(),
+      tasks: db.query("SELECT * FROM tasks").all(),
+      runs: db.query("SELECT * FROM runs").all(),
+      proposals: db.query("SELECT * FROM proposals").all(),
+    }));
+    expect(() => open(path)).toThrow();
+    inspect(path, (db) => {
+      expect(db.query("PRAGMA user_version").get()).toEqual({
+        user_version: 1,
+      });
+      expect({
+        columns: db.query("PRAGMA table_info(tasks)").all(),
+        tasks: db.query("SELECT * FROM tasks").all(),
+        runs: db.query("SELECT * FROM runs").all(),
+        proposals: db.query("SELECT * FROM proposals").all(),
+      }).toEqual(original);
+    });
+  },
+);
 
 test("a separate SQLite process can read while the writer saves", async () => {
   const path = directory();
@@ -248,7 +477,7 @@ test("deleting every plan preserves an authoritative initialized empty database"
   storage.close();
   expect(open(path).load()).toEqual(empty());
   inspect(path, (db) =>
-    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 1 }),
+    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 2 }),
   );
 });
 
@@ -258,6 +487,9 @@ test.each([
   "future-version",
   "invalid-row",
   "missing-table",
+  "notification-mode",
+  "notification-json",
+  "notification-receipt",
 ] as const)(
   "%s SQLite data fails closed without clearing the database",
   (damage) => {
@@ -274,10 +506,16 @@ test.each([
       inspect(path, (db) =>
         db.exec(
           damage === "future-version"
-            ? "PRAGMA user_version = 2"
+            ? "PRAGMA user_version = 3"
             : damage === "missing-table"
               ? "DROP TABLE requests"
-              : "UPDATE runs SET admission = NULL WHERE status = 'running'",
+              : damage === "notification-mode"
+                ? "UPDATE tasks SET notification_mode = 'invalid'"
+                : damage === "notification-json"
+                  ? "UPDATE tasks SET notifications = 'not JSON'"
+                  : damage === "notification-receipt"
+                    ? "UPDATE tasks SET notifications = '[{}]'"
+                    : "UPDATE runs SET admission = NULL WHERE status = 'running'",
         ),
       );
     }
@@ -302,6 +540,49 @@ test("invalid permissions and duplicate run identifiers cannot overwrite saved t
   }
 });
 
+test.each(["mode", "receipt", "duplicate", "overflow"] as const)(
+  "invalid notification %s cannot overwrite saved tasks",
+  (defect) => {
+    const path = directory();
+    const saved = state();
+    saved.tasks[0]!.input.notification_mode = "agent";
+    saved.tasks[0]!.notifications = [notification(saved)];
+    const storage = open(path);
+    storage.save(saved);
+    const original = storage.load();
+    const changed = structuredClone(original);
+    if (defect === "mode")
+      (
+        changed.tasks[0]!.input as { notification_mode: string }
+      ).notification_mode = "invalid";
+    else if (defect === "receipt")
+      changed.tasks[0]!.notifications![0]!.run_id = "invalid";
+    else if (defect === "duplicate")
+      changed.tasks[0]!.notifications!.push(notification(saved));
+    else
+      changed.tasks[0]!.notifications = Array.from(
+        { length: 101 },
+        (_, index) => ({
+          ...notification(saved),
+          event_key: `completed-${index}`,
+        }),
+      );
+    expect(() => storage.save(changed)).toThrow();
+    expect(storage.load()).toEqual(original);
+  },
+);
+
+test("notification bytes are bounded before materializing their JSON", () => {
+  const path = directory();
+  const storage = open(path);
+  storage.save(state());
+  storage.close();
+  inspect(path, (db) =>
+    db.exec("UPDATE tasks SET notifications = printf('%33000000s', '')"),
+  );
+  expect(() => open(path)).toThrow("Saved Ranger tasks are too large");
+});
+
 test("a failure after deleting old rows rolls back every table and can be retried", () => {
   const path = directory();
   const storage = open(path);
@@ -309,6 +590,8 @@ test("a failure after deleting old rows rolls back every table and can be retrie
   const previous = storage.load();
   const changed = structuredClone(previous);
   changed.tasks[0]!.task.status = "paused";
+  changed.tasks[0]!.input.notification_mode = "agent";
+  changed.tasks[0]!.notifications = [notification(previous)];
   changed.proposals[0]!.proposal.status = "cancelled";
   changed.requests = [];
   inspect(path, (db) =>

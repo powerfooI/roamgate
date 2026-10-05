@@ -28,6 +28,7 @@ import {
   type AssistantWorkspaceRef,
 } from "../../../shared/assistant";
 import { bridge } from "../api";
+import type { RangerTaskNotificationTarget } from "../taskNotifications";
 import {
   assistantActionExecuting,
   callAssistant,
@@ -456,6 +457,8 @@ export function AssistantPanel({
   open,
   floating,
   mobile,
+  requestedTask,
+  onRequestedTaskHandled,
   onClose,
   onToggleFloating,
   onOpenSource,
@@ -463,6 +466,8 @@ export function AssistantPanel({
   open: boolean;
   floating: boolean;
   mobile: boolean;
+  requestedTask?: RangerTaskNotificationTarget | null;
+  onRequestedTaskHandled?: () => void;
   onClose: () => void;
   onToggleFloating: () => void;
   onOpenSource: (source: AssistantSource) => void;
@@ -491,6 +496,12 @@ export function AssistantPanel({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [providerSearch, setProviderSearch] = useState("");
   const [view, setView] = useState<"chat" | "tasks">("chat");
+  useEffect(() => {
+    if (!requestedTask) return;
+    setSettingsOpen(false);
+    setHistoryOpen(false);
+    setView("tasks");
+  }, [requestedTask]);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const followingOutput = useRef(true);
@@ -1598,6 +1609,8 @@ export function AssistantPanel({
       {snapshot ? (
         <AssistantTasks
           active={!showSettings && view === "tasks"}
+          requestedTask={connected && !state.loading ? requestedTask : null}
+          onRequestedTaskHandled={onRequestedTaskHandled}
           snapshot={snapshot}
           connected={connected}
           workspaces={permittedWorkspaces}

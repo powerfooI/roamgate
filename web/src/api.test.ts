@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { AssistantSnapshot } from "../../shared/assistant";
+import type {
+  AssistantSnapshot,
+  AssistantTaskNotification,
+} from "../../shared/assistant";
 import {
   Bridge,
   type ConnectionStatus,
@@ -199,6 +202,94 @@ test("assistant pushes stay global and reject malformed or scoped envelopes", ()
   push({ assistant: snapshot });
   expect(received).toHaveLength(1);
 });
+
+test.each([undefined, false, true])(
+  "assistant notifications require an enabled global channel (%s)",
+  (enabled) => {
+    class AssistantSocket extends HangingWebSocket {
+      static instance: AssistantSocket;
+      constructor() {
+        super();
+        AssistantSocket.instance = this;
+      }
+    }
+    installBrowserGlobals(AssistantSocket as unknown as typeof WebSocket);
+    const bridge = createTestBridge(1000);
+    bridge.connect();
+    const socket = AssistantSocket.instance;
+    socket.readyState = WebSocket.OPEN;
+    const notification: AssistantTaskNotification = {
+      task_id: "8c077fd2-4970-4a27-887a-c3e0701dde92",
+      run_id: "5f021276-176e-4af6-b540-944d7c8c0869",
+      status: "succeeded",
+      title: "Ranger task completed",
+      body: "The requested work has completed.",
+    };
+    const received: AssistantTaskNotification[] = [];
+    const events: unknown[] = [];
+    const unsubscribe = bridge.onAssistantNotification((value) =>
+      received.push(value),
+    );
+    bridge.onEvent((value) => events.push(value));
+    const push = (value: unknown) =>
+      socket.onmessage?.({ data: JSON.stringify(value) } as MessageEvent);
+    const hello = {
+      hello: true,
+      bridge_protocol_version: 2,
+      default_connection_id: "alpha",
+      capabilities: { connection_id: true, embedded_assistant: enabled },
+    };
+    push({ assistant_notification: notification });
+    push({ ...hello, assistant_notification: notification });
+    expect(bridge.status).toBe("connecting");
+    expect(received).toEqual([]);
+    push(hello);
+    for (const invalid of [
+      null,
+      [],
+      { ...notification, task_id: "invalid" },
+      { ...notification, run_id: "invalid" },
+      { ...notification, status: "running" },
+      { ...notification, title: "" },
+      { ...notification, title: "x".repeat(201) },
+      { ...notification, body: 123 },
+      { ...notification, body: "x".repeat(401) },
+    ]) {
+      push({ assistant_notification: invalid });
+    }
+    for (const extra of [
+      { connection_id: "alpha" },
+      { connection_generation: 2 },
+      { assistant: {} },
+      { event: "workspace.created", data: {} },
+      { terminal: {} },
+      { terminal_clipboard: {} },
+      { terminal_closed: {} },
+      { popup: null },
+      { control: { type: "pause_connection" } },
+      { id: "1", result: {} },
+    ]) {
+      push({ assistant_notification: notification, ...extra });
+    }
+    expect(received).toEqual([]);
+    expect(events).toEqual([]);
+    bridge.setActiveConnection("beta");
+    for (const status of ["succeeded", "failed", "waiting"] as const) {
+      push({ assistant_notification: { ...notification, status } });
+    }
+    expect(received).toEqual(
+      enabled
+        ? (["succeeded", "failed", "waiting"] as const).map((status) => ({
+            ...notification,
+            status,
+          }))
+        : [],
+    );
+    unsubscribe();
+    push({ assistant_notification: notification });
+    expect(received).toHaveLength(enabled ? 3 : 0);
+  },
+);
 
 describe("bridge connection lifecycle", () => {
   test("marks the bridge connected only after a valid hello", async () => {

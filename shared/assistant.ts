@@ -79,6 +79,20 @@ export type AssistantTaskInput = {
   prompt: string;
   scope: AssistantWorkspaceRef[];
   schedule: AssistantTaskSchedule;
+  notification_mode?: "status" | "agent";
+};
+
+export type AssistantNotificationInput = {
+  event_key: string;
+  kind: "completed" | "attention";
+  title: string;
+  body: string;
+};
+
+export type AssistantNotificationReceipt = AssistantNotificationInput & {
+  run_id: string;
+  created_at: string;
+  scope_key: string;
 };
 
 export type AssistantTaskRun = {
@@ -90,6 +104,35 @@ export type AssistantTaskRun = {
   finished_at?: string;
   error: string | null;
 };
+
+export type AssistantTaskNotification = {
+  task_id: string;
+  run_id: string;
+  status: "succeeded" | "failed" | "waiting";
+  title: string;
+  body: string;
+};
+
+export function isAssistantTaskNotification(
+  value: unknown,
+): value is AssistantTaskNotification {
+  const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
+  return (
+    record(value) &&
+    text(value.task_id) &&
+    uuid.test(value.task_id) &&
+    text(value.run_id) &&
+    uuid.test(value.run_id) &&
+    (value.status === "succeeded" ||
+      value.status === "failed" ||
+      value.status === "waiting") &&
+    text(value.title) &&
+    !!value.title.trim() &&
+    value.title.length <= 200 &&
+    text(value.body) &&
+    value.body.length <= 400
+  );
+}
 
 export type AssistantTask = AssistantTaskInput & {
   id: string;
@@ -201,6 +244,9 @@ export function isAssistantTaskInput(
     !text(value.prompt) ||
     !value.prompt.trim() ||
     value.prompt.length > 32_000 ||
+    (value.notification_mode !== undefined &&
+      value.notification_mode !== "status" &&
+      value.notification_mode !== "agent") ||
     !Array.isArray(value.scope) ||
     !value.scope.length ||
     value.scope.length > ASSISTANT_MAX_WORKSPACES ||

@@ -28,7 +28,8 @@ const schema = `
     next_run_at TEXT, due_at TEXT,
     title TEXT NOT NULL, prompt TEXT NOT NULL, scope TEXT NOT NULL,
     schedule TEXT NOT NULL, config TEXT NOT NULL,
-    targets TEXT NOT NULL, workspaces TEXT NOT NULL
+    targets TEXT NOT NULL, workspaces TEXT NOT NULL,
+    notification_mode TEXT, notifications TEXT NOT NULL DEFAULT '[]'
   ) STRICT;
   CREATE TABLE runs (
     id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
@@ -63,6 +64,8 @@ type TaskRow = {
   config: string;
   targets: string;
   workspaces: string;
+  notification_mode: string | null;
+  notifications: string;
 };
 type RunRow = {
   id: string;
@@ -140,11 +143,10 @@ export function openTaskStorage(
   };
   try {
     db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000");
-    if (
-      existing &&
-      db.query<{ user_version: number }, []>("PRAGMA user_version").get()
-        ?.user_version !== 1
-    )
+    const version = db
+      .query<{ user_version: number }, []>("PRAGMA user_version")
+      .get()!.user_version;
+    if (existing && ![1, 2].includes(version))
       throw new Error("Unsupported Ranger task database");
     if (
       db.query<{ journal_mode: string }, []>("PRAGMA journal_mode = WAL").get()
@@ -159,7 +161,11 @@ export function openTaskStorage(
         "DELETE FROM requests; DELETE FROM runs; DELETE FROM tasks; DELETE FROM proposals",
       );
       const taskInsert = db.query(
-        "INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        `INSERT INTO tasks (
+          id, position, status, created_at, updated_at, next_run_at, due_at,
+          title, prompt, scope, schedule, config, targets, workspaces,
+          notification_mode, notifications
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const runInsert = db.query(
         "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -181,6 +187,8 @@ export function openTaskStorage(
           JSON.stringify(config),
           JSON.stringify(targets),
           JSON.stringify(workspaces),
+          input.notification_mode ?? null,
+          JSON.stringify(entry.notifications ?? []),
         );
         for (const [position, run] of entry.runs.entries()) {
           const admission: PreparedTask | null = [
@@ -232,12 +240,6 @@ export function openTaskStorage(
         requestInsert.run(request.id, request.task_id, position);
     }
 
-    if (!existing)
-      db.transaction(() => {
-        db.exec(schema);
-        db.exec("PRAGMA user_version = 1");
-      }).immediate();
-
     const load = db.transaction(() => {
       // Bound row counts and payloads before materializing JSON from disk.
       let bytes = 0;
@@ -259,6 +261,8 @@ export function openTaskStorage(
             "config",
             "targets",
             "workspaces",
+            "notification_mode",
+            "notifications",
           ],
         ],
         [
@@ -297,38 +301,47 @@ export function openTaskStorage(
       const tasks = db
         .query<TaskRow, []>("SELECT * FROM tasks ORDER BY position")
         .all()
-        .map((row) => ({
-          task: {
-            id: row.id,
-            status: row.status,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            next_run_at: row.next_run_at,
-          },
-          due_at: row.due_at ?? undefined,
-          input: {
-            title: row.title,
-            prompt: row.prompt,
-            scope: JSON.parse(row.scope),
-            schedule: JSON.parse(row.schedule),
-          },
-          config: JSON.parse(row.config),
-          targets: JSON.parse(row.targets),
-          workspaces: JSON.parse(row.workspaces),
-          runs: runs
-            .filter((run) => run.task_id === row.id)
-            .map((run) => ({
-              ...(run.admission === null ? {} : JSON.parse(run.admission)),
-              id: run.id,
-              task_id: run.task_id,
-              status: run.status,
-              scheduled_at: run.scheduled_at,
-              started_at: run.started_at ?? undefined,
-              finished_at: run.finished_at ?? undefined,
-              error: run.error,
-              manual: run.manual === 1,
-            })),
-        }));
+        .map((row) => {
+          const notifications: unknown = JSON.parse(row.notifications);
+          return {
+            task: {
+              id: row.id,
+              status: row.status,
+              created_at: row.created_at,
+              updated_at: row.updated_at,
+              next_run_at: row.next_run_at,
+            },
+            due_at: row.due_at ?? undefined,
+            input: {
+              title: row.title,
+              prompt: row.prompt,
+              scope: JSON.parse(row.scope),
+              schedule: JSON.parse(row.schedule),
+              ...(row.notification_mode === null
+                ? {}
+                : { notification_mode: row.notification_mode }),
+            },
+            config: JSON.parse(row.config),
+            targets: JSON.parse(row.targets),
+            workspaces: JSON.parse(row.workspaces),
+            ...(Array.isArray(notifications) && notifications.length === 0
+              ? {}
+              : { notifications }),
+            runs: runs
+              .filter((run) => run.task_id === row.id)
+              .map((run) => ({
+                ...(run.admission === null ? {} : JSON.parse(run.admission)),
+                id: run.id,
+                task_id: run.task_id,
+                status: run.status,
+                scheduled_at: run.scheduled_at,
+                started_at: run.started_at ?? undefined,
+                finished_at: run.finished_at ?? undefined,
+                error: run.error,
+                manual: run.manual === 1,
+              })),
+          };
+        });
       if (
         runs.some(
           (run) =>
@@ -357,8 +370,24 @@ export function openTaskStorage(
         .all();
       return validate({ tasks, proposals, requests });
     });
+    if (!existing)
+      db.transaction(() => {
+        db.exec(schema);
+        db.exec("PRAGMA user_version = 2");
+        load();
+      }).immediate();
+    else if (version === 1)
+      db.transaction(() => {
+        db.exec(`
+          ALTER TABLE tasks ADD COLUMN notification_mode TEXT;
+          ALTER TABLE tasks ADD COLUMN notifications TEXT NOT NULL DEFAULT '[]';
+        `);
+        // Validate every table before committing the schema upgrade.
+        load();
+        db.exec("PRAGMA user_version = 2");
+      }).immediate();
     // Fail closed during construction, including a missing or damaged table.
-    load();
+    else load();
     const save = db.transaction((state: SavedTaskState) =>
       write(validate(state)),
     );

@@ -13,7 +13,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { type AssistantDriver, createPiDriver } from "./pi-driver";
-import { actionTools, type WorkspaceToolResult, workspaceTools } from "./tools";
+import {
+  actionTools,
+  notificationTools,
+  type WorkspaceToolResult,
+  workspaceTools,
+} from "./tools";
 
 function durableEntries(directory: string, entries: unknown[]) {
   const pointer = entries[0] as { id: string };
@@ -112,7 +117,11 @@ async function durableFixture(reply: (index: number) => Response) {
       anthropic: { type: "api_key", key: "synthetic-local-key" },
     }),
   );
-  const requests: { messages: unknown[]; tools: { name: string }[] }[] = [];
+  const requests: {
+    messages: unknown[];
+    tools: { name: string }[];
+    system: unknown;
+  }[] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -218,6 +227,7 @@ test("task tools use shared credentials with isolated durable storage and never 
   const proposed = {
     title: "Daily status",
     prompt: "Summarize the workspace status.",
+    notification_mode: "agent",
     scope: [{ connection_id: "local", workspace_id: "workspace" }],
     schedule: { type: "daily", time: "09:00", timezone: "Asia/Shanghai" },
   };
@@ -278,6 +288,119 @@ test("task tools use shared credentials with isolated durable storage and never 
     await f.cleanup();
   }
 });
+
+test("confirmed task notification tools preserve custom content, run after reads and recover without resending", async () => {
+  const notification = {
+    event_key: "agent-session-1:verified-success",
+    kind: "completed" as const,
+    title: "Release checks passed",
+    body: "The Agent confirmed all release checks passed. Review its result.",
+  };
+  const receipt = JSON.stringify({ accepted: true, notification });
+  const f = await durableFixture((index) =>
+    modelReply(
+      index,
+      index === 1
+        ? [
+            ...toolUse(
+              "workspace_history",
+              "read-outcome",
+              { pane_id: "agent-pane" },
+              0,
+            ),
+            ...toolUse(
+              "send_user_notification",
+              "notify-outcome",
+              notification,
+              1,
+            ),
+            ...finish("tool_use"),
+          ]
+        : [...text("The notification was accepted."), ...finish("end_turn")],
+    ),
+  );
+  let sends = 0;
+  let reads = 0;
+  let readFinished = false;
+  const notify: NonNullable<
+    Parameters<AssistantDriver["run"]>[0]["notify"]
+  > = async (input, signal) => {
+    expect(readFinished).toBe(true);
+    expect(input).toEqual(notification);
+    expect(signal).toBeInstanceOf(AbortSignal);
+    sends++;
+    return { text: receipt };
+  };
+  try {
+    const first = f.createDriver();
+    const saved = await first.run(
+      f.input({
+        notify,
+        read: async (kind, params) => {
+          expect(kind).toBe("history");
+          expect(params).toEqual({ pane_id: "agent-pane" });
+          reads++;
+          await Bun.file(join(f.directory, "auth.json")).text();
+          readFinished = true;
+          return {
+            text: "Agent session 1 completed successfully; release checks passed.",
+          };
+        },
+      }),
+    );
+    expect(sends).toBe(1);
+    expect(reads).toBe(1);
+    expect(f.requests).toHaveLength(2);
+    expect(f.requests[0]?.tools.map((tool) => tool.name)).toEqual([
+      ...workspaceTools.map((tool) => tool.name),
+      ...notificationTools.map((tool) => tool.name),
+    ]);
+    expect(JSON.stringify(f.requests[1]?.messages)).toContain(
+      "Release checks passed",
+    );
+    expect(JSON.stringify(f.requests[1]?.messages)).toContain(
+      "verified-success",
+    );
+    const prompt = JSON.stringify(f.requests[0]);
+    for (const text of [
+      "notification_mode agent",
+      "idle alone is not proof of success",
+      "prior notification receipts",
+      "never claim the user received it",
+      "stay quiet",
+    ])
+      expect(prompt).toContain(text);
+    const results = durableEntries(f.directory, saved)
+      .flatMap((entry) => entry.model ?? [])
+      .filter((message) => message.role === "toolResult");
+    expect(
+      results.map((result) => result.role === "toolResult" && result.toolName),
+    ).toEqual(["workspace_history", "send_user_notification"]);
+    expect(results[1]?.role === "toolResult" && results[1].content).toEqual([
+      { type: "text", text: receipt },
+    ]);
+    await first.dispose();
+    const second = f.createDriver();
+    const activities: string[] = [];
+    await second.run(
+      f.input({
+        entries: saved,
+        recover: true,
+        notify,
+        tool: (_id, name, status) => activities.push(`${name}:${status}`),
+      }),
+    );
+    expect(sends).toBe(1);
+    expect(reads).toBe(1);
+    expect(f.requests).toHaveLength(2);
+    expect(activities).toEqual([
+      "workspace_history:completed",
+      "send_user_notification:completed",
+    ]);
+  } finally {
+    await f.cleanup();
+  }
+}, 3000);
 
 test("durable completion checkpoints before admission, deduplicates a restarted request and restores its answer and sources", async () => {
   let checkpoints = 0;
@@ -558,19 +681,31 @@ test("SQLite pauses a committed partial without aborting the durable submission 
   }
 }, 3000);
 
-test.each(["read", "proposal"] as const)(
+test.each(["read", "proposal", "notification"] as const)(
   "interrupted %s tools follow their declared replay policy",
   async (kind) => {
-    const name = kind === "read" ? "workspace_status" : "propose_agent_prompt";
+    const name =
+      kind === "read"
+        ? "workspace_status"
+        : kind === "proposal"
+          ? "propose_agent_prompt"
+          : "send_user_notification";
     const params =
       kind === "read"
         ? {}
-        : {
-            connection_id: "local",
-            workspace_id: "workspace",
-            pane_id: "pane",
-            prompt: "Review",
-          };
+        : kind === "proposal"
+          ? {
+              connection_id: "local",
+              workspace_id: "workspace",
+              pane_id: "pane",
+              prompt: "Review",
+            }
+          : {
+              event_key: "agent-session-1:completed",
+              kind: "completed",
+              title: "Agent finished",
+              body: "Workspace history confirms completion.",
+            };
     const f = await durableFixture((index) =>
       modelReply(
         index,
@@ -607,6 +742,7 @@ test.each(["read", "proposal"] as const)(
           },
           read: callback,
           propose: callback,
+          notify: (input, signal) => callback(undefined, input, signal),
         }),
       );
       await began.promise;
@@ -620,6 +756,7 @@ test.each(["read", "proposal"] as const)(
           recover: true,
           read: callback,
           propose: callback,
+          notify: (input, signal) => callback(undefined, input, signal),
           tool: (_id, _name, status) => states.push(status),
         }),
       );
@@ -631,7 +768,7 @@ test.each(["read", "proposal"] as const)(
         .filter((message) => message.role === "toolResult");
       expect(results).toHaveLength(1);
       expect(results[0]?.role === "toolResult" && results[0].isError).toBe(
-        kind === "proposal",
+        kind !== "read",
       );
       expect(
         durableEntries(f.directory, pointer).filter(

@@ -1,12 +1,15 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type {
   AssistantConfig,
+  AssistantNotificationInput,
+  AssistantNotificationReceipt,
   AssistantSnapshot,
   AssistantTask,
   AssistantTaskDetail,
   AssistantTaskInput,
+  AssistantTaskNotification,
   AssistantTaskProposal,
   AssistantTaskRun,
   AssistantWorkspace,
@@ -20,12 +23,30 @@ import {
   openTaskStorage,
   type TaskStorage,
 } from "./task-storage";
+import type { WorkspaceToolResult } from "./tools";
 
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
 const MAX_TASKS = 50;
 const MAX_RUNS = 20;
+const MAX_NOTIFICATIONS = 100;
 const key = (ref: { connection_id: string; workspace_id: string }) =>
   `${ref.connection_id}\0${ref.workspace_id}`;
+const notificationScopeKey = (targets: RecoveryTarget[]) =>
+  createHash("sha256")
+    .update(
+      JSON.stringify(
+        [...targets]
+          .sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0))
+          .map((target) => [
+            target.connection_id,
+            target.workspace_id,
+            target.endpoint_fingerprint,
+            target.herdr_boot_id,
+            target.workspace_identity,
+          ]),
+      ),
+    )
+    .digest("hex");
 
 export type PreparedTask = {
   input: AssistantTaskInput;
@@ -43,6 +64,7 @@ type SavedTask = PreparedTask & {
     "id" | "status" | "created_at" | "updated_at" | "next_run_at"
   >;
   runs: StoredTaskRun[];
+  notifications?: AssistantNotificationReceipt[];
   due_at?: string;
 };
 type SavedProposal = {
@@ -75,8 +97,14 @@ export function validateTaskInput(value: unknown): AssistantTaskInput {
   if (
     !record(value) ||
     Object.keys(value).some(
-      (field) => !["title", "prompt", "scope", "schedule"].includes(field),
+      (field) =>
+        !["title", "prompt", "scope", "schedule", "notification_mode"].includes(
+          field,
+        ),
     ) ||
+    (value.notification_mode !== undefined &&
+      value.notification_mode !== "status" &&
+      value.notification_mode !== "agent") ||
     !Array.isArray(value.scope) ||
     !value.scope.length ||
     value.scope.length > 64
@@ -102,7 +130,51 @@ export function validateTaskInput(value: unknown): AssistantTaskInput {
     prompt: text(value.prompt, 32_000),
     scope,
     schedule: validateTaskSchedule(value.schedule),
+    ...(value.notification_mode !== undefined
+      ? { notification_mode: value.notification_mode }
+      : {}),
   };
+}
+function validNotificationInput(value: unknown) {
+  return (
+    record(value) &&
+    (value.kind === "completed" || value.kind === "attention") &&
+    (
+      [
+        [value.event_key, 200],
+        [value.title, 200],
+        [value.body, 400],
+      ] as const
+    ).every(
+      ([content, limit]) =>
+        typeof content === "string" &&
+        !!content.trim() &&
+        content.length <= limit,
+    )
+  );
+}
+function validNotifications(value: unknown) {
+  return (
+    value === undefined ||
+    (Array.isArray(value) &&
+      value.length <= MAX_NOTIFICATIONS &&
+      value.every(
+        (notification) =>
+          record(notification) &&
+          validNotificationInput(notification) &&
+          typeof notification.run_id === "string" &&
+          UUID.test(notification.run_id) &&
+          typeof notification.created_at === "string" &&
+          Number.isFinite(Date.parse(notification.created_at)) &&
+          typeof notification.scope_key === "string" &&
+          /^[a-f0-9]{64}$/.test(notification.scope_key),
+      ) &&
+      new Set(
+        value.map((notification) =>
+          JSON.stringify([notification.scope_key, notification.event_key]),
+        ),
+      ).size === value.length)
+  );
 }
 function validPrepared(value: unknown): value is PreparedTask {
   if (!record(value) || !record(value.config)) return false;
@@ -156,6 +228,33 @@ function validPrepared(value: unknown): value is PreparedTask {
     return false;
   }
 }
+function validSavedProposal(entry: SavedProposal) {
+  try {
+    const proposal = entry.proposal;
+    const input = validateTaskInput({
+      title: proposal.title,
+      prompt: proposal.prompt,
+      scope: proposal.scope,
+      schedule: proposal.schedule,
+      ...(proposal.notification_mode !== undefined
+        ? { notification_mode: proposal.notification_mode }
+        : {}),
+    });
+    const expected = validateTaskInput(entry.prepared.input);
+    return (
+      JSON.stringify({
+        ...input,
+        notification_mode: input.notification_mode ?? "status",
+      }) ===
+      JSON.stringify({
+        ...expected,
+        notification_mode: expected.notification_mode ?? "status",
+      })
+    );
+  } catch {
+    return false;
+  }
+}
 function receipt(run: StoredTaskRun): AssistantTaskRun {
   const { id, task_id, status, scheduled_at, started_at, finished_at, error } =
     run;
@@ -186,6 +285,7 @@ export function validateSavedTasks(saved: unknown): SavedTaskState {
     !saved.tasks.every(
       (entry: SavedTask) =>
         validPrepared(entry) &&
+        validNotifications(entry.notifications) &&
         UUID.test(entry.task?.id) &&
         ["active", "paused", "cancelled"].includes(entry.task.status) &&
         [entry.task.created_at, entry.task.updated_at].every((date) =>
@@ -227,6 +327,7 @@ export function validateSavedTasks(saved: unknown): SavedTaskState {
     !saved.proposals.every(
       (entry: SavedProposal) =>
         validPrepared(entry.prepared) &&
+        validSavedProposal(entry) &&
         UUID.test(entry.proposal?.id) &&
         ["pending", "confirmed", "cancelled"].includes(entry.proposal.status),
     ) ||
@@ -258,6 +359,7 @@ export function validateSavedTasks(saved: unknown): SavedTaskState {
 export function createAssistantTasks(options: {
   directory: string;
   publish(): void;
+  notify?(notification: AssistantTaskNotification): void;
   validate(prepared: PreparedTask, signal?: AbortSignal): Promise<void>;
   child(
     run: SavedTaskRun,
@@ -376,6 +478,57 @@ export function createAssistantTasks(options: {
       enabled = false;
       options.publish();
       throw new Error("The Ranger task changes could not be saved.");
+    }
+    if (options.notify) {
+      const previousRuns = new Map(
+        previous.tasks.flatMap((entry) =>
+          entry.runs.map((run) => [run.id, run] as const),
+        ),
+      );
+      for (const entry of tasks)
+        for (const run of entry.runs) {
+          if (
+            (run.status !== "succeeded" &&
+              run.status !== "failed" &&
+              run.status !== "waiting") ||
+            previousRuns.get(run.id)?.status === run.status
+          )
+            continue;
+          if (
+            run.status === "succeeded" &&
+            (previousRuns.get(run.id)?.input?.notification_mode === "agent" ||
+              run.input?.notification_mode === "agent" ||
+              entry.notifications?.some(
+                (notification) => notification.run_id === run.id,
+              ))
+          )
+            continue;
+          const title =
+            previousRuns.get(run.id)?.input?.title ??
+            run.input?.title ??
+            entry.input.title;
+          const status = run.status;
+          try {
+            options.notify({
+              task_id: entry.task.id,
+              run_id: run.id,
+              status,
+              title:
+                status === "succeeded"
+                  ? "Ranger task completed"
+                  : status === "failed"
+                    ? "Ranger task failed"
+                    : "Ranger task needs confirmation",
+              body: `${title}: ${
+                status === "succeeded"
+                  ? "completed successfully."
+                  : status === "failed"
+                    ? "failed. Open Ranger to review the task."
+                    : "needs your confirmation. Open Ranger to review the pending action."
+              }`,
+            });
+          } catch {}
+        }
     }
     options.publish();
     const retained = new Set(
@@ -670,6 +823,89 @@ export function createAssistantTasks(options: {
     invalid: () => invalid,
     error: () => fault,
     summaries: () => tasks.map(summary),
+    notificationHistory: (
+      taskId: unknown,
+      runId?: unknown,
+    ): AssistantNotificationReceipt[] => {
+      const entry = find(taskId);
+      const run =
+        runId === undefined
+          ? undefined
+          : entry.runs.find((run) => run.id === runId);
+      if (runId !== undefined && (!run || !validPrepared(run)))
+        throw new Error("The original task run is no longer available.");
+      const scopeKey = notificationScopeKey(run?.targets ?? entry.targets);
+      return structuredClone(
+        entry.notifications?.filter(
+          (notification) => notification.scope_key === scopeKey,
+        ) ?? [],
+      );
+    },
+    async notifyRun(
+      taskId: unknown,
+      runId: unknown,
+      input: AssistantNotificationInput,
+      signal?: AbortSignal,
+    ): Promise<WorkspaceToolResult> {
+      if (!options.notify || !validNotificationInput(input))
+        throw new Error("Task notifications are unavailable or invalid.");
+      const notification = structuredClone(input);
+      const active = () => {
+        signal?.throwIfAborted();
+        const entry = find(taskId);
+        const run = entry.runs.find((run) => run.id === runId);
+        if (
+          disposed ||
+          entry.task.status === "cancelled" ||
+          !run ||
+          run.status !== "running" ||
+          !validPrepared(run)
+        )
+          throw new Error("The original task run is no longer active.");
+        return { entry, run };
+      };
+      const original = active();
+      await check(original.entry.task.id, seal(original.run), signal);
+      const { entry, run } = active();
+      const scopeKey = notificationScopeKey(run.targets);
+      if (
+        entry.notifications?.some(
+          (previous) =>
+            previous.scope_key === scopeKey &&
+            previous.event_key === notification.event_key,
+        )
+      )
+        return {
+          text: JSON.stringify({ accepted: false, reason: "already_notified" }),
+        };
+      if (entry.notifications?.some((previous) => previous.run_id === run.id))
+        return {
+          text: JSON.stringify({ accepted: false, reason: "run_limit" }),
+        };
+      change(() => {
+        entry.notifications = [
+          ...(entry.notifications ?? []),
+          {
+            ...notification,
+            scope_key: scopeKey,
+            run_id: run.id,
+            created_at: now(),
+          },
+        ].slice(-MAX_NOTIFICATIONS);
+      });
+      try {
+        options.notify({
+          task_id: entry.task.id,
+          run_id: run.id,
+          status: notification.kind === "completed" ? "succeeded" : "waiting",
+          title: notification.title,
+          body: notification.body,
+        });
+      } catch {}
+      return {
+        text: JSON.stringify({ accepted: true, delivery: "best_effort" }),
+      };
+    },
     proposal: (id: string) =>
       structuredClone(
         proposals.find((entry) => entry.proposal.id === id)?.proposal,

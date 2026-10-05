@@ -493,7 +493,7 @@ export function ConfigurationDialog({
               {s.taskNotificationsEnabled &&
                 (
                   [
-                    ["blocked", "Agent needs input"],
+                    ["blocked", "Task needs attention"],
                     ["completed", "Task completed"],
                   ] as const
                 ).map(([kind, label]) => (
