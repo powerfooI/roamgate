@@ -269,7 +269,7 @@ export async function callWorkspaceTool(
   }
 }
 
-/** The callback records a proposal; execution belongs to the user confirmation path. */
+/** The service decides whether the validated operation needs confirmation. */
 export async function callActionTool(
   name: string,
   params: unknown,
@@ -296,7 +296,7 @@ export async function callActionTool(
   }
 }
 
-/** Task admission remains on the explicit confirmation path. */
+/** Task admission uses the service's current approval policy. */
 export async function callTaskTool(
   name: string,
   params: unknown,

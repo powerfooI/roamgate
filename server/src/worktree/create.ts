@@ -110,7 +110,12 @@ export async function createWorkspaceWorktree(
     rpcParams.cwd = expectedRoot;
   }
   assertCurrent();
-  const result = await runtime.herdr.call("worktree.create", rpcParams);
+  const result = await runtime.herdr.call(
+    "worktree.create",
+    rpcParams,
+    undefined,
+    assertCurrent,
+  );
   assertCurrent();
   let parentTrackingFailed = false;
   await runtime.worktreeParents

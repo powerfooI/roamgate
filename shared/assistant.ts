@@ -16,6 +16,7 @@ export type AssistantConfig = {
   model: string;
   credential_source: "assistant" | "pi";
   allowed_workspaces: AssistantWorkspaceRef[];
+  approval_mode?: "manual" | "auto";
 };
 
 export const ASSISTANT_MODEL_APIS = [
@@ -186,6 +187,7 @@ export type AssistantTask = AssistantTaskInput & {
   next_run_at: string | null;
   workspaces: AssistantWorkspace[];
   model: { provider: string; id: string };
+  approval_mode?: "manual" | "auto";
   current_run?: AssistantTaskRun;
   last_run?: AssistantTaskRun;
 };
@@ -356,6 +358,9 @@ function task(value: unknown): value is AssistantTask {
   const data: Record<string, unknown> = value;
   return (
     text(data.id) &&
+    (data.approval_mode === undefined ||
+      data.approval_mode === "manual" ||
+      data.approval_mode === "auto") &&
     !!data.id &&
     ["active", "paused", "cancelled"].includes(String(data.status)) &&
     timestamp(data.created_at) &&
@@ -545,6 +550,9 @@ export function isAssistantSnapshot(
     !text(config.provider) ||
     !text(config.model) ||
     !["assistant", "pi"].includes(String(config.credential_source)) ||
+    (config.approval_mode !== undefined &&
+      config.approval_mode !== "manual" &&
+      config.approval_mode !== "auto") ||
     !Array.isArray(config.allowed_workspaces) ||
     !config.allowed_workspaces.every(workspaceRef) ||
     !Array.isArray(value.providers) ||

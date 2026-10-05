@@ -414,6 +414,12 @@ test("confirmed actions block further mutations and reconnect never confirms aga
     );
   expect(readAssistantState().draft).toBe("Keep this draft");
 
+  await callAssistant("configure_approval", { approval_mode: "manual" });
+  expect(server.call).toHaveBeenLastCalledWith(
+    "bridge.assistant.configure_approval",
+    { approval_mode: "manual" },
+  );
+
   for (const action of [
     "task.pause",
     "task.cancel",

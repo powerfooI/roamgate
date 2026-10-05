@@ -187,6 +187,9 @@ function validPrepared(value: unknown): value is PreparedTask {
       typeof value.config.model === "string" &&
       !!value.config.model &&
       ["assistant", "pi"].includes(String(value.config.credential_source)) &&
+      (value.config.approval_mode === undefined ||
+        value.config.approval_mode === "manual" ||
+        value.config.approval_mode === "auto") &&
       Array.isArray(value.config.allowed_workspaces) &&
       value.config.allowed_workspaces.length === refs.size &&
       new Set(value.config.allowed_workspaces.map((ref) => key(ref as never)))
@@ -571,6 +574,9 @@ export function createAssistantTasks(options: {
       ...structuredClone(entry.input),
       workspaces: structuredClone(entry.workspaces),
       model: { provider: entry.config.provider, id: entry.config.model },
+      ...(entry.config.approval_mode
+        ? { approval_mode: entry.config.approval_mode }
+        : {}),
       current_run: current(entry) ? receipt(current(entry)!) : undefined,
       last_run: entry.runs.find(
         (run) => !["queued", "running", "waiting"].includes(run.status),
@@ -978,12 +984,13 @@ export function createAssistantTasks(options: {
       });
       return structuredClone(proposal);
     },
-    async confirmProposal(id: string) {
+    async confirmProposal(id: string, authorized?: () => boolean) {
       let entry = proposals.find((value) => value.proposal.id === id);
       if (!entry) throw new Error("This task proposal is no longer available.");
       if (entry.proposal.status !== "pending") return;
       const sealed = seal(entry.prepared);
       await check(`proposal:${id}`, sealed);
+      if (authorized && !authorized()) return;
       entry = proposals.find((value) => value.proposal.id === id);
       if (!entry || entry.proposal.status !== "pending") return;
       if (JSON.stringify(entry.prepared) !== JSON.stringify(sealed))

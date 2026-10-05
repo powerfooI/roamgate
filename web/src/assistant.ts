@@ -130,6 +130,7 @@ export async function callAssistant(
     assistantActionExecuting(state.snapshot) &&
     action !== "get" &&
     action !== "stop" &&
+    action !== "configure_approval" &&
     !action.startsWith("task.")
   ) {
     throw new Error("Wait for the current action to finish.");

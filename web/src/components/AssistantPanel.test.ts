@@ -933,8 +933,18 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
           role: "assistant",
           text: "",
           sent_at: proposal.created_at,
-          tools: [],
-          sources: [],
+          tools: [
+            { id: "read", name: "workspace_status", status: "completed" },
+          ],
+          sources: [
+            {
+              ...workspace,
+              id: "source",
+              kind: "status",
+              title: "Project status",
+              read_at: proposal.created_at,
+            },
+          ],
           actions: proposals,
         },
       ],
@@ -988,6 +998,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
     const toggleFloating = mock(() => {
       panelFloating = !panelFloating;
     });
+    const openSource = mock(() => {});
     const render = async () => {
       await React.act(async () =>
         root.render(
@@ -998,7 +1009,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
             mobile: panelMobile,
             onClose: close,
             onToggleFloating: toggleFloating,
-            onOpenSource() {},
+            onOpenSource: openSource,
           }),
         ),
       );
@@ -1029,6 +1040,41 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
     };
     try {
       await render();
+      const activity = () =>
+        container.querySelector<HTMLDetailsElement>(".assistant-tools")!;
+      const toggleActivity = () => activity().querySelector("summary")!.click();
+      expect(activity().open).toBe(false);
+      expect(
+        activity().querySelector(".assistant-sources button"),
+      ).not.toBeNull();
+      await React.act(async () => toggleActivity());
+      expect(activity().open).toBe(true);
+      await render();
+      expect(activity().open).toBe(true);
+      clientState.snapshot.running = true;
+      await render();
+      await React.act(async () => toggleActivity());
+      expect(activity().open).toBe(false);
+      await React.act(async () => toggleActivity());
+      expect(activity().open).toBe(true);
+      clientState.snapshot.running = false;
+      await render();
+      expect(activity().open).toBe(false);
+      await React.act(async () => toggleActivity());
+      await render();
+      expect(activity().open).toBe(true);
+      await React.act(async () =>
+        activity()
+          .querySelector<HTMLButtonElement>(".assistant-sources button")!
+          .click(),
+      );
+      expect(openSource).toHaveBeenCalledWith(snapshot.messages[0].sources[0]);
+      clientState.snapshot.messages[0].tools = [];
+      await render();
+      expect(activity().querySelector("summary")!.textContent).toContain(
+        "Work performed (1)",
+      );
+      await React.act(async () => toggleActivity());
       await React.act(async () => button("Maximize Ranger").click());
       expect(
         container.querySelector(".assistant-panel.is-maximized"),
@@ -1530,6 +1576,91 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
           model: "my-model",
         },
       });
+      await React.act(async () => button("Ranger settings").click());
+      const workspaceDraft = () =>
+        container.querySelector<HTMLInputElement>(
+          ".assistant-workspaces input",
+        )!;
+      const modelDraft = button("Ranger model").textContent;
+      expect(workspaceDraft().checked).toBe(true);
+      await React.act(async () => workspaceDraft().click());
+      expect(workspaceDraft().checked).toBe(false);
+      const approvalDialog = () =>
+        container.querySelector<HTMLElement>(
+          '[role="dialog"][aria-label="Enable high-permission mode?"]',
+        );
+      const callsBeforeApproval = call.mock.calls.length;
+      await React.act(async () =>
+        button("Enable high-permission mode").click(),
+      );
+      expect(approvalDialog()).not.toBeNull();
+      expect(call).toHaveBeenCalledTimes(callsBeforeApproval);
+      await React.act(async () => button("Cancel", approvalDialog()!).click());
+      expect(approvalDialog()).toBeNull();
+      expect(call).toHaveBeenCalledTimes(callsBeforeApproval);
+      await React.act(async () =>
+        button("Enable high-permission mode").click(),
+      );
+      await React.act(async () =>
+        button("Enable high-permission mode", approvalDialog()!).click(),
+      );
+      expect(approvalDialog()).toBeNull();
+      expect(call).toHaveBeenLastCalledWith("configure_approval", {
+        approval_mode: "auto",
+      });
+      expect(call).toHaveBeenCalledTimes(callsBeforeApproval + 1);
+      clientState.snapshot = {
+        ...clientState.snapshot,
+        config: { ...clientState.snapshot.config, approval_mode: "auto" },
+      };
+      await render();
+      expect(workspaceDraft().checked).toBe(false);
+      expect(button("Ranger model").textContent).toBe(modelDraft);
+      expect(
+        container.querySelector('.assistant-panel-head [role="status"]')
+          ?.textContent,
+      ).toContain("High permission");
+      expect(
+        button("Disable high-permission mode").getAttribute("aria-pressed"),
+      ).toBe("true");
+      clientState.snapshot.running = true;
+      await render();
+      expect(button("Disable high-permission mode").disabled).toBe(false);
+      await React.act(async () =>
+        button("Disable high-permission mode").click(),
+      );
+      expect(call).toHaveBeenLastCalledWith("configure_approval", {
+        approval_mode: "manual",
+      });
+      expect(call).toHaveBeenCalledTimes(callsBeforeApproval + 2);
+      clientState.snapshot = {
+        ...clientState.snapshot,
+        running: false,
+        messages: clientState.snapshot.messages.map((message) => ({
+          ...message,
+          actions: [{ ...proposal, status: "executing" }],
+        })),
+      };
+      await render();
+      expect(button("Disable high-permission mode").disabled).toBe(false);
+      await React.act(async () =>
+        button("Disable high-permission mode").click(),
+      );
+      expect(call).toHaveBeenLastCalledWith("configure_approval", {
+        approval_mode: "manual",
+      });
+      expect(call).toHaveBeenCalledTimes(callsBeforeApproval + 3);
+      clientState.snapshot.config = {
+        ...clientState.snapshot.config,
+        approval_mode: "manual",
+      };
+      await render();
+      expect(button("Enable high-permission mode").disabled).toBe(true);
+      expect(workspaceDraft().checked).toBe(false);
+      expect(
+        container.querySelector('.assistant-panel-head [role="status"]')
+          ?.textContent,
+      ).not.toContain("High permission");
     } finally {
       await React.act(async () => root.unmount());
       for (const spy of [context, state, send, call]) spy.mockRestore();

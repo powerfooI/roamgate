@@ -364,6 +364,16 @@ authorization prompt in the window, choose a default model, select allowed
 workspaces, and **Save connection**. Only the selected workspaces are eligible
 for the chat's per-question reading scope; the default is empty.
 
+**High-permission mode** is a separate Settings control, off by default. Enabling
+it requires an explicit confirmation and applies immediately to new questions
+and newly created or edited tasks. Ranger can then execute its supported workspace,
+worktree, tab, pane, agent and prompt operations, and create schedules, without
+individual approval. It still uses only authorized workspaces and the selected
+question or task scope. Disabling it takes effect before subsequent automatic
+operations, including in running tasks; an operation already dispatched may finish.
+Existing tasks retain their saved mode and need an edit to adopt high-permission
+mode. Ranger's built-in write/command tools remain disabled.
+
 For a compatible endpoint, expand **Configure custom model** and enter a unique
 provider ID, API format, API base URL, model ID, and API key. Supported formats
 are OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages. Use a

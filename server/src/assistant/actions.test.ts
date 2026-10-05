@@ -114,7 +114,10 @@ function fixture(paneId = "w1:p1") {
     async (
       method: string,
       params: Record<string, unknown> = {},
+      _timeout?: number,
+      beforeSend?: () => void,
     ): Promise<any> => {
+      beforeSend?.();
       if (
         [
           "workspace.create",
@@ -281,6 +284,65 @@ function fixture(paneId = "w1:p1") {
 }
 
 describe("confirmed Ranger action targets", () => {
+  test.each(["create_workspace", "create_tab", "start_agent"] as const)(
+    "revocation at native %s dispatch sends nothing and does not enter lost-reply recovery",
+    async (kind) => {
+      const f = fixture();
+      const params =
+        kind === "create_workspace"
+          ? { label: "Revoked" }
+          : kind === "start_agent"
+            ? { pane_id: "w1:p1", agent: "pi" }
+            : {};
+      const prepared = await f.prepare(kind, params);
+      const connected = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      let allowed = true;
+      const original = f.call.getMockImplementation()!;
+      f.call.mockImplementation(async (method, params, timeout, beforeSend) => {
+        if (
+          ["workspace.create", "tab.create", "agent.start"].includes(method)
+        ) {
+          connected.resolve();
+          await release.promise;
+        }
+        return original(method, params, timeout, beforeSend);
+      });
+      const pending = prepared.execute(() => allowed);
+      await connected.promise;
+      allowed = false;
+      release.resolve();
+      expect(await pending).toEqual({
+        status: "failed",
+        detail:
+          "Automatic approval was disabled before dispatch. Nothing was sent.",
+      });
+      expect(f.mutations).toEqual([]);
+    },
+  );
+
+  test("worktree preparation forwards live permission through its awaited shared flow", async () => {
+    const f = fixture();
+    const prepared = await f.prepare("create_worktree", {
+      branch: "feature/revoked",
+    });
+    const fetching = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let allowed = true;
+    const original = f.createWorktree.getMockImplementation()!;
+    f.createWorktree.mockImplementation(async (...args) => {
+      fetching.resolve();
+      await release.promise;
+      return original(...args);
+    });
+    const pending = prepared.execute(() => allowed);
+    await fetching.promise;
+    allowed = false;
+    release.resolve();
+    await pending;
+    expect(f.mutations).toEqual([]);
+  });
+
   test("tab creation stays in the approved workspace and runs once after preview", async () => {
     const f = fixture();
     const prepared = await f.prepare("create_tab", {});
@@ -301,6 +363,7 @@ describe("confirmed Ranger action targets", () => {
       "tab.create",
       { workspace_id: "w1", cwd: "/ranger-actions-fixture", focus: false },
       30_000,
+      expect.any(Function),
     );
     expect(f.workspaces).toHaveLength(1);
   });
@@ -342,6 +405,7 @@ describe("confirmed Ranger action targets", () => {
       "tab.create",
       { workspace_id: "w1", cwd: "/ranger-actions-fixture", focus: false },
       30_000,
+      expect.any(Function),
     );
   });
 
@@ -375,6 +439,7 @@ describe("confirmed Ranger action targets", () => {
           focus: false,
         },
         30_000,
+        expect.any(Function),
       );
       expect(f.panes[0]!.agent).toBe("pi");
       expect(f.tabs).toHaveLength(1);
@@ -525,6 +590,7 @@ describe("confirmed Ranger action targets", () => {
         focus: false,
       },
       30_000,
+      expect.any(Function),
     );
   });
 
@@ -731,6 +797,7 @@ describe("confirmed Ranger action targets", () => {
         timeout_ms: 60_000,
       },
       65_000,
+      expect.any(Function),
     );
     await expect(
       f.prepare("start_agent", { pane_id: "w1:p1", agent: "uninstalled" }),
@@ -753,6 +820,7 @@ describe("confirmed Ranger action targets", () => {
         "agent.start",
         { pane_id: paneId, kind: "pi", name, timeout_ms: 60_000 },
         65_000,
+        expect.any(Function),
       );
       expect(f.mutations).toEqual(["agent.start"]);
       names.push(name);
@@ -944,6 +1012,7 @@ describe("confirmed Ranger action targets", () => {
       "agent.prompt",
       { target: "w1:p1", text: "Feedback:\nPlease add coverage." },
       5000,
+      expect.any(Function),
     );
   });
 

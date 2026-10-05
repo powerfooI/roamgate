@@ -290,6 +290,59 @@ test("task tools use shared credentials with isolated durable storage and never 
   }
 });
 
+test("automatic model tools receive verified receipts and continue with the new pane", async () => {
+  const target = { connection_id: "local", workspace_id: "workspace" };
+  const receipt = JSON.stringify({
+    status: "succeeded",
+    detail: "Verified pane w1:p2",
+  });
+  const f = await durableFixture((index) =>
+    modelReply(
+      index,
+      index === 1
+        ? [
+            ...toolUse("propose_tab_create", "tab", target, 0),
+            ...finish("tool_use"),
+          ]
+        : index === 2
+          ? [
+              ...toolUse(
+                "propose_agent_start",
+                "agent",
+                { ...target, pane_id: "w1:p2", agent: "pi" },
+                0,
+              ),
+              ...finish("tool_use"),
+            ]
+          : [...text("Verified tab and agent created."), ...finish("end_turn")],
+    ),
+  );
+  const calls: string[] = [];
+  try {
+    await f.createDriver().run(
+      f.input({
+        config: { ...f.input().config, approval_mode: "auto" },
+        propose: async (kind, params) => {
+          calls.push(kind);
+          if (kind === "start_agent") expect(params.pane_id).toBe("w1:p2");
+          return { text: receipt };
+        },
+      }),
+    );
+    expect(calls).toEqual(["create_tab", "start_agent"]);
+    expect(f.requests).toHaveLength(3);
+    expect(JSON.stringify(f.requests[1]?.messages)).toContain(
+      "Verified pane w1:p2",
+    );
+    expect(JSON.stringify(f.requests[0])).toContain("High-permission mode");
+    expect(JSON.stringify(f.requests[0]?.tools)).not.toContain(
+      "does not create it",
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("confirmed task notification tools preserve custom content, run after reads and recover without resending", async () => {
   const notification = {
     event_key: "agent-session-1:verified-success",
@@ -682,19 +735,19 @@ test("SQLite pauses a committed partial without aborting the durable submission 
   }
 }, 3000);
 
-test.each(["read", "proposal", "notification"] as const)(
+test.each(["read", "proposal", "automatic", "notification"] as const)(
   "interrupted %s tools follow their declared replay policy",
   async (kind) => {
     const name =
       kind === "read"
         ? "workspace_status"
-        : kind === "proposal"
+        : kind === "proposal" || kind === "automatic"
           ? "propose_agent_prompt"
           : "send_user_notification";
     const params =
       kind === "read"
         ? {}
-        : kind === "proposal"
+        : kind === "proposal" || kind === "automatic"
           ? {
               connection_id: "local",
               workspace_id: "workspace",
@@ -738,6 +791,11 @@ test.each(["read", "proposal", "notification"] as const)(
       const first = f.createDriver();
       const pending = first.run(
         f.input({
+          ...(kind === "automatic"
+            ? {
+                config: { ...f.input().config, approval_mode: "auto" as const },
+              }
+            : {}),
           checkpoint: (entries) => {
             pointer = entries;
           },
@@ -753,6 +811,11 @@ test.each(["read", "proposal", "notification"] as const)(
       const states: string[] = [];
       await second.run(
         f.input({
+          ...(kind === "automatic"
+            ? {
+                config: { ...f.input().config, approval_mode: "auto" as const },
+              }
+            : {}),
           entries: pointer,
           recover: true,
           read: callback,

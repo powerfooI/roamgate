@@ -45,6 +45,30 @@ async function startServer(
 }
 
 describe("HerdrClient one-shot lifecycle", () => {
+  test("rechecks authorization after socket connection and sends no revoked request", async () => {
+    let received = false;
+    let checked = false;
+    let allowed = true;
+    const closed = Promise.withResolvers<void>();
+    const client = new HerdrClient(
+      await startServer(() => {
+        received = true;
+      }),
+    );
+    servers
+      .at(-1)!
+      .once("connection", (socket) => socket.once("close", closed.resolve));
+    const pending = client.call("workspace.create", {}, 8000, () => {
+      checked = true;
+      if (!allowed) throw new Error("Approval revoked");
+    });
+    allowed = false;
+    await expect(pending).rejects.toThrow("Approval revoked");
+    await closed.promise;
+    expect(checked).toBe(true);
+    expect(received).toBe(false);
+  });
+
   test("rejects mismatched and malformed one-shot response envelopes", async () => {
     const wrongId = new HerdrClient(
       await startServer((socket) => {

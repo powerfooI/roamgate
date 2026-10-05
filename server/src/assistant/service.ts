@@ -37,6 +37,7 @@ import {
   type RecoveryTarget,
 } from "./context";
 import { type AssistantDriver, createPiDriver } from "./pi-driver";
+import type { PreparedAssistantAction } from "./actions";
 import type { NotificationToolSender } from "./tools";
 import {
   createAssistantTasks,
@@ -119,11 +120,20 @@ function config(value: Record<string, unknown>): AssistantConfig {
     value.credential_source !== "pi"
   )
     throw new Error("Invalid credential source");
+  if (
+    value.approval_mode !== undefined &&
+    value.approval_mode !== "manual" &&
+    value.approval_mode !== "auto"
+  )
+    throw new Error("Invalid approval mode");
   return {
     provider: value.provider === "" ? "" : string(value.provider, "provider"),
     model: value.model === "" ? "" : string(value.model, "model"),
     credential_source: value.credential_source,
     allowed_workspaces: refs(value.allowed_workspaces),
+    ...(value.approval_mode !== undefined
+      ? { approval_mode: value.approval_mode }
+      : {}),
   };
 }
 
@@ -165,6 +175,7 @@ export function createAssistantService(options: {
   ): AssistantDriver;
   taskRun?: SavedTaskRun;
   globalAllowed?(): AssistantWorkspaceRef[];
+  globalApprovalMode?(): AssistantConfig["approval_mode"];
 }): AssistantService {
   const directory = options.directory ?? assistantDirectory();
   const statePath = join(directory, "state.json");
@@ -241,9 +252,9 @@ export function createAssistantService(options: {
               await checkTaskScope(signal);
               return {
                 preview: prepared.preview,
-                execute: async () => {
+                execute: async (authorized?: () => boolean) => {
                   await checkTaskScope();
-                  const result = await prepared.execute();
+                  const result = await prepared.execute(authorized);
                   await checkTaskScope();
                   return result;
                 },
@@ -266,15 +277,7 @@ export function createAssistantService(options: {
   let recovering = false;
   let awaitingRecovery = false;
   let actionWork: Promise<void> | undefined;
-  const preparedActions = new Map<
-    string,
-    {
-      execute(): Promise<{
-        status: "succeeded" | "failed" | "uncertain";
-        detail: string;
-      }>;
-    }
-  >();
+  const preparedActions = new Map<string, PreparedAssistantAction>();
   let turnController: AbortController | undefined;
   let authController: AbortController | undefined;
   let authWork: Promise<void> | undefined;
@@ -296,6 +299,20 @@ export function createAssistantService(options: {
     error: null,
     auth: null,
   };
+  function autoApprove(admitted: AssistantConfig) {
+    return (
+      !disposed &&
+      admitted.approval_mode === "auto" &&
+      state.config.approval_mode === "auto" &&
+      (!options.taskRun ||
+        (options.globalApprovalMode?.() === "auto" &&
+          options.taskRun.targets.every((target) =>
+            options
+              .globalAllowed?.()
+              .some((ref) => refKey(ref) === refKey(target)),
+          )))
+    );
+  }
   try {
     assertSafeDataPath(statePath);
     if (existsSync(statePath)) {
@@ -676,12 +693,16 @@ export function createAssistantService(options: {
       publish(true);
       return;
     }
+    reserveAction(action, true);
+    startAction(action, prepared);
+  }
+  function reserveAction(action: AssistantAction, clearContext: boolean) {
     // Durably reserve the operation before any effect. A crash leaves an
     // uncertain receipt, never an operation that is automatically retried.
     action.status = "executing";
     action.detail =
       "Executing the confirmed operation and checking its result...";
-    entries = [];
+    if (clearContext) entries = [];
     try {
       persist();
     } catch {
@@ -693,28 +714,43 @@ export function createAssistantService(options: {
         "The confirmation could not be saved. Nothing was executed.",
       );
     }
-    preparedActions.delete(id);
+    preparedActions.delete(action.id);
     publish(true);
-    actionWork = (async () => {
+  }
+  async function executeAction(
+    action: AssistantAction,
+    prepared: PreparedAssistantAction,
+    authorized?: () => boolean,
+  ) {
+    try {
+      const result = await prepared.execute(authorized);
+      action.status = result.status;
+      action.detail = result.detail.slice(0, MAX_TEXT);
+    } catch {
+      action.status = "uncertain";
+      action.detail =
+        "The operation could not be verified. Check the target before proposing another operation; it will not be retried automatically.";
+    } finally {
       try {
-        const result = await prepared.execute();
-        action.status = result.status;
-        action.detail = result.detail.slice(0, MAX_TEXT);
+        persist();
       } catch {
-        action.status = "uncertain";
-        action.detail =
-          "The operation could not be verified. Check the target before proposing another operation; it will not be retried automatically.";
-      } finally {
-        try {
-          persist();
-        } catch {
-          state.error =
-            "The operation result could not be saved. The action will not be replayed.";
-        }
-        actionWork = undefined;
-        publish(true);
+        state.error =
+          "The operation result could not be saved. The action will not be replayed.";
       }
-    })();
+      publish(true);
+    }
+  }
+  function startAction(
+    action: AssistantAction,
+    prepared: PreparedAssistantAction,
+    authorized?: () => boolean,
+  ) {
+    const work = executeAction(action, prepared, authorized).finally(() => {
+      if (actionWork === work) actionWork = undefined;
+      publish(true);
+    });
+    actionWork = work;
+    return work;
   }
   function message(
     role: AssistantMessage["role"],
@@ -815,7 +851,10 @@ export function createAssistantService(options: {
         activeRun = {
           request_id: requestId,
           draft_id: draft.id,
-          config: turnConfig,
+          config:
+            turnConfig.approval_mode === "auto" && !autoApprove(turnConfig)
+              ? { ...turnConfig, approval_mode: "manual" }
+              : turnConfig,
           text: prompt,
           recovery_targets: recoveryTargets,
         };
@@ -871,7 +910,9 @@ export function createAssistantService(options: {
         if (controller.signal.aborted) return;
         assertTaskAllowed();
         entries = await driver.run({
-          config: turnConfig,
+          config: autoApprove(turnConfig)
+            ? turnConfig
+            : { ...turnConfig, approval_mode: "manual" },
           entries,
           signal: controller.signal,
           text: pending.text,
@@ -940,6 +981,10 @@ export function createAssistantService(options: {
                     "This turn already has eight task proposals.",
                   );
                 const prepared = await prepareTask(args, combined, captured);
+                prepared.config = config({
+                  ...prepared.config,
+                  approval_mode: turnConfig.approval_mode,
+                });
                 combined.throwIfAborted();
                 const proposal = await tasks!.propose(prepared, combined);
                 if (combined.aborted) {
@@ -964,6 +1009,15 @@ export function createAssistantService(options: {
                   throw new Error("The task proposal could not be saved.");
                 }
                 publish(true);
+                if (autoApprove(turnConfig)) {
+                  await tasks!.confirmProposal(
+                    proposal.id,
+                    () => autoApprove(turnConfig) && !combined.aborted,
+                  );
+                  Object.assign(proposal, tasks!.proposal(proposal.id));
+                  persist();
+                  publish(true);
+                }
                 return { text: JSON.stringify(proposal) };
               }
             : undefined,
@@ -1006,6 +1060,16 @@ export function createAssistantService(options: {
             }
             preparedActions.set(action.id, prepared);
             publish(true);
+            if (autoApprove(turnConfig)) {
+              if (actionWork)
+                throw new Error("Another Ranger operation is still executing.");
+              reserveAction(action, false);
+              await startAction(
+                action,
+                prepared,
+                () => autoApprove(turnConfig) && !combined.aborted,
+              );
+            }
             return { text: JSON.stringify(action) };
           },
           read: async (kind, args, signal) => {
@@ -1361,6 +1425,7 @@ export function createAssistantService(options: {
           context: baseContext,
           taskRun,
           globalAllowed: () => state.config.allowed_workspaces,
+          globalApprovalMode: () => state.config.approval_mode,
           sendNotification: options.notify
             ? (notification, signal) =>
                 tasks!.notifyRun(
@@ -1511,6 +1576,26 @@ export function createAssistantService(options: {
         return current();
       }
       switch (method) {
+        case "configure_approval": {
+          if (
+            Object.keys(params).some((key) => key !== "approval_mode") ||
+            (params.approval_mode !== "manual" &&
+              params.approval_mode !== "auto")
+          )
+            throw new Error("Invalid approval mode");
+          if (params.approval_mode === "auto") idle();
+          const approval_mode = params.approval_mode;
+          const previous = state.config;
+          state.config = { ...previous, approval_mode };
+          try {
+            persist();
+          } catch {
+            state.config = previous;
+            throw new Error("The approval mode could not be saved.");
+          }
+          publish(true);
+          break;
+        }
         case "get":
           try {
             await catalog();
@@ -1624,7 +1709,10 @@ export function createAssistantService(options: {
             )
               throw new Error("Invalid model");
             saveChange(() => {
-              state.config = next;
+              state.config = config({
+                ...next,
+                approval_mode: state.config.approval_mode,
+              });
               cancelPendingActions(
                 "The Ranger configuration changed. Ask for a fresh preview.",
               );
