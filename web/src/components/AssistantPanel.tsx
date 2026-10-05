@@ -16,7 +16,13 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   ASSISTANT_MAX_WORKSPACES,
   type AssistantAction,
@@ -690,6 +696,8 @@ export function AssistantPanel({
   const [providerSearch, setProviderSearch] = useState("");
   const [view, setView] = useState<"chat" | "tasks">("chat");
   const [confirmApproval, setConfirmApproval] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(380);
+  const [maximumWidth, setMaximumWidth] = useState(380);
   useEffect(() => {
     if (!requestedTask) return;
     setSettingsOpen(false);
@@ -702,6 +710,41 @@ export function AssistantPanel({
   const composing = useRef(false);
   const pendingAction = useRef(false);
   const contextSequence = useRef(0);
+  const panelRef = useRef<HTMLElement>(null);
+  const resizeStart = useRef<{
+    pointerId: number;
+    x: number;
+    width: number;
+    scale: number;
+  } | null>(null);
+  const width = Math.min(panelWidth, maximumWidth);
+  const resizePanel = (next: number) =>
+    setPanelWidth(Math.min(maximumWidth, Math.max(300, next)));
+  useEffect(() => {
+    const surfaces = panelRef.current?.parentElement;
+    if (!open || !surfaces) return;
+    const update = () => {
+      const annotations = surfaces.querySelector<HTMLElement>(
+        ":scope > .annotation-panel:not(.is-floating)",
+      );
+      setMaximumWidth(
+        Math.max(
+          380,
+          surfaces.clientWidth -
+            (annotations?.offsetWidth ?? 0) -
+            (annotations ? 16 : 8) -
+            240,
+        ),
+      );
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(surfaces);
+    const stage = surfaces.querySelector(".workspace-stage");
+    if (stage) observer.observe(stage);
+    return () => observer.disconnect();
+  }, [open, floating, mobile, maximized]);
   const savedConfig = snapshot
     ? JSON.stringify({
         provider: snapshot.config.provider,
@@ -917,7 +960,9 @@ export function AssistantPanel({
 
   return (
     <aside
+      ref={panelRef}
       className={`assistant-panel ${floating ? "is-floating" : ""} ${mobile ? "is-mobile" : maximized ? "is-maximized" : ""}`}
+      style={{ "--assistant-panel-width": `${width}px` } as CSSProperties}
       aria-label="Ranger"
       onKeyDown={(event) => {
         // Global workspace shortcuts must not consume typing inside the panel.
@@ -935,6 +980,69 @@ export function AssistantPanel({
         }
       }}
     >
+      {!floating && !mobile && !maximized ? (
+        <div
+          className="assistant-panel-resizer"
+          role="separator"
+          aria-label="Resize Ranger"
+          aria-orientation="vertical"
+          aria-valuemin={300}
+          aria-valuemax={Math.round(maximumWidth)}
+          aria-valuenow={Math.round(width)}
+          tabIndex={0}
+          title="Drag to resize Ranger; double-click to reset"
+          onPointerDown={(event) => {
+            if (event.button !== 0 || !panelRef.current) return;
+            event.preventDefault();
+            const panel = panelRef.current;
+            resizeStart.current = {
+              pointerId: event.pointerId,
+              x: event.clientX,
+              width: panel.offsetWidth,
+              scale:
+                panel.getBoundingClientRect().width / panel.offsetWidth || 1,
+            };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            const start = resizeStart.current;
+            if (
+              !start ||
+              start.pointerId !== event.pointerId ||
+              !event.currentTarget.hasPointerCapture(event.pointerId)
+            )
+              return;
+            resizePanel(start.width + (start.x - event.clientX) / start.scale);
+          }}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId))
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            resizeStart.current = null;
+          }}
+          onPointerCancel={() => {
+            resizeStart.current = null;
+          }}
+          onLostPointerCapture={() => {
+            resizeStart.current = null;
+          }}
+          onDoubleClick={() => setPanelWidth(380)}
+          onKeyDown={(event) => {
+            const next =
+              event.key === "ArrowLeft"
+                ? width + 24
+                : event.key === "ArrowRight"
+                  ? width - 24
+                  : event.key === "Home"
+                    ? 300
+                    : event.key === "End"
+                      ? maximumWidth
+                      : null;
+            if (next === null) return;
+            event.preventDefault();
+            resizePanel(next);
+          }}
+        />
+      ) : null}
       <header className="assistant-panel-head">
         <Compass size={19} aria-hidden="true" />
         <div>

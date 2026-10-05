@@ -1106,8 +1106,91 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(button("Pin Ranger")).toBeDefined();
 
       panelFloating = false;
+      Object.defineProperty(container, "clientWidth", { value: 1280 });
       await render();
+      const panel = container.querySelector<HTMLElement>(".assistant-panel")!;
+      const panelWidth = () =>
+        Number.parseFloat(
+          panel.style.getPropertyValue("--assistant-panel-width"),
+        );
+      const resizer = () =>
+        container.querySelector<HTMLElement>('[aria-label="Resize Ranger"]');
+      expect(panelWidth()).toBe(380);
+      const handle = resizer()!;
+      const capture = new Set<number>();
+      handle.setPointerCapture = (id) => {
+        capture.add(id);
+      };
+      handle.hasPointerCapture = (id) => capture.has(id);
+      handle.releasePointerCapture = (id) => {
+        capture.delete(id);
+      };
+      Object.defineProperty(panel, "offsetWidth", { get: panelWidth });
+      panel.getBoundingClientRect = () =>
+        ({ width: panelWidth() * 1.5 }) as DOMRect;
+      const pointer = async (type: string, x: number) => {
+        await React.act(async () => {
+          handle.dispatchEvent(
+            new window.PointerEvent(type, {
+              bubbles: true,
+              pointerId: 1,
+              button: 0,
+              clientX: x,
+            }),
+          );
+        });
+      };
+      await pointer("pointerdown", 900);
+      await pointer("pointermove", 720);
+      expect(panelWidth()).toBe(500);
+      await pointer("pointerup", 720);
+      expect(capture.size).toBe(0);
+      await pointer("pointermove", 0);
+      expect(panelWidth()).toBe(500);
+      await pointer("pointerdown", 720);
+      capture.clear();
+      await pointer("pointermove", 0);
+      expect(panelWidth()).toBe(500);
+      await pointer("pointerdown", 720);
+      await pointer("pointercancel", 720);
+      await pointer("pointermove", 0);
+      expect(panelWidth()).toBe(500);
+      const resizeKey = async (key: string) => {
+        await React.act(async () => {
+          handle.dispatchEvent(
+            new window.KeyboardEvent("keydown", {
+              bubbles: true,
+              cancelable: true,
+              key,
+            }),
+          );
+        });
+      };
+      await resizeKey("Home");
+      expect(panelWidth()).toBe(300);
+      await resizeKey("ArrowRight");
+      expect(panelWidth()).toBe(300);
+      await resizeKey("End");
+      expect(panelWidth()).toBe(1032);
+      await resizeKey("ArrowLeft");
+      expect(panelWidth()).toBe(1032);
+      await resizeKey("ArrowRight");
+      expect(panelWidth()).toBe(1008);
+      panelFloating = true;
+      await render();
+      expect(panelWidth()).toBe(1008);
+      expect(resizer()).toBeNull();
+      panelFloating = false;
+      await render();
+      expect(panelWidth()).toBe(1008);
+      await React.act(async () =>
+        resizer()!.dispatchEvent(
+          new window.MouseEvent("dblclick", { bubbles: true }),
+        ),
+      );
+      expect(panelWidth()).toBe(380);
       await React.act(async () => button("Maximize Ranger").click());
+      expect(resizer()).toBeNull();
       await React.act(async () =>
         button("Restore Ranger").dispatchEvent(
           new window.KeyboardEvent("keydown", {
@@ -1138,6 +1221,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       ).not.toBeNull();
       panelMobile = true;
       await render();
+      expect(resizer()).toBeNull();
       expect(
         container.querySelector('[aria-label="Maximize Ranger"]'),
       ).toBeNull();

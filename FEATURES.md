@@ -173,6 +173,8 @@ Ranger is an experimental workspace management assistant.
 Open **Ranger** from the global topbar button or its configurable keyboard
 shortcut. Desktop uses a floating window like Annotations; **Pin Ranger**
 reserves space beside the current workspace. Mobile uses a full chat surface.
+Pinning keeps Ranger's width. Drag its left edge, or focus the edge and use
+Left/Right, to resize the docked panel; double-click the edge to reset its width.
 Use **Maximize Ranger** to fill the workspace area and **Restore Ranger** (or
 Escape) to return to the previous layout.
 The conversation stays available when switching workspaces or connections.

@@ -1,5 +1,6 @@
 .assistant-panel {
-  flex: 0 0 clamp(300px, 30%, 380px);
+  position: relative;
+  flex: 0 0 min(var(--assistant-panel-width, 380px), 100%);
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -17,7 +18,28 @@
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(380px, 100%);
+  width: min(var(--assistant-panel-width, 380px), 100%);
+}
+
+.assistant-panel-resizer {
+  position: absolute;
+  z-index: 2;
+  inset: 0 auto 0 0;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.assistant-panel-resizer:hover,
+.assistant-panel-resizer:focus-visible {
+  outline: none;
+  background: var(--accent-hover);
+}
+
+@container workspace-surfaces (max-width: 900px) {
+  .assistant-panel-resizer {
+    display: none;
+  }
 }
 
 .workspace-surfaces > .assistant-panel.is-maximized:not(.is-mobile) {
