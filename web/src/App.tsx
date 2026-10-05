@@ -44,7 +44,7 @@ import {
   Compass,
   FileDiff,
   FolderTree,
-  GitCommitHorizontal,
+  GitGraph,
   History,
   Info,
   LoaderCircle,
@@ -1898,20 +1898,30 @@ export default function App() {
       setAnnotationsOpen(false);
       setAssistantOpen(true);
       setAssistantMounted(true);
-      if (mobile) setMobileView("assistant");
+      if (mobile) {
+        setMobileTabSheetOpen(false);
+        setMobileView("assistant");
+      }
     }
   }, [assistantVisible, mobile]);
   const closeAssistant = () => {
+    const source = document.activeElement;
     setAssistantOpen(false);
     if (mobile && mobileView === "assistant") setMobileView("session");
-    const terminal = mobile
-      ? null
-      : document.querySelector<HTMLElement>(
-          ".pane-layout-cell.is-active .xterm-helper-textarea, .pane-switcher-layout .xterm-helper-textarea, .workspace-terminal-surface > .terminal-shell .xterm-helper-textarea",
-        );
-    (
-      terminal ?? document.querySelector<HTMLElement>(".assistant-entry")
-    )?.focus();
+    requestAnimationFrame(() => {
+      const terminal = mobile
+        ? null
+        : document.querySelector<HTMLElement>(
+            ".pane-layout-cell.is-active .xterm-helper-textarea, .pane-switcher-layout .xterm-helper-textarea, .workspace-terminal-surface > .terminal-shell .xterm-helper-textarea",
+          );
+      focusIfUnchanged(
+        mobile && mobileControlsCollapsed
+          ? mobileControlsToggleRef.current
+          : (terminal ??
+              document.querySelector<HTMLElement>(".assistant-entry")),
+        source,
+      );
+    });
   };
   const toggleAssistantFloating = () => {
     const next = !assistantFloating;
@@ -3715,6 +3725,36 @@ export default function App() {
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   };
+  const assistantEntry = (
+    <button
+      type="button"
+      className={
+        mobile
+          ? `assistant-entry ${assistantVisible ? "active" : ""}`
+          : `topbar-button assistant-entry ${assistantVisible ? "is-active" : ""}`
+      }
+      title={shortcutTitle("Ranger", "assistant.toggle")}
+      aria-label={
+        assistantSnapshot?.running ||
+        assistantActionExecuting(assistantSnapshot)
+          ? "Ranger is working"
+          : "Open Ranger"
+      }
+      aria-pressed={assistantVisible}
+      tabIndex={mobile && mobileControlsCollapsed ? -1 : 0}
+      onPointerDown={mobile ? blurActiveInput : undefined}
+      onClick={toggleAssistant}
+    >
+      <Compass size={mobile ? 16 : 15} aria-hidden="true" />
+      <span className={mobile ? "mobile-nav-label" : "assistant-entry-label"}>
+        Ranger
+      </span>
+      {assistantSnapshot?.running ||
+      assistantActionExecuting(assistantSnapshot) ? (
+        <span className="assistant-entry-running" aria-hidden="true" />
+      ) : null}
+    </button>
+  );
   return (
     <div
       ref={appRef}
@@ -3747,26 +3787,7 @@ export default function App() {
         </div>
         <div className="topbar-actions">
           <div className="topbar-command-group">
-            <button
-              type="button"
-              className={`topbar-button assistant-entry ${assistantVisible ? "is-active" : ""}`}
-              title={shortcutTitle("Ranger", "assistant.toggle")}
-              aria-label={
-                assistantSnapshot?.running ||
-                assistantActionExecuting(assistantSnapshot)
-                  ? "Ranger is working"
-                  : "Open Ranger"
-              }
-              aria-pressed={assistantVisible}
-              onClick={toggleAssistant}
-            >
-              <Compass size={15} aria-hidden="true" />
-              <span className="assistant-entry-label">Ranger</span>
-              {assistantSnapshot?.running ||
-              assistantActionExecuting(assistantSnapshot) ? (
-                <span className="assistant-entry-running" aria-hidden="true" />
-              ) : null}
-            </button>
+            {!mobile ? assistantEntry : null}
             <CommandCombobox
               key={`${resourceUiKey}:commands`}
               onOpenFileExplorer={openFileExplorer}
@@ -3830,7 +3851,7 @@ export default function App() {
           tabIndex={mobileControlsCollapsed ? -1 : 0}
           onClick={() => openInspector("commits")}
         >
-          <GitCommitHorizontal size={16} />
+          <GitGraph size={16} />
           <span className="mobile-nav-label">Commits</span>
         </button>
         <button
@@ -3878,9 +3899,10 @@ export default function App() {
       />
       <nav
         className="mobile-nav mobile-workspace-tools"
-        aria-label="Workspaces and tabs"
+        aria-label="Ranger, workspaces, and tabs"
         aria-hidden={mobileControlsCollapsed}
       >
+        {mobile ? assistantEntry : null}
         <button
           type="button"
           className={mobileTabSheetOpen ? "active" : ""}

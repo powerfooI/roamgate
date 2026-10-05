@@ -76,7 +76,7 @@
   flex: 1;
   min-width: 0;
   display: grid;
-  gap: 1px;
+  gap: 3px;
 }
 
 .assistant-panel-head strong {
@@ -92,16 +92,38 @@
 
 .assistant-panel-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
 
-.assistant-panel-head .assistant-panel-experimental {
+.assistant-panel-head .assistant-panel-experimental,
+.assistant-panel-head .assistant-panel-access {
   padding: 1px 5px;
   border: 1px solid var(--border-soft);
   border-radius: 4px;
   font-size: 9px;
   line-height: 1.3;
+  white-space: nowrap;
+}
+
+.assistant-panel-head .assistant-panel-access {
+  color: var(--warning-text);
+  background: var(--warning-soft);
+}
+
+.assistant-panel-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.assistant-panel-meta > [role="status"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .assistant-icon-button {
@@ -126,17 +148,12 @@
 .assistant-primary-nav {
   flex: 0 0 auto;
   display: flex;
-  gap: 4px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--viewer-border);
-  background: var(--viewer-header-bg);
+  gap: 2px;
 }
 
 .assistant-primary-nav button {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 10px;
-  font-size: 11px;
+  padding: 2px 6px;
+  font-size: 10px;
 }
 
 .assistant-primary-nav button[aria-pressed="true"] {
@@ -671,14 +688,12 @@
   overflow-wrap: anywhere;
 }
 
-.assistant-tools,
-.assistant-scope-picker {
+.assistant-tools {
   color: var(--muted);
   font-size: 10px;
 }
 
-.assistant-tools summary,
-.assistant-scope-picker summary {
+.assistant-tools summary {
   cursor: pointer;
 }
 
@@ -701,8 +716,19 @@
   overflow-wrap: anywhere;
 }
 
+.assistant-activity-card {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--viewer-border);
+  border-radius: 8px;
+  background: var(--viewer-content-bg);
+  color: var(--text);
+  font-size: 10px;
+}
+
 .assistant-tool-state {
   flex: 0 0 auto;
+  color: var(--muted);
 }
 
 .assistant-tool-state.is-running {
@@ -927,10 +953,8 @@
 }
 
 .assistant-sources button {
-  min-width: 0;
   display: grid;
   gap: 3px;
-  padding: 6px 8px;
   text-align: left;
 }
 
@@ -966,17 +990,9 @@
   font-size: 12px;
 }
 
-.assistant-scope-picker[open] {
+.assistant-compose-input {
   display: grid;
-}
-
-.assistant-scope-picker fieldset {
-  max-height: min(150px, 25dvh);
-  padding-top: 8px;
-}
-
-.assistant-scope-picker > button {
-  margin-top: 7px;
+  gap: 8px;
 }
 
 .assistant-compose-actions > span {
@@ -1012,13 +1028,22 @@
   box-shadow: none;
 }
 
-.assistant-panel.is-mobile button,
-.assistant-panel.is-mobile .assistant-scope-picker summary {
+.assistant-panel.is-mobile button {
   min-height: 44px;
 }
 
-.assistant-panel.is-mobile .assistant-icon-button {
+.assistant-panel.is-mobile .assistant-icon-button,
+.assistant-panel.is-mobile .assistant-primary-nav button {
   min-width: 44px;
+}
+
+.assistant-panel.is-mobile .assistant-panel-head .assistant-icon-button {
+  min-width: 28px;
+  min-height: 28px;
+}
+
+.assistant-panel.is-mobile .assistant-primary-nav button {
+  min-height: 26px;
 }
 
 .assistant-panel.is-mobile .assistant-workspace-choice {
@@ -1028,6 +1053,28 @@
 
 .assistant-panel.is-mobile .assistant-panel-footer {
   padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+}
+
+.assistant-panel.is-mobile .assistant-compose-input {
+  position: relative;
+  display: block;
+}
+
+.assistant-panel.is-mobile .assistant-compose-input textarea {
+  display: block;
+  padding-right: 58px;
+}
+
+.assistant-panel.is-mobile .assistant-compose-actions {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+}
+
+.assistant-panel.is-mobile .assistant-compose-actions > button {
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
 }
 
 .assistant-panel.is-mobile textarea,

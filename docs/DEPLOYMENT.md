@@ -361,16 +361,18 @@ Open the global **Ranger** window and its **Settings** button. Choose
 **Ranger connection** or **Shared Pi credentials**, select a provider, and use the available **Sign in**
 or **Enter API key** action. Complete the provider's web/device-code or manual
 authorization prompt in the window, choose a default model, select allowed
-workspaces, and **Save connection**. Only the selected workspaces are eligible
-for the chat's per-question reading scope; the default is empty.
+workspaces, and **Save connection**. Each question automatically uses saved
+authorized workspaces that are currently available; no workspaces are authorized
+by default.
 
 **High-permission mode** is a separate Settings control, off by default. Enabling
 it requires an explicit confirmation and applies immediately to new questions
 and newly created or edited tasks. Ranger can then execute its supported workspace,
 worktree, tab, pane, agent and prompt operations, and create schedules, without
-individual approval. It still uses only authorized workspaces and the selected
-question or task scope. Disabling it takes effect before subsequent automatic
-operations, including in running tasks; an operation already dispatched may finish.
+individual approval. It still uses only authorized workspaces; scheduled tasks
+retain their own saved scope. Disabling it takes effect before subsequent
+automatic operations, including in running tasks; an operation already dispatched
+may finish.
 Existing tasks retain their saved mode and need an edit to adopt high-permission
 mode. Ranger's built-in write/command tools remain disabled.
 

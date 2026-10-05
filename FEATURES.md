@@ -170,9 +170,11 @@ See [History synchronization](docs/HISTORY.md).
 
 Ranger is an experimental workspace management assistant.
 
-Open **Ranger** from the global topbar button or its configurable keyboard
-shortcut. Desktop uses a floating window like Annotations; **Pin Ranger**
-reserves space beside the current workspace. Mobile uses a full chat surface.
+Open **Ranger** from the global topbar button on desktop or the navigation
+capsule on mobile, or use its configurable keyboard shortcut. Desktop uses a
+floating window like Annotations; **Pin Ranger** reserves space beside the
+current workspace. Mobile uses a full chat surface and hides the navigation
+capsule until Ranger closes.
 Pinning keeps Ranger's width. Drag its left edge, or focus the edge and use
 Left/Right, to resize the docked panel; double-click the edge to reset its width.
 Use **Maximize Ranger** to fill the workspace area and **Restore Ranger** (or
@@ -186,9 +188,10 @@ The conversation stays available when switching workspaces or connections.
   and API-key entry in the window. **Configure custom model** connects compatible
   endpoints by API address, format, key, and model ID. Shared mode also reads
   Pi's custom models. See [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
-- Allow workspaces in Settings, then choose the **Reading scope** for each
-  question. **Select all** adds the currently available workspaces; **Clear**
-  removes every selection. Use **Save connection** to apply permission changes.
+- Allow workspaces in Settings. Each question automatically uses saved
+  authorized workspaces that are currently available. **Select all** adds the
+  currently available workspaces; **Clear** removes every selection. Use
+  **Save connection** to apply permission changes.
   Workspace choices use a compact grid that scrolls when the list is long.
   No workspaces are authorized by default, and new workspaces need to be
   selected separately. The scope stays fixed while Ranger streams an answer.

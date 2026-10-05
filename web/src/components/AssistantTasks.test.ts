@@ -702,7 +702,7 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
       await ui.render(ui.current, true);
       expect(ui.get).toHaveBeenLastCalledWith("b", "current");
       expect(ui.container.textContent).toContain("Waiting for approval");
-      expect(ui.container.textContent).toContain("workspace_status");
+      expect(ui.container.textContent).toContain("Workspace status");
       const activity =
         ui.container.querySelector<HTMLDetailsElement>(".assistant-tools")!;
       expect(activity.open).toBe(false);

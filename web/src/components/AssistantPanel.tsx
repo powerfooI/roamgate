@@ -41,6 +41,7 @@ import {
   assistantActionExecuting,
   callAssistant,
   parseAssistantContext,
+  readAssistantState,
   refreshAssistant,
   sendAssistant,
   setAssistantDraft,
@@ -110,6 +111,13 @@ function credentialStatus(provider: AssistantSnapshot["providers"][number]) {
       : "Credentials saved";
 }
 
+const activityLabels = new Map([
+  ["workspace_status", "Workspace status"],
+  ["workspace_diff", "Workspace changes"],
+  ["workspace_terminal", "Terminal output"],
+  ["workspace_history", "Agent history"],
+]);
+
 export function AssistantMessageActivity({
   message,
   running,
@@ -134,8 +142,8 @@ export function AssistantMessageActivity({
       {message.tools.length ? (
         <ul>
           {message.tools.map((tool) => (
-            <li key={tool.id}>
-              <span>{tool.name}</span>
+            <li key={tool.id} className="assistant-activity-card">
+              <span>{activityLabels.get(tool.name) ?? tool.name}</span>
               <span className={`assistant-tool-state is-${tool.status}`}>
                 {tool.status}
               </span>
@@ -149,12 +157,16 @@ export function AssistantMessageActivity({
             <button
               type="button"
               key={source.id}
+              className="assistant-activity-card"
               onClick={() => onOpenSource(source)}
             >
               <span>
                 <ExternalLink size={12} /> {source.title}
               </span>
-              <small>Read {formatUiDateTime(source.read_at)}</small>
+              <small>
+                {activityLabels.get(`workspace_${source.kind}`)} &middot; Read{" "}
+                {formatUiDateTime(source.read_at)}
+              </small>
             </button>
           ))}
         </div>
@@ -687,7 +699,6 @@ export function AssistantPanel({
   const [workspaces, setWorkspaces] = useState<AssistantWorkspace[]>([]);
   const [contextErrors, setContextErrors] = useState<string[]>([]);
   const [contextLoading, setContextLoading] = useState(false);
-  const [scope, setScope] = useState<AssistantWorkspaceRef[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmNew, setConfirmNew] = useState(false);
@@ -760,17 +771,29 @@ export function AssistantPanel({
     snapshot?.auth?.status === "waiting" ||
     snapshot?.auth?.status === "working";
   const executing = assistantActionExecuting(snapshot);
+  const headerStatus = !connected
+    ? "Reconnecting"
+    : executing
+      ? "Executing action"
+      : snapshot?.running
+        ? "Working"
+        : "Idle";
   const operationBusy = busy || executing;
   const completedActions = (snapshot?.messages ?? [])
     .flatMap((message) => message.actions ?? [])
     .filter((action) => !["pending", "executing"].includes(action.status))
     .map((action) => `${action.id}:${action.status}`)
     .join(",");
-  const scopeAvailable = scope.filter(
-    (workspace) =>
-      !!snapshot &&
-      includesWorkspace(snapshot.config.allowed_workspaces, workspace),
-  );
+  const authorizedScope = (available: AssistantWorkspaceRef[]) =>
+    (snapshot?.config.allowed_workspaces ?? [])
+      .filter((workspace) => includesWorkspace(available, workspace))
+      .map(({ connection_id, workspace_id }) => ({
+        connection_id,
+        workspace_id,
+      }));
+  const scope = authorizedScope(workspaces);
+  const unavailableScopeMessage =
+    "No authorized workspaces are currently available. Reconnect or refresh in Ranger settings.";
 
   useEffect(() => {
     if (!savedConfig) return;
@@ -786,9 +809,11 @@ export function AssistantPanel({
       const result = parseAssistantContext(
         await bridge.call("bridge.assistant.context"),
       );
-      if (sequence !== contextSequence.current) return;
-      setWorkspaces(result.workspaces);
-      setContextErrors(result.errors);
+      if (sequence === contextSequence.current) {
+        setWorkspaces(result.workspaces);
+        setContextErrors(result.errors);
+      }
+      return result.workspaces;
     } catch (cause) {
       if (sequence === contextSequence.current)
         setContextErrors([
@@ -872,7 +897,7 @@ export function AssistantPanel({
       snapshot?.running ||
       executing ||
       !state.draft.trim() ||
-      !scopeAvailable.length ||
+      !scope.length ||
       composing.current
     )
       return;
@@ -881,7 +906,20 @@ export function AssistantPanel({
     setError(null);
     followingOutput.current = true;
     try {
-      await sendAssistant(state.draft, scopeAvailable);
+      const available = await loadContext();
+      if (!available)
+        throw new Error("Unable to refresh authorized workspaces. Try again.");
+      const current = readAssistantState().snapshot;
+      if (
+        current?.instance_id !== snapshot?.instance_id ||
+        current?.session_id !== snapshot?.session_id
+      )
+        throw new Error(
+          "The active Ranger chat changed. Select it again before sending.",
+        );
+      const scope = authorizedScope(available);
+      if (!scope.length) throw new Error(unavailableScopeMessage);
+      await sendAssistant(state.draft, scope);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -1044,24 +1082,44 @@ export function AssistantPanel({
         />
       ) : null}
       <header className="assistant-panel-head">
-        <Compass size={19} aria-hidden="true" />
         <div>
           <div className="assistant-panel-title">
-            <strong>Ranger</strong>
-            <span className="assistant-panel-experimental">Experimental</span>
+            <strong title="Experimental workspace management assistant">
+              Ranger
+            </strong>
+            {snapshot?.config.approval_mode === "auto" ? (
+              <span
+                className="assistant-panel-access"
+                aria-label="High-permission mode enabled"
+                title="High-permission mode enabled"
+              >
+                Full access
+              </span>
+            ) : (
+              <span className="assistant-panel-experimental">Experimental</span>
+            )}
           </div>
-          <span role="status">
-            {!connected
-              ? "Reconnecting"
-              : executing
-                ? "Executing action"
-                : snapshot?.running
-                  ? "Working"
-                  : "Workspace management assistant"}
-            {snapshot?.config.approval_mode === "auto"
-              ? " / High permission"
-              : ""}
-          </span>
+          <div className="assistant-panel-meta">
+            <nav className="assistant-primary-nav" aria-label="Ranger views">
+              {(["chat", "tasks"] as const).map((item) => (
+                <button
+                  type="button"
+                  key={item}
+                  className="ghost"
+                  aria-pressed={!showSettings && view === item}
+                  onClick={() => {
+                    setView(item);
+                    setSettingsOpen(false);
+                  }}
+                >
+                  {item === "chat" ? "Chat" : "Tasks"}
+                </button>
+              ))}
+            </nav>
+            <span role="status" title={headerStatus}>
+              {headerStatus}
+            </span>
+          </div>
         </div>
         {!mobile && !maximized ? (
           <button
@@ -1110,23 +1168,6 @@ export function AssistantPanel({
           <X size={16} />
         </button>
       </header>
-
-      <nav className="assistant-primary-nav" aria-label="Ranger views">
-        {(["chat", "tasks"] as const).map((item) => (
-          <button
-            type="button"
-            key={item}
-            className="ghost"
-            aria-pressed={!showSettings && view === item}
-            onClick={() => {
-              setView(item);
-              setSettingsOpen(false);
-            }}
-          >
-            {item === "chat" ? "Chat" : "Tasks"}
-          </button>
-        ))}
-      </nav>
 
       {displayedError ? (
         <div className="assistant-error" role="alert">
@@ -1411,10 +1452,8 @@ export function AssistantPanel({
             </span>
           </div>
           <p className="assistant-hint">
-            Execute supported operations and create schedules without individual
-            confirmations, within authorized workspaces. Newly created or edited
-            tasks keep this mode. Turning it off requires confirmation for
-            subsequent operations; dispatched operations may finish.
+            Skip action and schedule confirmations in authorized workspaces. New
+            or edited tasks keep this mode; started operations may finish.
           </p>
           <button
             type="button"
@@ -1449,10 +1488,11 @@ export function AssistantPanel({
             </button>
           </div>
           <p className="assistant-hint">
-            Select workspaces Ranger may read and manage. Choose the scope of
-            each question in the chat. Actions require confirmation unless
-            high-permission mode is enabled. Selected status, conversations,
-            terminal output, and diffs may be sent to your model provider.
+            Select workspaces Ranger may read and manage. Each question uses
+            saved authorized workspaces that are currently available. Actions
+            require confirmation unless high-permission mode is enabled.
+            Selected status, conversations, terminal output, and diffs may be
+            sent to your model provider.
           </p>
           <div className="assistant-workspace-actions">
             <button
@@ -1591,7 +1631,6 @@ export function AssistantPanel({
             }
             onClick={async () => {
               if (await run("configure", { config })) {
-                setScope(config.allowed_workspaces);
                 setSettingsOpen(false);
               }
             }}
@@ -1645,19 +1684,26 @@ export function AssistantPanel({
               <Plus size={13} /> New chat
             </button>
           </div>
-          {!ready || authPending ? (
+          {!ready || authPending || !scope.length ? (
             <div className="assistant-setup-notice">
               <span>
                 {authPending
                   ? "Provider sign-in is in progress. Open model settings to continue."
-                  : "Connect a provider and choose a model to send messages."}
+                  : !ready
+                    ? "Connect a provider and choose a model to send messages."
+                    : !snapshot.config.allowed_workspaces.length
+                      ? "Allow workspaces in Ranger settings to send messages."
+                      : contextLoading
+                        ? "Loading authorized workspaces"
+                        : unavailableScopeMessage}
               </span>
               <button
                 type="button"
                 className="ghost"
                 onClick={() => setSettingsOpen(true)}
               >
-                <Settings size={13} /> Model settings
+                <Settings size={13} />{" "}
+                {ready && !authPending ? "Ranger settings" : "Model settings"}
               </button>
             </div>
           ) : null}
@@ -1754,7 +1800,7 @@ export function AssistantPanel({
                   <strong>What would you like to work on?</strong>
                   <span>
                     Ask about progress or changes, or ask Ranger to propose
-                    workspace and agent actions in the workspaces you select.
+                    workspace and agent actions in your authorized workspaces.
                   </span>
                 </div>
               ) : (
@@ -1853,108 +1899,82 @@ export function AssistantPanel({
               void submit();
             }}
           >
-            <details className="assistant-scope-picker">
-              <summary>
-                Reading scope:{" "}
-                {scopeAvailable.length
-                  ? `${scopeAvailable.length} workspace${scopeAvailable.length === 1 ? "" : "s"}`
-                  : "Choose workspaces"}
-              </summary>
-              <fieldset
-                className="assistant-workspaces"
-                disabled={operationBusy || snapshot.running || !connected}
+            <div className="assistant-compose-input">
+              <textarea
+                ref={inputRef}
+                aria-label="Message Ranger"
+                placeholder="Ask about your workspaces"
+                enterKeyHint={mobile ? "send" : undefined}
+                rows={3}
+                maxLength={20_000}
+                value={state.draft}
+                onChange={(event) =>
+                  setAssistantDraft(event.currentTarget.value)
+                }
+                onCompositionStart={() => {
+                  composing.current = true;
+                }}
+                onCompositionEnd={() => {
+                  composing.current = false;
+                }}
+                onKeyDown={(event) => {
+                  if (
+                    event.key !== "Enter" ||
+                    event.shiftKey ||
+                    event.nativeEvent.isComposing ||
+                    composing.current ||
+                    event.keyCode === 229
+                  )
+                    return;
+                  event.preventDefault();
+                  if (!event.repeat) void submit();
+                }}
+              />
+              <div
+                className="assistant-compose-actions"
+                onMouseDown={
+                  mobile ? (event) => event.preventDefault() : undefined
+                }
               >
-                {permittedWorkspaces.map((workspace) => (
-                  <label
-                    key={workspaceKey(workspace)}
-                    className="assistant-workspace-choice"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={includesWorkspace(scopeAvailable, workspace)}
-                      onChange={() =>
-                        setScope(toggleWorkspace(scopeAvailable, workspace))
-                      }
-                    />
-                    <span>
-                      {workspace.label}
-                      <small>{workspace.connection_label}</small>
-                    </span>
-                  </label>
-                ))}
-                {!permittedWorkspaces.length ? (
-                  <span className="assistant-hint">
-                    Allow workspaces in Ranger settings first.
+                {!mobile ? (
+                  <span>
+                    {executing
+                      ? "Confirmed action is executing"
+                      : snapshot.running
+                        ? "Ranger is working"
+                        : "Enter to send, Shift+Enter for a new line"}
                   </span>
                 ) : null}
-              </fieldset>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => setSettingsOpen(true)}
-              >
-                Manage allowed workspaces
-              </button>
-            </details>
-            <textarea
-              ref={inputRef}
-              aria-label="Message Ranger"
-              placeholder="Ask about your workspaces"
-              rows={3}
-              maxLength={20_000}
-              value={state.draft}
-              onChange={(event) => setAssistantDraft(event.currentTarget.value)}
-              onCompositionStart={() => {
-                composing.current = true;
-              }}
-              onCompositionEnd={() => {
-                composing.current = false;
-              }}
-              onKeyDown={(event) => {
-                if (
-                  event.key !== "Enter" ||
-                  event.shiftKey ||
-                  event.nativeEvent.isComposing ||
-                  composing.current ||
-                  event.keyCode === 229
-                )
-                  return;
-                event.preventDefault();
-                if (!event.repeat) void submit();
-              }}
-            />
-            <div className="assistant-compose-actions">
-              <span>
-                {executing
-                  ? "Confirmed action is executing"
-                  : snapshot.running
-                    ? "Scope stays fixed while working"
-                    : "Enter to send, Shift+Enter for a new line"}
-              </span>
-              {snapshot.running ? (
-                <button
-                  type="button"
-                  title="Stop the model response; confirmed actions continue"
-                  disabled={busy || !connected}
-                  onClick={() => void run("stop")}
-                >
-                  <Square size={13} /> Stop
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={
-                    operationBusy ||
-                    !connected ||
-                    !ready ||
-                    authPending ||
-                    !state.draft.trim() ||
-                    !scopeAvailable.length
-                  }
-                >
-                  <Send size={13} /> Send
-                </button>
-              )}
+                {snapshot.running ? (
+                  <button
+                    type="button"
+                    aria-label="Stop"
+                    title="Stop the model response; confirmed actions continue"
+                    disabled={busy || !connected}
+                    onClick={() => void run("stop")}
+                  >
+                    <Square size={mobile ? 16 : 13} />
+                    {!mobile ? " Stop" : null}
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    aria-label="Send"
+                    title="Send message"
+                    disabled={
+                      operationBusy ||
+                      !connected ||
+                      !ready ||
+                      authPending ||
+                      !state.draft.trim() ||
+                      !scope.length
+                    }
+                  >
+                    <Send size={mobile ? 16 : 13} />
+                    {!mobile ? " Send" : null}
+                  </button>
+                )}
+              </div>
             </div>
           </form>
         </>
@@ -1974,7 +1994,7 @@ export function AssistantPanel({
       <ConfirmDialog
         open={confirmApproval}
         title="Enable high-permission mode?"
-        message="Ranger will execute supported workspace, worktree, tab, pane, agent and prompt operations, and create scheduled tasks, without asking again. These operations may run setup hooks or start agents. Only authorized workspaces and the selected scope are available. This applies to new questions and newly created or edited tasks and stays enabled until you turn it off."
+        message="Ranger can run supported operations and create schedules without approval in authorized workspaces. Operations may run setup hooks or start agents. Applies to new questions and new or edited tasks until disabled."
         confirmLabel="Enable high-permission mode"
         onConfirm={() =>
           void run("configure_approval", { approval_mode: "auto" })

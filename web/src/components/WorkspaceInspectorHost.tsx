@@ -2,7 +2,7 @@ import {
   FileDiff,
   FolderTree,
   GitFork,
-  GitCommitHorizontal,
+  GitGraph,
   History,
   Maximize2,
   Minimize2,
@@ -569,7 +569,7 @@ export function WorkspaceInspectorHost({
             onClick={() => onViewChange("commits")}
             onKeyDown={handleTabKeyDown}
           >
-            <GitCommitHorizontal size={14} /> Commits
+            <GitGraph size={14} /> Commits
           </button>
           <button
             ref={historyTabRef}

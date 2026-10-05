@@ -9,7 +9,8 @@
   text-align: center;
 }
 
-.app.zen .tabbar {
+.app.zen .tabbar,
+:where(html[data-layout="mobile"]) .app.assistant-view .tabbar {
   display: none;
 }
 
