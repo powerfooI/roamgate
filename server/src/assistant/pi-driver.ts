@@ -114,7 +114,15 @@ Read only the context needed to answer. Do not include credentials or authorizat
 /** Load the SDK only when the assistant is used; ordinary bridge startup stays cheap. */
 export function createPiDriver(
   directory: string,
-  loadSdk = () => import("@earendil-works/pi-coding-agent"),
+  loadSdk = async () => {
+    // Embed Pi's otherwise opaque OAuth imports for standalone executables.
+    // Keep undici aligned with the SDK so Bun resolves one pi-ai peer context.
+    const { registerBunOAuthFlows } = await import(
+      "@earendil-works/pi-ai/bun-oauth"
+    );
+    registerBunOAuthFlows();
+    return import("@earendil-works/pi-coding-agent");
+  },
   credentialDirectory = directory,
 ): AssistantDriver {
   let active: ActiveRun | undefined;
