@@ -64,7 +64,7 @@
     "start:server": "bun run --filter roamgate-server start"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
+    "@biomejs/biome": "2.5.15",
     "@types/jsdom": "^30.0.0",
     "@types/proper-lockfile": "4.1.4",
     "@types/web-push": "^3.6.4",
