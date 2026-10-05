@@ -31,6 +31,7 @@ export class HerdrClient extends EventEmitter {
     method: string,
     params: Record<string, unknown> = {},
     timeoutMs = 8000,
+    beforeSend?: () => void,
   ): Promise<any> {
     const requestId = `r_${Date.now().toString(36)}_${Math.random()
       .toString(36)
@@ -65,7 +66,15 @@ export class HerdrClient extends EventEmitter {
         finish(new Error(`${(e as any).code ?? "error"}: ${e.message}`)),
       );
       s.on("connect", () => {
-        s.write(JSON.stringify({ id: requestId, method, params }) + "\n");
+        if (done) return;
+        try {
+          beforeSend?.();
+          s.write(JSON.stringify({ id: requestId, method, params }) + "\n");
+        } catch (error) {
+          finish(
+            error instanceof Error ? error : new Error("RPC dispatch rejected"),
+          );
+        }
       });
       s.on("data", (chunk) => {
         buf += chunk.toString("utf8");

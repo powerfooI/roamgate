@@ -16,12 +16,20 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   ASSISTANT_MAX_WORKSPACES,
   type AssistantAction,
   type AssistantAuthState,
   type AssistantConfig,
+  type AssistantMessage,
+  type AssistantModelConnection,
   type AssistantSnapshot,
   type AssistantSource,
   type AssistantWorkspace,
@@ -100,6 +108,197 @@ function credentialStatus(provider: AssistantSnapshot["providers"][number]) {
     : provider.credential_method === "api_key"
       ? "API key saved"
       : "Credentials saved";
+}
+
+export function AssistantMessageActivity({
+  message,
+  running,
+  onOpenSource,
+}: {
+  message: Pick<AssistantMessage, "tools" | "sources">;
+  running: boolean;
+  onOpenSource: (source: AssistantSource) => void;
+}) {
+  const details = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (details.current) details.current.open = running;
+  }, [running]);
+  return (
+    <details className="assistant-tools" ref={details}>
+      <summary>
+        {running && message.tools.some((tool) => tool.status === "running")
+          ? "Reading workspace context"
+          : "Work performed"}{" "}
+        ({message.tools.length + message.sources.length})
+      </summary>
+      {message.tools.length ? (
+        <ul>
+          {message.tools.map((tool) => (
+            <li key={tool.id}>
+              <span>{tool.name}</span>
+              <span className={`assistant-tool-state is-${tool.status}`}>
+                {tool.status}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {message.sources.length ? (
+        <div className="assistant-sources" aria-label="Sources">
+          {message.sources.map((source) => (
+            <button
+              type="button"
+              key={source.id}
+              onClick={() => onOpenSource(source)}
+            >
+              <span>
+                <ExternalLink size={12} /> {source.title}
+              </span>
+              <small>Read {formatUiDateTime(source.read_at)}</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
+function AssistantModelForm({
+  config,
+  provider,
+  providers,
+  selectedModel,
+  tasksRunning,
+  onSave,
+}: {
+  config: AssistantConfig;
+  provider: AssistantSnapshot["providers"][number] | undefined;
+  providers: AssistantSnapshot["providers"];
+  selectedModel: AssistantSnapshot["models"][number] | undefined;
+  tasksRunning: boolean;
+  onSave(input: AssistantModelConnection): Promise<boolean>;
+}) {
+  const custom = selectedModel?.custom ?? provider?.custom;
+  const [providerId, setProviderId] = useState(
+    custom ? (provider?.id ?? "") : "",
+  );
+  const [model, setModel] = useState(custom ? config.model : "");
+  const [baseUrl, setBaseUrl] = useState(custom?.base_url ?? "");
+  const [api, setApi] = useState(custom?.api ?? "openai-completions");
+  const [apiKey, setApiKey] = useState("");
+  const keySaved = providers.some(
+    (item) => item.id === providerId.trim() && item.configured,
+  );
+  return (
+    <details className="assistant-custom-model">
+      <summary>
+        {custom ? "Edit custom model" : "Configure custom model"}
+      </summary>
+      <form
+        aria-label="Custom model connection"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (tasksRunning) return;
+          if (
+            await onSave({
+              provider: providerId.trim(),
+              model: model.trim(),
+              base_url: baseUrl.trim(),
+              api,
+              ...(apiKey ? { api_key: apiKey } : {}),
+              credential_source: config.credential_source,
+            })
+          )
+            setApiKey("");
+        }}
+      >
+        <label className="form-field">
+          <span>Provider ID</span>
+          <input
+            aria-label="Custom provider ID"
+            required
+            maxLength={64}
+            pattern="[a-zA-Z0-9][a-zA-Z0-9_.:-]*"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="my-provider"
+            value={providerId}
+            onChange={(event) => setProviderId(event.currentTarget.value)}
+          />
+        </label>
+        <label className="form-field">
+          <span>API format</span>
+          <ThemedSelect
+            aria-label="Custom API format"
+            value={api}
+            options={[
+              { value: "openai-completions", label: "OpenAI Chat Completions" },
+              { value: "openai-responses", label: "OpenAI Responses" },
+              { value: "anthropic-messages", label: "Anthropic Messages" },
+            ]}
+            onChange={(value) => setApi(value as typeof api)}
+          />
+        </label>
+        <label className="form-field">
+          <span>API base URL</span>
+          <input
+            type="url"
+            aria-label="Custom API base URL"
+            required
+            maxLength={2000}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="https://api.example.com/v1"
+            value={baseUrl}
+            onChange={(event) => setBaseUrl(event.currentTarget.value)}
+          />
+        </label>
+        <label className="form-field">
+          <span>Model ID</span>
+          <input
+            aria-label="Custom model ID"
+            required
+            maxLength={500}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="your-model-id"
+            value={model}
+            onChange={(event) => setModel(event.currentTarget.value)}
+          />
+        </label>
+        <label className="form-field">
+          <span>API key</span>
+          <input
+            type="password"
+            aria-label="Custom API key"
+            required={!keySaved}
+            maxLength={10000}
+            autoComplete="new-password"
+            spellCheck={false}
+            placeholder={
+              keySaved ? "Leave blank to keep the saved key" : "API key"
+            }
+            value={apiKey}
+            onChange={(event) => setApiKey(event.currentTarget.value)}
+          />
+        </label>
+        <p className="assistant-hint">
+          {config.credential_source === "pi"
+            ? "Saved to Pi on the bridge host and shared with Pi."
+            : "Saved for Ranger on the bridge host."}{" "}
+          For a local server without authentication, enter a dummy key.
+        </p>
+        {tasksRunning ? (
+          <p className="assistant-hint">
+            Stop running tasks before changing a model connection.
+          </p>
+        ) : null}
+        <button type="submit" disabled={tasksRunning}>
+          Save custom model
+        </button>
+      </form>
+    </details>
+  );
 }
 
 const actionNames: Record<AssistantAction["kind"], string> = {
@@ -496,6 +695,9 @@ export function AssistantPanel({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [providerSearch, setProviderSearch] = useState("");
   const [view, setView] = useState<"chat" | "tasks">("chat");
+  const [confirmApproval, setConfirmApproval] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(380);
+  const [maximumWidth, setMaximumWidth] = useState(380);
   useEffect(() => {
     if (!requestedTask) return;
     setSettingsOpen(false);
@@ -508,7 +710,49 @@ export function AssistantPanel({
   const composing = useRef(false);
   const pendingAction = useRef(false);
   const contextSequence = useRef(0);
-  const savedConfig = snapshot ? JSON.stringify(snapshot.config) : "";
+  const panelRef = useRef<HTMLElement>(null);
+  const resizeStart = useRef<{
+    pointerId: number;
+    x: number;
+    width: number;
+    scale: number;
+  } | null>(null);
+  const width = Math.min(panelWidth, maximumWidth);
+  const resizePanel = (next: number) =>
+    setPanelWidth(Math.min(maximumWidth, Math.max(300, next)));
+  useEffect(() => {
+    const surfaces = panelRef.current?.parentElement;
+    if (!open || !surfaces) return;
+    const update = () => {
+      const annotations = surfaces.querySelector<HTMLElement>(
+        ":scope > .annotation-panel:not(.is-floating)",
+      );
+      setMaximumWidth(
+        Math.max(
+          380,
+          surfaces.clientWidth -
+            (annotations?.offsetWidth ?? 0) -
+            (annotations ? 16 : 8) -
+            240,
+        ),
+      );
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(surfaces);
+    const stage = surfaces.querySelector(".workspace-stage");
+    if (stage) observer.observe(stage);
+    return () => observer.disconnect();
+  }, [open, floating, mobile, maximized]);
+  const savedConfig = snapshot
+    ? JSON.stringify({
+        provider: snapshot.config.provider,
+        model: snapshot.config.model,
+        credential_source: snapshot.config.credential_source,
+        allowed_workspaces: snapshot.config.allowed_workspaces,
+      })
+    : "";
   const connected = state.connectionStatus === "connected";
   const ready = !!snapshot && connectionReady(snapshot);
   const showSettings = settingsOpen ?? (!!snapshot && !ready);
@@ -566,7 +810,10 @@ export function AssistantPanel({
   }, [open, connected, state.supported, completedActions, connectionSignature]);
 
   useEffect(() => {
-    if (executing || snapshot?.running) setConfirmNew(false);
+    if (executing || snapshot?.running) {
+      setConfirmNew(false);
+      setConfirmApproval(false);
+    }
   }, [executing, snapshot?.running]);
 
   useEffect(() => {
@@ -591,7 +838,10 @@ export function AssistantPanel({
   const run = async (action: string, params: Record<string, unknown> = {}) => {
     if (
       pendingAction.current ||
-      (executing && action !== "stop" && !action.startsWith("task.")) ||
+      (executing &&
+        action !== "stop" &&
+        action !== "configure_approval" &&
+        !action.startsWith("task.")) ||
       ((action === "action.confirm" || action === "action.cancel") &&
         snapshot?.running) ||
       ((action === "new_session" || action === "select_session") &&
@@ -685,6 +935,10 @@ export function AssistantPanel({
   const modelOptions = (snapshot?.models ?? [])
     .filter((model) => model.provider === config?.provider)
     .map((model) => ({ value: model.id, label: model.label }));
+  const selectedModel = snapshot?.models.find(
+    (model) =>
+      model.provider === config?.provider && model.id === config?.model,
+  );
   const permittedWorkspaces = workspaces.filter(
     (workspace) =>
       !!snapshot &&
@@ -706,7 +960,9 @@ export function AssistantPanel({
 
   return (
     <aside
+      ref={panelRef}
       className={`assistant-panel ${floating ? "is-floating" : ""} ${mobile ? "is-mobile" : maximized ? "is-maximized" : ""}`}
+      style={{ "--assistant-panel-width": `${width}px` } as CSSProperties}
       aria-label="Ranger"
       onKeyDown={(event) => {
         // Global workspace shortcuts must not consume typing inside the panel.
@@ -715,7 +971,8 @@ export function AssistantPanel({
           event.key === "Escape" &&
           !event.defaultPrevented &&
           !event.nativeEvent.isComposing &&
-          !confirmNew
+          !confirmNew &&
+          !confirmApproval
         ) {
           event.preventDefault();
           if (maximized && !mobile) setMaximized(false);
@@ -723,6 +980,69 @@ export function AssistantPanel({
         }
       }}
     >
+      {!floating && !mobile && !maximized ? (
+        <div
+          className="assistant-panel-resizer"
+          role="separator"
+          aria-label="Resize Ranger"
+          aria-orientation="vertical"
+          aria-valuemin={300}
+          aria-valuemax={Math.round(maximumWidth)}
+          aria-valuenow={Math.round(width)}
+          tabIndex={0}
+          title="Drag to resize Ranger; double-click to reset"
+          onPointerDown={(event) => {
+            if (event.button !== 0 || !panelRef.current) return;
+            event.preventDefault();
+            const panel = panelRef.current;
+            resizeStart.current = {
+              pointerId: event.pointerId,
+              x: event.clientX,
+              width: panel.offsetWidth,
+              scale:
+                panel.getBoundingClientRect().width / panel.offsetWidth || 1,
+            };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            const start = resizeStart.current;
+            if (
+              !start ||
+              start.pointerId !== event.pointerId ||
+              !event.currentTarget.hasPointerCapture(event.pointerId)
+            )
+              return;
+            resizePanel(start.width + (start.x - event.clientX) / start.scale);
+          }}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId))
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            resizeStart.current = null;
+          }}
+          onPointerCancel={() => {
+            resizeStart.current = null;
+          }}
+          onLostPointerCapture={() => {
+            resizeStart.current = null;
+          }}
+          onDoubleClick={() => setPanelWidth(380)}
+          onKeyDown={(event) => {
+            const next =
+              event.key === "ArrowLeft"
+                ? width + 24
+                : event.key === "ArrowRight"
+                  ? width - 24
+                  : event.key === "Home"
+                    ? 300
+                    : event.key === "End"
+                      ? maximumWidth
+                      : null;
+            if (next === null) return;
+            event.preventDefault();
+            resizePanel(next);
+          }}
+        />
+      ) : null}
       <header className="assistant-panel-head">
         <Compass size={19} aria-hidden="true" />
         <div>
@@ -738,6 +1058,9 @@ export function AssistantPanel({
                 : snapshot?.running
                   ? "Working"
                   : "Workspace management assistant"}
+            {snapshot?.config.approval_mode === "auto"
+              ? " / High permission"
+              : ""}
           </span>
         </div>
         {!mobile && !maximized ? (
@@ -771,7 +1094,7 @@ export function AssistantPanel({
           type="button"
           className="assistant-icon-button"
           aria-label="Ranger settings"
-          title="Model connection and reading permissions"
+          title="Model connection and workspace permissions"
           aria-pressed={showSettings}
           onClick={() => setSettingsOpen(!showSettings)}
         >
@@ -879,13 +1202,13 @@ export function AssistantPanel({
                       value: "assistant",
                       label: "Ranger connection",
                       description:
-                        "Save Ranger logins and API keys separately from Pi.",
+                        "Save Ranger logins, API keys and custom models separately from Pi.",
                     },
                     {
                       value: "pi",
                       label: "Shared Pi credentials",
                       description:
-                        "Use Pi's saved logins and API keys. New logins and keys are also saved to Pi.",
+                        "Use Pi's saved logins, API keys and custom models. Changes are also saved to Pi.",
                     },
                   ] as const
                 ).map((item) => (
@@ -919,6 +1242,34 @@ export function AssistantPanel({
                 ))}
               </div>
             </div>
+            <AssistantModelForm
+              key={JSON.stringify([
+                config.credential_source,
+                provider?.id,
+                config.model,
+                provider?.custom,
+                selectedModel?.custom,
+              ])}
+              config={config}
+              provider={provider}
+              providers={snapshot.providers}
+              selectedModel={selectedModel}
+              tasksRunning={
+                snapshot.tasks?.some(
+                  (task) => task.current_run?.status === "running",
+                ) ?? false
+              }
+              onSave={async (input) => {
+                if (!(await run("configure_model", input))) return false;
+                setConfig({
+                  ...config,
+                  provider: input.provider,
+                  model: input.model,
+                });
+                setProviderSearch("");
+                return true;
+              }}
+            />
             <div
               className="assistant-providers"
               role="group"
@@ -1054,6 +1405,38 @@ export function AssistantPanel({
             />
           ) : null}
           <div className="assistant-section-heading">
+            <h3>High-permission mode</h3>
+            <span className="assistant-hint">
+              {snapshot.config.approval_mode === "auto" ? "Enabled" : "Off"}
+            </span>
+          </div>
+          <p className="assistant-hint">
+            Execute supported operations and create schedules without individual
+            confirmations, within authorized workspaces. Newly created or edited
+            tasks keep this mode. Turning it off requires confirmation for
+            subsequent operations; dispatched operations may finish.
+          </p>
+          <button
+            type="button"
+            aria-pressed={snapshot.config.approval_mode === "auto"}
+            disabled={
+              busy ||
+              !connected ||
+              !!authPending ||
+              (snapshot.config.approval_mode !== "auto" &&
+                (executing || snapshot.running))
+            }
+            onClick={() => {
+              if (snapshot.config.approval_mode === "auto")
+                void run("configure_approval", { approval_mode: "manual" });
+              else setConfirmApproval(true);
+            }}
+          >
+            {snapshot.config.approval_mode === "auto"
+              ? "Disable high-permission mode"
+              : "Enable high-permission mode"}
+          </button>
+          <div className="assistant-section-heading">
             <h3>Allowed workspaces</h3>
             <button
               type="button"
@@ -1067,9 +1450,9 @@ export function AssistantPanel({
           </div>
           <p className="assistant-hint">
             Select workspaces Ranger may read and manage. Choose the scope of
-            each question in the chat. Each action requires confirmation.
-            Selected status, conversations, terminal output, and diffs may be
-            sent to your model provider.
+            each question in the chat. Actions require confirmation unless
+            high-permission mode is enabled. Selected status, conversations,
+            terminal output, and diffs may be sent to your model provider.
           </p>
           <div className="assistant-workspace-actions">
             <button
@@ -1437,47 +1820,16 @@ export function AssistantPanel({
                           />
                         ))
                       : null}
-                    {message.tools.length ? (
-                      <details className="assistant-tools">
-                        <summary>
-                          {message.tools.some(
-                            (tool) => tool.status === "running",
-                          )
-                            ? "Reading workspace context"
-                            : "Work performed"}{" "}
-                          ({message.tools.length})
-                        </summary>
-                        <ul>
-                          {message.tools.map((tool) => (
-                            <li key={tool.id}>
-                              <span>{tool.name}</span>
-                              <span
-                                className={`assistant-tool-state is-${tool.status}`}
-                              >
-                                {tool.status}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </details>
-                    ) : null}
-                    {message.sources.length ? (
-                      <div className="assistant-sources" aria-label="Sources">
-                        {message.sources.map((source) => (
-                          <button
-                            type="button"
-                            key={source.id}
-                            onClick={() => onOpenSource(source)}
-                          >
-                            <span>
-                              <ExternalLink size={12} /> {source.title}
-                            </span>
-                            <small>
-                              Read {formatUiDateTime(source.read_at)}
-                            </small>
-                          </button>
-                        ))}
-                      </div>
+                    {message.tools.length || message.sources.length ? (
+                      <AssistantMessageActivity
+                        message={message}
+                        running={
+                          snapshot.running &&
+                          message ===
+                            snapshot.messages[snapshot.messages.length - 1]
+                        }
+                        onOpenSource={onOpenSource}
+                      />
                     ) : null}
                   </section>
                 ))
@@ -1509,6 +1861,7 @@ export function AssistantPanel({
                   : "Choose workspaces"}
               </summary>
               <fieldset
+                className="assistant-workspaces"
                 disabled={operationBusy || snapshot.running || !connected}
               >
                 {permittedWorkspaces.map((workspace) => (
@@ -1618,6 +1971,16 @@ export function AssistantPanel({
           onOpenSource={onOpenSource}
         />
       ) : null}
+      <ConfirmDialog
+        open={confirmApproval}
+        title="Enable high-permission mode?"
+        message="Ranger will execute supported workspace, worktree, tab, pane, agent and prompt operations, and create scheduled tasks, without asking again. These operations may run setup hooks or start agents. Only authorized workspaces and the selected scope are available. This applies to new questions and newly created or edited tasks and stays enabled until you turn it off."
+        confirmLabel="Enable high-permission mode"
+        onConfirm={() =>
+          void run("configure_approval", { approval_mode: "auto" })
+        }
+        onClose={() => setConfirmApproval(false)}
+      />
       <ConfirmDialog
         open={confirmNew}
         title="Start a new Ranger chat?"

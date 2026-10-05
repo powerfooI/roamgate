@@ -933,8 +933,18 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
           role: "assistant",
           text: "",
           sent_at: proposal.created_at,
-          tools: [],
-          sources: [],
+          tools: [
+            { id: "read", name: "workspace_status", status: "completed" },
+          ],
+          sources: [
+            {
+              ...workspace,
+              id: "source",
+              kind: "status",
+              title: "Project status",
+              read_at: proposal.created_at,
+            },
+          ],
           actions: proposals,
         },
       ],
@@ -988,6 +998,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
     const toggleFloating = mock(() => {
       panelFloating = !panelFloating;
     });
+    const openSource = mock(() => {});
     const render = async () => {
       await React.act(async () =>
         root.render(
@@ -998,7 +1009,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
             mobile: panelMobile,
             onClose: close,
             onToggleFloating: toggleFloating,
-            onOpenSource() {},
+            onOpenSource: openSource,
           }),
         ),
       );
@@ -1029,6 +1040,41 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
     };
     try {
       await render();
+      const activity = () =>
+        container.querySelector<HTMLDetailsElement>(".assistant-tools")!;
+      const toggleActivity = () => activity().querySelector("summary")!.click();
+      expect(activity().open).toBe(false);
+      expect(
+        activity().querySelector(".assistant-sources button"),
+      ).not.toBeNull();
+      await React.act(async () => toggleActivity());
+      expect(activity().open).toBe(true);
+      await render();
+      expect(activity().open).toBe(true);
+      clientState.snapshot.running = true;
+      await render();
+      await React.act(async () => toggleActivity());
+      expect(activity().open).toBe(false);
+      await React.act(async () => toggleActivity());
+      expect(activity().open).toBe(true);
+      clientState.snapshot.running = false;
+      await render();
+      expect(activity().open).toBe(false);
+      await React.act(async () => toggleActivity());
+      await render();
+      expect(activity().open).toBe(true);
+      await React.act(async () =>
+        activity()
+          .querySelector<HTMLButtonElement>(".assistant-sources button")!
+          .click(),
+      );
+      expect(openSource).toHaveBeenCalledWith(snapshot.messages[0].sources[0]);
+      clientState.snapshot.messages[0].tools = [];
+      await render();
+      expect(activity().querySelector("summary")!.textContent).toContain(
+        "Work performed (1)",
+      );
+      await React.act(async () => toggleActivity());
       await React.act(async () => button("Maximize Ranger").click());
       expect(
         container.querySelector(".assistant-panel.is-maximized"),
@@ -1060,8 +1106,91 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(button("Pin Ranger")).toBeDefined();
 
       panelFloating = false;
+      Object.defineProperty(container, "clientWidth", { value: 1280 });
       await render();
+      const panel = container.querySelector<HTMLElement>(".assistant-panel")!;
+      const panelWidth = () =>
+        Number.parseFloat(
+          panel.style.getPropertyValue("--assistant-panel-width"),
+        );
+      const resizer = () =>
+        container.querySelector<HTMLElement>('[aria-label="Resize Ranger"]');
+      expect(panelWidth()).toBe(380);
+      const handle = resizer()!;
+      const capture = new Set<number>();
+      handle.setPointerCapture = (id) => {
+        capture.add(id);
+      };
+      handle.hasPointerCapture = (id) => capture.has(id);
+      handle.releasePointerCapture = (id) => {
+        capture.delete(id);
+      };
+      Object.defineProperty(panel, "offsetWidth", { get: panelWidth });
+      panel.getBoundingClientRect = () =>
+        ({ width: panelWidth() * 1.5 }) as DOMRect;
+      const pointer = async (type: string, x: number) => {
+        await React.act(async () => {
+          handle.dispatchEvent(
+            new window.PointerEvent(type, {
+              bubbles: true,
+              pointerId: 1,
+              button: 0,
+              clientX: x,
+            }),
+          );
+        });
+      };
+      await pointer("pointerdown", 900);
+      await pointer("pointermove", 720);
+      expect(panelWidth()).toBe(500);
+      await pointer("pointerup", 720);
+      expect(capture.size).toBe(0);
+      await pointer("pointermove", 0);
+      expect(panelWidth()).toBe(500);
+      await pointer("pointerdown", 720);
+      capture.clear();
+      await pointer("pointermove", 0);
+      expect(panelWidth()).toBe(500);
+      await pointer("pointerdown", 720);
+      await pointer("pointercancel", 720);
+      await pointer("pointermove", 0);
+      expect(panelWidth()).toBe(500);
+      const resizeKey = async (key: string) => {
+        await React.act(async () => {
+          handle.dispatchEvent(
+            new window.KeyboardEvent("keydown", {
+              bubbles: true,
+              cancelable: true,
+              key,
+            }),
+          );
+        });
+      };
+      await resizeKey("Home");
+      expect(panelWidth()).toBe(300);
+      await resizeKey("ArrowRight");
+      expect(panelWidth()).toBe(300);
+      await resizeKey("End");
+      expect(panelWidth()).toBe(1032);
+      await resizeKey("ArrowLeft");
+      expect(panelWidth()).toBe(1032);
+      await resizeKey("ArrowRight");
+      expect(panelWidth()).toBe(1008);
+      panelFloating = true;
+      await render();
+      expect(panelWidth()).toBe(1008);
+      expect(resizer()).toBeNull();
+      panelFloating = false;
+      await render();
+      expect(panelWidth()).toBe(1008);
+      await React.act(async () =>
+        resizer()!.dispatchEvent(
+          new window.MouseEvent("dblclick", { bubbles: true }),
+        ),
+      );
+      expect(panelWidth()).toBe(380);
       await React.act(async () => button("Maximize Ranger").click());
+      expect(resizer()).toBeNull();
       await React.act(async () =>
         button("Restore Ranger").dispatchEvent(
           new window.KeyboardEvent("keydown", {
@@ -1092,6 +1221,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       ).not.toBeNull();
       panelMobile = true;
       await render();
+      expect(resizer()).toBeNull();
       expect(
         container.querySelector('[aria-label="Maximize Ranger"]'),
       ).toBeNull();
@@ -1424,6 +1554,197 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       ).not.toBeNull();
       await React.act(async () => button("Ranger settings").click());
       expect(container.querySelector(".assistant-panel-settings")).toBeNull();
+      await React.act(async () => button("Ranger settings").click());
+      const customForm = () =>
+        container.querySelector<HTMLFormElement>(
+          '[aria-label="Custom model connection"]',
+        )!;
+      const customInput = (label: string) =>
+        customForm().querySelector<HTMLInputElement>(
+          `[aria-label="${label}"]`,
+        )!;
+      expect(customInput("Custom API key").type).toBe("password");
+      expect(customInput("Custom API key").required).toBe(true);
+      await React.act(async () => {
+        for (const [label, value] of [
+          ["Custom provider ID", "my-provider"],
+          ["Custom API base URL", "https://example.com/v1"],
+          ["Custom model ID", "my-model"],
+          ["Custom API key", "synthetic-key"],
+        ]) {
+          const input = customInput(label);
+          Object.getOwnPropertyDescriptor(
+            browser.HTMLInputElement.prototype,
+            "value",
+          )!.set!.call(input, value);
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      });
+      call.mockRejectedValueOnce(new Error("Custom model could not be saved"));
+      const submitCustom = async () =>
+        React.act(async () =>
+          customForm().dispatchEvent(
+            new Event("submit", { bubbles: true, cancelable: true }),
+          ),
+        );
+      await submitCustom();
+      expect(customInput("Custom API key").value).toBe("synthetic-key");
+      expect(
+        container.querySelector(".assistant-error")?.textContent,
+      ).toContain("Custom model could not be saved");
+      clientState.snapshot.providers.push({
+        id: "my-provider",
+        label: "my-provider",
+        configured: true,
+        methods: ["api_key"],
+        custom: {
+          base_url: "https://example.com/v1",
+          api: "openai-completions",
+        },
+      });
+      clientState.snapshot.models.push({
+        provider: "my-provider",
+        id: "my-model",
+        label: "my-model",
+      });
+      call.mockImplementation(async () => clientState.snapshot);
+      await submitCustom();
+      expect(call).toHaveBeenLastCalledWith("configure_model", {
+        provider: "my-provider",
+        model: "my-model",
+        base_url: "https://example.com/v1",
+        api: "openai-completions",
+        api_key: "synthetic-key",
+        credential_source: "assistant",
+      });
+      expect(customInput("Custom API key").value).toBe("");
+      expect(customInput("Custom API key").required).toBe(false);
+      expect(customInput("Custom API base URL").value).toBe(
+        "https://example.com/v1",
+      );
+      expect(customInput("Custom model ID").value).toBe("my-model");
+      expect(button("Save connection").disabled).toBe(false);
+      clientState.snapshot.providers[
+        clientState.snapshot.providers.length - 1
+      ]!.custom = {
+        base_url: "https://refreshed.example.com/v1",
+        api: "openai-responses",
+      };
+      await render();
+      expect(customInput("Custom API base URL").value).toBe(
+        "https://refreshed.example.com/v1",
+      );
+      clientState.snapshot.models[
+        clientState.snapshot.models.length - 1
+      ]!.custom = {
+        base_url: "https://model-override.example.com/v1",
+        api: "anthropic-messages",
+      };
+      await render();
+      expect(customInput("Custom API base URL").value).toBe(
+        "https://model-override.example.com/v1",
+      );
+      await submitCustom();
+      expect(
+        call.mock.calls[call.mock.calls.length - 1]?.[1],
+      ).not.toHaveProperty("api_key");
+      expect(call.mock.calls[call.mock.calls.length - 1]?.[1]).toMatchObject({
+        base_url: "https://model-override.example.com/v1",
+        api: "anthropic-messages",
+      });
+      await React.act(async () => button("Save connection").click());
+      expect(call).toHaveBeenLastCalledWith("configure", {
+        config: {
+          ...clientState.snapshot.config,
+          provider: "my-provider",
+          model: "my-model",
+        },
+      });
+      await React.act(async () => button("Ranger settings").click());
+      const workspaceDraft = () =>
+        container.querySelector<HTMLInputElement>(
+          ".assistant-workspaces input",
+        )!;
+      const modelDraft = button("Ranger model").textContent;
+      expect(workspaceDraft().checked).toBe(true);
+      await React.act(async () => workspaceDraft().click());
+      expect(workspaceDraft().checked).toBe(false);
+      const approvalDialog = () =>
+        container.querySelector<HTMLElement>(
+          '[role="dialog"][aria-label="Enable high-permission mode?"]',
+        );
+      const callsBeforeApproval = call.mock.calls.length;
+      await React.act(async () =>
+        button("Enable high-permission mode").click(),
+      );
+      expect(approvalDialog()).not.toBeNull();
+      expect(call).toHaveBeenCalledTimes(callsBeforeApproval);
+      await React.act(async () => button("Cancel", approvalDialog()!).click());
+      expect(approvalDialog()).toBeNull();
+      expect(call).toHaveBeenCalledTimes(callsBeforeApproval);
+      await React.act(async () =>
+        button("Enable high-permission mode").click(),
+      );
+      await React.act(async () =>
+        button("Enable high-permission mode", approvalDialog()!).click(),
+      );
+      expect(approvalDialog()).toBeNull();
+      expect(call).toHaveBeenLastCalledWith("configure_approval", {
+        approval_mode: "auto",
+      });
+      expect(call).toHaveBeenCalledTimes(callsBeforeApproval + 1);
+      clientState.snapshot = {
+        ...clientState.snapshot,
+        config: { ...clientState.snapshot.config, approval_mode: "auto" },
+      };
+      await render();
+      expect(workspaceDraft().checked).toBe(false);
+      expect(button("Ranger model").textContent).toBe(modelDraft);
+      expect(
+        container.querySelector('.assistant-panel-head [role="status"]')
+          ?.textContent,
+      ).toContain("High permission");
+      expect(
+        button("Disable high-permission mode").getAttribute("aria-pressed"),
+      ).toBe("true");
+      clientState.snapshot.running = true;
+      await render();
+      expect(button("Disable high-permission mode").disabled).toBe(false);
+      await React.act(async () =>
+        button("Disable high-permission mode").click(),
+      );
+      expect(call).toHaveBeenLastCalledWith("configure_approval", {
+        approval_mode: "manual",
+      });
+      expect(call).toHaveBeenCalledTimes(callsBeforeApproval + 2);
+      clientState.snapshot = {
+        ...clientState.snapshot,
+        running: false,
+        messages: clientState.snapshot.messages.map((message) => ({
+          ...message,
+          actions: [{ ...proposal, status: "executing" }],
+        })),
+      };
+      await render();
+      expect(button("Disable high-permission mode").disabled).toBe(false);
+      await React.act(async () =>
+        button("Disable high-permission mode").click(),
+      );
+      expect(call).toHaveBeenLastCalledWith("configure_approval", {
+        approval_mode: "manual",
+      });
+      expect(call).toHaveBeenCalledTimes(callsBeforeApproval + 3);
+      clientState.snapshot.config = {
+        ...clientState.snapshot.config,
+        approval_mode: "manual",
+      };
+      await render();
+      expect(button("Enable high-permission mode").disabled).toBe(true);
+      expect(workspaceDraft().checked).toBe(false);
+      expect(
+        container.querySelector('.assistant-panel-head [role="status"]')
+          ?.textContent,
+      ).not.toContain("High permission");
     } finally {
       await React.act(async () => root.unmount());
       for (const spy of [context, state, send, call]) spy.mockRestore();

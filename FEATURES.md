@@ -173,6 +173,8 @@ Ranger is an experimental workspace management assistant.
 Open **Ranger** from the global topbar button or its configurable keyboard
 shortcut. Desktop uses a floating window like Annotations; **Pin Ranger**
 reserves space beside the current workspace. Mobile uses a full chat surface.
+Pinning keeps Ranger's width. Drag its left edge, or focus the edge and use
+Left/Right, to resize the docked panel; double-click the edge to reset its width.
 Use **Maximize Ranger** to fill the workspace area and **Restore Ranger** (or
 Escape) to return to the previous layout.
 The conversation stays available when switching workspaces or connections.
@@ -181,16 +183,21 @@ The conversation stays available when switching workspaces or connections.
   Use a separate Ranger connection or explicitly reuse the bridge account's
   saved Pi credentials with **Shared Pi credentials**. Select a saved provider or
   expand **Connect another provider**; both credential sources support sign-in
-  and API-key entry in the window. See [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
+  and API-key entry in the window. **Configure custom model** connects compatible
+  endpoints by API address, format, key, and model ID. Shared mode also reads
+  Pi's custom models. See [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
 - Allow workspaces in Settings, then choose the **Reading scope** for each
   question. **Select all** adds the currently available workspaces; **Clear**
   removes every selection. Use **Save connection** to apply permission changes.
+  Workspace choices use a compact grid that scrolls when the list is long.
   No workspaces are authorized by default, and new workspaces need to be
   selected separately. The scope stays fixed while Ranger streams an answer.
 - Expand **Work performed** to inspect context reads. Ranger can read
   workspace status, agent history, changes, and recent terminal output. Source
   links show when the evidence was read and open the corresponding workspace
   or inspector view; unavailable or replaced connections require fresh evidence.
+  Reads and source cards collapse together when each answer finishes; expand
+  them again to inspect the evidence.
   Ranger chooses how many recent terminal lines to read (1-1,000; default 120),
   with the newest 32,000 characters retained if the output exceeds its budget.
 - Ask Ranger to create a workspace, worktree, or terminal tab, split a pane to
@@ -205,6 +212,13 @@ The conversation stays available when switching workspaces or connections.
   completion from partial or uncertain outcomes. An uncertain operation must be
   checked at its target before proposing another one; reconnects never replay it.
   Newly created workspaces must be explicitly allowed before Ranger can use them.
+- **High-permission mode** in Settings is off by default. Enable it explicitly
+  to let Ranger execute supported management operations and create scheduled
+  tasks without individual confirmations. Results remain visible in the chat.
+  Workspace authorization and each question's scope still apply. Disable the
+  mode at any time to require confirmation for subsequent operations. Existing
+  tasks keep their saved permission mode; edit a task while this mode is enabled
+  to allow automatic operations in its future runs.
 - Closing the window hides it while work continues; the topbar indicator shows
   activity. **Stop** cancels the current turn. **New chat** saves the current
   conversation and starts an empty one, keeping the model connection and workspace
@@ -227,8 +241,9 @@ current browser tab's memory, separately for each conversation.
 The **Chat / Tasks** switch keeps scheduled work separate from conversations.
 The Chat toolbar provides direct **History** and **New chat** buttons.
 
-Create a task in **Tasks**, or ask Ranger to propose a schedule and confirm its
-preview. Schedules support one UTC timestamp, a daily time in an explicit
+Create a task in **Tasks**, or ask Ranger for a schedule. Confirm its preview in
+manual mode; high-permission mode enables it directly. Schedules support one UTC
+timestamp, a daily time in an explicit
 timezone, or an interval in whole minutes. The task fixes its workspace scope and
 model at creation. It runs with the browser closed and retains separate results
 and tool activity for each run; reopening Tasks shows the current progress.
@@ -243,7 +258,8 @@ your task prompt warrants attention. Failed Ranger runs and pending action
 confirmations still use fixed alerts in either mode.
 
 For example, ask Ranger to check an Agent every minute and notify you only
-when its work finishes or fails, then confirm the proposed task. Ranger reads
+when its work finishes or fails, then confirm the proposed task in manual mode.
+Ranger reads
 the authorized workspace context and reports the evidence it finds; an idle
 Agent alone does not establish success. Each run can issue one custom notice,
 and repeated events are deduplicated across checks and restarts.
@@ -261,9 +277,10 @@ deleted with their history. Each task retains the latest 20 runs, with at most 5
 stored tasks.
 Task plans, run receipts and durable execution data are persisted in SQLite on
 the bridge host.
-Automatic runs may read and propose operations; management operations still need
-confirmation in the run details. Task execution does not replace the active chat.
-Workspace permissions cover both reads and confirmed management operations.
+Automatic runs may read and propose operations. Management operations need
+confirmation in the run details unless the task was saved with high-permission
+mode and that mode is still enabled globally. Task execution does not replace
+the active chat. Workspace permissions cover both reads and management operations.
 Ordinary Roamgate access still grants the
 [administrative authority](SECURITY.md#trust-model) described by its trust model.
 
