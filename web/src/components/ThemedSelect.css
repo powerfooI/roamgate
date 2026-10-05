@@ -20,8 +20,10 @@
 }
 
 .themed-select-value {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: left;
   white-space: nowrap;
 }
 
