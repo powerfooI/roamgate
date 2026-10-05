@@ -270,6 +270,93 @@ describe("Ranger approval policy", () => {
     expect(writes).toBe(0);
   });
 
+  // Preparation, proposal creation, and automatic confirmation revalidate.
+  test.each([1, 2, 3])(
+    "revoking during task validation %i keeps manual confirmation manual after re-enabling auto",
+    async (validation) => {
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const childFinished = Promise.withResolvers<void>();
+      let preparing = false;
+      let checks = 0;
+      let writes = 0;
+      let receipt = "";
+      const f = setup(
+        {
+          catalog: async () => {
+            if (preparing && ++checks === validation) {
+              entered.resolve();
+              await release.promise;
+            }
+            return catalog;
+          },
+          run: async (input) => {
+            preparing = true;
+            receipt = (
+              await input.task!("create", {
+                title: "Create later",
+                prompt: "Create a tab",
+                scope: configured.allowed_workspaces,
+                schedule: {
+                  type: "once",
+                  at: new Date(Date.now() + 3_600_000).toISOString(),
+                },
+              })
+            ).text;
+            return [];
+          },
+        },
+        () => ({
+          catalog: async () => catalog,
+          login: async () => {},
+          stop: async () => {},
+          dispose: async () => {},
+          run: async (input) => {
+            expect(input.config.approval_mode).toBe("manual");
+            await input.propose!(
+              "create_tab",
+              configured.allowed_workspaces[0]!,
+            );
+            childFinished.resolve();
+            return [];
+          },
+        }),
+      );
+      stableTaskIdentity(f.context);
+      f.context.prepareAction = async () =>
+        permissionAction(async () => {
+          writes++;
+          return { status: "succeeded", detail: "Created" };
+        });
+      await f.service.handle("configure", { config: configured });
+      await f.service.handle("configure_approval", { approval_mode: "auto" });
+      await f.service.handle("send", {
+        request_id: "revoke-task",
+        text: "Schedule a tab",
+      });
+      await entered.promise;
+      await f.service.handle("configure_approval", {
+        approval_mode: "manual",
+      });
+      release.resolve();
+      await until(() => !f.service.peek().running);
+      const proposal = JSON.parse(receipt);
+      expect(proposal.status).toBe("pending");
+      await f.service.handle("task.confirm_proposal", {
+        proposal_id: proposal.id,
+      });
+      const task = f.service.peek().tasks![0]!;
+      expect(task.approval_mode).toBe("manual");
+      await f.service.handle("configure_approval", { approval_mode: "auto" });
+      jest.useFakeTimers();
+      await f.service.resume();
+      await f.service.handle("task.run_now", { task_id: task.id });
+      jest.advanceTimersByTime(0);
+      await childFinished.promise;
+      expect(writes).toBe(0);
+    },
+  );
+
   test("failed revocation preserves live action and streamed message references", async () => {
     const executing = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();

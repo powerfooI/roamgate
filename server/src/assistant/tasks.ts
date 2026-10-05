@@ -995,6 +995,8 @@ export function createAssistantTasks(options: {
       if (!entry || entry.proposal.status !== "pending") return;
       if (JSON.stringify(entry.prepared) !== JSON.stringify(sealed))
         throw new Error("The task proposal changed. Ask for a fresh preview.");
+      // Manual confirmation does not authorize future automatic effects.
+      if (!authorized) sealed.config.approval_mode = "manual";
       change(() => {
         const task = insert(sealed, `proposal:${id}`);
         entry!.proposal.status = "confirmed";
