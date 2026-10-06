@@ -19,6 +19,7 @@ for (const scale of [1, 1.25, 1.5]) {
     const cleanups: Array<() => void> = [];
     const listeners = new Map<string, (event: unknown) => void>();
     const styles = new Map<string, string>();
+    const attributes = new Map<string, string>();
     let placement: MobileControlsPlacement = { side: "right", offsetY: 0 };
     let appliedOffset = 0;
     let appBottom = 844;
@@ -38,6 +39,7 @@ for (const scale of [1, 1.25, 1.5]) {
           scale,
     });
     const element = {
+      getAttribute: () => null,
       offsetHeight: 200,
       getBoundingClientRect: rect,
       animate,
@@ -52,12 +54,19 @@ for (const scale of [1, 1.25, 1.5]) {
     const app = {
       offsetWidth: 320,
       getBoundingClientRect: () => ({ width: 320 * scale, bottom: appBottom }),
+      querySelector: () => null,
+      setAttribute: (key: string, value: string) => attributes.set(key, value),
+      removeAttribute: (key: string) => attributes.delete(key),
+      hasAttribute: (key: string) => attributes.has(key),
       querySelectorAll: (selector: string) =>
-        selector.includes("mobile-terminal-controls")
-          ? [element]
-          : selector.includes("terminal-mobile-keys-toggle")
-            ? [header, shortcut]
-            : [header],
+        selector === ".terminal-composer, .terminal-composer-commands" ||
+        selector === ".terminal-composer"
+          ? []
+          : selector.includes("mobile-terminal-controls")
+            ? [element]
+            : selector.includes("terminal-mobile-keys-toggle")
+              ? [header, shortcut]
+              : [header],
       classList: { add() {}, remove() {} },
       style: {
         setProperty: (key: string, value: string) => styles.set(key, value),
@@ -85,7 +94,12 @@ for (const scale of [1, 1.25, 1.5]) {
       },
       window: {
         configurable: true,
-        value: { innerWidth: 320 * scale, innerHeight: 844 },
+        value: {
+          innerWidth: 320 * scale,
+          innerHeight: 844,
+          addEventListener() {},
+          removeEventListener() {},
+        },
       },
       getComputedStyle: {
         configurable: true,
@@ -140,7 +154,11 @@ for (const scale of [1, 1.25, 1.5]) {
       const startX = 280 * scale;
       pointer("pointerdown", startX, 500);
       pointer("pointermove", startX - 7, 500);
-      expect(styles.size).toBe(0); // Threshold stays in viewport pixels.
+      expect(
+        [...styles.keys()].filter((key) =>
+          key.startsWith("--mobile-controls-drag-"),
+        ),
+      ).toHaveLength(0); // Threshold stays in viewport pixels.
       pointer("pointermove", startX, -1000);
       expect(Number.parseFloat(styles.get("--mobile-controls-drag-y")!)).toBe(
         -Math.round(844 / scale - 300 - 60 - 8),
@@ -162,7 +180,11 @@ for (const scale of [1, 1.25, 1.5]) {
         side: "left",
         offsetY: Math.round(90 / scale),
       });
-      expect(styles.size).toBe(0);
+      expect(
+        [...styles.keys()].filter((key) =>
+          key.startsWith("--mobile-controls-drag-"),
+        ),
+      ).toHaveLength(0);
       const after = rect();
       const frames = animate.mock.calls[0]![0];
       const [dx, dy] = String(frames[0]!.translate)
@@ -215,7 +237,11 @@ for (const scale of [1, 1.25, 1.5]) {
         expect(appliedOffset).toBe(
           Math.round(400 / scale - 300 - Math.max(60, 140 / scale) - 8),
         );
-        expect(styles.size).toBe(0);
+        expect(
+          [...styles.keys()].filter((key) =>
+            key.startsWith("--mobile-controls-drag-"),
+          ),
+        ).toHaveLength(0);
         expect(placement).toBe(savedPlacement);
       }
 

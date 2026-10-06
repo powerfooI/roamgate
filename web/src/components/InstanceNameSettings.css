@@ -1,0 +1,61 @@
+.instance-name-settings {
+  padding: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.instance-name-settings form {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.instance-name-settings label {
+  font-weight: 600;
+}
+
+.instance-name-settings input {
+  width: 100%;
+  min-width: 0;
+}
+
+.instance-name-settings p {
+  margin: 0;
+}
+
+.instance-name-scope,
+.instance-name-hint,
+.instance-name-status {
+  color: var(--muted);
+}
+
+.instance-name-preview {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+
+.instance-name-preview output {
+  font-weight: 600;
+}
+
+.instance-name-error,
+.instance-name-settings [role="alert"] {
+  color: var(--danger-text);
+}
+
+.instance-name-error,
+.instance-name-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.instance-name-error span {
+  flex: 1;
+  min-width: 0;
+}

@@ -82,6 +82,8 @@ import { bindListenerBeforeConnectionStart } from "./connections/startup";
 import { LEGACY_DEFAULT_CONNECTION_ID } from "./connections/types";
 import { createAuthHandlers, unauthenticatedLoginRedirect } from "./http/auth";
 import { serveStatic } from "./http/static-files";
+import { handleInstanceSettings } from "./http/instance-settings";
+import { readGuiSettings } from "./config/gui-settings";
 import {
   TERMINAL_UPLOAD_TIMEOUT_MS,
   terminalUploadRequestBodyLimit,
@@ -1473,6 +1475,9 @@ function main() {
           if (url.pathname === "/api/notifications/push") {
             return webPush.handle(req);
           }
+          if (url.pathname === "/api/instance-settings") {
+            return handleInstanceSettings(req);
+          }
           if (url.pathname === "/api/health") {
             return Response.json({
               ok: true,
@@ -1522,7 +1527,11 @@ function main() {
             return handleConnectionHttpRequest(connectionRoute, url, req);
           }
           // Everything else: serve the built frontend (embedded or on-disk).
-          return serveStatic(req, config.publicDir);
+          return serveStatic(
+            req,
+            config.publicDir,
+            (await readGuiSettings()).title_suffix,
+          );
         },
         websocket: {
           perMessageDeflate: WS_PER_MESSAGE_DEFLATE,

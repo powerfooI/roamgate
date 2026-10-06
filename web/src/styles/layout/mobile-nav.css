@@ -1,5 +1,6 @@
 /* ===== mobile nav (hidden on desktop) ===== */
-.mobile-nav {
+.mobile-nav,
+.mobile-controls-stack {
   display: none;
 }
 
@@ -11,6 +12,10 @@
 
 /* Keep mobile styling in sync with the saved layout and URL override. */
 :where(html[data-layout="mobile"]) {
+  .mobile-controls-stack {
+    display: contents;
+  }
+
   .mobile-nav {
     /* Collapse toward the toggle center, 21px inside the dock edge. */
     --mobile-controls-origin-x: calc(100% - 21px);
@@ -117,18 +122,6 @@
     pointer-events: none;
   }
 
-  /* While the on-screen keyboard is open the floating controls cover too
-     much of the terminal, so fade them out until the keyboard closes. Some
-     mobile browsers do not expose Composer keyboard geometry, so its focused
-     textarea is the direct fallback signal. */
-  .keyboard-open .mobile-nav:not(.mobile-terminal-tools),
-  .app:has(.terminal-composer-input:focus)
-    .mobile-nav:not(.mobile-terminal-tools) {
-    opacity: 0;
-    pointer-events: none;
-    transform: translate3d(0, 12px, 0) scale(0.85);
-  }
-
   .mobile-controls-collapsed .mobile-nav:not(.mobile-terminal-tools) {
     opacity: 0;
     pointer-events: none;
@@ -233,13 +226,8 @@
     pointer-events: none;
   }
 
-  /* While the on-screen keyboard is open the floating controls cover too
-     much of the terminal, so fade them out until the keyboard closes. Some
-     mobile browsers do not expose Composer keyboard geometry, so its focused
-     textarea is the direct fallback signal. */
-  .keyboard-open .mobile-terminal-controls,
-  .keyboard-open .mobile-composer-shortcut,
-  .app:has(.terminal-composer-input:focus) .mobile-terminal-controls {
+  /* The Type shortcut has no role while direct typing owns the keyboard. */
+  .keyboard-open .mobile-composer-shortcut {
     opacity: 0;
     pointer-events: none;
     transform: translate3d(0, 12px, 0) scale(0.85);
@@ -291,5 +279,78 @@
       background: transparent;
       box-shadow: none;
     }
+  }
+}
+
+/* A short keyboard viewport may not fit three rows. Keep every navigation
+   action in a horizontally scrollable row, with the toggle at the dock edge.
+   This is transient geometry, not the user's collapsed or saved placement. */
+:where(html[data-layout="mobile"]) .app[data-mobile-controls-compact] {
+  .mobile-controls-stack {
+    position: fixed;
+    right: calc(10px + env(safe-area-inset-right, 0px));
+    bottom: var(--mobile-controls-compact-bottom);
+    z-index: 74;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: max-content;
+    max-width: calc(
+      100% -
+      20px -
+      env(safe-area-inset-left, 0px) -
+      env(safe-area-inset-right, 0px)
+    );
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    direction: rtl;
+    border-radius: 999px;
+    translate: var(--mobile-controls-drag-x, 0px) 0px;
+  }
+
+  .mobile-controls-stack > .mobile-nav,
+  .mobile-terminal-controls {
+    position: static;
+    flex: 0 0 auto;
+    direction: ltr;
+    translate: none;
+  }
+
+  .mobile-terminal-controls {
+    position: sticky;
+    right: 0;
+    left: 0;
+    bottom: auto;
+    order: -1;
+    /* Opaque behind the sticky group as other pills scroll under it. */
+    background: var(--panel);
+  }
+
+  &.mobile-controls-left .mobile-controls-stack {
+    right: auto;
+    left: calc(10px + env(safe-area-inset-left, 0px));
+    direction: ltr;
+  }
+
+  &.mobile-controls-collapsed .mobile-controls-stack > .mobile-nav {
+    display: none;
+  }
+
+  /* Keep one control row above a tall draft/shortcut panel. The editor and
+     actions remain reachable by scrolling the dock in tiny viewports. */
+  .terminal-composer {
+    max-height: var(--mobile-controls-composer-max-height);
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+
+  .terminal-composer-commands {
+    position: static;
+    flex-shrink: 0;
+  }
+
+  &.assistant-view .mobile-controls-stack {
+    display: none;
   }
 }

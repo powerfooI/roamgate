@@ -436,7 +436,14 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   commands, and multi-step sequences are not supported.
 - Drag the `⋯` controls button to move the floating controls; release snaps
   them to the nearer side edge at that height, mirrored on the left. The
-  position is kept per browser and stays clear of the header and tab strip.
+  position is kept per browser and stays clear of the header and tab strip
+  when space allows.
+  The capsules remain available with Composer, Direct input, and the device
+  keyboard open. They temporarily move above the input dock without changing
+  the saved position. Short/scaled viewports use a horizontally scrollable row;
+  the input dock can scroll too when space is tight. In extremely short views,
+  reachable controls and input take priority over header clearance. Folding or dragging the
+  controls preserves typing focus; choosing another view can dismiss the keyboard.
 - The bottom-right **Type** button opens one input dock with a
   **Composer / Direct** mode switch and the configured two shortcut rows.
   The keyboard button shows or hides both rows in either mode and remembers
@@ -457,6 +464,8 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   without changing the saved choice. Shortcut keys act on the terminal in either mode.
 - In the mobile composer, the **terminal command icon (`>_`)** opens a floating
   command picker above the input without shrinking the editor or terminal.
+  In the compact controls layout it stays inside the scrollable input dock so
+  commands remain reachable without covering the navigation row.
   It browses built-in catalogs for Claude Code, Codex, Pi, Kimi Code, Grok Build,
   and Antigravity CLI (`agy`) using the pane's agent identity.
   Type a leading `/` for prefix completion. Up/Down selects
@@ -469,6 +478,11 @@ separate for desktop/mobile. Jump from a diff to its file preview.
 - Install as a PWA for an app window; a bundled Nerd Font supplies terminal
   icons. **PWA is not offline access**: Roamgate must remain reachable.
   See [installation steps](README.md#install-as-a-pwa).
+- **Configuration > Instance > Title suffix** gives different Roamgate servers
+  distinct page and PWA names, such as `Roamgate · Home` and `Roamgate · Work`.
+  Names are saved on each server and shared across devices. Existing Android
+  installations may need a browser-approved update or reinstall.
+  [Instance naming](docs/DEPLOYMENT.md#pwa-instance-names).
 
 ## Remote, Multi-Client, and Operations
 

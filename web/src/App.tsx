@@ -671,6 +671,14 @@ function isEditableElement(target: EventTarget | null) {
 }
 
 function blurActiveInput(event: React.PointerEvent<HTMLButtonElement>) {
+  // A compact-row gesture may be a horizontal pan. Dismiss input only once
+  // its native click handler confirms navigation, not at the start of a swipe.
+  if (
+    event.currentTarget.closest(
+      ".app[data-mobile-controls-compact] .mobile-controls-stack",
+    )
+  )
+    return;
   if (document.activeElement instanceof HTMLElement) {
     document.activeElement.blur();
   }
@@ -3838,177 +3846,181 @@ export default function App() {
         </button>
       ) : null}
 
-      <nav
-        className="mobile-nav"
-        aria-label="Workspace view switcher"
-        aria-hidden={mobileControlsCollapsed}
-      >
-        <button
-          type="button"
-          className={mobileView === "commits" ? "active" : ""}
-          title="Commits"
-          aria-label="Show commit history"
-          tabIndex={mobileControlsCollapsed ? -1 : 0}
-          onClick={() => openInspector("commits")}
-        >
-          <GitGraph size={16} />
-          <span className="mobile-nav-label">Commits</span>
-        </button>
-        <button
-          type="button"
-          className={mobileView === "annotations" ? "active" : ""}
-          title={shortcutTitle("Annotations", "annotations.toggle")}
-          aria-label="Show review annotations"
-          aria-pressed={annotationsOpen}
-          tabIndex={mobileControlsCollapsed ? -1 : 0}
-          onClick={toggleAnnotations}
-        >
-          <MessageSquareText size={16} />
-          <span className="mobile-nav-label">
-            Annotations{annotations.length > 0 ? ` ${annotations.length}` : ""}
-          </span>
-        </button>
-        <button
-          type="button"
-          className={mobileView === "history" ? "active" : ""}
-          title={
-            activePaneHasAgent || historyInspectorOpen
-              ? "History"
-              : "Select an agent pane to view History"
-          }
-          aria-label="Show agent message history"
-          aria-pressed={historyInspectorOpen}
-          tabIndex={mobileControlsCollapsed ? -1 : 0}
-          disabled={!activePaneHasAgent && !historyInspectorOpen}
-          onClick={() => {
-            if (historyInspectorOpen && mobileView !== "history") {
-              setMobileView("history");
-            } else {
-              setAgentHistoryInspectorOpen(!historyInspectorOpen);
-            }
-          }}
-        >
-          <History size={16} />
-          <span className="mobile-nav-label">History</span>
-        </button>
-      </nav>
-      <MobileTabSheet
-        open={mobile && mobileTabSheetOpen}
-        onClose={() => setMobileTabSheetOpen(false)}
-        onShowSession={activateTerminalSurface}
-      />
-      <nav
-        className="mobile-nav mobile-workspace-tools"
-        aria-label="Ranger, workspaces, and tabs"
-        aria-hidden={mobileControlsCollapsed}
-      >
-        {mobile ? assistantEntry : null}
-        <button
-          type="button"
-          className={mobileTabSheetOpen ? "active" : ""}
-          title="Tabs"
-          aria-label="Show tabs"
-          aria-pressed={mobileTabSheetOpen}
-          tabIndex={mobileControlsCollapsed ? -1 : 0}
-          disabled={!focusedWorkspace}
-          onPointerDown={blurActiveInput}
-          onClick={() => setMobileTabSheetOpen((open) => !open)}
-        >
-          <SquareStack size={16} />
-          {focusedWorkspaceTabCount > 0 ? (
-            <span className="mobile-nav-badge" aria-hidden="true">
-              {focusedWorkspaceTabCount}
-            </span>
-          ) : null}
-          <span className="mobile-nav-label">Tabs</span>
-        </button>
-        <button
-          type="button"
-          className={mobileView === "workspaces" ? "active" : ""}
-          title={shortcutTitle("Workspaces", "workspaces.open")}
-          aria-label={
-            mobileView === "workspaces" ? "Hide workspaces" : "Show workspaces"
-          }
-          aria-pressed={mobileView === "workspaces"}
-          tabIndex={mobileControlsCollapsed ? -1 : 0}
-          onPointerDown={blurActiveInput}
-          onClick={
-            mobileView === "workspaces"
-              ? activateTerminalSurface
-              : openWorkspaces
-          }
-        >
-          <PanelTop size={17} />
-          <span className="mobile-nav-label">Workspaces</span>
-        </button>
-      </nav>
-      <div className="mobile-terminal-controls">
+      <div className="mobile-controls-stack">
         <nav
-          className="mobile-nav mobile-terminal-tools"
-          aria-label="Terminal, files, and changes"
+          className="mobile-nav"
+          aria-label="Workspace view switcher"
           aria-hidden={mobileControlsCollapsed}
         >
           <button
             type="button"
-            className={
-              mobileView === "session" && !agentHistoryOpen ? "active" : ""
+            className={mobileView === "commits" ? "active" : ""}
+            title="Commits"
+            aria-label="Show commit history"
+            tabIndex={mobileControlsCollapsed ? -1 : 0}
+            onClick={() => openInspector("commits")}
+          >
+            <GitGraph size={16} />
+            <span className="mobile-nav-label">Commits</span>
+          </button>
+          <button
+            type="button"
+            className={mobileView === "annotations" ? "active" : ""}
+            title={shortcutTitle("Annotations", "annotations.toggle")}
+            aria-label="Show review annotations"
+            aria-pressed={annotationsOpen}
+            tabIndex={mobileControlsCollapsed ? -1 : 0}
+            onClick={toggleAnnotations}
+          >
+            <MessageSquareText size={16} />
+            <span className="mobile-nav-label">
+              Annotations
+              {annotations.length > 0 ? ` ${annotations.length}` : ""}
+            </span>
+          </button>
+          <button
+            type="button"
+            className={mobileView === "history" ? "active" : ""}
+            title={
+              activePaneHasAgent || historyInspectorOpen
+                ? "History"
+                : "Select an agent pane to view History"
             }
-            title="Terminal"
-            aria-label="Show terminal session"
+            aria-label="Show agent message history"
+            aria-pressed={historyInspectorOpen}
             tabIndex={mobileControlsCollapsed ? -1 : 0}
-            onClick={activateTerminalSurface}
+            disabled={!activePaneHasAgent && !historyInspectorOpen}
+            onClick={() => {
+              if (historyInspectorOpen && mobileView !== "history") {
+                setMobileView("history");
+              } else {
+                setAgentHistoryInspectorOpen(!historyInspectorOpen);
+              }
+            }}
           >
-            <SquareTerminal size={16} />
-            <span className="mobile-nav-label">Terminal</span>
-          </button>
-          <button
-            type="button"
-            className={mobileView === "files" ? "active" : ""}
-            title={shortcutTitle("Files", "files.toggle")}
-            aria-label="Show workspace files"
-            tabIndex={mobileControlsCollapsed ? -1 : 0}
-            onClick={() => openFileExplorer()}
-          >
-            <FolderTree size={16} />
-            <span className="mobile-nav-label">Files</span>
-          </button>
-          <button
-            type="button"
-            className={mobileView === "changes" ? "active" : ""}
-            title={shortcutTitle("Changes", "diff.toggle")}
-            aria-label="Show workspace changes"
-            tabIndex={mobileControlsCollapsed ? -1 : 0}
-            onClick={() => openDiffViewer()}
-          >
-            <FileDiff size={16} />
-            <span className="mobile-nav-label">Changes</span>
+            <History size={16} />
+            <span className="mobile-nav-label">History</span>
           </button>
         </nav>
-        <button
-          ref={mobileControlsToggleRef}
-          type="button"
-          className="mobile-controls-toggle"
-          aria-description="Drag to move the controls"
-          aria-label={
-            mobileControlsCollapsed
-              ? "Show mobile controls"
-              : "Hide mobile controls"
-          }
-          title={
-            mobileControlsCollapsed
-              ? "Show mobile controls"
-              : "Hide mobile controls"
-          }
-          aria-pressed={mobileControlsCollapsed}
-          onPointerDown={blurActiveInput}
-          onClick={() => setMobileControlsCollapsed((value) => !value)}
+        <MobileTabSheet
+          open={mobile && mobileTabSheetOpen}
+          onClose={() => setMobileTabSheetOpen(false)}
+          onShowSession={activateTerminalSurface}
+        />
+        <nav
+          className="mobile-nav mobile-workspace-tools"
+          aria-label="Ranger, workspaces, and tabs"
+          aria-hidden={mobileControlsCollapsed}
         >
-          {mobileControlsCollapsed ? (
-            <MoreHorizontal size={17} />
-          ) : (
-            <X size={17} />
-          )}
-        </button>
+          {mobile ? assistantEntry : null}
+          <button
+            type="button"
+            className={mobileTabSheetOpen ? "active" : ""}
+            title="Tabs"
+            aria-label="Show tabs"
+            aria-pressed={mobileTabSheetOpen}
+            tabIndex={mobileControlsCollapsed ? -1 : 0}
+            disabled={!focusedWorkspace}
+            onPointerDown={blurActiveInput}
+            onClick={() => setMobileTabSheetOpen((open) => !open)}
+          >
+            <SquareStack size={16} />
+            {focusedWorkspaceTabCount > 0 ? (
+              <span className="mobile-nav-badge" aria-hidden="true">
+                {focusedWorkspaceTabCount}
+              </span>
+            ) : null}
+            <span className="mobile-nav-label">Tabs</span>
+          </button>
+          <button
+            type="button"
+            className={mobileView === "workspaces" ? "active" : ""}
+            title={shortcutTitle("Workspaces", "workspaces.open")}
+            aria-label={
+              mobileView === "workspaces"
+                ? "Hide workspaces"
+                : "Show workspaces"
+            }
+            aria-pressed={mobileView === "workspaces"}
+            tabIndex={mobileControlsCollapsed ? -1 : 0}
+            onPointerDown={blurActiveInput}
+            onClick={
+              mobileView === "workspaces"
+                ? activateTerminalSurface
+                : openWorkspaces
+            }
+          >
+            <PanelTop size={17} />
+            <span className="mobile-nav-label">Workspaces</span>
+          </button>
+        </nav>
+        <div className="mobile-terminal-controls">
+          <nav
+            className="mobile-nav mobile-terminal-tools"
+            aria-label="Terminal, files, and changes"
+            aria-hidden={mobileControlsCollapsed}
+          >
+            <button
+              type="button"
+              className={
+                mobileView === "session" && !agentHistoryOpen ? "active" : ""
+              }
+              title="Terminal"
+              aria-label="Show terminal session"
+              tabIndex={mobileControlsCollapsed ? -1 : 0}
+              onClick={activateTerminalSurface}
+            >
+              <SquareTerminal size={16} />
+              <span className="mobile-nav-label">Terminal</span>
+            </button>
+            <button
+              type="button"
+              className={mobileView === "files" ? "active" : ""}
+              title={shortcutTitle("Files", "files.toggle")}
+              aria-label="Show workspace files"
+              tabIndex={mobileControlsCollapsed ? -1 : 0}
+              onClick={() => openFileExplorer()}
+            >
+              <FolderTree size={16} />
+              <span className="mobile-nav-label">Files</span>
+            </button>
+            <button
+              type="button"
+              className={mobileView === "changes" ? "active" : ""}
+              title={shortcutTitle("Changes", "diff.toggle")}
+              aria-label="Show workspace changes"
+              tabIndex={mobileControlsCollapsed ? -1 : 0}
+              onClick={() => openDiffViewer()}
+            >
+              <FileDiff size={16} />
+              <span className="mobile-nav-label">Changes</span>
+            </button>
+          </nav>
+          <button
+            ref={mobileControlsToggleRef}
+            type="button"
+            className="mobile-controls-toggle"
+            aria-description="Drag to move the controls"
+            aria-label={
+              mobileControlsCollapsed
+                ? "Show mobile controls"
+                : "Hide mobile controls"
+            }
+            title={
+              mobileControlsCollapsed
+                ? "Show mobile controls"
+                : "Hide mobile controls"
+            }
+            aria-pressed={mobileControlsCollapsed}
+            onClick={() => setMobileControlsCollapsed((value) => !value)}
+          >
+            {mobileControlsCollapsed ? (
+              <MoreHorizontal size={17} />
+            ) : (
+              <X size={17} />
+            )}
+          </button>
+        </div>
       </div>
 
       {activeTerminalComposerDraftKey && !terminalComposerOpen ? (

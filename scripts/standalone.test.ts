@@ -74,7 +74,7 @@ import { serveStatic } from ${JSON.stringify(fileURLToPath(new URL("../server/sr
 if (process.argv.includes("--crash")) throw new Error("source map probe");
 const server = Bun.serve({
   hostname: "127.0.0.1", port: 0,
-  fetch: request => serveStatic(request, process.argv[2]),
+  fetch: request => serveStatic(request, process.argv[2], "Packaged"),
 });
 const results = [];
 try {
@@ -88,6 +88,7 @@ try {
     ["/", "POST", "text/html"],
     ["/%ZZ", "GET", "text/html"],
     ["/..%2Foutside.txt", "GET", "text/html"],
+    ["/manifest.json", "GET", "*/*"],
   ]) {
     const response = await fetch(new URL(path, server.url), { method, headers: { accept } });
     results.push({ status: response.status, type: response.headers.get("content-type"),
@@ -152,8 +153,18 @@ try {
     expect(result.ambient).toBeNull();
     expect(
       result.results.map((item: { status: number }) => item.status),
-    ).toEqual([200, 200, 200, 200, 404, 200, 405, 400, 404]);
-    expect(result.results[0].cache).toBe("no-cache, must-revalidate");
+    ).toEqual([200, 200, 200, 200, 404, 200, 405, 400, 404, 200]);
+    expect(result.results[0].cache).toBe("private, no-cache, must-revalidate");
+    expect(result.results[9].cache).toBe("private, no-cache, must-revalidate");
+    expect(
+      JSON.parse(Buffer.from(result.results[9].body, "base64").toString()),
+    ).toMatchObject({
+      name: "Roamgate \u00b7 Packaged",
+      short_name: "Roamgate \u00b7 Packaged",
+      id: "/",
+      start_url: "/",
+      scope: "/",
+    });
     expect(Buffer.from(result.results[1].body, "base64").toString()).toBe(
       "embedded entry",
     );

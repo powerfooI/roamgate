@@ -1,3 +1,4 @@
+import { normalizeTitleSuffix } from "../../../shared/instanceName";
 import { defaultDataFile } from "./data-paths";
 import { roamgateEnv } from "./environment";
 import { dirname } from "node:path";
@@ -31,6 +32,7 @@ export type GuiWorkspaceAutoSyncSettings = {
 
 export type GuiSettings = {
   version: 1;
+  title_suffix?: string;
   repositories: Record<string, GuiRepoSettings>;
   workspace_auto_sync: Record<string, GuiWorkspaceAutoSyncSettings>;
   terminal_transport?: Record<string, { surface_codecs: boolean }>;
@@ -50,11 +52,20 @@ export function guiSettingsPath(): string {
 function defaultGuiSettings(): GuiSettings {
   return {
     version: 1,
+    title_suffix: "",
     repositories: {},
     workspace_auto_sync: {},
     terminal_transport: {},
     custom: {},
   };
+}
+
+function storedTitleSuffix(value: unknown): string {
+  try {
+    return normalizeTitleSuffix(value ?? "");
+  } catch {
+    return "";
+  }
 }
 
 function normalizeGuiSettings(raw: unknown): GuiSettings {
@@ -118,6 +129,7 @@ function normalizeGuiSettings(raw: unknown): GuiSettings {
   }
   return {
     version: 1,
+    title_suffix: storedTitleSuffix(obj.title_suffix),
     repositories: normalizedRepos,
     workspace_auto_sync: normalizedWorkspaceAutoSync,
     terminal_transport: Object.fromEntries(

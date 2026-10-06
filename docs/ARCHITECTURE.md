@@ -49,6 +49,23 @@ SSH tunnel, not Herdr or its workspaces.
   connection-scoped. Switching connections retires the browser lease; same-ID
   runtime replacement clears active and inactive sessions before IDs can recur.
 
+## Instance naming
+
+The authenticated, bridge-global `/api/instance-settings` endpoint reads and
+updates `title_suffix` through the GUI settings store's atomic mutation queue.
+Writes require JSON and the `x-roamgate-settings` header, reject cross-site
+requests, and do not require a live Herdr connection. Existing settings without
+this field retain the default `Roamgate` name.
+
+The server derives HTML title/application metadata and both manifest `name` and
+`short_name` from the same normalized suffix. HTML values are escaped with
+`HTMLRewriter`; manifest values are JSON-encoded. The credentialed manifest stays
+at `/manifest.json`, with unchanged `id`, `start_url`, `scope`, and icons. Entry
+HTML and manifest responses are private and require revalidation; the push
+service worker does not cache them. Frontend startup/focus refreshes read the
+same setting, and confirmed saves update document metadata without changing
+connection selection or install identity.
+
 ## Terminal endpoints
 
 ### Negotiation and transport
@@ -112,6 +129,14 @@ the viewer's viewport; browsers reject oversized frames after shrinking.
 Root CSS zoom scales the UI. Terminals cancel it and scale xterm fonts directly,
 keeping cell measurements, IME, selection, and mouse input in viewport CSS pixels.
 Popover positioning likewise cancels zoom and reapplies it to content.
+
+Mobile floating controls clamp their rendered position to the visual viewport
+and visible input dock, including resize/scroll and dynamic Composer height.
+Keyboard lift is transient; only an explicit drag changes the stored placement,
+and saves its delta without the temporary lift. When the normal stack cannot
+fit, a scrollable compact row reserves space above a height-bounded input dock.
+Its toggle remains focus-neutral, while actual navigation retains keyboard
+dismissal. These layout adjustments do not send terminal input or change drafts.
 
 Input waits for readiness and revalidates attachment/session/runtime leases;
 it is never replayed into a replacement terminal. Disconnect rejects pending

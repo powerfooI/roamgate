@@ -1,5 +1,6 @@
 import { initializeLayoutPreferences } from "./layoutPreferences";
 import { initializeShortcutPreferences } from "./shortcutPreferences";
+import { initializeInstanceName } from "./instanceName";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "./styles/tokens.css";
@@ -39,6 +40,8 @@ class ErrorBoundary extends React.Component<
 
 initializeLayoutPreferences();
 initializeShortcutPreferences();
+const stopInstanceNameSync = initializeInstanceName();
+if (import.meta.hot) import.meta.hot.dispose(stopInstanceNameSync);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

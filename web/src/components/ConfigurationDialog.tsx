@@ -45,6 +45,7 @@ import { AutoSyncRepositoriesDialog } from "./AutoSyncRepositoriesDialog";
 import { CloseButton } from "./CloseButton";
 import { TerminalTransportSettings } from "./TerminalTransportSettings";
 import { ConfigurationLoadingDialog } from "./ConfigurationLoadingDialog";
+import { InstanceNameSettings } from "./InstanceNameSettings";
 import { MobileSheetHandle } from "./MobileSheetHandle";
 import "./ConfigMenu.css";
 import "./ConfigurationDialog.css";
@@ -92,7 +93,13 @@ export type ConfigurationProps = {
   onTerminalThemeSelectionChange: (selection: TerminalThemeSelection) => void;
   onCustomTerminalThemesChange: (themes: CustomTerminalTheme[]) => void;
 };
-const tabs = ["Appearance", "Behavior", "Connection", "Integrations"] as const;
+const tabs = [
+  "Appearance",
+  "Behavior",
+  "Instance",
+  "Connection",
+  "Integrations",
+] as const;
 export type ConfigurationTab = (typeof tabs)[number];
 type Detail = "terminal" | "layout" | "keyboard" | "mobile" | "sync";
 
@@ -203,7 +210,9 @@ export function ConfigurationDialog({
           <div className="modal-head">
             <div>
               <h2>Configuration</h2>
-              <p>Appearance, behavior, connections, and agent integrations</p>
+              <p>
+                Appearance, behavior, instance, connections, and integrations
+              </p>
             </div>
             <CloseButton label="Close Configuration" onClick={onClose} />
           </div>
@@ -559,6 +568,14 @@ export function ConfigurationDialog({
             </section>
             <section
               role="tabpanel"
+              id="configuration-panel-Instance"
+              aria-labelledby="configuration-tab-Instance"
+              hidden={tab !== "Instance"}
+            >
+              {tab === "Instance" ? <InstanceNameSettings /> : null}
+            </section>
+            <section
+              role="tabpanel"
               id="configuration-panel-Connection"
               aria-labelledby="configuration-tab-Connection"
               hidden={tab !== "Connection"}
@@ -613,7 +630,9 @@ export function ConfigurationDialog({
             <span className="muted">
               {tab === "Integrations"
                 ? "Changes require confirmation."
-                : "Changes are saved automatically."}
+                : tab === "Instance"
+                  ? "Use Save or Reset to default to apply the instance name."
+                  : "Changes are saved automatically."}
             </span>
             <button type="button" onClick={onClose}>
               Done

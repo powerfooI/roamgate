@@ -2586,6 +2586,15 @@ export function TerminalView({
           );
         }
       }
+      // Folding/dragging controls or panning their compact row must not
+      // dismiss Direct input. A compact navigation click blurs in the row.
+      if (
+        e.target instanceof Element &&
+        e.target.closest(
+          ".mobile-controls-toggle, .app[data-mobile-controls-compact] .mobile-controls-stack",
+        )
+      )
+        return;
       if (
         composerModeRef.current === "direct" &&
         e.target instanceof Element &&

@@ -650,6 +650,30 @@ Explicit socket flags/environment variables override automatic tunnel paths.
 See [isolation](./ARCHITECTURE.md#connection-isolation) and
 [SSH lifecycle](./ARCHITECTURE.md#ssh-transport).
 
+## PWA instance names
+
+Use **Configuration > Instance > Title suffix** to distinguish Roamgate servers
+installed from different addresses. A suffix such as `Home` produces
+`Roamgate · Home` in the page title and PWA installation metadata. The name is
+shared by every viewer of that Roamgate instance, including across devices; it
+is independent of the selected Herdr connection. Use **Reset to default** or save
+an empty suffix to restore `Roamgate`.
+
+Suffixes accept up to 32 Unicode characters after whitespace normalization.
+Keep them short so Android launchers can display the distinguishing part.
+The `title_suffix` setting is saved in the server's GUI settings file and
+survives restarts. When running multiple bridges under one OS account, use a
+separate `ROAMGATE_SETTINGS_PATH` for each, as described in
+[connection setup](#multiple-and-remote-herdr-connections).
+
+Set the suffix before installing the PWA when possible. Saving updates the open
+page immediately; other open pages refresh the name when brought to the
+foreground. Existing installed apps may keep their old launcher name until the
+browser processes the manifest update and asks for confirmation. If it stays
+unchanged, reinstall the PWA from that instance's address. This does not rename
+an installed Android app instantly. See
+[Chrome's Android app update guidance](https://support.google.com/chrome/answer/9658361?co=GENIE.Platform%3DAndroid&hl=en).
+
 ## Worktree hooks
 
 Configure hooks in `roamgate.json` at the repository root:

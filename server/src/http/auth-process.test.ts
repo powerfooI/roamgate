@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -25,6 +25,7 @@ async function withAuthServer(
       OPEN_BROWSER: "0",
       ROAMGATE_PASSWORD: password,
       ROAMGATE_CONNECTIONS_PATH: join(root, "connections.json"),
+      ROAMGATE_SETTINGS_PATH: join(root, "settings.json"),
       HERDR_SOCKET_PATH: join(root, "missing-control.sock"),
       HERDR_CLIENT_SOCKET_PATH: join(root, "missing-render.sock"),
       HERDR_SSH_HOST: "",
@@ -258,4 +259,161 @@ test("development non-loopback binding still requires login", async () => {
     },
     { NODE_ENV: "development", HOST: "0.0.0.0" },
   );
+}, 20_000);
+
+test("instance naming is authenticated, persistent, and isolated from other instances", async () => {
+  const root = await mkdtemp(join(tmpdir(), "roamgate-instance-name-"));
+  const settingsPath = join(root, "settings.json");
+  const login = async (base: string) => {
+    const response = await fetch(`${base}/api/login`, {
+      method: "POST",
+      body: JSON.stringify({ password }),
+      signal: AbortSignal.timeout(5000),
+    });
+    expect(response.status).toBe(200);
+    return response.headers.get("set-cookie")!.split(";", 1)[0];
+  };
+  const save = (base: string, cookie: string, title_suffix: string) =>
+    fetch(`${base}/api/instance-settings`, {
+      method: "PUT",
+      headers: {
+        cookie,
+        "x-roamgate-settings": "1",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ title_suffix }),
+      signal: AbortSignal.timeout(5000),
+    });
+  const manifest = async (base: string, cookie: string) => {
+    const response = await fetch(`${base}/manifest.json`, {
+      headers: { cookie },
+      signal: AbortSignal.timeout(5000),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-cache, must-revalidate",
+    );
+    return response.json();
+  };
+  try {
+    await withAuthServer(
+      async (base) => {
+        for (const path of ["/api/instance-settings", "/manifest.json"]) {
+          expect(
+            (
+              await fetch(`${base}${path}`, {
+                signal: AbortSignal.timeout(5000),
+              })
+            ).status,
+          ).toBe(401);
+        }
+        expect((await save(base, "", "Unauthorized")).status).toBe(401);
+        const cookie = await login(base);
+        const get = await fetch(`${base}/api/instance-settings`, {
+          headers: { cookie },
+          signal: AbortSignal.timeout(5000),
+        });
+        expect(await get.json()).toEqual({ title_suffix: "" });
+        expect(get.headers.get("cache-control")).toBe("no-store");
+        const original = await manifest(base, cookie);
+        expect(original.name).toBe("Roamgate");
+        const saved = await save(base, cookie, "  Home  ");
+        expect(saved.status).toBe(200);
+        expect(await saved.json()).toEqual({ title_suffix: "Home" });
+        expect(await manifest(base, cookie)).toEqual({
+          ...original,
+          name: "Roamgate \u00b7 Home",
+          short_name: "Roamgate \u00b7 Home",
+        });
+        const html = await (
+          await fetch(`${base}/`, {
+            headers: { cookie, accept: "text/html" },
+            signal: AbortSignal.timeout(5000),
+          })
+        ).text();
+        expect(html).toContain("<title>Roamgate \u00b7 Home</title>");
+        expect(html).toContain(
+          'name="application-name" content="Roamgate \u00b7 Home"',
+        );
+        expect(html).toContain(
+          'name="apple-mobile-web-app-title" content="Roamgate \u00b7 Home"',
+        );
+        await withAuthServer(async (otherBase) => {
+          const otherCookie = await login(otherBase);
+          expect((await manifest(otherBase, otherCookie)).name).toBe(
+            "Roamgate",
+          );
+          expect((await save(otherBase, otherCookie, "Work")).status).toBe(200);
+          expect((await manifest(otherBase, otherCookie)).name).toBe(
+            "Roamgate \u00b7 Work",
+          );
+          expect((await manifest(base, cookie)).name).toBe(
+            "Roamgate \u00b7 Home",
+          );
+        });
+      },
+      { ROAMGATE_SETTINGS_PATH: settingsPath },
+    );
+    // A new process reads the same persisted name before serving its first page.
+    await withAuthServer(
+      async (base) => {
+        const cookie = await login(base);
+        expect((await manifest(base, cookie)).name).toBe(
+          "Roamgate \u00b7 Home",
+        );
+        expect((await save(base, cookie, "")).status).toBe(200);
+        expect((await manifest(base, cookie)).name).toBe("Roamgate");
+      },
+      { ROAMGATE_SETTINGS_PATH: settingsPath },
+    );
+    expect((await Bun.file(settingsPath).json()).title_suffix).toBe("");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}, 30_000);
+
+test("instance name save failures preserve the current name and permit retry", async () => {
+  const root = await mkdtemp(join(tmpdir(), "roamgate-instance-save-"));
+  const blockedPath = join(root, "settings.json");
+  await mkdir(blockedPath);
+  try {
+    await withAuthServer(
+      async (base) => {
+        const response = await fetch(`${base}/api/login`, {
+          method: "POST",
+          body: JSON.stringify({ password }),
+          signal: AbortSignal.timeout(5000),
+        });
+        const cookie = response.headers.get("set-cookie")!.split(";", 1)[0];
+        const save = () =>
+          fetch(`${base}/api/instance-settings`, {
+            method: "PUT",
+            headers: {
+              cookie,
+              "x-roamgate-settings": "1",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ title_suffix: "Retry" }),
+            signal: AbortSignal.timeout(5000),
+          });
+        const failed = await save();
+        expect(failed.status).toBe(500);
+        expect(await failed.json()).toEqual({
+          error: "Unable to save instance name",
+        });
+        const get = () =>
+          fetch(`${base}/api/instance-settings`, {
+            headers: { cookie },
+            signal: AbortSignal.timeout(5000),
+          }).then((response) => response.json());
+        expect(await get()).toEqual({ title_suffix: "" });
+        await rm(blockedPath, { recursive: true });
+        expect((await save()).status).toBe(200);
+        expect(await get()).toEqual({ title_suffix: "Retry" });
+      },
+      { ROAMGATE_SETTINGS_PATH: blockedPath },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 }, 20_000);

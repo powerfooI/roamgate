@@ -506,6 +506,105 @@ async function registerDomTests() {
     );
   }
 
+  test.each(["touch", "mouse"])(
+    "mobile capsule toggle pointerdown preserves Direct input and draft (%s)",
+    async (pointerType) => {
+      writeTerminalComposerDraft(draftKey, "unsent Composer draft");
+      localStorage.setItem(storageKey, "direct");
+      await mount();
+      await typeGesture();
+      const term = currentTerminal();
+      document.documentElement.classList.add("keyboard-open");
+      const toggle = document.createElement("button");
+      toggle.className = "mobile-controls-toggle";
+      const icon = document.createElement("span");
+      toggle.append(icon);
+      document.body.append(toggle);
+      const focusCount = term.focusCount;
+      // Dispatch through the real document capture handler. App's mousedown
+      // focus guard is tested separately; cancellation there cannot prevent
+      // an explicit earlier blur in TerminalView's capture listener.
+      act(() =>
+        icon.dispatchEvent(
+          new browser.PointerEvent("pointerdown", {
+            bubbles: true,
+            pointerType,
+          }) as unknown as PointerEvent,
+        ),
+      );
+      expect(document.activeElement).toBe(term.textarea);
+      expect(term.focusCount).toBe(focusCount);
+      expect(term.options.disableStdin).toBe(false);
+      expect(term.textarea.readOnly).toBe(false);
+      expect(selectedMode()).toBe("direct");
+      expect(savedMode()).toBe("direct");
+      expect(readTerminalComposerDraft(draftKey)).toBe("unsent Composer draft");
+      act(() => term.onDataCallback("continue typing"));
+      expect(
+        calls.filter((call) => call.method === "terminal.input"),
+      ).toHaveLength(1);
+      // Ordinary outside navigation retains the existing keyboard-dismiss path.
+      const outside = document.createElement("button");
+      document.body.append(outside);
+      act(() =>
+        outside.dispatchEvent(
+          new browser.PointerEvent("pointerdown", {
+            bubbles: true,
+            pointerType,
+          }) as unknown as PointerEvent,
+        ),
+      );
+      expect(document.activeElement).not.toBe(term.textarea);
+    },
+  );
+
+  test.each(["touch", "mouse"])(
+    "compact capsule row pan does not retire Direct keyboard input (%s)",
+    async (pointerType) => {
+      localStorage.setItem(storageKey, "direct");
+      await mount();
+      await typeGesture();
+      const term = currentTerminal();
+      document.documentElement.classList.add("keyboard-open");
+      const app = document.createElement("div");
+      app.className = "app";
+      app.setAttribute("data-mobile-controls-compact", "");
+      const row = document.createElement("div");
+      row.className = "mobile-controls-stack";
+      const button = document.createElement("button");
+      const icon = document.createElement("span");
+      button.append(icon);
+      row.append(button);
+      app.append(row);
+      document.body.append(app);
+      const down = () =>
+        act(() =>
+          icon.dispatchEvent(
+            new browser.PointerEvent("pointerdown", {
+              bubbles: true,
+              pointerType,
+            }) as unknown as PointerEvent,
+          ),
+        );
+      down();
+      touch(row, "touchstart", 100);
+      touch(row, "touchmove", 101);
+      touch(row, "touchend", 101);
+      expect(document.activeElement).toBe(term.textarea);
+      expect(term.options.disableStdin).toBe(false);
+      expect(term.textarea.readOnly).toBe(false);
+      expect(scrollCalls()).toEqual([]);
+      expect(calls.some((call) => call.method === "terminal.input")).toBe(
+        false,
+      );
+      // Only the compact pan surface gets this exemption; normal navigation
+      // keeps the existing outside-pointer dismissal behavior.
+      app.removeAttribute("data-mobile-controls-compact");
+      down();
+      expect(document.activeElement).not.toBe(term.textarea);
+    },
+  );
+
   test("Composer draft gestures remain native while terminal swipes and output preserve editing", async () => {
     await mount();
     await typeGesture();
