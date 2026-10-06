@@ -1,14 +1,21 @@
 import {
+  ASSISTANT_MAX_TOOL_ARGUMENTS,
+  ASSISTANT_MAX_TOOL_OUTPUT,
+  ASSISTANT_MAX_TOOL_DETAILS,
   type AssistantConfig,
+  type AssistantMessage,
   type AssistantModelConnection,
   type AssistantSnapshot,
   type AssistantSource,
+  type AssistantToolActivity,
   isAssistantModelApi,
   isAssistantModelEndpoint,
 } from "../../../shared/assistant";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { pathToFileURL } from "node:url";
 import { isRecord } from "../agent/session-utils";
 import { assertSafeDataPath } from "../config/data-paths";
 import {
@@ -59,6 +66,11 @@ export type AssistantDriver = {
     input: AssistantModelConnection,
     save: (path: string, value: unknown) => void,
   ): Promise<void>;
+  readToolDetails?(
+    entries: unknown[],
+    messages: AssistantMessage[],
+    sourceDirectory?: string,
+  ): Promise<AssistantMessage[]>;
   login(
     provider: string,
     method: "api_key" | "oauth",
@@ -89,12 +101,102 @@ export type AssistantDriver = {
       id: string,
       name: string,
       status: "running" | "completed" | "failed",
+      details?: Pick<AssistantToolActivity, "arguments" | "output">,
     ): void;
     error(): void;
   }): Promise<unknown[]>;
   stop(): Promise<void>;
   dispose(): Promise<void>;
 };
+
+type ToolProjection = Pick<
+  AssistantToolActivity,
+  "name" | "arguments" | "output"
+> & { ambiguous?: boolean };
+const DETAIL_TRUNCATED = "\n[truncated]";
+
+function projectToolDetails(
+  entries: readonly unknown[],
+  wanted?: Map<string, string>,
+  budget = ASSISTANT_MAX_TOOL_DETAILS,
+): Map<string, ToolProjection> {
+  const details = new Map<string, ToolProjection>();
+  const ambiguous = new Set<string>();
+  for (const entry of entries) {
+    if (!isRecord(entry) || !Array.isArray(entry.model)) continue;
+    for (const message of entry.model) {
+      if (!isRecord(message)) continue;
+      if (message.role === "assistant" && Array.isArray(message.content)) {
+        for (const call of message.content) {
+          if (
+            !isRecord(call) ||
+            call.type !== "toolCall" ||
+            typeof call.id !== "string" ||
+            typeof call.name !== "string" ||
+            (wanted && !wanted.has(call.id))
+          )
+            continue;
+          if (details.has(call.id)) ambiguous.add(call.id);
+          else
+            details.set(call.id, {
+              name: call.name,
+              ...(isRecord(call.arguments)
+                ? { arguments: JSON.stringify(call.arguments, null, 2) }
+                : {}),
+            });
+        }
+      } else if (
+        message.role === "toolResult" &&
+        typeof message.toolCallId === "string"
+      ) {
+        const call = details.get(message.toolCallId);
+        if (
+          call &&
+          call.name === message.toolName &&
+          Array.isArray(message.content)
+        )
+          call.output = message.content
+            .filter(
+              (part) =>
+                isRecord(part) &&
+                part.type === "text" &&
+                typeof part.text === "string",
+            )
+            .map((part) => part.text)
+            .join("\n");
+      }
+    }
+  }
+  for (const [id, detail] of details)
+    if (wanted && wanted.get(id) !== detail.name) details.delete(id);
+    else if (ambiguous.has(id))
+      details.set(id, { name: detail.name, ambiguous: true });
+  let fields = [...details.values()].reduce(
+    (count, tool) =>
+      count +
+      Number(tool.arguments !== undefined) +
+      Number(tool.output !== undefined),
+    0,
+  );
+  if (fields * DETAIL_TRUNCATED.length > budget) return new Map();
+  const bounded = (value: string, max: number) => {
+    const limit = Math.min(max, budget - --fields * DETAIL_TRUNCATED.length);
+    const result =
+      value.length <= limit
+        ? value
+        : value.slice(0, Math.max(0, limit - DETAIL_TRUNCATED.length)) +
+          DETAIL_TRUNCATED;
+    budget -= result.length;
+    return result;
+  };
+  for (const tool of details.values()) {
+    if (tool.arguments !== undefined)
+      tool.arguments = bounded(tool.arguments, ASSISTANT_MAX_TOOL_ARGUMENTS);
+    if (tool.output !== undefined)
+      tool.output = bounded(tool.output, ASSISTANT_MAX_TOOL_OUTPUT);
+  }
+  return details;
+}
 
 function systemPrompt(automatic: boolean) {
   return `You are Ranger, the Roamgate workspace assistant. Help the user understand the workspaces they explicitly authorized for this turn.
@@ -202,6 +304,117 @@ export function createPiDriver(
     return { path, saved: { ...saved, providers: saved.providers } };
   }
   return {
+    async readToolDetails(entries, messages, sourceDirectory = directory) {
+      const result = structuredClone(messages);
+      const wanted = new Map<string, string>();
+      const duplicated = new Set<string>();
+      const seen = new Set<string>();
+      let budget = ASSISTANT_MAX_TOOL_DETAILS;
+      for (const message of result) {
+        for (const tool of message.tools) {
+          budget -= (tool.arguments?.length ?? 0) + (tool.output?.length ?? 0);
+          if (seen.has(tool.id)) duplicated.add(tool.id);
+          seen.add(tool.id);
+          if (
+            tool.arguments === undefined ||
+            (tool.status !== "running" && tool.output === undefined)
+          )
+            wanted.set(tool.id, tool.name);
+        }
+      }
+      for (const id of duplicated) wanted.delete(id);
+      if (!wanted.size || budget <= 0) return result;
+      const pointer = entries[0];
+      if (
+        entries.length !== 1 ||
+        !isRecord(pointer) ||
+        pointer.type !== "ranger-durable" ||
+        Object.keys(pointer).some((key) => key !== "type" && key !== "id") ||
+        typeof pointer.id !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+          pointer.id,
+        )
+      )
+        return result;
+      let database: DatabaseSync | undefined;
+      try {
+        const storeDirectory = join(sourceDirectory, "durable", pointer.id);
+        const path = join(storeDirectory, "execution.sqlite");
+        assertSafeDataPath(path);
+        const stat = lstatSync(path);
+        if (!stat.isFile() || stat.nlink !== 1) return result;
+        const inactive = () =>
+          [
+            `${storeDirectory}.lock`,
+            ...["-wal", "-shm", "-journal"].map((suffix) => `${path}${suffix}`),
+          ].every((candidate) => {
+            try {
+              lstatSync(candidate);
+              return false;
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+                throw error;
+              return true;
+            }
+          });
+        const immutable = inactive();
+        const uri = pathToFileURL(path);
+        uri.search = "mode=ro&immutable=1";
+        // Closed WAL stores have no sidecars. Immutable reads cannot create them,
+        // so accept this snapshot only while the store remains closed and unchanged.
+        database = new DatabaseSync(immutable ? uri : path, { readOnly: true });
+        const { ROOT_CONVERSATION_ID } = await import(
+          "@earendil-works/pi-durable"
+        );
+        const records: unknown[] = [];
+        let bytes = 0;
+        // A bounded, complete scan detects reused call IDs without guessing which turn owns them.
+        for (const row of database
+          .prepare(
+            "SELECT substr(record, 1, 1000001) AS record, length(CAST(record AS BLOB)) AS bytes FROM entries WHERE conversation_id = ? ORDER BY id LIMIT 4001",
+          )
+          .iterate(ROOT_CONVERSATION_ID)) {
+          bytes += Number(row.bytes);
+          if (
+            records.length === 4000 ||
+            Number(row.bytes) > 1_000_000 ||
+            bytes > 16_000_000
+          )
+            return result;
+          records.push(JSON.parse(String(row.record)));
+        }
+        if (immutable) {
+          assertSafeDataPath(path);
+          const after = lstatSync(path);
+          if (
+            !inactive() ||
+            !after.isFile() ||
+            after.nlink !== 1 ||
+            after.dev !== stat.dev ||
+            after.ino !== stat.ino ||
+            after.size !== stat.size ||
+            after.mtimeMs !== stat.mtimeMs ||
+            after.ctimeMs !== stat.ctimeMs
+          )
+            return result;
+        }
+        const details = projectToolDetails(records, wanted, budget);
+        for (const message of result)
+          for (const tool of message.tools) {
+            const detail = details.get(tool.id);
+            if (detail?.name !== tool.name || detail.ambiguous) continue;
+            if (tool.arguments === undefined && detail.arguments !== undefined)
+              tool.arguments = detail.arguments;
+            if (tool.output === undefined && detail.output !== undefined)
+              tool.output = detail.output;
+          }
+      } catch {
+        // Unavailable or malformed historical stores keep their existing summary.
+      } finally {
+        database?.close();
+      }
+      return result;
+    },
     async catalog(source) {
       // Recreate without availability checks: refresh() can execute !command keys.
       const models = await runtime(source, true);
@@ -286,12 +499,18 @@ export function createPiDriver(
           ?.configured
       )
         throw new Error("Enter an API key for this provider");
-      const selected = entries.find(
+      const ids = new Set(input.models ?? [input.model]);
+      const selected = entries.filter(
         (model): model is Record<string, unknown> =>
-          isRecord(model) && model.id === input.model,
+          isRecord(model) && typeof model.id === "string" && ids.has(model.id),
       );
-      if (selected?.type !== undefined && selected.type !== "chat")
+      if (
+        selected.some(
+          (model) => model.type !== undefined && model.type !== "chat",
+        )
+      )
         throw new Error("Select a chat model");
+      const existing = new Set(selected.map((model) => model.id));
       save(path, {
         ...saved,
         providers: {
@@ -299,25 +518,25 @@ export function createPiDriver(
           [input.provider]: {
             ...previous,
             ...(!previous ? { baseUrl: input.base_url, api: input.api } : {}),
-            models: selected
-              ? entries.map((model) =>
-                  model === selected
-                    ? {
-                        ...selected,
-                        baseUrl: input.base_url,
-                        api: input.api,
-                      }
-                    : model,
-                )
-              : [
-                  ...entries,
-                  {
-                    id: input.model,
-                    ...(previous
-                      ? { baseUrl: input.base_url, api: input.api }
-                      : {}),
-                  },
-                ],
+            models: [
+              ...entries.map((model) =>
+                isRecord(model) && existing.has(model.id)
+                  ? {
+                      ...model,
+                      baseUrl: input.base_url,
+                      api: input.api,
+                    }
+                  : model,
+              ),
+              ...[...ids]
+                .filter((id) => !existing.has(id))
+                .map((id) => ({
+                  id,
+                  ...(previous
+                    ? { baseUrl: input.base_url, api: input.api }
+                    : {}),
+                })),
+            ],
           },
         },
       });
@@ -594,6 +813,7 @@ export function createPiDriver(
           const entries = [...transcript.values()]
             .filter((entry) => entry.id > first && entry.id <= last)
             .sort((a, b) => a.id - b.id);
+          const details = projectToolDetails(entries);
           const live = view.docs["pi.live"] as
             | import("@earendil-works/pi-durable").LiveState
             | undefined;
@@ -634,9 +854,15 @@ export function createPiDriver(
             name: string,
             value: "running" | "completed" | "failed",
           ) => {
-            if (toolStates.get(id) === value) return;
-            toolStates.set(id, value);
-            input.tool(id, name, value);
+            const detail = details.get(id);
+            const fields =
+              detail?.ambiguous || detail?.name === name
+                ? { arguments: detail.arguments, output: detail.output }
+                : undefined;
+            const key = JSON.stringify([value, fields]);
+            if (toolStates.get(id) === key) return;
+            toolStates.set(id, key);
+            input.tool(id, name, value, fields);
           };
           for (const entry of entries) {
             for (const message of entry.model ?? []) {

@@ -376,13 +376,16 @@ may finish.
 Existing tasks retain their saved mode and need an edit to adopt high-permission
 mode. Ranger's built-in write/command tools remain disabled.
 
-For a compatible endpoint, expand **Configure custom model** and enter a unique
-provider ID, API format, API base URL, model ID, and API key. Supported formats
-are OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages. Use a
-dummy key for an unauthenticated local server. **Save custom model** selects the
-saved model; then select allowed workspaces and **Save connection**. Select a
-custom provider and model to **Edit custom model**; a blank key keeps its existing
-key. Stop running tasks before changing a model connection.
+For a compatible endpoint, expand **Configure custom models** and enter a unique
+provider ID, API format, API base URL, model IDs, and API key. Enter one model ID
+per line or separate IDs with commas, up to 100 IDs of 500 characters each.
+Duplicate IDs are saved once. Supported formats are OpenAI Chat Completions,
+OpenAI Responses, and Anthropic Messages. Use a
+dummy key for an unauthenticated local server. **Save custom models** saves the
+whole batch and selects the first ID; then select allowed workspaces and
+**Save connection**. Select a custom provider and model to **Edit custom models**;
+a blank key keeps its existing key. Stop running tasks before changing a model
+connection. Existing models outside the batch keep their settings.
 Use a separate provider ID for a different endpoint so existing providers keep
 their connection settings.
 

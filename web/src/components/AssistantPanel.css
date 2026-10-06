@@ -290,6 +290,7 @@
 }
 
 .assistant-panel .form-field input,
+.assistant-panel .form-field textarea,
 .assistant-panel .themed-select-trigger {
   width: 100%;
   min-height: 34px;
@@ -705,15 +706,41 @@
   list-style: none;
 }
 
-.assistant-tools li {
+.assistant-tool-details summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.assistant-tools li > span:first-child {
+.assistant-tool-details summary > span:first-child {
+  flex: 1;
   overflow-wrap: anywhere;
+}
+
+.assistant-tool-details summary::before {
+  content: "\25b6";
+  font-size: 8px;
+}
+
+.assistant-tool-details[open] > summary::before {
+  content: "\25bc";
+}
+
+.assistant-tool-content {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.assistant-tool-content pre {
+  max-height: 240px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  font: 11px / 1.6 var(--mono-font);
 }
 
 .assistant-activity-card {
@@ -926,6 +953,8 @@
 
 .assistant-prompt-content summary:focus-visible,
 .assistant-prompt-content pre:focus-visible,
+.assistant-tool-details summary:focus-visible,
+.assistant-tool-content pre:focus-visible,
 .assistant-action-meta summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;

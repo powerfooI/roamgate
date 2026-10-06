@@ -507,6 +507,11 @@ hold execution checkpoints, transcripts, and tool results; `state.json` retains
 their active context reference and pending run. SQLite uses WAL mode and
 `synchronous = FULL` with a process ownership lock. Missing or invalid execution
 stores cannot create replacement contexts.
+Tool activity cards expose bounded argument JSON and text results, including
+safe tool failure messages. Historical details are projected from existing
+execution logs through a read-only SQLite connection without resuming a run or
+rewriting saved conversations. Missing or ambiguous records leave details
+unavailable. Images and internal execution metadata are not included.
 There is no automatic deletion or aggregate disk quota
 for saved conversations or durable stores, including contexts retired by scope
 changes. One bridge process must own an assistant data directory.

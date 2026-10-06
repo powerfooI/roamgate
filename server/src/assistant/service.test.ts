@@ -17,7 +17,10 @@ import type {
   AssistantTaskNotification,
   AssistantWorkspace,
 } from "../../../shared/assistant";
-import { isAssistantSnapshot } from "../../../shared/assistant";
+import {
+  ASSISTANT_MAX_CUSTOM_MODELS,
+  isAssistantSnapshot,
+} from "../../../shared/assistant";
 import {
   type AssistantContext,
   AssistantRecoveryNotReadyError,
@@ -165,6 +168,209 @@ function permissionAction(
     execute,
   };
 }
+
+test("live tool details persist while repeated call IDs explicitly clear stale details", async () => {
+  const pointer = [{ type: "ranger-durable", id: randomUUID() }];
+  const f = setup({
+    run: async (input) => {
+      input.tool("failed", "workspace_history", "running", {
+        arguments: '{\n  "pane_id": "pane"\n}',
+      });
+      input.tool("failed", "workspace_history", "failed", {
+        output: "Workspace tool unavailable.",
+      });
+      input.tool("reused", "workspace_status", "completed", {
+        arguments: "{}",
+        output: "Old result",
+      });
+      input.tool("reused", "workspace_status", "completed", {
+        arguments: undefined,
+        output: undefined,
+      });
+      input.message("Done");
+      return pointer;
+    },
+  });
+  await f.service.handle("configure", { config: configured });
+  await f.service.handle("send", { text: "Read tools", request_id: "tools" });
+  await until(() => !f.service.peek().running);
+  const tools = f.service.peek().messages.at(-1)!.tools;
+  expect(tools[0]).toMatchObject({
+    status: "failed",
+    arguments: '{\n  "pane_id": "pane"\n}',
+    output: "Workspace tool unavailable.",
+  });
+  expect(tools[1]).toEqual({
+    id: "reused",
+    name: "workspace_status",
+    status: "completed",
+  });
+  expect(
+    JSON.parse(
+      readFileSync(join(f.directory, "state.json"), "utf8"),
+    ).messages.at(-1).tools,
+  ).toEqual(tools);
+  await f.service.dispose();
+  const restored = createAssistantService({
+    directory: f.directory,
+    context: f.context,
+    driver: f.driver,
+    publish: () => {},
+  });
+  services.push(restored);
+  expect((await restored.snapshot()).messages.at(-1)!.tools).toEqual(tools);
+});
+
+test("legacy tool details hydrate current and archived chats without rewriting their summaries", async () => {
+  const pointer = [{ type: "ranger-durable", id: randomUUID() }];
+  let runs = 0;
+  let reads = 0;
+  const f = setup({
+    run: async (input) => {
+      runs++;
+      input.tool("legacy", "workspace_status", "completed");
+      input.message("Done");
+      return pointer;
+    },
+  });
+  await f.service.handle("configure", { config: configured });
+  await f.service.handle("send", { text: "Read status", request_id: "legacy" });
+  await until(() => !f.service.peek().running);
+  const sessionId = f.service.peek().session_id!;
+  const statePath = join(f.directory, "state.json");
+  const before = readFileSync(statePath, "utf8");
+  f.driver.readToolDetails = async (entries, messages) => {
+    reads++;
+    expect(entries).toEqual(pointer);
+    const result = structuredClone(messages);
+    for (const message of result)
+      for (const tool of message.tools)
+        Object.assign(tool, { arguments: "{}", output: "Saved status" });
+    return result;
+  };
+  const detailed = await f.service.handle("get", {});
+  expect(detailed.messages.at(-1)!.tools[0]).toMatchObject({
+    arguments: "{}",
+    output: "Saved status",
+  });
+  expect(readFileSync(statePath, "utf8")).toBe(before);
+  await f.service.handle("configure", { config: configured });
+  expect(f.service.peek().messages.at(-1)!.tools[0]!.output).toBe(
+    "Saved status",
+  );
+  expect(
+    JSON.parse(readFileSync(statePath, "utf8")).messages.at(-1).tools[0].output,
+  ).toBeUndefined();
+  await f.service.handle("new_session", {});
+  const archive = join(f.directory, "sessions", `${sessionId}.json`);
+  expect(
+    JSON.parse(readFileSync(archive, "utf8")).messages.at(-1).tools[0].output,
+  ).toBeUndefined();
+  const selected = await f.service.handle("select_session", {
+    session_id: sessionId,
+  });
+  expect(selected.messages.at(-1)!.tools[0]!.output).toBe("Saved status");
+  expect(reads).toBe(2);
+  await f.service.dispose();
+  const restored = createAssistantService({
+    directory: f.directory,
+    context: f.context,
+    driver: f.driver,
+    publish: () => {},
+  });
+  services.push(restored);
+  expect((await restored.snapshot()).messages.at(-1)!.tools[0]!.arguments).toBe(
+    "{}",
+  );
+  expect(runs).toBe(1);
+});
+
+test("an in-flight history read cannot restore details cleared by a live tool update", async () => {
+  const done = Promise.withResolvers<unknown[]>();
+  const reading = Promise.withResolvers<void>();
+  const details = Promise.withResolvers<void>();
+  let input: Parameters<AssistantDriver["run"]>[0] | undefined;
+  const f = setup({
+    run: async (next) => {
+      input = next;
+      next.tool("call", "workspace_status", "running");
+      return done.promise;
+    },
+    readToolDetails: async (_entries, messages) => {
+      reading.resolve();
+      await details.promise;
+      messages.at(-1)!.tools[0]!.arguments = '{"stale": true}';
+      return messages;
+    },
+  });
+  await f.service.handle("configure", { config: configured });
+  await f.service.handle("send", { text: "Read status", request_id: "race" });
+  await until(() => input !== undefined);
+  const pending = f.service.snapshot();
+  await reading.promise;
+  input!.tool("call", "workspace_status", "completed", {
+    arguments: undefined,
+    output: undefined,
+  });
+  details.resolve();
+  expect((await pending).messages.at(-1)!.tools[0]!.arguments).toBeUndefined();
+  expect(f.service.peek().messages.at(-1)!.tools[0]!.arguments).toBeUndefined();
+  done.resolve([]);
+  await until(() => !f.service.peek().running);
+});
+
+test("legacy task run details read the child's saved durable pointer without rerunning it", async () => {
+  jest.useFakeTimers();
+  const pointer = [{ type: "ranger-durable", id: randomUUID() }];
+  let runs = 0;
+  const f = setup({}, () => ({
+    ...f.driver,
+    run: async (input) => {
+      runs++;
+      input.tool("child-call", "workspace_status", "completed");
+      input.message("Saved task status");
+      return pointer;
+    },
+  }));
+  stableTaskIdentity(f.context);
+  await f.service.handle("configure", { config: configured });
+  const created = await f.service.handle("task.create", {
+    request_id: randomUUID(),
+    title: "Read status",
+    prompt: "Read status",
+    scope: configured.allowed_workspaces,
+    schedule: { type: "interval", minutes: 1 },
+  });
+  const taskId = created.tasks![0]!.id;
+  await f.service.resume();
+  await f.service.handle("task.run_now", { task_id: taskId });
+  jest.advanceTimersByTime(0);
+  await flushTasks();
+  const runId = (await f.service.taskDetail({ task_id: taskId })).runs[0]!.id;
+  const sourceDirectory = join(f.directory, "tasks", taskId, "runs", runId);
+  const statePath = join(sourceDirectory, "state.json");
+  const before = readFileSync(statePath, "utf8");
+  f.driver.readToolDetails = async (entries, messages, directory) => {
+    expect(entries).toEqual(pointer);
+    expect(directory).toBe(sourceDirectory);
+    const result = structuredClone(messages);
+    Object.assign(result.at(-1)!.tools[0]!, {
+      arguments: "{}",
+      output: "Saved task status",
+    });
+    return result;
+  };
+  const detailed = await f.service.taskDetail({
+    task_id: taskId,
+    run_id: runId,
+  });
+  expect(detailed.run!.messages.at(-1)!.tools[0]).toMatchObject({
+    arguments: "{}",
+    output: "Saved task status",
+  });
+  expect(readFileSync(statePath, "utf8")).toBe(before);
+  expect(runs).toBe(1);
+});
 
 describe("Ranger approval policy", () => {
   test("auto actions and schedules return real receipts and retain durable admission", async () => {
@@ -2509,7 +2715,10 @@ describe("bridge-global assistant", () => {
       await expect(
         f.service.handle("configure_model", { ...input, api_key: undefined }),
       ).rejects.toThrow("could not be saved");
-      const connected = await f.service.handle("configure_model", input);
+      const connected = await f.service.handle("configure_model", {
+        ...input,
+        models: [input.model, "second-model", input.model],
+      });
       expect(connected.config.provider).toBe("");
       expect(
         connected.providers.find((provider) => provider.id === input.provider),
@@ -2521,6 +2730,7 @@ describe("bridge-global assistant", () => {
       const saved = JSON.parse(readFileSync(path, "utf8"));
       expect(saved.providers[input.provider].models).toEqual([
         { id: input.model },
+        { id: "second-model" },
       ]);
       expect(readFileSync(path, "utf8")).not.toContain(input.api_key);
       saved.providers.other = {
@@ -2538,7 +2748,7 @@ describe("bridge-global assistant", () => {
           baseUrl: "http://localhost:1",
           api: "openai-completions",
         },
-        { id: "second-model" },
+        { id: "second-model", name: "Second model", contextWindow: 4096 },
       ];
       writeFileSync(path, JSON.stringify(saved));
       expect(
@@ -2547,7 +2757,16 @@ describe("bridge-global assistant", () => {
         )?.custom,
       ).toEqual({ base_url: "http://localhost:1", api: "openai-completions" });
       const key = "synthetic-replacement-key";
-      await f.service.handle("configure_model", { ...input, api_key: key });
+      const batch = await f.service.handle("configure_model", {
+        ...input,
+        models: [input.model, " third-model ", "second-model", "third-model"],
+        api_key: key,
+      });
+      expect(
+        batch.models
+          .filter((model) => model.provider === input.provider)
+          .map((model) => model.id),
+      ).toEqual([input.model, "second-model", "third-model"]);
       const updated = JSON.parse(readFileSync(path, "utf8"));
       expect(updated.providers.other).toEqual(saved.providers.other);
       expect(updated.providers[input.provider].baseUrl).toBe(
@@ -2562,7 +2781,12 @@ describe("bridge-global assistant", () => {
           baseUrl: server.url.href,
           api: input.api,
         },
-        { id: "second-model" },
+        {
+          ...saved.providers[input.provider].models[1],
+          baseUrl: server.url.href,
+          api: input.api,
+        },
+        { id: "third-model", baseUrl: server.url.href, api: input.api },
       ]);
       await f.service.handle("configure_model", {
         ...input,
@@ -2574,6 +2798,7 @@ describe("bridge-global assistant", () => {
         ].key,
       ).toBe(key);
       const before = readFileSync(path, "utf8");
+      const authBefore = readFileSync(join(f.directory, "auth.json"), "utf8");
       for (const invalid of [
         { provider: "anthropic" },
         { provider: "__proto__" },
@@ -2584,11 +2809,32 @@ describe("bridge-global assistant", () => {
         { api_key: "!touch secret-value" },
         { api_key: "$SECRET_VALUE" },
         { credential_source: "pi" },
+        { models: "local-model,second-model" },
+        { models: null },
+        { models: [] },
+        { models: ["other-model"] },
+        { models: [input.model, "new-model", " "] },
+        { models: [input.model, "new-model", 123] },
+        { models: [input.model, "new-model", "x".repeat(501)] },
+        { models: [input.model, "new-model", "bad\u0000model"] },
+        {
+          models: Array.from(
+            { length: ASSISTANT_MAX_CUSTOM_MODELS + 1 },
+            () => input.model,
+          ),
+        },
       ]) {
         await expect(
-          f.service.handle("configure_model", { ...input, ...invalid }),
+          f.service.handle("configure_model", {
+            ...input,
+            api_key: "synthetic-should-not-save-key",
+            ...invalid,
+          }),
         ).rejects.toThrow("could not be saved");
         expect(readFileSync(path, "utf8")).toBe(before);
+        expect(readFileSync(join(f.directory, "auth.json"), "utf8")).toBe(
+          authBefore,
+        );
       }
       await f.service.handle("configure", {
         ...configured,

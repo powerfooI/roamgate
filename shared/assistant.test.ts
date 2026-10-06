@@ -1,11 +1,46 @@
 import { expect, test } from "bun:test";
 import {
+  ASSISTANT_MAX_TOOL_ARGUMENTS,
+  ASSISTANT_MAX_TOOL_OUTPUT,
   isAssistantMessage,
   isAssistantTaskDetail,
   isAssistantTaskInput,
   isAssistantTaskNotification,
   type AssistantTaskDetail,
 } from "./assistant";
+
+test("tool activities accept bounded details and retain legacy summaries", () => {
+  const message = {
+    id: "message",
+    role: "assistant",
+    text: "Done",
+    sent_at: "2026-10-06T00:00:00Z",
+    sources: [],
+    tools: [{ id: "read", name: "workspace_status", status: "completed" }],
+  };
+  expect(isAssistantMessage(message)).toBe(true);
+  const tool = {
+    ...message.tools[0],
+    arguments: "{}",
+    output: "Workspace is idle",
+  };
+  expect(isAssistantMessage({ ...message, tools: [tool] })).toBe(true);
+  expect(
+    isAssistantMessage({
+      ...message,
+      tools: [{ ...tool, output: "failed", status: "failed" }],
+    }),
+  ).toBe(true);
+  for (const invalid of [
+    { arguments: {} },
+    { output: [] },
+    { arguments: "x".repeat(ASSISTANT_MAX_TOOL_ARGUMENTS + 1) },
+    { output: "x".repeat(ASSISTANT_MAX_TOOL_OUTPUT + 1) },
+  ])
+    expect(
+      isAssistantMessage({ ...message, tools: [{ ...tool, ...invalid }] }),
+    ).toBe(false);
+});
 
 test("Ranger notification envelopes require a string status and bounded task targets", () => {
   const notification = {

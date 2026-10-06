@@ -868,6 +868,8 @@ test.each(["SIGKILL", "SIGTERM"] as const)(
         id: "completed-status",
         name: "workspace_status",
         status: "completed",
+        arguments: "{}",
+        output: expect.any(String),
       });
       expect(draft.sources).toHaveLength(1);
       expect(draft.sources[0]).toMatchObject({
@@ -935,13 +937,7 @@ test.each(["SIGKILL", "SIGTERM"] as const)(
       expect(answer.sources).toEqual(draft.sources);
       expect(
         answer.tools.filter((tool) => tool.name === "workspace_status"),
-      ).toEqual([
-        {
-          id: "completed-status",
-          name: "workspace_status",
-          status: "completed",
-        },
-      ]);
+      ).toEqual(draft.tools.filter((tool) => tool.name === "workspace_status"));
       expect(answer.actions).toHaveLength(1);
       expect(answer.actions![0]).toMatchObject({
         id: draft.actions![0]!.id,
@@ -1057,6 +1053,8 @@ test("a scheduled question starts without a browser and resumes its independent 
       id: "completed-status",
       name: "workspace_status",
       status: "completed",
+      arguments: "{}",
+      output: expect.any(String),
     });
     expect(statusReads()).toHaveLength(1);
     expect(f.requests).toHaveLength(3);

@@ -20,10 +20,12 @@ import type {
   AssistantTaskDetail,
   AssistantTaskNotification,
   AssistantNotificationReceipt,
+  AssistantToolActivity,
   AssistantWorkspace,
   AssistantWorkspaceRef,
 } from "../../../shared/assistant";
 import {
+  ASSISTANT_MAX_CUSTOM_MODELS,
   ASSISTANT_MAX_WORKSPACES,
   isAssistantModelApi,
   isAssistantModelEndpoint,
@@ -264,6 +266,7 @@ export function createAssistantService(options: {
       }
     : baseContext;
   let entries: unknown[] = [];
+  let historicalTools = new Map<string, Map<string, AssistantToolActivity>>();
   let entryScope = "";
   let requests: string[] = [];
   let pendingRequest: string | undefined;
@@ -480,12 +483,81 @@ export function createAssistantService(options: {
   function current(): AssistantSnapshot {
     boundMessages();
     updateSummary();
-    return structuredClone({
+    const snapshot = structuredClone({
       ...state,
       ...(tasks
         ? { tasks: tasks.summaries(), error: tasks.error() ?? state.error }
         : {}),
     });
+    for (const message of snapshot.messages)
+      for (const tool of message.tools) {
+        const detail = historicalTools.get(message.id)?.get(tool.id);
+        if (detail?.name !== tool.name) continue;
+        if (tool.arguments === undefined && detail.arguments !== undefined)
+          tool.arguments = detail.arguments;
+        if (tool.output === undefined && detail.output !== undefined)
+          tool.output = detail.output;
+      }
+    return snapshot;
+  }
+  async function detailedSnapshot() {
+    const snapshot = current();
+    if (!driver.readToolDetails) return snapshot;
+    const sessionId = state.session_id;
+    const pointer = entries;
+    try {
+      const messages = await driver.readToolDetails(pointer, snapshot.messages);
+      if (
+        disposed ||
+        state.session_id !== sessionId ||
+        entries !== pointer ||
+        state.revision !== snapshot.revision
+      )
+        return current();
+      historicalTools = new Map(
+        messages.map((message) => [
+          message.id,
+          new Map(
+            message.tools.flatMap((tool) => {
+              const original = snapshot.messages
+                .find((item) => item.id === message.id)
+                ?.tools.find((item) => item.id === tool.id);
+              const previous = historicalTools.get(message.id)?.get(tool.id);
+              const argumentsText =
+                previous?.arguments ??
+                (original?.arguments === undefined
+                  ? tool.arguments
+                  : undefined);
+              const output =
+                previous?.output ??
+                (original?.output === undefined ? tool.output : undefined);
+              return argumentsText === undefined && output === undefined
+                ? []
+                : [
+                    [
+                      tool.id,
+                      {
+                        id: tool.id,
+                        name: tool.name,
+                        status: tool.status,
+                        ...(argumentsText !== undefined
+                          ? { arguments: argumentsText }
+                          : {}),
+                        ...(output !== undefined ? { output } : {}),
+                      },
+                    ] as const,
+                  ];
+            }),
+          ),
+        ]),
+      );
+      if (
+        JSON.stringify(messages.map((message) => message.tools)) !==
+        JSON.stringify(snapshot.messages.map((message) => message.tools))
+      )
+        publish(true);
+    } catch {}
+    return current();
   }
   function publish(immediate = false) {
     state.revision++;
@@ -1102,11 +1174,24 @@ export function createAssistantService(options: {
             streamedText = "";
             updateText();
           },
-          tool: (id, name, status) => {
-            const tool = draft.tools.find((entry) => entry.id === id);
+          tool: (id, name, status, details) => {
+            let tool = draft.tools.find((entry) => entry.id === id);
             if (tool) tool.status = status;
-            else if (draft.tools.length < 64)
-              draft.tools.push({ id, name, status });
+            else if (draft.tools.length < 64) {
+              tool = { id, name, status };
+              draft.tools.push(tool);
+            }
+            if (tool && details) {
+              historicalTools.get(draft.id)?.delete(id);
+              if (Object.hasOwn(details, "arguments")) {
+                if (details.arguments === undefined) delete tool.arguments;
+                else tool.arguments = details.arguments;
+              }
+              if (Object.hasOwn(details, "output")) {
+                if (details.output === undefined) delete tool.output;
+                else tool.output = details.output;
+              }
+            }
             publish();
           },
           error: () => {
@@ -1484,7 +1569,38 @@ export function createAssistantService(options: {
         Object.keys(params).some((key) => key !== "task_id" && key !== "run_id")
       )
         throw new Error("Task detail accepts only task and run identifiers.");
-      return tasks.detail(params.task_id, params.run_id);
+      const detail = tasks.detail(params.task_id, params.run_id);
+      if (
+        detail.run &&
+        driver.readToolDetails &&
+        detail.run.messages.some((message) =>
+          message.tools.some(
+            (tool) => tool.arguments === undefined || tool.output === undefined,
+          ),
+        )
+      ) {
+        try {
+          const sourceDirectory = join(
+            directory,
+            "tasks",
+            detail.task.id,
+            "runs",
+            detail.run.id,
+          );
+          const path = join(sourceDirectory, "state.json");
+          assertSafeDataPath(path);
+          if (statSync(path).size <= MAX_STATE_BYTES) {
+            const saved = JSON.parse(readFileSync(path, "utf8"));
+            if (Array.isArray(saved.entries))
+              detail.run.messages = await driver.readToolDetails(
+                saved.entries,
+                detail.run.messages,
+                sourceDirectory,
+              );
+          }
+        } catch {}
+      }
+      return detail;
     },
     async snapshot(): Promise<AssistantSnapshot> {
       if (disposed) throw new Error("Ranger unavailable");
@@ -1493,7 +1609,7 @@ export function createAssistantService(options: {
       } catch {
         state.error = "The provider catalog could not be loaded.";
       }
-      return current();
+      return detailedSnapshot();
     },
     async handle(
       method: string,
@@ -1624,6 +1740,7 @@ export function createAssistantService(options: {
                   ![
                     "provider",
                     "model",
+                    "models",
                     "base_url",
                     "api",
                     "api_key",
@@ -1634,10 +1751,29 @@ export function createAssistantService(options: {
               throw new Error("Invalid model connection");
             const provider = string(params.provider, "provider", 64).trim();
             const model = string(params.model, "model").trim();
+            const rawModels = params.models;
+            if (
+              rawModels !== undefined &&
+              (!Array.isArray(rawModels) ||
+                !rawModels.length ||
+                rawModels.length > ASSISTANT_MAX_CUSTOM_MODELS)
+            )
+              throw new Error("Invalid model connection");
+            const models =
+              rawModels === undefined
+                ? undefined
+                : [
+                    ...new Set(
+                      rawModels.map((id) => string(id, "model").trim()),
+                    ),
+                  ];
             const base_url = string(params.base_url, "base URL", 2000).trim();
             if (
               !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/.test(provider) ||
               /[\u0000-\u001f\u007f]/.test(model) ||
+              (models &&
+                (!models.includes(model) ||
+                  models.some((id) => /[\u0000-\u001f\u007f]/.test(id)))) ||
               !isAssistantModelEndpoint(base_url) ||
               !isAssistantModelApi(params.api)
             )
@@ -1655,6 +1791,7 @@ export function createAssistantService(options: {
               {
                 provider,
                 model,
+                ...(models ? { models } : {}),
                 base_url,
                 api: params.api,
                 api_key,
@@ -1853,7 +1990,9 @@ export function createAssistantService(options: {
         default:
           throw new Error("Unknown Ranger method");
       }
-      return current();
+      return method === "get" || method === "select_session"
+        ? detailedSnapshot()
+        : current();
     },
     async dispose(): Promise<void> {
       disposed = true;

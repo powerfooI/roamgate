@@ -1,4 +1,8 @@
 export const ASSISTANT_MAX_WORKSPACES = 64;
+export const ASSISTANT_MAX_CUSTOM_MODELS = 100;
+export const ASSISTANT_MAX_TOOL_ARGUMENTS = 8_000;
+export const ASSISTANT_MAX_TOOL_OUTPUT = 16_000;
+export const ASSISTANT_MAX_TOOL_DETAILS = 128_000;
 
 export type AssistantWorkspaceRef = {
   connection_id: string;
@@ -28,6 +32,7 @@ export type AssistantModelApi = (typeof ASSISTANT_MODEL_APIS)[number];
 export type AssistantModelConnection = {
   provider: string;
   model: string;
+  models?: string[];
   base_url: string;
   api: AssistantModelApi;
   api_key?: string;
@@ -76,6 +81,8 @@ export type AssistantToolActivity = {
   id: string;
   name: string;
   status: "running" | "completed" | "failed";
+  arguments?: string;
+  output?: string;
 };
 
 export type AssistantActionKind =
@@ -481,6 +488,12 @@ export function isAssistantMessage(value: unknown): value is AssistantMessage {
         record(tool) &&
         text(tool.id) &&
         text(tool.name) &&
+        (tool.arguments === undefined ||
+          (text(tool.arguments) &&
+            tool.arguments.length <= ASSISTANT_MAX_TOOL_ARGUMENTS)) &&
+        (tool.output === undefined ||
+          (text(tool.output) &&
+            tool.output.length <= ASSISTANT_MAX_TOOL_OUTPUT)) &&
         ["running", "completed", "failed"].includes(String(tool.status)),
     ) &&
     Array.isArray(value.sources) &&

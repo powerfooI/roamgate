@@ -24,6 +24,7 @@ import {
   useState,
 } from "react";
 import {
+  ASSISTANT_MAX_CUSTOM_MODELS,
   ASSISTANT_MAX_WORKSPACES,
   type AssistantAction,
   type AssistantAuthState,
@@ -142,11 +143,46 @@ export function AssistantMessageActivity({
       {message.tools.length ? (
         <ul>
           {message.tools.map((tool) => (
-            <li key={tool.id} className="assistant-activity-card">
-              <span>{activityLabels.get(tool.name) ?? tool.name}</span>
-              <span className={`assistant-tool-state is-${tool.status}`}>
-                {tool.status}
-              </span>
+            <li key={tool.id}>
+              <details className="assistant-activity-card assistant-tool-details">
+                <summary>
+                  <span>{activityLabels.get(tool.name) ?? tool.name}</span>
+                  <span className={`assistant-tool-state is-${tool.status}`}>
+                    {tool.status}
+                  </span>
+                </summary>
+                <div className="assistant-tool-content">
+                  {tool.arguments !== undefined ? (
+                    <>
+                      <strong>Arguments</strong>
+                      <pre tabIndex={0}>{tool.arguments}</pre>
+                    </>
+                  ) : null}
+                  {tool.output !== undefined ? (
+                    <>
+                      <strong>
+                        {tool.status === "failed" ? "Error" : "Result"}
+                      </strong>
+                      <pre tabIndex={0}>{tool.output}</pre>
+                    </>
+                  ) : null}
+                  {tool.arguments === undefined && tool.output === undefined ? (
+                    <p className="assistant-hint">
+                      Call details are unavailable.
+                    </p>
+                  ) : null}
+                  {tool.arguments !== undefined && tool.output === undefined ? (
+                    <p className="assistant-hint">
+                      {tool.status === "running"
+                        ? "Result pending."
+                        : "Result unavailable."}
+                    </p>
+                  ) : null}
+                  {tool.arguments === undefined && tool.output !== undefined ? (
+                    <p className="assistant-hint">Arguments unavailable.</p>
+                  ) : null}
+                </div>
+              </details>
             </li>
           ))}
         </ul>
@@ -198,23 +234,37 @@ function AssistantModelForm({
   const [baseUrl, setBaseUrl] = useState(custom?.base_url ?? "");
   const [api, setApi] = useState(custom?.api ?? "openai-completions");
   const [apiKey, setApiKey] = useState("");
+  const models = [
+    ...new Set(
+      model
+        .split(/[,\r\n]+/)
+        .map((id) => id.trim())
+        .filter(Boolean),
+    ),
+  ];
   const keySaved = providers.some(
     (item) => item.id === providerId.trim() && item.configured,
   );
   return (
     <details className="assistant-custom-model">
       <summary>
-        {custom ? "Edit custom model" : "Configure custom model"}
+        {custom ? "Edit custom models" : "Configure custom models"}
       </summary>
       <form
         aria-label="Custom model connection"
         onSubmit={async (event) => {
           event.preventDefault();
-          if (tasksRunning) return;
+          if (
+            tasksRunning ||
+            !models.length ||
+            models.length > ASSISTANT_MAX_CUSTOM_MODELS
+          )
+            return;
           if (
             await onSave({
               provider: providerId.trim(),
-              model: model.trim(),
+              model: models[0]!,
+              ...(models.length > 1 ? { models } : {}),
               base_url: baseUrl.trim(),
               api,
               ...(apiKey ? { api_key: apiKey } : {}),
@@ -266,11 +316,13 @@ function AssistantModelForm({
           />
         </label>
         <label className="form-field">
-          <span>Model ID</span>
-          <input
-            aria-label="Custom model ID"
+          <span>Model IDs</span>
+          <textarea
+            aria-label="Custom model IDs"
+            aria-describedby="assistant-custom-model-ids-hint"
             required
-            maxLength={500}
+            rows={3}
+            maxLength={ASSISTANT_MAX_CUSTOM_MODELS * 501}
             autoComplete="off"
             spellCheck={false}
             placeholder="your-model-id"
@@ -278,6 +330,11 @@ function AssistantModelForm({
             onChange={(event) => setModel(event.currentTarget.value)}
           />
         </label>
+        <p className="assistant-hint" id="assistant-custom-model-ids-hint">
+          One ID per line, or separated by commas. Up to{" "}
+          {ASSISTANT_MAX_CUSTOM_MODELS} IDs, 500 characters each. The first ID
+          will be selected.
+        </p>
         <label className="form-field">
           <span>API key</span>
           <input
@@ -305,8 +362,15 @@ function AssistantModelForm({
             Stop running tasks before changing a model connection.
           </p>
         ) : null}
-        <button type="submit" disabled={tasksRunning}>
-          Save custom model
+        <button
+          type="submit"
+          disabled={
+            tasksRunning ||
+            !models.length ||
+            models.length > ASSISTANT_MAX_CUSTOM_MODELS
+          }
+        >
+          Save custom models
         </button>
       </form>
     </details>

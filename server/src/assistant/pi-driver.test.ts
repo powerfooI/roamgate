@@ -13,6 +13,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
+import {
+  ASSISTANT_MAX_TOOL_ARGUMENTS,
+  ASSISTANT_MAX_TOOL_OUTPUT,
+  ASSISTANT_MAX_TOOL_DETAILS,
+  type AssistantMessage,
+} from "../../../shared/assistant";
 import { type AssistantDriver, createPiDriver } from "./pi-driver";
 import {
   actionTools,
@@ -40,11 +47,270 @@ function durableEntries(directory: string, entries: unknown[]) {
   }
 }
 
+test("historical tool details are bounded read-only text and leave ambiguous calls unavailable", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "roamgate-tool-details-"));
+  const id = randomUUID();
+  const root = join(directory, "durable", id);
+  mkdirSync(root, { recursive: true });
+  const path = join(root, "execution.sqlite");
+  const database = new DatabaseSync(path);
+  database.exec(
+    "CREATE TABLE entries (id INTEGER PRIMARY KEY, conversation_id INTEGER, record TEXT)",
+  );
+  const insert = database.prepare("INSERT INTO entries VALUES (?, ?, ?)");
+  let entry = 0;
+  const add = (model: unknown, conversation = 1) =>
+    insert.run(++entry, conversation, JSON.stringify({ model: [model] }));
+  const messages: AssistantMessage[] = [
+    {
+      id: "legacy",
+      role: "assistant",
+      text: "Done",
+      sent_at: "2026-10-06T00:00:00Z",
+      sources: [],
+      tools: Array.from({ length: 64 }, (_, index) => ({
+        id: `call-${index}`,
+        name: "workspace_terminal",
+        status: index === 0 ? "failed" : "completed",
+      })),
+    },
+  ];
+  for (const tool of messages[0]!.tools) {
+    add({
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          id: tool.id,
+          name: tool.name,
+          arguments: tool.id === "call-0" ? {} : { prompt: "a".repeat(9000) },
+        },
+      ],
+    });
+    add({
+      role: "toolResult",
+      toolCallId: tool.id,
+      toolName: tool.name,
+      content: [
+        {
+          type: "text",
+          text:
+            tool.id === "call-0"
+              ? "Workspace tool unavailable."
+              : "o".repeat(17000),
+        },
+        { type: "image", data: "private-image", mimeType: "image/png" },
+      ],
+      details: { private: "private-details" },
+      isError: tool.status === "failed",
+    });
+  }
+  add(
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          id: "call-0",
+          name: "workspace_terminal",
+          arguments: { private: "other-conversation" },
+        },
+      ],
+    },
+    2,
+  );
+  database.close();
+  const driver = createPiDriver(directory, async () => {
+    throw new Error("SDK model runtime must not load");
+  });
+  const pointer = [{ type: "ranger-durable", id }];
+  try {
+    const before = readFileSync(path);
+    const detailed = await driver.readToolDetails!(pointer, messages);
+    expect(messages[0]!.tools[0]!.arguments).toBeUndefined();
+    expect(detailed[0]!.tools[0]).toMatchObject({
+      arguments: "{}",
+      output: "Workspace tool unavailable.",
+      status: "failed",
+    });
+    expect(JSON.stringify(detailed)).not.toContain("private-");
+    expect(JSON.stringify(detailed)).not.toContain("other-conversation");
+    expect(detailed[0]!.tools[1]!.arguments).toContain('\n  "prompt":');
+    expect(detailed[0]!.tools[1]!.arguments).toEndWith("[truncated]");
+    expect(detailed[0]!.tools[1]!.output).toEndWith("[truncated]");
+    expect(
+      detailed[0]!.tools.every(
+        (tool) =>
+          (tool.arguments?.length ?? 0) <= ASSISTANT_MAX_TOOL_ARGUMENTS &&
+          (tool.output?.length ?? 0) <= ASSISTANT_MAX_TOOL_OUTPUT,
+      ),
+    ).toBe(true);
+    expect(
+      detailed[0]!.tools.reduce(
+        (bytes, tool) =>
+          bytes + (tool.arguments?.length ?? 0) + (tool.output?.length ?? 0),
+        0,
+      ),
+    ).toBeLessThanOrEqual(ASSISTANT_MAX_TOOL_DETAILS);
+    expect(readFileSync(path)).toEqual(before);
+    expect(existsSync(`${root}.lock`)).toBe(false);
+    expect(existsSync(`${path}-wal`)).toBe(false);
+    expect(existsSync(`${path}-shm`)).toBe(false);
+    const writer = new DatabaseSync(path);
+    writer.exec("PRAGMA journal_mode = WAL");
+    mkdirSync(`${root}.lock`);
+    writer.prepare("INSERT INTO entries VALUES (?, 1, ?)").run(
+      ++entry,
+      JSON.stringify({
+        model: [
+          {
+            role: "toolResult",
+            toolCallId: "call-1",
+            toolName: "workspace_terminal",
+            content: [{ type: "text", text: "Committed WAL result" }],
+          },
+        ],
+      }),
+    );
+    expect(
+      (await driver.readToolDetails!(pointer, messages))[0]!.tools[1]!.output,
+    ).toBe("Committed WAL result");
+    expect(existsSync(`${root}.lock`)).toBe(true);
+    writer.prepare("INSERT INTO entries VALUES (?, 1, ?)").run(
+      ++entry,
+      JSON.stringify({
+        model: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "toolCall",
+                id: "call-0",
+                name: "workspace_terminal",
+                arguments: { wrong: "later turn" },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(
+      (await driver.readToolDetails!(pointer, messages))[0]!.tools[0]!
+        .arguments,
+    ).toBeUndefined();
+    writer.prepare("INSERT INTO entries VALUES (?, 1, ?)").run(
+      ++entry,
+      JSON.stringify({
+        model: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "toolCall",
+                id: "call-2",
+                name: "workspace_status",
+                arguments: { wrong: "another tool with the same ID" },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(
+      (await driver.readToolDetails!(pointer, messages))[0]!.tools[2],
+    ).toEqual(messages[0]!.tools[2]);
+    for (const name of ["workspace_status", "workspace_terminal"])
+      writer.prepare("INSERT INTO entries VALUES (?, 1, ?)").run(
+        ++entry,
+        JSON.stringify({
+          model: [
+            {
+              role: "assistant",
+              content: [
+                { type: "toolCall", id: "reverse-call", name, arguments: {} },
+              ],
+            },
+          ],
+        }),
+      );
+    const reversed = [
+      {
+        ...messages[0]!,
+        tools: [{ ...messages[0]!.tools[2]!, id: "reverse-call" }],
+      },
+    ];
+    expect(await driver.readToolDetails!(pointer, reversed)).toEqual(reversed);
+    writer.exec("BEGIN");
+    while (entry < 4002)
+      writer.prepare("INSERT INTO entries VALUES (?, 1, ?)").run(++entry, "{}");
+    writer.exec("COMMIT");
+    expect(await driver.readToolDetails!(pointer, messages)).toEqual(messages);
+    writer.close();
+    rmSync(`${root}.lock`, { recursive: true });
+    expect(
+      await driver.readToolDetails!(
+        [{ type: "ranger-durable", id: "../../private" }],
+        messages,
+      ),
+    ).toEqual(messages);
+  } finally {
+    await driver.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 function events(values: Record<string, unknown>[]) {
   return values
     .map((value) => `event: ${value.type}\ndata: ${JSON.stringify(value)}\n\n`)
     .join("");
 }
+
+test("live tool details clear when a model reuses a call ID within the same turn", async () => {
+  const f = await durableFixture((index) =>
+    modelReply(
+      index,
+      index < 3
+        ? [
+            ...toolUse(
+              "workspace_status",
+              "reused",
+              index === 1
+                ? {}
+                : { connection_id: "local", workspace_id: "workspace" },
+              0,
+            ),
+            ...finish("tool_use"),
+          ]
+        : [...text("Done"), ...finish("end_turn")],
+    ),
+  );
+  const reported: {
+    status: string;
+    details:
+      | Pick<
+          import("../../../shared/assistant").AssistantToolActivity,
+          "arguments" | "output"
+        >
+      | undefined;
+  }[] = [];
+  try {
+    await f.createDriver().run(
+      f.input({
+        tool: (_id, _name, status, details) =>
+          reported.push({ status, details }),
+      }),
+    );
+    expect(reported.some((event) => event.details?.arguments === "{}")).toBe(
+      true,
+    );
+    expect(reported.at(-1)).toEqual({
+      status: "completed",
+      details: { arguments: undefined, output: undefined },
+    });
+  } finally {
+    await f.cleanup();
+  }
+});
 
 function start(index: number) {
   return {
@@ -1134,9 +1400,15 @@ test("custom model catalogs isolate Ranger and Pi configuration while task runs 
       { provider: "shared", id: "local-model", label: "local-model" },
     ]);
     expect(() => readFileSync(sentinel)).toThrow();
+    const privateConfig = configuration("private", "synthetic-private-key");
+    Object.assign(privateConfig.providers.private, {
+      baseUrl: "http://localhost:4567/v1",
+      api: "openai-responses",
+      models: [{ id: "changed" }],
+    });
     writeFileSync(
       join(ranger, "models.json"),
-      '{ // Pi comments\n "providers": {"private": {"baseUrl":"http://localhost:4567/v1","api":"openai-responses","apiKey":"synthetic-private-key","models":[{"id":"changed"},],}},}',
+      `{ // Pi comments\n "providers": ${JSON.stringify(privateConfig.providers)},}`,
     );
     const refreshed = await driver.catalog("assistant");
     expect(refreshed.models).toMatchObject([
@@ -1150,6 +1422,76 @@ test("custom model catalogs isolate Ranger and Pi configuration while task runs 
     });
     expect(JSON.stringify(refreshed)).not.toContain("synthetic-private-key");
     expect((await driver.catalog("pi")).models[0]?.id).toBe("local-model");
+    for (const source of ["assistant", "pi"] as const) {
+      const path = join(
+        source === "assistant" ? ranger : shared,
+        "models.json",
+      );
+      const otherPath = join(
+        source === "assistant" ? shared : ranger,
+        "models.json",
+      );
+      const otherBefore = readFileSync(otherPath, "utf8");
+      const saved =
+        source === "assistant"
+          ? privateConfig
+          : JSON.parse(readFileSync(path, "utf8"));
+      const provider = source === "assistant" ? "private" : "shared";
+      const model = saved.providers[provider].models[0].id;
+      const input = {
+        provider,
+        model,
+        models: [model, "new-model", "new-model"],
+        base_url: "http://localhost:6789/v1",
+        api: "openai-responses" as const,
+        api_key: `synthetic-${source}-replacement`,
+        credential_source: source,
+      };
+      const writes: string[] = [];
+      const save = (savedPath: string, value: unknown) => {
+        writes.push(savedPath);
+        writeFileSync(savedPath, JSON.stringify(value));
+      };
+      await driver.configureModel!(input, save);
+      expect(writes).toEqual([path]);
+      expect(readFileSync(otherPath, "utf8")).toBe(otherBefore);
+      const updated = JSON.parse(readFileSync(path, "utf8"));
+      expect(updated.providers[provider]).toEqual({
+        ...saved.providers[provider],
+        models: [model, "new-model"].map((id) => ({
+          id,
+          baseUrl: input.base_url,
+          api: input.api,
+        })),
+      });
+      const authPath = join(
+        source === "assistant" ? ranger : shared,
+        "auth.json",
+      );
+      expect(JSON.parse(readFileSync(authPath, "utf8"))[provider].key).toBe(
+        input.api_key,
+      );
+      updated.providers[provider].models.push({
+        id: "non-chat",
+        type: "embedding",
+      });
+      writeFileSync(path, JSON.stringify(updated));
+      const beforeInvalid = readFileSync(path, "utf8");
+      const authBefore = readFileSync(authPath, "utf8");
+      await expect(
+        driver.configureModel!(
+          {
+            ...input,
+            models: [model, "another-model", "non-chat"],
+            api_key: "synthetic-should-not-save",
+          },
+          save,
+        ),
+      ).rejects.toThrow("Select a chat model");
+      expect(writes).toEqual([path]);
+      expect(readFileSync(path, "utf8")).toBe(beforeInvalid);
+      expect(readFileSync(authPath, "utf8")).toBe(authBefore);
+    }
     const before = readFileSync(join(ranger, "models.json"), "utf8");
     writeFileSync(join(ranger, "models.json"), "invalid-secret-json");
     await expect(driver.catalog("assistant")).rejects.toThrow();
@@ -1255,6 +1597,10 @@ test("the real Pi SDK streams, executes only a workspace tool, resumes, and abor
   const deltas: string[] = [];
   const messages: string[] = [];
   const tools: string[] = [];
+  const details: Pick<
+    import("../../../shared/assistant").AssistantToolActivity,
+    "arguments" | "output"
+  >[] = [];
   const result: WorkspaceToolResult = {
     text: "Workspace is running.",
     sources: [
@@ -1289,7 +1635,10 @@ test("the real Pi SDK streams, executes only a workspace tool, resumes, and abor
     },
     delta: (delta) => deltas.push(delta),
     message: (message) => messages.push(message),
-    tool: (_id, _name, status) => tools.push(status),
+    tool: (_id, _name, status, fields) => {
+      tools.push(status);
+      if (fields) details.push(fields);
+    },
     error: () => {
       errors++;
     },
@@ -1303,8 +1652,47 @@ test("the real Pi SDK streams, executes only a workspace tool, resumes, and abor
     expect(deltas.join("")).toBe("Inspecting status.Workspace is running.");
     expect(messages).toEqual(["Inspecting status.", "Workspace is running."]);
     expect(tools).toEqual(["running", "completed"]);
+    expect(details.at(-1)).toMatchObject({ arguments: "{}" });
+    expect(details.at(-1)!.output).toContain("Workspace is running.");
     expect(saved).toHaveLength(1);
     expect(saved[0]).toMatchObject({ type: "ranger-durable" });
+    const closedId = randomUUID();
+    const closedDirectory = join(directory, "durable", closedId);
+    mkdirSync(closedDirectory);
+    // The driver's final checkpoint is copied without sidecars to exercise a closed WAL store.
+    const closedDatabase = join(closedDirectory, "execution.sqlite");
+    writeFileSync(
+      closedDatabase,
+      readFileSync(
+        join(
+          directory,
+          "durable",
+          (saved[0] as { id: string }).id,
+          "execution.sqlite",
+        ),
+      ),
+    );
+    expect(readFileSync(closedDatabase)[18]).toBe(2);
+    const legacy: AssistantMessage[] = [
+      {
+        id: "legacy",
+        role: "assistant",
+        text: "Done",
+        sent_at: "2026-10-06T00:00:00Z",
+        sources: [],
+        tools: [
+          { id: "read-status", name: "workspace_status", status: "completed" },
+        ],
+      },
+    ];
+    const restored = await driver.readToolDetails!(
+      [{ type: "ranger-durable", id: closedId }],
+      legacy,
+    );
+    expect(restored[0]!.tools[0]!.arguments).toBe("{}");
+    expect(restored[0]!.tools[0]!.output).toContain("Workspace is running.");
+    expect(existsSync(`${closedDatabase}-wal`)).toBe(false);
+    expect(existsSync(`${closedDatabase}-shm`)).toBe(false);
     expect(
       durableEntries(directory, saved).some(
         (entry) => entry.model?.[0]?.role === "toolResult",

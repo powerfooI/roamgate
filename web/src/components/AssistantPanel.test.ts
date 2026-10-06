@@ -1,6 +1,7 @@
 import { expect, mock, spyOn, test } from "bun:test";
 import * as React from "react";
 import {
+  ASSISTANT_MAX_CUSTOM_MODELS,
   ASSISTANT_MAX_WORKSPACES,
   type AssistantAction,
   type AssistantSnapshot,
@@ -1055,6 +1056,67 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       const recorded = clientState.snapshot.messages[0];
       const originalTools = recorded.tools;
       const originalSources = recorded.sources;
+      const toolDetails = () =>
+        activity().querySelector<HTMLDetailsElement>(
+          ".assistant-tool-details",
+        )!;
+      expect(toolDetails().open).toBe(false);
+      await React.act(async () =>
+        toolDetails().querySelector("summary")!.click(),
+      );
+      expect(toolDetails().open).toBe(true);
+      expect(toolDetails().textContent).toContain(
+        "Call details are unavailable.",
+      );
+      recorded.tools = [
+        {
+          ...originalTools[0],
+          arguments: JSON.stringify(
+            { connection_id: "local", workspace_id: "w1" },
+            null,
+            2,
+          ),
+          output: unsafe,
+        },
+        {
+          id: "tasks",
+          name: "list_ranger_tasks",
+          status: "completed",
+          arguments: "{}",
+          output: "[]",
+        },
+      ];
+      await render();
+      expect(toolDetails().open).toBe(true);
+      expect(
+        Array.from(
+          toolDetails().querySelectorAll("pre"),
+          (item) => item.textContent,
+        ),
+      ).toEqual([recorded.tools[0].arguments!, unsafe]);
+      expect(toolDetails().querySelector("img, script")).toBeNull();
+      expect(toolDetails().textContent).toContain("Arguments");
+      expect(toolDetails().textContent).toContain("Result");
+      const taskDetails = activity().querySelectorAll<HTMLDetailsElement>(
+        ".assistant-tool-details",
+      )[1];
+      expect(taskDetails.open).toBe(false);
+      await React.act(async () =>
+        taskDetails.querySelector("summary")!.click(),
+      );
+      expect(taskDetails.open).toBe(true);
+      expect(toolDetails().open).toBe(true);
+      recorded.tools[0].status = "failed";
+      await render();
+      expect(toolDetails().open).toBe(true);
+      expect(toolDetails().textContent).toContain("Error");
+      expect(toolDetails().querySelector(".assistant-hint")).toBeNull();
+      recorded.tools[0].output = undefined;
+      await render();
+      expect(toolDetails().textContent).toContain("Result unavailable.");
+      recorded.tools[0].status = "running";
+      await render();
+      expect(toolDetails().textContent).toContain("Result pending.");
       for (const [kind, label] of [
         ["status", "Workspace status"],
         ["diff", "Workspace changes"],
@@ -1652,35 +1714,64 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
           '[aria-label="Custom model connection"]',
         )!;
       const customInput = (label: string) =>
-        customForm().querySelector<HTMLInputElement>(
+        customForm().querySelector<HTMLInputElement | HTMLTextAreaElement>(
           `[aria-label="${label}"]`,
         )!;
+      const setCustomInput = (label: string, value: string) => {
+        const input = customInput(label);
+        Object.getOwnPropertyDescriptor(
+          input.tagName === "TEXTAREA"
+            ? browser.HTMLTextAreaElement.prototype
+            : browser.HTMLInputElement.prototype,
+          "value",
+        )!.set!.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      };
       expect(customInput("Custom API key").type).toBe("password");
       expect(customInput("Custom API key").required).toBe(true);
+      expect(button("Save custom models").disabled).toBe(true);
       await React.act(async () => {
         for (const [label, value] of [
           ["Custom provider ID", "my-provider"],
           ["Custom API base URL", "https://example.com/v1"],
-          ["Custom model ID", "my-model"],
+          ["Custom model IDs", " , \n "],
           ["Custom API key", "synthetic-key"],
-        ]) {
-          const input = customInput(label);
-          Object.getOwnPropertyDescriptor(
-            browser.HTMLInputElement.prototype,
-            "value",
-          )!.set!.call(input, value);
-          input.dispatchEvent(new Event("input", { bubbles: true }));
-        }
+        ])
+          setCustomInput(label!, value!);
       });
-      call.mockRejectedValueOnce(new Error("Custom model could not be saved"));
       const submitCustom = async () =>
         React.act(async () =>
           customForm().dispatchEvent(
             new Event("submit", { bubbles: true, cancelable: true }),
           ),
         );
+      const callsBeforeInvalidModels = call.mock.calls.length;
+      expect(button("Save custom models").disabled).toBe(true);
+      await submitCustom();
+      expect(call).toHaveBeenCalledTimes(callsBeforeInvalidModels);
+      await React.act(async () =>
+        setCustomInput(
+          "Custom model IDs",
+          Array.from(
+            { length: ASSISTANT_MAX_CUSTOM_MODELS + 1 },
+            (_, index) => `model-${index}`,
+          ).join("\n"),
+        ),
+      );
+      expect(button("Save custom models").disabled).toBe(true);
+      await submitCustom();
+      expect(call).toHaveBeenCalledTimes(callsBeforeInvalidModels);
+      await React.act(async () =>
+        setCustomInput(
+          "Custom model IDs",
+          " my-model,\r\n second-model \nmy-model, ,third-model ",
+        ),
+      );
+      expect(button("Save custom models").disabled).toBe(false);
+      call.mockRejectedValueOnce(new Error("Custom model could not be saved"));
       await submitCustom();
       expect(customInput("Custom API key").value).toBe("synthetic-key");
+      expect(customInput("Custom model IDs").value).toContain("second-model");
       expect(
         container.querySelector(".assistant-error")?.textContent,
       ).toContain("Custom model could not be saved");
@@ -1694,16 +1785,19 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
           api: "openai-completions",
         },
       });
-      clientState.snapshot.models.push({
-        provider: "my-provider",
-        id: "my-model",
-        label: "my-model",
-      });
+      clientState.snapshot.models.push(
+        ...["my-model", "second-model", "third-model"].map((id) => ({
+          provider: "my-provider",
+          id,
+          label: id,
+        })),
+      );
       call.mockImplementation(async () => clientState.snapshot);
       await submitCustom();
       expect(call).toHaveBeenLastCalledWith("configure_model", {
         provider: "my-provider",
         model: "my-model",
+        models: ["my-model", "second-model", "third-model"],
         base_url: "https://example.com/v1",
         api: "openai-completions",
         api_key: "synthetic-key",
@@ -1714,7 +1808,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(customInput("Custom API base URL").value).toBe(
         "https://example.com/v1",
       );
-      expect(customInput("Custom model ID").value).toBe("my-model");
+      expect(customInput("Custom model IDs").value).toBe("my-model");
       expect(button("Save connection").disabled).toBe(false);
       clientState.snapshot.providers[
         clientState.snapshot.providers.length - 1
@@ -1726,9 +1820,9 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(customInput("Custom API base URL").value).toBe(
         "https://refreshed.example.com/v1",
       );
-      clientState.snapshot.models[
-        clientState.snapshot.models.length - 1
-      ]!.custom = {
+      clientState.snapshot.models.find(
+        (model) => model.id === "my-model",
+      )!.custom = {
         base_url: "https://model-override.example.com/v1",
         api: "anthropic-messages",
       };
@@ -1740,6 +1834,9 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(
         call.mock.calls[call.mock.calls.length - 1]?.[1],
       ).not.toHaveProperty("api_key");
+      expect(
+        call.mock.calls[call.mock.calls.length - 1]?.[1],
+      ).not.toHaveProperty("models");
       expect(call.mock.calls[call.mock.calls.length - 1]?.[1]).toMatchObject({
         base_url: "https://model-override.example.com/v1",
         api: "anthropic-messages",

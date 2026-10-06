@@ -185,8 +185,9 @@ The conversation stays available when switching workspaces or connections.
   Use a separate Ranger connection or explicitly reuse the bridge account's
   saved Pi credentials with **Shared Pi credentials**. Select a saved provider or
   expand **Connect another provider**; both credential sources support sign-in
-  and API-key entry in the window. **Configure custom model** connects compatible
-  endpoints by API address, format, key, and model ID. Shared mode also reads
+  and API-key entry in the window. **Configure custom models** connects compatible
+  endpoints by API address, format, key, and model IDs separated by commas or
+  newlines. Shared mode also reads
   Pi's custom models. See [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
 - Allow workspaces in Settings. Each question automatically uses saved
   authorized workspaces that are currently available. **Select all** adds the
@@ -195,10 +196,13 @@ The conversation stays available when switching workspaces or connections.
   Workspace choices use a compact grid that scrolls when the list is long.
   No workspaces are authorized by default, and new workspaces need to be
   selected separately. The scope stays fixed while Ranger streams an answer.
-- Expand **Work performed** to inspect context reads. Ranger can read
+- Expand **Work performed**, then an individual tool card to inspect its
+  **Arguments** and **Result** or **Error**, including tools that manage tasks or
+  propose actions. Long details are marked when truncated; older calls show
+  details when their execution logs can be located. Ranger can read
   workspace status, agent history, changes, and recent terminal output. Source
   links show when the evidence was read and open the corresponding workspace
-  or inspector view; unavailable or replaced connections require fresh evidence.
+  or pane; unavailable or replaced connections require fresh evidence.
   Reads and source cards collapse together when each answer finishes; expand
   them again to inspect the evidence.
   Ranger chooses how many recent terminal lines to read (1-1,000; default 120),
