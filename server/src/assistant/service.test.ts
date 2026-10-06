@@ -766,6 +766,144 @@ describe("Ranger approval policy", () => {
 });
 
 describe("Ranger scheduled task service", () => {
+  test("editing a completed one-time task cannot repeat its auto-approved workspace write", async () => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    let writes = 0;
+    const starts: string[] = [];
+    const f = setup({}, () => ({
+      catalog: async () => catalog,
+      login: async () => {},
+      stop: async () => {},
+      dispose: async () => {},
+      run: async (input) => {
+        starts.push(input.requestId!);
+        await input.propose!("create_tab", configured.allowed_workspaces[0]!);
+        return [];
+      },
+    }));
+    stableTaskIdentity(f.context);
+    f.context.prepareAction = async () =>
+      permissionAction(async () => {
+        writes++;
+        return { status: "succeeded", detail: "Created" };
+      });
+    await f.service.handle("configure", { config: configured });
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    const input = {
+      title: "Create tab once",
+      prompt: "Create a tab",
+      scope: configured.allowed_workspaces,
+      schedule: { type: "once", at: "2026-10-04T00:01:00.000Z" },
+    };
+    const created = await f.service.handle("task.create", {
+      ...input,
+      request_id: randomUUID(),
+    });
+    const task = created.tasks![0]!;
+    await f.service.resume();
+    jest.advanceTimersByTime(60_000);
+    await flushTasks();
+    expect(writes).toBe(1);
+    expect(f.service.peek().tasks![0]!.next_run_at).toBeNull();
+    expect(
+      (await f.service.taskDetail({ task_id: task.id })).runs[0]!.status,
+    ).toBe("succeeded");
+    for (const edit of [
+      { title: "Renamed completed task" },
+      { prompt: "Edited instructions" },
+      { notification_mode: "agent" },
+      { schedule: { at: "2026-10-04T00:01:00Z", type: "once" } },
+    ]) {
+      await f.service.handle("task.update", {
+        ...input,
+        ...edit,
+        task_id: task.id,
+      });
+      jest.advanceTimersByTime(0);
+      await flushTasks();
+      expect(f.service.peek().tasks![0]!.next_run_at).toBeNull();
+      expect(writes).toBe(1);
+    }
+    await f.service.resume();
+    jest.advanceTimersByTime(600_000);
+    await flushTasks();
+    expect(starts).toHaveLength(1);
+    expect(
+      (await f.service.taskDetail({ task_id: task.id })).runs,
+    ).toHaveLength(1);
+  });
+
+  test.each(["ready", "revoked permission", "replaced identity"] as const)(
+    "a catalog failure releases a coalesced one-time run with a %s workspace",
+    async (safety) => {
+      jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+      const admission = Promise.withResolvers<void>();
+      let starts = 0;
+      const f = setup({}, () => ({
+        catalog: async () => catalog,
+        login: async () => {},
+        stop: async () => {},
+        dispose: async () => {},
+        run: async () => {
+          starts++;
+          return [];
+        },
+      }));
+      stableTaskIdentity(f.context);
+      await f.service.handle("configure", configured);
+      const created = await f.service.handle("task.create", {
+        request_id: randomUUID(),
+        title: "Check once",
+        prompt: "Check status",
+        scope: configured.allowed_workspaces,
+        schedule: { type: "once", at: "2026-10-04T00:01:00.000Z" },
+      });
+      const taskId = created.tasks![0]!.id;
+      await f.service.resume();
+      await f.service.handle("task.run_now", { task_id: taskId });
+      let catalogChecks = 0;
+      f.driver.catalog = async () => {
+        if (++catalogChecks === 1) await admission.promise;
+        return catalog;
+      };
+      jest.advanceTimersByTime(0);
+      await flushTasks();
+      expect(catalogChecks).toBe(1);
+      expect(starts).toBe(0);
+      jest.advanceTimersByTime(60_000);
+      await flushTasks();
+      jest.advanceTimersByTime(0);
+      await flushTasks();
+      expect(f.service.peek().tasks![0]!.next_run_at).toBeNull();
+      if (safety === "revoked permission")
+        await f.service.handle("configure", {
+          ...configured,
+          allowed_workspaces: [],
+        });
+      if (safety === "replaced identity")
+        f.context.restoreScope = async () => {
+          throw new Error("Workspace identity changed");
+        };
+      admission.reject(new Error("Transient provider catalog failure"));
+      await flushTasks();
+      jest.advanceTimersByTime(0);
+      await flushTasks();
+      const detail = await f.service.taskDetail({ task_id: taskId });
+      expect(detail.runs).toHaveLength(2);
+      expect(detail.runs[1]!.status).toBe("failed");
+      expect(detail.runs[0]!).toMatchObject({
+        scheduled_at: "2026-10-04T00:01:00.000Z",
+        status: safety === "ready" ? "succeeded" : "failed",
+      });
+      expect(starts).toBe(safety === "ready" ? 1 : 0);
+      const checks = catalogChecks;
+      jest.advanceTimersByTime(600_000);
+      await flushTasks();
+      expect(catalogChecks).toBe(checks);
+      expect(starts).toBe(safety === "ready" ? 1 : 0);
+    },
+  );
+
   test("model connection edits defer task admission and cannot replace credentials during an active task", async () => {
     jest.useFakeTimers({ now: Date.parse("2026-10-05T00:00:00Z") });
     const editing = Promise.withResolvers<void>();

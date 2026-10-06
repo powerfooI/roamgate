@@ -1,4 +1,4 @@
-import { sshCommandArgv } from "../bridge/ssh-command";
+import { gitShellCommandArgv } from "./git-shell";
 import {
   GIT_DIFF_TIMEOUT_MS,
   PREVIEW_IMAGE_MAX_BYTES,
@@ -30,7 +30,7 @@ function commitId(value: unknown): string {
 async function git(context: Context, command: string) {
   const full = `git -C ${context.shQuote(context.root)} -c core.quotepath=false ${command}`;
   const result = await context.runProcessWithCodeTimeout(
-    context.host ? sshCommandArgv(context.host, full) : ["sh", "-lc", full],
+    gitShellCommandArgv(full, context.host),
     GIT_DIFF_TIMEOUT_MS,
   );
   if (result.code !== 0) {
@@ -100,7 +100,7 @@ export async function listCommits(
   if (!head) {
     const full = `git -C ${context.shQuote(context.root)} rev-parse -q --verify 'HEAD^{commit}'`;
     const result = await context.runProcessWithCodeTimeout(
-      context.host ? sshCommandArgv(context.host, full) : ["sh", "-lc", full],
+      gitShellCommandArgv(full, context.host),
       GIT_DIFF_TIMEOUT_MS,
     );
     if (result.code !== 0)
@@ -179,7 +179,7 @@ export async function readCommit(context: Context, shaValue: unknown) {
 async function gitObjectExists(context: Context, sha: string) {
   const full = `git -C ${context.shQuote(context.root)} cat-file -e ${context.shQuote(`${sha}^{commit}`)}`;
   const result = await context.runProcessWithCodeTimeout(
-    context.host ? sshCommandArgv(context.host, full) : ["sh", "-lc", full],
+    gitShellCommandArgv(full, context.host),
     GIT_DIFF_TIMEOUT_MS,
   );
   return result.code === 0;

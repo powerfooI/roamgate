@@ -277,6 +277,14 @@ function nextAfter(entry: SavedTask, now: number) {
   }
   return nextTaskTime(entry.input.schedule, now);
 }
+function scheduleKey(schedule: AssistantTaskInput["schedule"]) {
+  const normalized = validateTaskSchedule(schedule);
+  if (normalized.type === "daily")
+    normalized.timezone = new Intl.DateTimeFormat("en-US", {
+      timeZone: normalized.timezone,
+    }).resolvedOptions().timeZone;
+  return JSON.stringify(normalized);
+}
 
 export function validateSavedTasks(saved: unknown): SavedTaskState {
   if (Buffer.byteLength(JSON.stringify(saved) ?? "") > MAX_TASK_STATE_BYTES)
@@ -626,6 +634,8 @@ export function createAssistantTasks(options: {
           (entry.task.status === "active" || run.manual || run.started_at)
         )
           due.push(retryAt.get(run.id) ?? Date.now());
+        else if (!run && entry.task.status === "active" && entry.due_at)
+          due.push(Date.now());
       }
     if (!due.length) return;
     timer = setTimeout(
@@ -758,8 +768,18 @@ export function createAssistantTasks(options: {
         entry.task.next_run_at &&
         Date.parse(entry.task.next_run_at) <= time,
     );
-    if (due.length)
+    const deferred = tasks.filter(
+      (entry) =>
+        entry.task.status === "active" && entry.due_at && !current(entry),
+    );
+    if (due.length || deferred.length)
       change(() => {
+        // A startup failure or restart can leave a coalesced occurrence with
+        // no active run. Claim it once before processing newer deadlines.
+        for (const entry of deferred) {
+          queue(entry, entry.due_at!);
+          delete entry.due_at;
+        }
         for (const entry of due) {
           const scheduled = entry.task.next_run_at!;
           const next = nextAfter(entry, time);
@@ -945,17 +965,22 @@ export function createAssistantTasks(options: {
         );
       change(() => {
         bump(entry.task.id);
+        const scheduleChanged =
+          scheduleKey(entry.input.schedule) !==
+          scheduleKey(sealed.input.schedule);
         Object.assign(entry, sealed);
-        Object.assign(entry.task, {
-          updated_at: now(),
-          next_run_at:
+        entry.task.updated_at = now();
+        // Editing metadata must not rearm a consumed one-shot, shift a
+        // recurring cadence, or discard an occurrence already due.
+        if (scheduleChanged) {
+          entry.task.next_run_at =
             sealed.input.schedule.type === "once"
               ? sealed.input.schedule.at
               : new Date(
                   nextTaskTime(sealed.input.schedule, Date.now())!,
-                ).toISOString(),
-        });
-        delete entry.due_at;
+                ).toISOString();
+          delete entry.due_at;
+        }
       });
       arm();
     },

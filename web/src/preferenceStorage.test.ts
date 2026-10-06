@@ -1,8 +1,13 @@
 import { expect, test } from "bun:test";
 import { Window } from "happy-dom";
 
-type Scenario = "legacy" | "current" | "events";
-const scenarios: Scenario[] = ["legacy", "current", "events"];
+type Scenario = "legacy" | "current" | "events" | "mobile-shortcuts";
+const scenarios: Scenario[] = [
+  "legacy",
+  "current",
+  "events",
+  "mobile-shortcuts",
+];
 const scenario = process.env.ROAMGATE_PREFERENCE_STORAGE_TEST;
 
 if (scenario) {
@@ -46,6 +51,10 @@ async function checkPreferenceStorage(scenario: Scenario) {
     });
   }
   try {
+    if (scenario === "mobile-shortcuts") {
+      await checkMobileTerminalShortcutStorage(browser);
+      return;
+    }
     const layoutKey = "layoutPreferences.v1";
     const shortcutKey = "keyboardShortcuts.v1";
     const raw = browser.localStorage;
@@ -170,5 +179,83 @@ async function checkPreferenceStorage(scenario: Scenario) {
     }
   } finally {
     await browser.happyDOM.close();
+  }
+}
+
+async function checkMobileTerminalShortcutStorage(browser: Window) {
+  const {
+    MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY: key,
+    defaultMobileTerminalShortcutRows,
+    parseMobileTerminalShortcutRows,
+    serializeMobileTerminalShortcutRows,
+  } = await import("./mobileTerminalShortcuts");
+  const { roamgateLocalStorage, subscribeLocalStorage } = await import(
+    "./browserStorage"
+  );
+  const raw = browser.localStorage;
+  const defaults = defaultMobileTerminalShortcutRows();
+  const withoutBackspace = defaultMobileTerminalShortcutRows();
+  withoutBackspace[1][3] = null;
+  const legacy = JSON.stringify(withoutBackspace);
+  raw.setItem(key, legacy);
+  const read = () =>
+    parseMobileTerminalShortcutRows(roamgateLocalStorage.getItem(key));
+  const save = (rows: typeof defaults) =>
+    roamgateLocalStorage.setItem(
+      key,
+      serializeMobileTerminalShortcutRows(rows),
+    );
+  const storageEvent = (changedKey: string | null, storageArea = raw) =>
+    browser.dispatchEvent(
+      new browser.StorageEvent("storage", {
+        ...(changedKey === null ? {} : { key: changedKey }),
+        storageArea,
+      }),
+    );
+
+  // Launch migrates legacy defaults and the App's save effect stamps the version.
+  let snapshot = read();
+  expect(snapshot).toEqual(defaults);
+  save(snapshot);
+  expect(JSON.parse(raw.getItem(`roamgate:${key}`)!)).toEqual({
+    version: 1,
+    rows: defaults,
+  });
+  expect(raw.getItem(key)).toBe(legacy);
+
+  const unsubscribe = subscribeLocalStorage((changedKey) => {
+    if (changedKey === key || changedKey === null) snapshot = read();
+  });
+  try {
+    // Another tab removes Backspace, leaving exactly the former default layout.
+    save(withoutBackspace);
+    expect(snapshot).toEqual(defaults);
+    storageEvent(`roamgate:${key}`);
+    expect(snapshot).toEqual(withoutBackspace);
+    expect(read()).toEqual(withoutBackspace);
+    save(snapshot);
+    expect(read()).toEqual(withoutBackspace);
+
+    // A stale legacy event must not override the versioned current selection.
+    storageEvent(key);
+    expect(snapshot).toEqual(withoutBackspace);
+
+    // Reset reaches other tabs, while unrelated session storage is ignored.
+    save(defaults);
+    storageEvent(`roamgate:${key}`, browser.sessionStorage);
+    expect(snapshot).toEqual(withoutBackspace);
+    storageEvent(`roamgate:${key}`);
+    expect(snapshot).toEqual(defaults);
+    save(withoutBackspace);
+    storageEvent(`roamgate:${key}`);
+    expect(snapshot).toEqual(withoutBackspace);
+
+    roamgateLocalStorage.clear();
+    storageEvent(null);
+    expect(snapshot).toEqual(defaults);
+    expect(read()).toEqual(defaults);
+    expect(raw.getItem(key)).toBe(legacy);
+  } finally {
+    unsubscribe();
   }
 }

@@ -528,13 +528,18 @@ export function parseMobileTerminalShortcutRows(
 ): MobileTerminalShortcutRows {
   if (!raw) return defaultMobileTerminalShortcutRows();
   try {
-    const rows = normalizeMobileTerminalShortcutRows(JSON.parse(raw));
-    // The app saves rows on every launch, so an untouched layout is stored
-    // verbatim; upgrade it to the current defaults, which add Backspace.
-    return JSON.stringify(rows) ===
-      serializeMobileTerminalShortcutRows(previousDefaultRows())
-      ? defaultMobileTerminalShortcutRows()
-      : rows;
+    const value = JSON.parse(raw);
+    if (Array.isArray(value)) {
+      const rows = normalizeMobileTerminalShortcutRows(value);
+      // Only legacy arrays need the Backspace upgrade. New saves record a
+      // version so removing Backspace cannot trigger this migration again.
+      return JSON.stringify(rows) === JSON.stringify(previousDefaultRows())
+        ? defaultMobileTerminalShortcutRows()
+        : rows;
+    }
+    return value?.version === 1
+      ? normalizeMobileTerminalShortcutRows(value.rows)
+      : defaultMobileTerminalShortcutRows();
   } catch {
     return defaultMobileTerminalShortcutRows();
   }
@@ -543,7 +548,10 @@ export function parseMobileTerminalShortcutRows(
 export function serializeMobileTerminalShortcutRows(
   rows: MobileTerminalShortcutRows,
 ): string {
-  return JSON.stringify(normalizeMobileTerminalShortcutRows(rows));
+  return JSON.stringify({
+    version: 1,
+    rows: normalizeMobileTerminalShortcutRows(rows),
+  });
 }
 
 export function mobileTerminalShortcutCount(

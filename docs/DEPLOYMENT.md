@@ -11,6 +11,14 @@ access, use the [tutorial](./TUTORIAL.md#networking).
   under `%APPDATA%\herdr\`.
 - [Bun](https://bun.sh) 1.4.1+ for source builds only; standalone needs no Bun/Node.js.
 
+Windows local Git features require [Git for Windows](https://gitforwindows.org/)
+with Git available on PATH. Changes, Commits, and branch auto-sync locate its
+bundled Bash beside Git or in standard system/per-user installation directories;
+`sh.exe` does not need to be on PATH. For a portable or custom installation,
+add its `cmd` or `bin` directory to PATH and restart Roamgate. These commands use
+Git Bash even when Roamgate starts from PowerShell; SSH workspaces continue to
+use the remote host's shell and tools.
+
 ### Herdr compatibility
 
 This source build supports verified legacy protocols 14–20 (Herdr 0.7.0–0.8.2)
@@ -769,6 +777,26 @@ on Linux, `sudo loginctl enable-linger "$USER"` keeps services after logout.
 On macOS, installation checks the configured listener before registering the
 launchd job. If another process owns the port, it reports the conflict and leaves
 the preserved config available for choosing a different port.
+
+macOS service installation validates effective config values without executing
+the file. Use one `NAME=value` assignment per line, optionally prefixed by
+`export`, with shell single/double quotes, backslash escapes, and comments.
+`$NAME` and `${NAME}` expand variables defined earlier in the file; `HOME` is
+available as the service user's home directory. For example:
+
+```sh
+SECRET='replace-with-a-strong-password'
+ROAMGATE_PASSWORD="$SECRET"
+```
+
+The expanded password must contain 15 to 1024 Unicode characters. An explicitly
+empty `ROAMGATE_PASSWORD` selects generated-token authentication, even when the
+legacy password variable is set. Define other referenced variables in the config:
+the installing terminal's environment is not the launchd environment. References
+to externally defined variables, shell-special assignments, command substitutions,
+standalone commands, and other unsupported shell expressions are rejected before
+config migration or service changes. Keep the config self-contained; resolve
+dynamic values yourself before installing or reinstalling.
 
 ```bash
 curl -fsS http://127.0.0.1:8787/healthz

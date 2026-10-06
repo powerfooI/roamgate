@@ -29,6 +29,7 @@ import {
   publishDataFile,
 } from "./data-paths";
 import { roamgateEnv } from "./environment";
+import { resolveLaunchdEnvironment } from "./launchd-environment";
 import { assertValidAuthPassword, loadOrCreateAuthToken } from "./auth-token";
 import {
   browserUrlFor,
@@ -363,75 +364,36 @@ interface ServiceAccess {
   usesFixedPassword: boolean;
 }
 
-function servicePassword(contents: string): string {
-  const password =
-    readEnvironmentValue(contents, "ROAMGATE_PASSWORD") ??
-    readEnvironmentValue(contents, "HERDR_GUI_PASSWORD") ??
-    "";
-  if (password) assertValidAuthPassword(password);
-  return password;
-}
-
 function prepareServiceAccess(
   configPath: string,
-  launchd: boolean = false,
+  contents: string,
+  platform: ServicePlatform,
+  homeDir: string,
 ): ServiceAccess {
-  const contents = readFileSync(configPath, "utf8");
-  let host = readEnvironmentValue(contents, "HOST") || "127.0.0.1";
-  let configuredPort = readEnvironmentValue(contents, "PORT");
-  if (launchd) {
-    // Match the LaunchAgent's shell sourcing, including comments and expansion.
-    const result = Bun.spawnSync([
-      "/bin/sh",
-      "-c",
-      'set -a; if [ -f "$1" ]; then . "$1"; fi; printf "\\0%s\\0%s" "${HOST-127.0.0.1}" "${PORT-8787}"',
-      "roamgate-service",
-      configPath,
-    ]);
-    const [, resolvedHost, resolvedPort] = result.stdout
-      .toString()
-      .split("\0")
-      .slice(-3);
-    if (
-      result.exitCode !== 0 ||
-      resolvedHost === undefined ||
-      resolvedPort === undefined
-    ) {
-      throw new Error(
-        `cannot load launchd service config ${configPath}: ${result.stderr.toString().trim() || "shell did not return HOST/PORT"}`,
-      );
-    }
-    host = resolvedHost;
-    configuredPort = resolvedPort;
-  }
-  const port = Number(configuredPort || 8787);
+  const environment =
+    platform === "launchd"
+      ? resolveLaunchdEnvironment(contents, configPath, homeDir)
+      : undefined;
+  const readValue = (name: string) =>
+    environment ? environment[name] : readEnvironmentValue(contents, name);
+  const password =
+    readValue("ROAMGATE_PASSWORD") ?? readValue("HERDR_GUI_PASSWORD") ?? "";
+  if (password) assertValidAuthPassword(password);
+
+  const host = readValue("HOST") ?? "127.0.0.1";
+  const port = Number(readValue("PORT") ?? 8787);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error(`invalid PORT in ${configPath}: ${configuredPort}`);
+    throw new Error(`invalid PORT in ${configPath}`);
   }
 
   const tls = Boolean(
     loadServerTls(
-      readEnvironmentValue(contents, "ROAMGATE_TLS_CERT") ??
-        readEnvironmentValue(contents, "HERDR_GUI_TLS_CERT"),
-      readEnvironmentValue(contents, "ROAMGATE_TLS_KEY") ??
-        readEnvironmentValue(contents, "HERDR_GUI_TLS_KEY"),
+      readValue("ROAMGATE_TLS_CERT") ?? readValue("HERDR_GUI_TLS_CERT"),
+      readValue("ROAMGATE_TLS_KEY") ?? readValue("HERDR_GUI_TLS_KEY"),
     ),
   );
-  const password = servicePassword(contents);
   const usesFixedPassword = password.length > 0;
-  if (usesFixedPassword) {
-    return { host, port, tls, usesFixedPassword };
-  }
-
-  const tokenPath = join(dirname(configPath), "auth-token");
-  return {
-    host,
-    port,
-    tls,
-    token: loadOrCreateAuthToken(tokenPath),
-    tokenPath,
-    usesFixedPassword,
-  };
+  return { host, port, tls, usesFixedPassword };
 }
 
 function printServiceAccess(
@@ -696,20 +658,27 @@ function installService(
     runtime.appDataDir,
   );
   const existingConfig = [paths.config, legacy.config].find(existsSync);
-  if (existingConfig) {
-    assertSafeDataPath(existingConfig);
-    servicePassword(readFileSync(existingConfig, "utf8"));
-  }
+  if (existingConfig) assertSafeDataPath(existingConfig);
+  // Resolve and validate the effective configuration before migrating files,
+  // generating a token, rewriting a definition, or stopping an existing job.
+  const access = prepareServiceAccess(
+    existingConfig ?? paths.config,
+    existingConfig
+      ? readFileSync(existingConfig, "utf8")
+      : DEFAULT_SERVICE_ENV_FILE,
+    platform,
+    runtime.homeDir,
+  );
   migrateDataFile(paths.config, legacy.config);
   migrateDataFile(
     join(dirname(paths.config), "auth-token"),
     join(dirname(legacy.config), "auth-token"),
   );
   const environmentCreated = ensureEnvironmentFile(paths.config);
-  const access = prepareServiceAccess(
-    paths.config,
-    platform === "launchd" && runCommand === defaultRunCommand,
-  );
+  if (!access.usesFixedPassword) {
+    access.tokenPath = join(dirname(paths.config), "auth-token");
+    access.token = loadOrCreateAuthToken(access.tokenPath);
+  }
   if (paths.stdoutLog) mkdirSync(dirname(paths.stdoutLog), { recursive: true });
   const customSystemdExecStart =
     platform === "systemd"

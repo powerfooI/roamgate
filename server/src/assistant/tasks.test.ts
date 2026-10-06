@@ -816,6 +816,276 @@ test("once admission is durable, immutable and isolated; restart keeps one origi
   expect(restored.runs).toHaveLength(1);
 });
 
+test.each(["succeeded", "failed", "stopped", "running", "waiting"] as const)(
+  "metadata edits do not replay a consumed one-time task with a %s run",
+  async (status) => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    const f = fixture();
+    const input = prepared({ type: "once", at: "2026-10-04T00:01:00.000Z" });
+    const task = await f.manager.create(input, randomUUID());
+    await f.manager.resume();
+    jest.advanceTimersByTime(60_000);
+    await flush();
+    const original = f.runs[0]!;
+    if (status === "stopped") await f.manager.control("stop", task.id);
+    else if (status !== "running")
+      original.complete(
+        status === "waiting",
+        status === "failed" ? "Failed" : null,
+      );
+    expect(f.manager.detail(task.id).runs[0]!.status).toBe(status);
+
+    input.input.title = "Renamed task";
+    input.input.prompt = "Updated instructions";
+    input.input.notification_mode = "agent";
+    input.config.model = "another-model";
+    for (const refs of [
+      input.input.scope,
+      input.config.allowed_workspaces,
+      input.workspaces,
+      input.targets,
+    ])
+      refs[0]!.workspace_id = "another-workspace";
+    // Equivalent timestamp spelling must also preserve consumed state.
+    input.input.schedule = { at: "2026-10-04T00:01:00Z", type: "once" };
+    await f.manager.update(task.id, input);
+    expect(f.manager.detail(task.id).task.next_run_at).toBeNull();
+    expect(original.run.input.title).toBe("Check workspace");
+    if (status === "running" || status === "waiting") original.complete();
+    jest.advanceTimersByTime(600_000);
+    await flush();
+    expect(f.runs).toHaveLength(1);
+    await f.manager.dispose();
+    const restored = fixture(f.directory);
+    await restored.manager.resume();
+    await flush();
+    expect(restored.runs).toHaveLength(0);
+    expect(restored.manager.detail(task.id).task.next_run_at).toBeNull();
+    expect(restored.manager.detail(task.id).task.title).toBe("Renamed task");
+  },
+);
+
+test.each(["interval", "daily"] as const)(
+  "metadata edits preserve %s cadence, including an overdue paused deadline",
+  async (type) => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    const f = fixture();
+    const input = prepared(
+      type === "interval"
+        ? { type, minutes: 2 }
+        : { type, time: "00:02", timezone: "Etc/UTC" },
+    );
+    const task = await f.manager.create(input, randomUUID());
+    await f.manager.resume();
+    jest.advanceTimersByTime(30_000);
+    input.input.title = "Renamed before deadline";
+    input.input.schedule =
+      type === "interval"
+        ? { minutes: 2, type }
+        : { timezone: "UTC", time: "00:02", type };
+    await f.manager.update(task.id, input);
+    expect(f.manager.detail(task.id).task.next_run_at).toBe(
+      "2026-10-04T00:02:00.000Z",
+    );
+    await f.manager.control("pause", task.id);
+    jest.advanceTimersByTime(180_000);
+    input.input.prompt = "Updated after deadline";
+    await f.manager.update(task.id, input);
+    expect(f.manager.detail(task.id).task.next_run_at).toBe(
+      "2026-10-04T00:02:00.000Z",
+    );
+    await f.manager.control("resume", task.id);
+    jest.advanceTimersByTime(0);
+    await flush();
+    expect(f.runs).toHaveLength(1);
+    expect(f.runs[0]!.run.scheduled_at).toBe("2026-10-04T00:02:00.000Z");
+    expect(f.manager.detail(task.id).task.next_run_at).toBe(
+      type === "interval"
+        ? "2026-10-04T00:04:00.000Z"
+        : "2026-10-05T00:02:00.000Z",
+    );
+  },
+);
+
+test.each(["once", "interval"] as const)(
+  "metadata edits retain a coalesced %s occurrence while schedule changes replace it",
+  async (type) => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    const f = fixture();
+    const input = prepared(
+      type === "once"
+        ? { type, at: "2026-10-04T00:01:00.000Z" }
+        : { type, minutes: 1 },
+    );
+    const task = await f.manager.create(input, randomUUID());
+    await f.manager.resume();
+    const manual = await startRun(f, task.id);
+    jest.advanceTimersByTime(60_000);
+    await flush();
+    const next = f.manager.detail(task.id).task.next_run_at;
+    input.input.title = "Updated while due";
+    await f.manager.update(task.id, input);
+    expect(f.manager.detail(task.id).task.next_run_at).toBe(next);
+    manual.complete();
+    jest.advanceTimersByTime(0);
+    await flush();
+    expect(f.runs).toHaveLength(2);
+    expect(f.runs[1]!.run).toMatchObject({
+      manual: false,
+      scheduled_at: "2026-10-04T00:01:00.000Z",
+    });
+    expect(f.runs[1]!.run.input.title).toBe(input.input.title);
+
+    jest.advanceTimersByTime(60_000);
+    await flush();
+    input.input.schedule =
+      type === "once"
+        ? { type, at: "2026-10-04T00:05:00.000Z" }
+        : { type, minutes: 3 };
+    const changedDeadline =
+      type === "once"
+        ? "2026-10-04T00:05:00.000Z"
+        : new Date(Date.now() + 180_000).toISOString();
+    await f.manager.update(task.id, input);
+    expect(f.manager.detail(task.id).task.next_run_at).toBe(changedDeadline);
+    f.runs[1]!.complete();
+    jest.advanceTimersByTime(0);
+    await flush();
+    expect(f.runs).toHaveLength(2);
+    jest.advanceTimersByTime(Date.parse(changedDeadline) - Date.now());
+    await flush();
+    expect(f.runs).toHaveLength(3);
+    expect(f.runs[2]!.run.scheduled_at).toBe(changedDeadline);
+  },
+);
+
+test.each([
+  { restart: false, safety: "ready" },
+  { restart: true, safety: "ready" },
+  { restart: false, safety: "revoked" },
+  { restart: true, safety: "revoked" },
+  { restart: false, safety: "disconnected" },
+  { restart: true, safety: "disconnected" },
+])(
+  "failed manual admission drains a due one-time task with fresh validation: %j",
+  async ({ restart, safety }) => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    const admission = Promise.withResolvers<void>();
+    let mode = "ready";
+    let checks = 0;
+    const validate = async () => {
+      checks++;
+      if (mode === "blocked") await admission.promise;
+      if (mode === "revoked") throw new Error("Workspace permission revoked");
+      if (mode === "disconnected")
+        throw new AssistantRecoveryNotReadyError("Connection unavailable");
+    };
+    let f = fixture(undefined, validate);
+    const task = await f.manager.create(
+      prepared({ type: "once", at: "2026-10-04T00:01:00.000Z" }),
+      randomUUID(),
+    );
+    await f.manager.resume();
+    await f.manager.control("run_now", task.id);
+    mode = "blocked";
+    jest.advanceTimersByTime(0);
+    await flush();
+    const manual = f.manager.detail(task.id).runs[0]!;
+    jest.advanceTimersByTime(60_000);
+    await flush();
+    expect(f.manager.detail(task.id).task.next_run_at).toBeNull();
+    mode = safety;
+    admission.reject(new Error("Transient provider catalog failure"));
+    await flush();
+    expect(f.manager.detail(task.id).runs[0]!.status).toBe("failed");
+    expect(f.runs).toHaveLength(0);
+    const checksBeforeDrain = checks;
+    if (restart) {
+      await f.manager.dispose();
+      f = fixture(f.directory, validate);
+      await f.manager.resume();
+    } else jest.advanceTimersByTime(0);
+    await flush();
+    expect(checks).toBe(checksBeforeDrain + 1);
+    const drained = f.manager.detail(task.id).runs[0]!;
+    expect(drained.id).not.toBe(manual.id);
+    expect(drained.scheduled_at).toBe("2026-10-04T00:01:00.000Z");
+    expect(f.manager.detail(task.id).runs).toHaveLength(2);
+    if (safety === "disconnected") {
+      expect(drained.status).toBe("queued");
+      expect(f.runs).toHaveLength(0);
+      jest.advanceTimersByTime(4_999);
+      await flush();
+      expect(checks).toBe(checksBeforeDrain + 1);
+      jest.advanceTimersByTime(1);
+      await flush();
+      expect(checks).toBe(checksBeforeDrain + 2);
+      mode = "ready";
+      await f.manager.resume();
+      await flush();
+      expect(f.runs[0]!.run.id).toBe(drained.id);
+    }
+    if (safety === "revoked") {
+      expect(drained.status).toBe("failed");
+      expect(f.runs).toHaveLength(0);
+    } else {
+      expect(f.runs).toHaveLength(1);
+      expect(f.runs[0]!.run.manual).toBe(false);
+      expect(f.runs[0]!.recover).toBe(false);
+      f.runs[0]!.complete();
+    }
+    const finalChecks = checks;
+    jest.advanceTimersByTime(600_000);
+    await flush();
+    await f.manager.resume();
+    expect(checks).toBe(finalChecks);
+    expect(f.manager.detail(task.id).runs).toHaveLength(2);
+    await f.manager.dispose();
+    const restored = fixture(f.directory, validate);
+    await restored.manager.resume();
+    await flush();
+    expect(restored.runs).toHaveLength(0);
+    expect(checks).toBe(finalChecks);
+  },
+);
+
+test("restart drains the oldest stranded interval once before newer missed deadlines", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const admission = Promise.withResolvers<void>();
+  let blocked = false;
+  const f = fixture(undefined, async () => {
+    if (blocked) await admission.promise;
+  });
+  const task = await f.manager.create(prepared(), randomUUID());
+  await f.manager.resume();
+  await f.manager.control("run_now", task.id);
+  blocked = true;
+  jest.advanceTimersByTime(0);
+  await flush();
+  jest.advanceTimersByTime(60_000);
+  await flush();
+  admission.reject(new Error("Transient catalog failure"));
+  await flush();
+  await f.manager.dispose();
+  jest.advanceTimersByTime(150_000);
+  const restored = fixture(f.directory);
+  await restored.manager.resume();
+  await flush();
+  expect(restored.runs).toHaveLength(1);
+  expect(restored.runs[0]!.run.scheduled_at).toBe("2026-10-04T00:01:00.000Z");
+  expect(restored.manager.detail(task.id).task.next_run_at).toBe(
+    "2026-10-04T00:04:00.000Z",
+  );
+  restored.runs[0]!.complete();
+  jest.advanceTimersByTime(0);
+  await flush();
+  expect(restored.runs).toHaveLength(1);
+  jest.advanceTimersByTime(Date.parse("2026-10-04T00:04:00.000Z") - Date.now());
+  await flush();
+  expect(restored.runs).toHaveLength(2);
+  expect(restored.runs[1]!.run.scheduled_at).toBe("2026-10-04T00:04:00.000Z");
+});
+
 test("one model slot coalesces missed intervals and waiting previews release the slot", async () => {
   jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
   const f = fixture();

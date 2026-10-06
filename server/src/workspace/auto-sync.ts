@@ -1,5 +1,5 @@
 import type { HerdrClient } from "../bridge/herdr-client";
-import { sshCommandArgv } from "../bridge/ssh-command";
+import { gitShellCommandArgv } from "./git-shell";
 import {
   connectionSettingsPrefix,
   DEFAULT_WORKSPACE_AUTO_SYNC_INTERVAL_MINUTES,
@@ -81,7 +81,7 @@ export async function syncWorkspaceBranch({
   const runGit = (args: string) => {
     const command = `GIT_TERMINAL_PROMPT=0 git -C ${shQuote(root)} ${args}`;
     return runProcessWithCodeTimeout(
-      host ? sshCommandArgv(host, command) : ["sh", "-lc", command],
+      gitShellCommandArgv(command, host),
       GIT_PULL_TIMEOUT_MS,
     );
   };

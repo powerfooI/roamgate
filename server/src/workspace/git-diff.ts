@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { LARGE_DIFF_PATCH_BYTES } from "../../../shared/gitDiffLimits";
 import { worktreeSnapshotCommand } from "./git-snapshot";
-import { sshCommandArgv } from "../bridge/ssh-command";
+import { gitShellCommandArgv } from "./git-shell";
 import { collectWorktreeFingerprints } from "./git-actions";
 import {
   GIT_DIFF_MAX_BYTES,
@@ -361,7 +361,7 @@ function runGitShellCommand({
 }) {
   const fullCommand = `git -C ${shQuote(root)} -c core.quotepath=false ${command}`;
   return runProcessWithCodeTimeout(
-    host ? sshCommandArgv(host, fullCommand) : ["sh", "-lc", fullCommand],
+    gitShellCommandArgv(fullCommand, host),
     timeoutMs,
   );
 }
@@ -391,7 +391,7 @@ fi
 exit "$git_code"
 `;
   const result = await runProcessWithCodeTimeout(
-    host ? sshCommandArgv(host, script) : ["sh", "-lc", script],
+    gitShellCommandArgv(script, host),
     GIT_DIFF_TIMEOUT_MS,
   );
   if (result.code !== 0 && result.code !== 1)
@@ -429,7 +429,7 @@ export async function snapshotWorktreeTree({
 }: { root: string } & GitCommandContext): Promise<string> {
   const command = worktreeSnapshotCommand(root, shQuote);
   const result = await runProcessWithCodeTimeout(
-    host ? sshCommandArgv(host, command) : ["sh", "-lc", command],
+    gitShellCommandArgv(command, host),
     GIT_DIFF_TIMEOUT_MS,
   );
   const tree = result.stdout.trim();
@@ -894,7 +894,7 @@ done
 exit 1
 `;
   const result = await runProcessWithCodeTimeout(
-    host ? sshCommandArgv(host, command) : ["sh", "-lc", command],
+    gitShellCommandArgv(command, host),
     GIT_DIFF_TIMEOUT_MS,
   );
   if (result.code !== 0) {
@@ -1305,7 +1305,7 @@ export async function pullGit({
 }) {
   const command = `GIT_TERMINAL_PROMPT=0 git -C ${shQuote(root)} -c core.quotepath=false pull --ff-only`;
   const result = await runProcessWithCodeTimeout(
-    host ? sshCommandArgv(host, command) : ["sh", "-lc", command],
+    gitShellCommandArgv(command, host),
     GIT_PULL_TIMEOUT_MS,
   );
   if (result.code !== 0) {

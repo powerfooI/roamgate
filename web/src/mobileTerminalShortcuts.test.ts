@@ -183,24 +183,61 @@ describe("mobile terminal shortcuts", () => {
     ).toBe(true);
   });
 
-  test("upgrades an untouched stored layout to the Backspace defaults", () => {
+  test("upgrades untouched legacy arrays to the Backspace defaults only once", () => {
     const previous = defaultMobileTerminalShortcutRows();
     previous[1][3] = null;
+    const migrated = parseMobileTerminalShortcutRows(JSON.stringify(previous));
+    expect(migrated).toEqual(defaultMobileTerminalShortcutRows());
+    expect(migrated[1][3]?.label).toBe("Bksp");
     expect(
       parseMobileTerminalShortcutRows(
-        serializeMobileTerminalShortcutRows(previous),
+        serializeMobileTerminalShortcutRows(migrated),
       ),
-    ).toEqual(defaultMobileTerminalShortcutRows());
-    expect(defaultMobileTerminalShortcutRows()[1][3]?.label).toBe("Bksp");
+    ).toEqual(migrated);
 
+    migrated[1][3] = null;
+    expect(
+      parseMobileTerminalShortcutRows(
+        serializeMobileTerminalShortcutRows(migrated),
+      ),
+    ).toEqual(previous);
+  });
+
+  test("preserves customized legacy arrays when upgrading the saved format", () => {
     const customized = defaultMobileTerminalShortcutRows();
     customized[1][3] = null;
     customized[0][4] = { id: "home", label: "Home", action: "home" };
+    const migrated = parseMobileTerminalShortcutRows(
+      JSON.stringify(customized),
+    );
+    expect(migrated).toEqual(customized);
     expect(
       parseMobileTerminalShortcutRows(
-        serializeMobileTerminalShortcutRows(customized),
+        serializeMobileTerminalShortcutRows(migrated),
       ),
     ).toEqual(customized);
+  });
+
+  test("round-trips removing Backspace from current defaults", () => {
+    const rows = defaultMobileTerminalShortcutRows();
+    rows[1][3] = null;
+    const saved = serializeMobileTerminalShortcutRows(rows);
+
+    expect(JSON.parse(saved)).toEqual({ version: 1, rows });
+    expect(parseMobileTerminalShortcutRows(saved)).toEqual(rows);
+  });
+
+  test("resetting restores Backspace without preventing subsequent removal", () => {
+    const reset = parseMobileTerminalShortcutRows(
+      serializeMobileTerminalShortcutRows(defaultMobileTerminalShortcutRows()),
+    );
+    expect(reset[1][3]?.action).toBe("backspace");
+    reset[1][3] = null;
+    expect(
+      parseMobileTerminalShortcutRows(
+        serializeMobileTerminalShortcutRows(reset),
+      ),
+    ).toEqual(reset);
   });
 
   test("normalizes untrusted stored rows, labels, actions, and ids", () => {
@@ -338,6 +375,18 @@ describe("mobile terminal shortcuts", () => {
 
     expect(parseMobileTerminalShortcutRows(null)).toEqual(expected);
     expect(parseMobileTerminalShortcutRows("not json")).toEqual(expected);
+    for (const value of [
+      null,
+      {},
+      { rows: [[], []] },
+      { version: 1 },
+      { version: 1, rows: "invalid" },
+      { version: 2, rows: [[], []] },
+    ]) {
+      expect(parseMobileTerminalShortcutRows(JSON.stringify(value))).toEqual(
+        expected,
+      );
+    }
   });
 
   test("round-trips normalized rows without sharing mutable defaults", () => {

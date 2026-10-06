@@ -1,4 +1,4 @@
-import { sshCommandArgv } from "../bridge/ssh-command";
+import { gitShellCommandArgv } from "./git-shell";
 import { GIT_DIFF_TIMEOUT_MS } from "./file-constants";
 import { sanitizeExplorerPath } from "./file-paths";
 import type { RunProcessWithCodeTimeout } from "./file-types";
@@ -61,9 +61,7 @@ async function runGit(
 ) {
   const fullCommand = `git -C ${context.shQuote(context.root)} -c core.quotepath=false ${command}`;
   const result = await context.runProcessWithCodeTimeout(
-    context.host
-      ? sshCommandArgv(context.host, fullCommand)
-      : ["sh", "-lc", fullCommand],
+    gitShellCommandArgv(fullCommand, context.host),
     timeoutMs,
   );
   return result;
@@ -163,9 +161,7 @@ for p in "$@"; do
 done
 `;
     const result = await context.runProcessWithCodeTimeout(
-      context.host
-        ? sshCommandArgv(context.host, command)
-        : ["sh", "-lc", command],
+      gitShellCommandArgv(command, context.host),
       GIT_DIFF_TIMEOUT_MS,
     );
     if (result.code !== 0) continue;
@@ -223,7 +219,7 @@ fi
 git -c core.quotepath=false clean -f -- ${context.shQuote(path)}
 `;
   const result = await context.runProcessWithCodeTimeout(
-    context.host ? sshCommandArgv(context.host, script) : ["sh", "-lc", script],
+    gitShellCommandArgv(script, context.host),
     GIT_DIFF_TIMEOUT_MS,
   );
   if (result.code !== 0) {
