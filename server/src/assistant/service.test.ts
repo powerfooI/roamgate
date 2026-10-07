@@ -50,7 +50,7 @@ const catalog = {
 const configured = {
   provider: "test",
   model: "model",
-  credential_source: "assistant",
+  credential_source: "assistant" as const,
   allowed_workspaces: [{ connection_id: "local", workspace_id: "ws" }],
 };
 const temporary: string[] = [];
@@ -3359,4 +3359,440 @@ describe("bridge-global assistant", () => {
       ).toBeUndefined();
     },
   );
+});
+
+const thinkingCatalog = {
+  ...catalog,
+  models: [
+    {
+      provider: "test",
+      id: "model",
+      label: "Model",
+      thinking_levels: ["off", "low", "high"] as const,
+      default_thinking_level: "off" as const,
+    },
+    {
+      provider: "test",
+      id: "fast",
+      label: "Fast",
+      thinking_levels: ["off"] as const,
+      default_thinking_level: "off" as const,
+    },
+  ],
+};
+function chatSelection(snapshot: AssistantSnapshot) {
+  const { provider, model, credential_source, thinking_level } =
+    snapshot.config;
+  return {
+    instance_id: snapshot.instance_id,
+    provider,
+    model,
+    credential_source,
+    thinking_level,
+  };
+}
+function thinkingDriver(): Pick<AssistantDriver, "catalog"> {
+  return {
+    catalog: async () => ({
+      ...catalog,
+      models: thinkingCatalog.models.map((model) => ({
+        ...model,
+        thinking_levels: [...model.thinking_levels],
+      })),
+    }),
+  };
+}
+
+describe("Ranger quick chat selection", () => {
+  test("persists effort across restart without changing scope or approval and clears unsupported effort on an explicit default switch", async () => {
+    const f = setup(thinkingDriver());
+    await f.service.handle("configure", configured);
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    const selected = await f.service.handle("configure_chat", {
+      provider: "test",
+      model: "model",
+      thinking_level: "high",
+      expected: chatSelection(f.service.peek()),
+    });
+    expect(selected.chat_selection).toBe(true);
+    expect(selected.config).toEqual({
+      ...configured,
+      approval_mode: "auto",
+      thinking_level: "high",
+    });
+    expect(
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8")).config,
+    ).toEqual(selected.config);
+    await f.service.dispose();
+    const restarted = createAssistantService({
+      directory: f.directory,
+      context: f.context,
+      driver: f.driver,
+      publish: () => {},
+    });
+    services.push(restarted);
+    expect(restarted.peek().config).toEqual(selected.config);
+    expect(restarted.peek().instance_id).not.toBe(selected.instance_id);
+    await expect(
+      restarted.handle("configure_chat", {
+        provider: "test",
+        model: "fast",
+        thinking_level: null,
+        expected: chatSelection(selected),
+      }),
+    ).rejects.toThrow("changed");
+    const reset = await restarted.handle("configure_chat", {
+      provider: "test",
+      model: "fast",
+      thinking_level: null,
+      expected: chatSelection(restarted.peek()),
+    });
+    expect(reset.config).toEqual({
+      ...configured,
+      model: "fast",
+      approval_mode: "auto",
+    });
+  });
+
+  test("rejects unsupported, malformed, stale and scope-widening selections without altering state", async () => {
+    const f = setup(thinkingDriver());
+    await f.service.handle("configure", configured);
+    const before = f.service.peek();
+    const selection = {
+      provider: "test",
+      model: "model",
+      thinking_level: "high",
+      expected: chatSelection(before),
+    };
+    for (const changes of [
+      { thinking_level: "max" },
+      { thinking_level: "ultra" },
+      { thinking_level: undefined },
+      { model: "fast" },
+      { provider: "missing" },
+      { model: "missing" },
+      { expected: { ...selection.expected, model: "other" } },
+      { expected: null },
+      { expected: { ...selection.expected, thinking_level: "low" } },
+      { expected: { ...selection.expected, credential_source: "pi" } },
+      { allowed_workspaces: [] },
+      { approval_mode: "auto" },
+      { credential_source: "pi" },
+    ]) {
+      await expect(
+        f.service.handle("configure_chat", { ...selection, ...changes }),
+      ).rejects.toThrow();
+      expect(f.service.peek().config).toEqual(before.config);
+    }
+    await expect(
+      f.service.handle("configure", { ...configured, thinking_level: "max" }),
+    ).rejects.toThrow();
+    expect(f.service.peek().config).toEqual(before.config);
+  });
+
+  test("serializes selection saves with sends and preserves a concurrent permission revocation", async () => {
+    const f = setup(thinkingDriver());
+    await f.service.handle("configure", configured);
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    const previous = chatSelection(f.service.peek());
+    const release = Promise.withResolvers<void>();
+    const load = f.driver.catalog;
+    f.driver.catalog = async (source) => {
+      await release.promise;
+      return load(source);
+    };
+    const saving = f.service.handle("configure_chat", {
+      provider: "test",
+      model: "model",
+      thinking_level: "high",
+      expected: previous,
+    });
+    await expect(
+      f.service.handle("send", {
+        text: "Hello",
+        request_id: "racing-send",
+        expected: previous,
+      }),
+    ).rejects.toThrow("busy");
+    await expect(
+      f.service.handle("configure_chat", {
+        provider: "test",
+        model: "fast",
+        thinking_level: null,
+        expected: previous,
+      }),
+    ).rejects.toThrow("busy");
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    release.resolve();
+    await saving;
+    expect(f.service.peek().config.approval_mode).toBe("manual");
+    expect(f.service.peek().config.thinking_level).toBe("high");
+    await expect(
+      f.service.handle("send", {
+        text: "Hello",
+        request_id: "racing-send",
+        expected: previous,
+      }),
+    ).rejects.toThrow("changed");
+    expect(f.service.peek().messages).toHaveLength(0);
+    await f.service.handle("send", {
+      text: "Hello",
+      request_id: "racing-send",
+      expected: chatSelection(f.service.peek()),
+    });
+    await until(() => !f.service.peek().running);
+    expect(f.service.peek().messages).toHaveLength(2);
+  });
+
+  test("reserved and streaming turns retain their model and effort while quick changes apply to the next turn", async () => {
+    const admitted: Parameters<AssistantDriver["run"]>[0]["config"][] = [];
+    const releaseTurn = Promise.withResolvers<void>();
+    const f = setup({
+      ...thinkingDriver(),
+      run: async (input) => {
+        admitted.push(input.config);
+        if (admitted.length === 1) await releaseTurn.promise;
+        input.message("Done");
+        return [];
+      },
+      dispose: async () => {
+        releaseTurn.resolve();
+      },
+    });
+    await f.service.handle("configure", {
+      ...configured,
+      thinking_level: "high",
+    });
+    const releaseScope = Promise.withResolvers<void>();
+    const capture = f.context.captureScope;
+    f.context.captureScope = async (...args) => {
+      await releaseScope.promise;
+      return capture(...args);
+    };
+    const sending = f.service.handle("send", {
+      text: "Hello",
+      request_id: "reserved",
+      expected: chatSelection(f.service.peek()),
+    });
+    const next = await f.service.handle("configure_chat", {
+      provider: "test",
+      model: "fast",
+      thinking_level: null,
+      expected: chatSelection(f.service.peek()),
+    });
+    expect(next.running).toBe(true);
+    releaseScope.resolve();
+    await sending;
+    expect(admitted[0]).toMatchObject({
+      model: "model",
+      thinking_level: "high",
+    });
+    expect(
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8"))
+        .active_run.config,
+    ).toMatchObject({ model: "model", thinking_level: "high" });
+    await f.service.handle("configure_chat", {
+      provider: "test",
+      model: "model",
+      thinking_level: "low",
+      expected: chatSelection(f.service.peek()),
+    });
+    expect(admitted[0]).toMatchObject({
+      model: "model",
+      thinking_level: "high",
+    });
+    releaseTurn.resolve();
+    await until(() => !f.service.peek().running);
+    await f.service.handle("send", {
+      text: "Next",
+      request_id: "next",
+      expected: chatSelection(f.service.peek()),
+    });
+    await until(() => !f.service.peek().running);
+    expect(admitted[1]).toMatchObject({
+      model: "model",
+      thinking_level: "low",
+    });
+  });
+
+  test("failed catalog and persistence writes preserve the old selection and release the save lock", async () => {
+    const f = setup(thinkingDriver());
+    await f.service.handle("configure", configured);
+    const before = f.service.peek().config;
+    const select = () =>
+      f.service.handle("configure_chat", {
+        provider: "test",
+        model: "model",
+        thinking_level: "high",
+        expected: chatSelection(f.service.peek()),
+      });
+    const load = f.driver.catalog;
+    f.driver.catalog = async () => {
+      throw new Error("Catalog unavailable");
+    };
+    await expect(select()).rejects.toThrow("model catalog could not be loaded");
+    expect(f.service.peek().config).toEqual(before);
+    f.driver.catalog = load;
+    const path = join(f.directory, "state.json");
+    rmSync(path);
+    mkdirSync(path);
+    await expect(select()).rejects.toThrow("could not be saved");
+    expect(f.service.peek().config).toEqual(before);
+    rmSync(path, { recursive: true });
+    await select();
+    expect(f.service.peek().config.thinking_level).toBe("high");
+  });
+
+  test("a stored effort becoming unsupported fails admission without running or losing the preference", async () => {
+    let runs = 0;
+    const f = setup({
+      ...thinkingDriver(),
+      run: async () => {
+        runs++;
+        return [];
+      },
+    });
+    await f.service.handle("configure", {
+      ...configured,
+      thinking_level: "high",
+    });
+    f.driver.catalog = async () => structuredClone(catalog);
+    await expect(
+      f.service.handle("send", { text: "Hello", request_id: "unsupported" }),
+    ).rejects.toThrow("unavailable");
+    expect(runs).toBe(0);
+    expect(f.service.peek().running).toBe(false);
+    expect(f.service.peek().config.thinking_level).toBe("high");
+  });
+});
+
+test("a failed quick selection save keeps the active stream attached to its original draft", async () => {
+  const release = Promise.withResolvers<void>();
+  const f = setup({
+    ...thinkingDriver(),
+    run: async (input) => {
+      input.delta("Before");
+      await release.promise;
+      input.delta(" after");
+      input.message("Before after");
+      return [];
+    },
+    dispose: async () => {
+      release.resolve();
+    },
+  });
+  await f.service.handle("configure", configured);
+  await f.service.handle("send", { request_id: "stream-save", text: "Hello" });
+  const path = join(f.directory, "state.json");
+  rmSync(path);
+  mkdirSync(path);
+  await expect(
+    f.service.handle("configure_chat", {
+      provider: "test",
+      model: "model",
+      thinking_level: "high",
+      expected: chatSelection(f.service.peek()),
+    }),
+  ).rejects.toThrow("could not be saved");
+  expect(f.service.peek().config.thinking_level).toBeUndefined();
+  rmSync(path, { recursive: true });
+  release.resolve();
+  await until(() => !f.service.peek().running);
+  expect(f.service.peek().messages.at(-1)?.text).toBe("Before after");
+  expect(JSON.parse(readFileSync(path, "utf8")).messages.at(-1).text).toBe(
+    "Before after",
+  );
+});
+
+test("streaming task proposals keep the admitted model and effort while direct task edits use current defaults", async () => {
+  const release = Promise.withResolvers<void>();
+  const input = {
+    title: "Check later",
+    prompt: "Summarize status",
+    scope: configured.allowed_workspaces,
+    schedule: {
+      type: "once",
+      at: new Date(Date.now() + 3600000).toISOString(),
+    },
+  };
+  let proposalId = "";
+  const f = setup({
+    ...thinkingDriver(),
+    run: async (turn) => {
+      await release.promise;
+      proposalId = JSON.parse((await turn.task!("create", input)).text).id;
+      return [];
+    },
+    dispose: async () => {
+      release.resolve();
+    },
+  });
+  stableTaskIdentity(f.context);
+  await f.service.handle("configure", {
+    ...configured,
+    thinking_level: "high",
+  });
+  await f.service.handle("send", {
+    request_id: "task-old-model",
+    text: "Check later",
+  });
+  await f.service.handle("configure_chat", {
+    provider: "test",
+    model: "fast",
+    thinking_level: null,
+    expected: chatSelection(f.service.peek()),
+  });
+  release.resolve();
+  await until(() => !f.service.peek().running);
+  expect(proposalId).not.toBe("");
+  await f.service.handle("task.confirm_proposal", { proposal_id: proposalId });
+  const taskId = f.service.peek().tasks![0]!.id;
+  expect(f.service.peek().tasks![0]!.model).toEqual({
+    provider: "test",
+    id: "model",
+  });
+  const { Database } = await import("bun:sqlite");
+  const db = new Database(join(f.directory, "tasks.sqlite"), {
+    readonly: true,
+  });
+  const savedConfig = (id: string) =>
+    JSON.parse(
+      (
+        db.query("SELECT config FROM tasks WHERE id = ?").get(id) as {
+          config: string;
+        }
+      ).config,
+    );
+  try {
+    expect(savedConfig(taskId)).toMatchObject({
+      provider: "test",
+      model: "model",
+      thinking_level: "high",
+    });
+    await f.service.handle("task.create", {
+      ...input,
+      title: "Direct task",
+      request_id: randomUUID(),
+    });
+    const directId = f.service
+      .peek()
+      .tasks!.find((task) => task.title === "Direct task")!.id;
+    expect(savedConfig(directId)).toMatchObject({
+      provider: "test",
+      model: "fast",
+    });
+    expect(savedConfig(directId).thinking_level).toBeUndefined();
+    await f.service.handle("task.update", {
+      ...input,
+      title: "Updated task",
+      task_id: taskId,
+    });
+    expect(savedConfig(taskId)).toMatchObject({
+      provider: "test",
+      model: "fast",
+    });
+    expect(savedConfig(taskId).thinking_level).toBeUndefined();
+  } finally {
+    db.close();
+  }
 });

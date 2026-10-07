@@ -419,6 +419,9 @@ export function createPiDriver(
       // Recreate without availability checks: refresh() can execute !command keys.
       const models = await runtime(source, true);
       const { saved } = modelConfiguration(source);
+      const { getSupportedThinkingLevels, clampThinkingLevel } = await import(
+        "@earendil-works/pi-ai/models"
+      );
       if (models.getError()) throw new Error("Invalid model configuration");
       const { builtinProviders } = await import(
         "@earendil-works/pi-ai/providers/all"
@@ -469,6 +472,10 @@ export function createPiDriver(
             provider: model.provider,
             id: model.id,
             label: model.name,
+            thinking_levels: getSupportedThinkingLevels(model),
+            ...(getSupportedThinkingLevels(model).length
+              ? { default_thinking_level: clampThinkingLevel(model, "off") }
+              : {}),
             ...(!builtinIds.has(model.provider) &&
             isAssistantModelEndpoint(model.baseUrl) &&
             isAssistantModelApi(model.api)
@@ -598,8 +605,22 @@ export function createPiDriver(
           runtime(input.config.credential_source),
           context,
         );
-        if (!modelRuntime.getModel(input.config.provider, input.config.model))
-          throw new Error("Model unavailable");
+        const model = modelRuntime.getModel(
+          input.config.provider,
+          input.config.model,
+        );
+        if (!model) throw new Error("Model unavailable");
+        const { getSupportedThinkingLevels, clampThinkingLevel } = await import(
+          "@earendil-works/pi-ai/models"
+        );
+        // Pi durable defaults to off. Resolve that against the actual model and
+        // set it explicitly so a reused durable root cannot retain an old effort.
+        const thinkingLevel =
+          input.config.thinking_level ?? clampThinkingLevel(model, "off");
+        if (!getSupportedThinkingLevels(model).includes(thinkingLevel))
+          throw new Error(
+            "The selected thinking effort is not supported by this model",
+          );
         const pointer = input.entries.find(
           (entry) => isRecord(entry) && entry.type === "ranger-durable",
         );
@@ -731,6 +752,7 @@ export function createPiDriver(
           context,
         );
         const agent = {
+          thinkingLevel,
           model: {
             provider: input.config.provider,
             modelId: input.config.model,

@@ -30,6 +30,7 @@ import {
   isAssistantModelApi,
   isAssistantModelEndpoint,
   isAssistantSnapshot,
+  isAssistantThinkingLevel,
 } from "../../../shared/assistant";
 import { assertSafeDataPath, dataRoot } from "../config/data-paths";
 import { roamgateEnv } from "../config/environment";
@@ -128,7 +129,15 @@ function config(value: Record<string, unknown>): AssistantConfig {
     value.approval_mode !== "auto"
   )
     throw new Error("Invalid approval mode");
+  if (
+    value.thinking_level !== undefined &&
+    !isAssistantThinkingLevel(value.thinking_level)
+  )
+    throw new Error("Invalid thinking effort");
   return {
+    ...(value.thinking_level !== undefined
+      ? { thinking_level: value.thinking_level }
+      : {}),
     provider: value.provider === "" ? "" : string(value.provider, "provider"),
     model: value.model === "" ? "" : string(value.model, "model"),
     credential_source: value.credential_source,
@@ -290,6 +299,7 @@ export function createAssistantService(options: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const initialSession = sessionSummary();
   const state: AssistantSnapshot = {
+    chat_selection: true,
     instance_id: randomUUID(),
     revision: 0,
     session_id: initialSession.id,
@@ -652,6 +662,52 @@ export function createAssistantService(options: {
     const result = await driver.catalog(source);
     if (state.config.credential_source === source) Object.assign(state, result);
   }
+  function checkSelection(value: unknown) {
+    if (
+      !value ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      Object.keys(value).some(
+        (key) =>
+          ![
+            "instance_id",
+            "provider",
+            "model",
+            "credential_source",
+            "thinking_level",
+          ].includes(key),
+      )
+    )
+      throw new Error("Invalid expected Ranger selection");
+    const expected = value as Record<string, unknown>;
+    if (
+      expected.instance_id !== state.instance_id ||
+      expected.provider !== state.config.provider ||
+      expected.model !== state.config.model ||
+      expected.credential_source !== state.config.credential_source ||
+      expected.thinking_level !== state.config.thinking_level
+    )
+      throw new Error(
+        "The Ranger model or thinking effort changed. Review the current selection and try again.",
+      );
+  }
+  function checkThinking(
+    selection: AssistantConfig,
+    models: AssistantSnapshot["models"],
+  ) {
+    const model = models.find(
+      (model) =>
+        model.provider === selection.provider && model.id === selection.model,
+    );
+    if (
+      model?.thinking_levels?.length === 0 ||
+      (selection.thinking_level !== undefined &&
+        !model?.thinking_levels?.includes(selection.thinking_level))
+    )
+      throw new Error(
+        "The selected thinking effort is not supported by this model",
+      );
+  }
   function idle() {
     if (disposed) throw new Error("Ranger unavailable");
     if (state.running || changing || authController || actionWork)
@@ -849,6 +905,7 @@ export function createAssistantService(options: {
     const requestId = string(params.request_id, "request identifier");
     if (requests.includes(requestId) || pendingRequest === requestId) return;
     idle();
+    if (params.expected !== undefined) checkSelection(params.expected);
     const text = string(
       params.text,
       "message",
@@ -884,6 +941,7 @@ export function createAssistantService(options: {
         )
       )
         throw new Error("The selected model is not configured");
+      checkThinking(turnConfig, state.models);
       const captured = await context.captureScope(scope, controller.signal);
       if (disposed) throw new Error("Ranger unavailable");
       const capturedKey = JSON.stringify(captured);
@@ -1052,7 +1110,12 @@ export function createAssistantService(options: {
                   throw new Error(
                     "This turn already has eight task proposals.",
                   );
-                const prepared = await prepareTask(args, combined, captured);
+                const prepared = await prepareTask(
+                  args,
+                  combined,
+                  captured,
+                  turnConfig,
+                );
                 prepared.config = config({
                   ...prepared.config,
                   approval_mode: turnConfig.approval_mode,
@@ -1262,6 +1325,7 @@ export function createAssistantService(options: {
         )
       )
         throw new Error("The original model is unavailable");
+      checkThinking(pending.config, available.models);
       controller.signal.throwIfAborted();
       if (disposed || activeRun !== pending) return;
       await checkTaskScope(controller.signal);
@@ -1456,13 +1520,18 @@ export function createAssistantService(options: {
       )
     )
       throw new Error("The original task model or permission is unavailable.");
+    checkThinking(prepared.config, available.models);
   }
   async function prepareTask(
     value: unknown,
     signal?: AbortSignal,
     capturedTurn?: AssistantWorkspace[],
+    admittedConfig?: AssistantConfig,
   ): Promise<PreparedTask> {
     const input = validateTaskInput(value);
+    // A tool proposal belongs to the admitted turn, even if another browser
+    // selected a different model for the next message while it was streaming.
+    const taskConfig = structuredClone(admittedConfig ?? state.config);
     const allowed = new Set(state.config.allowed_workspaces.map(refKey));
     const turn = capturedTurn ? new Set(capturedTurn.map(refKey)) : allowed;
     if (
@@ -1491,7 +1560,7 @@ export function createAssistantService(options: {
       targets,
       workspaces,
       config: {
-        ...structuredClone(state.config),
+        ...taskConfig,
         allowed_workspaces: structuredClone(input.scope),
       },
     };
@@ -1692,6 +1761,71 @@ export function createAssistantService(options: {
         return current();
       }
       switch (method) {
+        case "configure_chat": {
+          if (changing || authController)
+            throw new Error("Ranger settings are busy");
+          if (
+            Object.keys(params).some(
+              (key) =>
+                !["provider", "model", "thinking_level", "expected"].includes(
+                  key,
+                ),
+            ) ||
+            (params.thinking_level !== null &&
+              !isAssistantThinkingLevel(params.thinking_level))
+          )
+            throw new Error("Invalid Ranger chat selection");
+          const provider = string(params.provider, "provider");
+          const model = string(params.model, "model");
+          checkSelection(params.expected);
+          changing = true;
+          try {
+            const available = await driver
+              .catalog(state.config.credential_source)
+              .catch(() => {
+                throw new Error(
+                  "The model catalog could not be loaded. Try again.",
+                );
+              });
+            if (disposed) throw new Error("Ranger unavailable");
+            checkSelection(params.expected);
+            if (
+              !available.providers.some(
+                (entry) => entry.id === provider && entry.configured,
+              ) ||
+              !available.models.some(
+                (entry) => entry.provider === provider && entry.id === model,
+              )
+            )
+              throw new Error("The selected model is not configured");
+            // Only replace the next-turn selection. Scope, approval, admitted
+            // turns, and pending action previews keep their original authority.
+            const next = { ...state.config, provider, model };
+            delete next.thinking_level;
+            if (params.thinking_level !== null)
+              next.thinking_level = params.thinking_level;
+            checkThinking(next, available.models);
+            const previous = {
+              config: state.config,
+              providers: state.providers,
+              models: state.models,
+            };
+            state.config = next;
+            Object.assign(state, available);
+            try {
+              persist();
+            } catch {
+              // Do not clone/replace live messages or prepared action references:
+              // a failed next-turn save must leave the current stream attached.
+              Object.assign(state, previous);
+              throw new Error("The Ranger chat selection could not be saved.");
+            }
+            publish(true);
+          } finally {
+            changing = false;
+          }
+          break;
+        }
         case "configure_approval": {
           if (
             Object.keys(params).some((key) => key !== "approval_mode") ||
@@ -1845,6 +1979,7 @@ export function createAssistantService(options: {
               )
             )
               throw new Error("Invalid model");
+            checkThinking(next, nextCatalog.models);
             saveChange(() => {
               state.config = config({
                 ...next,

@@ -8,6 +8,7 @@ import {
   type AssistantTaskDetail,
 } from "../../shared/assistant";
 import { bridge, type ConnectionStatus } from "./api";
+import { assistantChatSelection } from "./assistantModels";
 
 type AssistantClientState = {
   snapshot: AssistantSnapshot | null;
@@ -131,6 +132,7 @@ export async function callAssistant(
     action !== "get" &&
     action !== "stop" &&
     action !== "configure_approval" &&
+    action !== "configure_chat" &&
     !action.startsWith("task.")
   ) {
     throw new Error("Wait for the current action to finish.");
@@ -254,7 +256,10 @@ export async function sendAssistant(
   if (!text.trim()) return;
   if (!scope.length) throw new Error("Choose a workspace to read first.");
   const sessionId = state.snapshot?.session_id;
-  const key = JSON.stringify([sessionId, text, scope]);
+  const expected = state.snapshot?.chat_selection
+    ? assistantChatSelection(state.snapshot)
+    : undefined;
+  const key = JSON.stringify([sessionId, text, scope, expected]);
   if (submission?.key !== key)
     submission = { key, requestId: crypto.randomUUID() };
   sending = true;
@@ -263,6 +268,7 @@ export async function sendAssistant(
       text,
       scope,
       request_id: submission.requestId,
+      ...(expected ? { expected } : {}),
       ...(sessionId ? { session_id: sessionId } : {}),
     });
     submission = null;

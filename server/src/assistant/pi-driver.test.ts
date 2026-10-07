@@ -376,7 +376,12 @@ function toolUse(
   ];
 }
 
-async function durableFixture(reply: (index: number) => Response) {
+async function durableFixture(
+  reply: (index: number) => Response,
+  modelChanges: Partial<
+    import("@earendil-works/pi-ai").Model<import("@earendil-works/pi-ai").Api>
+  > = {},
+) {
   const directory = mkdtempSync(join(tmpdir(), "roamgate-durable-"));
   writeFileSync(
     join(directory, "auth.json"),
@@ -388,6 +393,8 @@ async function durableFixture(reply: (index: number) => Response) {
     messages: unknown[];
     tools: { name: string }[];
     system: unknown;
+    thinking?: { type: string; budget_tokens?: number };
+    output_config?: { effort?: string };
   }[] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -413,7 +420,11 @@ async function durableFixture(reply: (index: number) => Response) {
               const model = runtime
                 .getModels("anthropic")
                 .find((model) => model.api === "anthropic-messages")!;
-              runtime.getModel = () => ({ ...model, baseUrl: server.url.href });
+              runtime.getModel = () => ({
+                ...model,
+                ...modelChanges,
+                baseUrl: server.url.href,
+              });
               return runtime;
             },
           },
@@ -1923,3 +1934,125 @@ test("the real Pi SDK records pending action proposals and finishes without exec
     rmSync(directory, { recursive: true, force: true });
   }
 }, 3000);
+
+test("catalog thinking capabilities and defaults come from the installed SDK, including custom model declarations", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "roamgate-thinking-catalog-"));
+  writeFileSync(
+    join(directory, "models.json"),
+    JSON.stringify({
+      providers: {
+        custom: {
+          api: "openai-completions",
+          baseUrl: "http://127.0.0.1:1234/v1",
+          apiKey: "synthetic-test-key",
+          models: [
+            { id: "basic", reasoning: false },
+            {
+              id: "reasoner",
+              reasoning: true,
+              thinkingLevelMap: {
+                off: null,
+                minimal: null,
+                xhigh: "xhigh",
+                max: "max",
+              },
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const driver = createPiDriver(directory);
+  try {
+    const catalog = await driver.catalog("assistant");
+    const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
+    const { getSupportedThinkingLevels, clampThinkingLevel } = await import(
+      "@earendil-works/pi-ai/models"
+    );
+    const runtime = await ModelRuntime.create({
+      authPath: join(directory, "auth.json"),
+      modelsPath: join(directory, "models.json"),
+      allowModelNetwork: false,
+      refreshOnCreate: false,
+    });
+    for (const entry of catalog.models) {
+      const model = runtime.getModel(entry.provider, entry.id)!;
+      expect(entry.thinking_levels).toEqual(getSupportedThinkingLevels(model));
+      expect(entry.default_thinking_level).toBe(
+        clampThinkingLevel(model, "off"),
+      );
+    }
+    expect(catalog.models.find((entry) => entry.id === "basic")).toMatchObject({
+      thinking_levels: ["off"],
+      default_thinking_level: "off",
+    });
+    expect(
+      catalog.models.find((entry) => entry.id === "reasoner"),
+    ).toMatchObject({
+      thinking_levels: ["low", "medium", "high", "xhigh", "max"],
+      default_thinking_level: "low",
+    });
+  } finally {
+    await driver.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Pi durable forwards selected effort to the provider and resets a reused root to the effective default", async () => {
+  const f = await durableFixture(
+    (index) => modelReply(index, [...text("Done"), ...finish("end_turn")]),
+    {
+      id: "claude-sonnet-4-5",
+      reasoning: true,
+      maxTokens: 64000,
+      thinkingLevelMap: {},
+      compat: { forceAdaptiveThinking: true },
+    },
+  );
+  const driver = f.createDriver();
+  try {
+    const input = f.input();
+    const entries = await driver.run({
+      ...input,
+      config: { ...input.config, thinking_level: "high" },
+    });
+    expect(f.requests).toHaveLength(1);
+    expect(f.requests[0]!.thinking?.type).toBe("adaptive");
+    expect(f.requests[0]!.output_config?.effort).toBe("high");
+    await driver.run({ ...f.input(), entries, requestId: "default-next-turn" });
+    expect(f.requests).toHaveLength(2);
+    expect(f.requests[1]!.thinking).toEqual({ type: "disabled" });
+    expect(f.requests[1]!.output_config?.effort).toBeUndefined();
+    await expect(
+      driver.run({
+        ...f.input(),
+        requestId: "unsupported",
+        config: { ...input.config, thinking_level: "max" },
+      }),
+    ).rejects.toThrow("not supported");
+    expect(f.requests).toHaveLength(2);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("Pi durable resolves an unsupported off default using the SDK's model capability map", async () => {
+  const f = await durableFixture(
+    (index) => modelReply(index, [...text("Done"), ...finish("end_turn")]),
+    {
+      id: "claude-sonnet-4-5",
+      reasoning: true,
+      maxTokens: 64000,
+      thinkingLevelMap: { off: null, minimal: null },
+      compat: { forceAdaptiveThinking: true },
+    },
+  );
+  try {
+    await f.createDriver().run(f.input());
+    expect(f.requests).toHaveLength(1);
+    expect(f.requests[0]!.thinking?.type).toBe("adaptive");
+    expect(f.requests[0]!.output_config?.effort).toBe("low");
+  } finally {
+    await f.cleanup();
+  }
+});

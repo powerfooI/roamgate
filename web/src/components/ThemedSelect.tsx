@@ -1,13 +1,21 @@
 import { Check, ChevronDown } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "../utils";
-import { Command, CommandItem, CommandList } from "./ui/command";
+import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "./ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import "./ThemedSelect.css";
 
 export type ThemedSelectOption = {
   value: string;
   label: string;
+  detail?: string;
+  keywords?: string[];
 };
 
 // Themed replacement for the native <select>: cmdk provides arrow/Home/End/
@@ -24,6 +32,10 @@ export function ThemedSelect({
   title,
   placeholder,
   disabled = false,
+  searchPlaceholder,
+  side,
+  contentClassName,
+  onSelectedClose,
 }: {
   value: string;
   options: ThemedSelectOption[];
@@ -35,9 +47,20 @@ export function ThemedSelect({
   title?: string;
   placeholder?: string;
   disabled?: boolean;
+  searchPlaceholder?: string;
+  side?: "top" | "bottom";
+  contentClassName?: string;
+  onSelectedClose?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(value);
+  const selected = useRef(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const close = () => setOpen(false);
+    window.addEventListener("popstate", close);
+    return () => window.removeEventListener("popstate", close);
+  }, []);
   useEffect(() => {
     if (disabled) setOpen(false);
   }, [disabled]);
@@ -47,7 +70,10 @@ export function ThemedSelect({
       open={open && !disabled}
       onOpenChange={(next) => {
         setOpen(next && !disabled);
-        if (next && !disabled) setHighlighted(value);
+        if (next && !disabled) {
+          selected.current = false;
+          setHighlighted(value);
+        }
       }}
     >
       <PopoverTrigger asChild>
@@ -68,21 +94,56 @@ export function ThemedSelect({
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="themed-select-content" align={align}>
+      <PopoverContent
+        className={cn("themed-select-content", contentClassName)}
+        align={align}
+        side={side}
+        collisionPadding={8}
+        onOpenAutoFocus={(event) => {
+          if (!searchPlaceholder) {
+            event.preventDefault();
+            listRef.current?.focus();
+          }
+        }}
+        onCloseAutoFocus={(event) => {
+          if (selected.current && onSelectedClose) {
+            event.preventDefault();
+            onSelectedClose();
+          }
+          selected.current = false;
+        }}
+        onEscapeKeyDown={(event) => event.stopPropagation()}
+      >
         <Command
           loop
-          shouldFilter={false}
+          shouldFilter={!!searchPlaceholder}
+          tabIndex={-1}
           value={highlighted}
           onValueChange={setHighlighted}
           aria-label={ariaLabel}
         >
-          <CommandList>
+          {searchPlaceholder ? (
+            <CommandInput
+              placeholder={searchPlaceholder}
+              aria-label={searchPlaceholder}
+            />
+          ) : null}
+          <CommandList ref={listRef} label={ariaLabel}>
+            {searchPlaceholder ? (
+              <CommandEmpty>No models found</CommandEmpty>
+            ) : null}
             {options.map((option) => (
               <CommandItem
                 key={option.value}
                 value={option.value}
+                keywords={[
+                  option.label,
+                  option.detail ?? "",
+                  ...(option.keywords ?? []),
+                ]}
                 onSelect={() => {
                   if (disabled) return;
+                  selected.current = true;
                   setOpen(false);
                   onChange(option.value);
                 }}
@@ -94,6 +155,9 @@ export function ThemedSelect({
                 </span>
                 <span className="command-item-text">
                   <span className="command-item-title">{option.label}</span>
+                  {option.detail ? (
+                    <span className="command-item-detail">{option.detail}</span>
+                  ) : null}
                 </span>
               </CommandItem>
             ))}

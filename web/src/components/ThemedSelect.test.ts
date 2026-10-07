@@ -1,8 +1,8 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 
 if (process.env.ROAMGATE_THEMED_SELECT_DOM_TEST !== "1") {
-  test("ThemedSelect disabled transitions in an isolated runtime", async () => {
+  test("ThemedSelect interactions in an isolated runtime", async () => {
     const child = Bun.spawn([process.execPath, "test", import.meta.path], {
       env: { ...process.env, ROAMGATE_THEMED_SELECT_DOM_TEST: "1" },
       stdout: "pipe",
@@ -82,15 +82,23 @@ async function registerDomTest() {
       const trigger = container.querySelector("button")!;
       expect(trigger.disabled).toBe(false);
       await act(async () => trigger.click());
-      expect(document.querySelector(".themed-select-content")).not.toBeNull();
+      expect(document.querySelector(".themed-select-content") !== null).toBe(
+        true,
+      );
       await render(true);
       expect(trigger.disabled).toBe(true);
-      expect(document.querySelector(".themed-select-content")).toBeNull();
+      expect(document.querySelector(".themed-select-content") === null).toBe(
+        true,
+      );
       await act(async () => trigger.click());
-      expect(document.querySelector(".themed-select-content")).toBeNull();
+      expect(document.querySelector(".themed-select-content") === null).toBe(
+        true,
+      );
       expect(changes).toEqual([]);
       await render(false);
-      expect(document.querySelector(".themed-select-content")).toBeNull();
+      expect(document.querySelector(".themed-select-content") === null).toBe(
+        true,
+      );
       await act(async () => trigger.click());
       const option = document.querySelector<HTMLElement>(
         '[cmdk-item][data-value="second"]',
@@ -98,11 +106,239 @@ async function registerDomTest() {
       expect(option).not.toBeNull();
       await act(async () => option.click());
       expect(changes).toEqual(["second"]);
-      expect(document.querySelector(".themed-select-content")).toBeNull();
+      expect(document.querySelector(".themed-select-content") === null).toBe(
+        true,
+      );
     } finally {
       await act(async () => root.unmount());
       container.remove();
       await browser.happyDOM.whenAsyncComplete();
     }
+  });
+
+  const cleanups: (() => Promise<void>)[] = [];
+  afterEach(async () => {
+    for (const cleanup of cleanups.splice(0)) await cleanup();
+    expect(document.querySelector(".themed-select-content") === null).toBe(
+      true,
+    );
+  });
+  const click = async (element: HTMLElement) => {
+    await act(async () => element.click());
+    await act(async () => browser.happyDOM.whenAsyncComplete());
+  };
+  const key = async (value: string) => {
+    const target = document.activeElement;
+    if (!target) throw new Error("No focused keyboard target");
+    await act(async () => {
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: value,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await act(async () => browser.happyDOM.whenAsyncComplete());
+  };
+  async function mount(searchable = false) {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const changes: string[] = [];
+    let selectedCloses = 0;
+    await act(async () =>
+      root.render(
+        createElement(
+          "div",
+          null,
+          createElement("button", { "aria-label": "Outside" }, "Outside"),
+          createElement(ThemedSelect, {
+            value: "second",
+            options: [
+              {
+                value: "first",
+                label: "First",
+                detail: "Alpha",
+                keywords: ["fast"],
+              },
+              {
+                value: "second",
+                label: "Second",
+                detail: "Beta",
+                keywords: ["balanced"],
+              },
+              {
+                value: "third",
+                label: "Third",
+                detail: "Gamma",
+                keywords: ["reasoner"],
+              },
+            ],
+            "aria-label": "Choose a model",
+            searchPlaceholder: searchable ? "Search models" : undefined,
+            onChange: (value) => changes.push(value),
+            onSelectedClose: () => {
+              selectedCloses += 1;
+            },
+          }),
+        ),
+      ),
+    );
+    cleanups.push(async () => {
+      await act(async () => root.unmount());
+      container.remove();
+      await browser.happyDOM.whenAsyncComplete();
+    });
+    return {
+      changes,
+      trigger: container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Choose a model"]',
+      )!,
+      outside: container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Outside"]',
+      )!,
+      selectedCloses: () => selectedCloses,
+    };
+  }
+
+  test("non-searchable keyboard navigation starts at the current selection and accepts Enter", async () => {
+    const fixture = await mount();
+    await click(fixture.trigger);
+    expect(document.activeElement?.hasAttribute("cmdk-list")).toBe(true);
+    expect(
+      document
+        .querySelector('[cmdk-item][data-selected="true"]')
+        ?.getAttribute("data-value"),
+    ).toBe("second");
+    await key("ArrowDown");
+    expect(
+      document
+        .querySelector('[cmdk-item][data-selected="true"]')
+        ?.getAttribute("data-value"),
+    ).toBe("third");
+    await key("Home");
+    expect(
+      document
+        .querySelector('[cmdk-item][data-selected="true"]')
+        ?.getAttribute("data-value"),
+    ).toBe("first");
+    await key("End");
+    await key("Enter");
+    expect(fixture.changes).toEqual(["third"]);
+    expect(fixture.selectedCloses()).toBe(1);
+    expect(document.querySelector(".themed-select-content") === null).toBe(
+      true,
+    );
+  });
+
+  test("search filters keywords and Enter selects the visible result", async () => {
+    const fixture = await mount(true);
+    await click(fixture.trigger);
+    const input = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Search models"]',
+    )!;
+    expect(document.activeElement === input).toBe(true);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )!.set!.call(input, "reasoner");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(document.querySelectorAll("[cmdk-item]")).toHaveLength(1);
+    expect(document.querySelector("[cmdk-item]")?.textContent).toContain(
+      "Gamma",
+    );
+    await key("Enter");
+    expect(fixture.changes).toEqual(["third"]);
+    expect(fixture.selectedCloses()).toBe(1);
+    expect(document.querySelector(".themed-select-content") === null).toBe(
+      true,
+    );
+  });
+
+  test("Escape closes without selection, restores trigger focus and resets the search on reopening", async () => {
+    const fixture = await mount(true);
+    await click(fixture.trigger);
+    const input = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Search models"]',
+    )!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )!.set!.call(input, "no such model");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(document.querySelector("[cmdk-empty]")?.textContent).toBe(
+      "No models found",
+    );
+    await key("Escape");
+    expect(document.querySelector(".themed-select-content") === null).toBe(
+      true,
+    );
+    expect(document.activeElement === fixture.trigger).toBe(true);
+    expect(fixture.changes).toEqual([]);
+    expect(fixture.selectedCloses()).toBe(0);
+    await click(fixture.trigger);
+    expect(
+      document.querySelector<HTMLInputElement>(
+        'input[aria-label="Search models"]',
+      )?.value,
+    ).toBe("");
+    expect(document.querySelectorAll("[cmdk-item]")).toHaveLength(3);
+  });
+
+  test("outside pointer and browser navigation dismiss without selection or a stale close callback", async () => {
+    const fixture = await mount(true);
+    await click(fixture.trigger);
+    await act(async () => {
+      fixture.outside.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          pointerType: "mouse",
+          button: 0,
+        }),
+      );
+      fixture.outside.dispatchEvent(
+        new PointerEvent("pointerup", {
+          bubbles: true,
+          pointerType: "mouse",
+          button: 0,
+        }),
+      );
+      fixture.outside.click();
+    });
+    await act(async () => browser.happyDOM.whenAsyncComplete());
+    expect(document.querySelector(".themed-select-content") === null).toBe(
+      true,
+    );
+    expect(fixture.selectedCloses()).toBe(0);
+    await click(fixture.trigger);
+    await act(async () => window.dispatchEvent(new Event("popstate")));
+    // Radix restores focus asynchronously when the old popover unmounts.
+    // Let that navigation finish before simulating the next user action.
+    await act(async () => browser.happyDOM.whenAsyncComplete());
+    expect(document.querySelector(".themed-select-content") === null).toBe(
+      true,
+    );
+    expect(fixture.changes).toEqual([]);
+    expect(fixture.selectedCloses()).toBe(0);
+    await click(fixture.trigger);
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      "Search models",
+    );
+    expect(
+      document
+        .querySelector('[cmdk-item][data-selected="true"]')
+        ?.getAttribute("data-value"),
+    ).toBe("second");
+    await key("Enter");
+    expect(fixture.changes).toEqual(["second"]);
+    expect(fixture.selectedCloses()).toBe(1);
+    await click(fixture.trigger);
+    await key("Escape");
+    expect(fixture.selectedCloses()).toBe(1);
   });
 }

@@ -517,3 +517,109 @@ test("task detail validates task and run identity without replacing chat state o
   await expect(old).rejects.toThrow("connection changed");
   expect(readAssistantState().snapshot).toEqual(chat);
 });
+
+test("chat selection changes remain server-authoritative through stale replies, failures and reconnects", async () => {
+  const server = installBridge();
+  const close = startAssistantClient();
+  await refreshAssistant();
+  const configured = (
+    revision: number,
+    model: string,
+    thinking_level: "low" | "high" = "low",
+  ): AssistantSnapshot => ({
+    ...snapshot(revision),
+    chat_selection: true,
+    config: { ...snapshot().config, model, thinking_level },
+    models: ["first", "second"].map((id) => ({
+      provider: "provider",
+      id,
+      label: id,
+      thinking_levels: ["off", "low", "high"],
+      default_thinking_level: "off",
+    })),
+  });
+  try {
+    server.push(configured(1, "first"));
+    setAssistantDraft("Unsent draft");
+    const pending = deferred();
+    server.call.mockReturnValueOnce(pending.promise);
+    const saving = callAssistant("configure_chat", { model: "second" });
+    expect(readAssistantState().snapshot?.config.model).toBe("first");
+    server.push(configured(3, "second", "high"));
+    pending.resolve(configured(2, "second"));
+    await saving;
+    expect(readAssistantState().snapshot?.config.thinking_level).toBe("high");
+    expect(readAssistantState().draft).toBe("Unsent draft");
+    server.call.mockRejectedValueOnce(
+      new Error("Selection changed in another browser"),
+    );
+    await expect(callAssistant("configure_chat")).rejects.toThrow(
+      "another browser",
+    );
+    expect(readAssistantState().snapshot?.config.model).toBe("second");
+    expect(readAssistantState().error).toContain("another browser");
+    const reconnect = deferred();
+    server.call.mockReturnValueOnce(reconnect.promise);
+    const oldSave = callAssistant("configure_chat");
+    server.status("disconnected");
+    server.push(configured(4, "first"));
+    reconnect.resolve(configured(9, "second"));
+    await oldSave;
+    expect(readAssistantState().snapshot?.config.model).toBe("first");
+    expect(readAssistantState().draft).toBe("Unsent draft");
+  } finally {
+    close();
+  }
+});
+
+test("send binds the visible model and effort and a changed selection starts a fresh request", async () => {
+  const server = installBridge();
+  const close = startAssistantClient();
+  await refreshAssistant();
+  try {
+    server.push({
+      ...snapshot(1),
+      chat_selection: true,
+      config: { ...snapshot().config, thinking_level: "high" },
+    });
+    setAssistantDraft("Use this model");
+    server.call.mockRejectedValueOnce(new Error("Model changed"));
+    await expect(sendAssistant("Use this model", scope)).rejects.toThrow(
+      "Model changed",
+    );
+    const first =
+      server.call.mock.calls[server.call.mock.calls.length - 1]?.[1];
+    expect(first?.expected).toEqual({
+      instance_id: "bridge-1",
+      provider: "provider",
+      model: "model",
+      credential_source: "assistant",
+      thinking_level: "high",
+    });
+    expect(readAssistantState().draft).toBe("Use this model");
+    server.push({
+      ...snapshot(2),
+      chat_selection: true,
+      config: { ...snapshot().config, model: "other", thinking_level: "low" },
+    });
+    server.call.mockRejectedValueOnce(new Error("Unavailable"));
+    await expect(sendAssistant("Use this model", scope)).rejects.toThrow(
+      "Unavailable",
+    );
+    const second =
+      server.call.mock.calls[server.call.mock.calls.length - 1]?.[1];
+    expect(second?.request_id).not.toBe(first?.request_id);
+    expect(second?.expected).toMatchObject({
+      model: "other",
+      thinking_level: "low",
+    });
+    server.call.mockRejectedValueOnce(new Error("Retry unavailable"));
+    await expect(sendAssistant("Use this model", scope)).rejects.toThrow();
+    expect(
+      server.call.mock.calls[server.call.mock.calls.length - 1]?.[1]
+        ?.request_id,
+    ).toBe(second?.request_id);
+  } finally {
+    close();
+  }
+});

@@ -12,6 +12,7 @@ import * as storeModule from "../store";
 import type { RangerTaskNotificationTarget } from "../taskNotifications";
 import { terminalFocusBlockedByOverlay } from "../terminalFocus";
 import { AssistantPanel, assistantAuthUrl } from "./AssistantPanel";
+import { AssistantChatControls } from "./AssistantChatControls";
 import * as taskControls from "./AssistantTasks";
 
 test("assistant sign-in links only open explicit http or https destinations", () => {
@@ -2213,6 +2214,25 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
       "The active Ranger chat changed. Select it again before sending.",
     );
     clientState.snapshot = snapshot;
+    snapshot.chat_selection = true;
+    render();
+    context.mockImplementationOnce(async () => {
+      clientState.snapshot = {
+        ...snapshot,
+        config: { ...snapshot.config, thinking_level: "high" },
+      };
+      return { workspaces: [workspace] };
+    });
+    invoke("aria-label", "Message Ranger", "onKeyDown", key());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(states[6]).toBe(
+      "The Ranger model settings changed. Check the selection before sending.",
+    );
+    clientState.snapshot = snapshot;
+    delete snapshot.chat_selection;
+    render();
     snapshot.config.allowed_workspaces = [];
     render();
     expect(find("aria-label", "Send").props.disabled).toBe(true);
@@ -2596,6 +2616,34 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
       "Unconfirmed action previews will be cancelled",
     );
     expect(stop).toHaveBeenCalledTimes(1);
+
+    // Quick changes share admission with Send and do not touch the draft or IME.
+    const controls = () =>
+      elements.find((item) => item.type === AssistantChatControls)!;
+    const change = () =>
+      (controls().props.onChange as (params: Record<string, unknown>) => void)({
+        model: "next",
+        thinking_level: "high",
+      });
+    invoke("aria-label", "Message Ranger", "onCompositionStart");
+    change();
+    expect(stop).toHaveBeenCalledTimes(1);
+    invoke("aria-label", "Message Ranger", "onCompositionEnd");
+    snapshot.running = true;
+    render();
+    expect(controls().props.disabled).toBe(false);
+    change();
+    change();
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(stop).toHaveBeenLastCalledWith("configure_chat", {
+      model: "next",
+      thinking_level: "high",
+    });
+    expect(clientState.draft).toBe("Explain the changes");
+    await Promise.resolve();
+    await Promise.resolve();
+    render();
+    expect(controls().props.disabled).toBe(false);
   } finally {
     for (const spy of spies.reverse()) spy.mockRestore();
   }

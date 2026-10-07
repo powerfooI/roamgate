@@ -152,3 +152,71 @@ test("task details bind run records to the selected task and validate stored out
     }),
   ).toBe(false);
 });
+
+test("thinking metadata validates exact SDK levels and remains optional for old snapshots", async () => {
+  const { ASSISTANT_THINKING_LEVELS, isAssistantSnapshot } = await import(
+    "./assistant"
+  );
+  const snapshot = {
+    instance_id: "bridge",
+    revision: 0,
+    config: {
+      provider: "test",
+      model: "model",
+      credential_source: "assistant",
+      allowed_workspaces: [],
+    },
+    providers: [],
+    models: [{ provider: "test", id: "model", label: "Model" }],
+    messages: [],
+    running: false,
+    error: null,
+    auth: null,
+  };
+  expect(isAssistantSnapshot(snapshot)).toBe(true);
+  for (const level of ASSISTANT_THINKING_LEVELS) {
+    expect(
+      isAssistantSnapshot({
+        ...snapshot,
+        chat_selection: true,
+        config: { ...snapshot.config, thinking_level: level },
+        models: [
+          {
+            ...snapshot.models[0],
+            thinking_levels: [level],
+            default_thinking_level: level,
+          },
+        ],
+      }),
+    ).toBe(true);
+  }
+  for (const invalid of ["auto", "ultra", "", null, ["high"], 1])
+    expect(
+      isAssistantSnapshot({
+        ...snapshot,
+        config: { ...snapshot.config, thinking_level: invalid },
+      }),
+    ).toBe(false);
+  for (const metadata of [
+    { thinking_levels: ["high", "high"] },
+    { thinking_levels: ["ultra"] },
+    { thinking_levels: "high" },
+    { thinking_levels: ["low"], default_thinking_level: "high" },
+    { default_thinking_level: "off" },
+  ])
+    expect(
+      isAssistantSnapshot({
+        ...snapshot,
+        models: [{ ...snapshot.models[0], ...metadata }],
+      }),
+    ).toBe(false);
+  expect(isAssistantSnapshot({ ...snapshot, chat_selection: false })).toBe(
+    false,
+  );
+  expect(
+    isAssistantSnapshot({
+      ...snapshot,
+      models: [{ ...snapshot.models[0], thinking_levels: [] }],
+    }),
+  ).toBe(true);
+});

@@ -14,7 +14,10 @@ import type {
   AssistantTaskRun,
   AssistantWorkspace,
 } from "../../../shared/assistant";
-import { isAssistantSnapshot } from "../../../shared/assistant";
+import {
+  isAssistantSnapshot,
+  isAssistantThinkingLevel,
+} from "../../../shared/assistant";
 import { assertSafeDataPath } from "../config/data-paths";
 import { AssistantRecoveryNotReadyError, type RecoveryTarget } from "./context";
 import { nextTaskTime, validateTaskSchedule } from "./task-schedule";
@@ -186,6 +189,8 @@ function validPrepared(value: unknown): value is PreparedTask {
       !!value.config.provider &&
       typeof value.config.model === "string" &&
       !!value.config.model &&
+      (value.config.thinking_level === undefined ||
+        isAssistantThinkingLevel(value.config.thinking_level)) &&
       ["assistant", "pi"].includes(String(value.config.credential_source)) &&
       (value.config.approval_mode === undefined ||
         value.config.approval_mode === "manual" ||

@@ -53,6 +53,12 @@ import { useStoreSelector } from "../store";
 import { MarkdownPreview } from "./markdown";
 import { ConfirmDialog } from "./ModalDialogs";
 import { ThemedSelect } from "./ThemedSelect";
+import { AssistantChatControls } from "./AssistantChatControls";
+import {
+  sameAssistantSelection,
+  thinkingForModel,
+  thinkingOptions,
+} from "../assistantModels";
 import { AssistantConversationMap } from "./AssistantConversationMap";
 import { AssistantTasks, TaskProposalCard } from "./AssistantTasks";
 import "./AssistantPanel.css";
@@ -824,6 +830,7 @@ export function AssistantPanel({
     ? JSON.stringify({
         provider: snapshot.config.provider,
         model: snapshot.config.model,
+        thinking_level: snapshot.config.thinking_level,
         credential_source: snapshot.config.credential_source,
         allowed_workspaces: snapshot.config.allowed_workspaces,
       })
@@ -930,6 +937,7 @@ export function AssistantPanel({
       (executing &&
         action !== "stop" &&
         action !== "configure_approval" &&
+        action !== "configure_chat" &&
         !action.startsWith("task.")) ||
       ((action === "action.confirm" || action === "action.cancel") &&
         snapshot?.running) ||
@@ -945,6 +953,7 @@ export function AssistantPanel({
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      if (action === "configure_chat") await refreshAssistant().catch(() => {});
       return false;
     } finally {
       pendingAction.current = false;
@@ -980,6 +989,13 @@ export function AssistantPanel({
       )
         throw new Error(
           "The active Ranger chat changed. Select it again before sending.",
+        );
+      if (
+        snapshot?.chat_selection &&
+        !sameAssistantSelection(current, snapshot)
+      )
+        throw new Error(
+          "The Ranger model settings changed. Check the selection before sending.",
         );
       const scope = authorizedScope(available);
       if (!scope.length) throw new Error(unavailableScopeMessage);
@@ -1027,7 +1043,12 @@ export function AssistantPanel({
       aria-pressed={config?.provider === item.id}
       onClick={() => {
         if (config && item.id !== config.provider)
-          setConfig({ ...config, provider: item.id, model: "" });
+          setConfig({
+            ...config,
+            provider: item.id,
+            model: "",
+            thinking_level: undefined,
+          });
       }}
     >
       <strong>{item.label}</strong>
@@ -1335,6 +1356,7 @@ export function AssistantPanel({
                           credential_source: item.value,
                           provider: "",
                           model: "",
+                          thinking_level: undefined,
                         },
                       });
                     }}
@@ -1370,6 +1392,7 @@ export function AssistantPanel({
                   ...config,
                   provider: input.provider,
                   model: input.model,
+                  thinking_level: undefined,
                 });
                 setProviderSearch("");
                 return true;
@@ -1491,9 +1514,43 @@ export function AssistantPanel({
                         ? "No models available"
                         : "Choose a model"
                 }
-                onChange={(value) => setConfig({ ...config, model: value })}
+                onChange={(value) =>
+                  setConfig({
+                    ...config,
+                    model: value,
+                    thinking_level: thinkingForModel(
+                      config,
+                      snapshot.models.find(
+                        (model) =>
+                          model.provider === config.provider &&
+                          model.id === value,
+                      ),
+                    ),
+                  })
+                }
               />
             </label>
+            {snapshot.chat_selection ? (
+              <label className="form-field">
+                <span>Thinking effort</span>
+                <ThemedSelect
+                  value={config.thinking_level ?? "default"}
+                  options={thinkingOptions(selectedModel, config)}
+                  aria-label="Default thinking effort"
+                  disabled={!thinkingOptions(selectedModel, config).length}
+                  placeholder="No adjustable thinking effort"
+                  onChange={(value) =>
+                    setConfig({
+                      ...config,
+                      thinking_level:
+                        value === "default"
+                          ? undefined
+                          : (value as AssistantConfig["thinking_level"]),
+                    })
+                  }
+                />
+              </label>
+            ) : null}
           </fieldset>
           {snapshot.auth &&
           (authPending || snapshot.auth.provider === config.provider) ? (
@@ -2040,6 +2097,18 @@ export function AssistantPanel({
                 )}
               </div>
             </div>
+            <AssistantChatControls
+              key={`${snapshot.instance_id}:${snapshot.session_id ?? ""}`}
+              snapshot={snapshot}
+              mobile={mobile}
+              disabled={busy || !connected || !!authPending || historyOpen}
+              onChange={(params) => {
+                if (!composing.current) void run("configure_chat", params);
+              }}
+              onSelectedClose={() =>
+                inputRef.current?.focus({ preventScroll: true })
+              }
+            />
           </form>
         </>
       )}

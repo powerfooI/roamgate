@@ -189,6 +189,12 @@ The conversation stays available when switching workspaces or connections.
   endpoints by API address, format, key, and model IDs separated by commas or
   newlines. Shared mode also reads
   Pi's custom models. See [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
+- Change the model and **Thinking effort** with the compact selectors below the
+  chat input. Search models across connected providers. Effort choices come from
+  the selected model; **Default** shows its effective level, and models without
+  adjustable thinking show a disabled control. Changes are saved on the bridge
+  and apply to the next message, including when a reply is still streaming.
+  They preserve your draft, conversation, and workspace permissions.
 - Allow workspaces in Settings. Each question automatically uses saved
   authorized workspaces that are currently available. **Select all** adds the
   currently available workspaces; **Clear** removes every selection. Use

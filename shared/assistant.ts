@@ -15,13 +15,37 @@ export type AssistantWorkspace = AssistantWorkspaceRef & {
   runtime_generation: number;
 };
 
+export const ASSISTANT_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+export type AssistantThinkingLevel = (typeof ASSISTANT_THINKING_LEVELS)[number];
+
+export function isAssistantThinkingLevel(
+  value: unknown,
+): value is AssistantThinkingLevel {
+  return ASSISTANT_THINKING_LEVELS.some((level) => level === value);
+}
+
 export type AssistantConfig = {
   provider: string;
   model: string;
+  thinking_level?: AssistantThinkingLevel;
   credential_source: "assistant" | "pi";
   allowed_workspaces: AssistantWorkspaceRef[];
   approval_mode?: "manual" | "auto";
 };
+
+/** Compare selection rather than stream revisions to detect stale browser writes. */
+export type AssistantChatSelection = Pick<
+  AssistantConfig,
+  "provider" | "model" | "credential_source" | "thinking_level"
+> & { instance_id: string };
 
 export const ASSISTANT_MODEL_APIS = [
   "openai-completions",
@@ -240,6 +264,7 @@ export type AssistantSessionSummary = {
 };
 
 export type AssistantSnapshot = {
+  chat_selection?: true;
   instance_id: string;
   revision: number;
   session_id?: string;
@@ -257,6 +282,8 @@ export type AssistantSnapshot = {
     provider: string;
     id: string;
     label: string;
+    thinking_levels?: AssistantThinkingLevel[];
+    default_thinking_level?: AssistantThinkingLevel;
     custom?: { base_url: string; api: AssistantModelApi };
   }[];
   messages: AssistantMessage[];
@@ -529,6 +556,7 @@ export function isAssistantSnapshot(
     !text(value.instance_id) ||
     !value.instance_id ||
     !generation(value.revision) ||
+    (value.chat_selection !== undefined && value.chat_selection !== true) ||
     (value.session_id === undefined) !== (value.sessions === undefined) ||
     (value.session_id !== undefined &&
       (!text(value.session_id) ||
@@ -562,6 +590,8 @@ export function isAssistantSnapshot(
     (value.error !== null && !text(value.error)) ||
     !text(config.provider) ||
     !text(config.model) ||
+    (config.thinking_level !== undefined &&
+      !isAssistantThinkingLevel(config.thinking_level)) ||
     !["assistant", "pi"].includes(String(config.credential_source)) ||
     (config.approval_mode !== undefined &&
       config.approval_mode !== "manual" &&
@@ -594,6 +624,15 @@ export function isAssistantSnapshot(
         text(model.provider) &&
         text(model.id) &&
         text(model.label) &&
+        (model.thinking_levels === undefined ||
+          (Array.isArray(model.thinking_levels) &&
+            model.thinking_levels.every(isAssistantThinkingLevel) &&
+            new Set(model.thinking_levels).size ===
+              model.thinking_levels.length)) &&
+        (model.default_thinking_level === undefined ||
+          (isAssistantThinkingLevel(model.default_thinking_level) &&
+            Array.isArray(model.thinking_levels) &&
+            model.thinking_levels.includes(model.default_thinking_level))) &&
         (model.custom === undefined ||
           (record(model.custom) &&
             isAssistantModelEndpoint(model.custom.base_url) &&
