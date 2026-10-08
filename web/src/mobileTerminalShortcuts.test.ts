@@ -65,6 +65,7 @@ describe("mobile terminal shortcuts", () => {
     ["6", true, false, true, "\x1e"],
     ["[", true, false, false, "\x1b"],
     ["/", true, false, false, "\x1b[47;5u"],
+    ["/", true, false, true, "\x1b[63;6u"],
     ["/", true, true, false, "\x1b[47;7u"],
     ["/", true, true, true, "\x1b[63;8u"],
     ["[", true, true, false, "\x1b[91;7u"],

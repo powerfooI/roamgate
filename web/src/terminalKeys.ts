@@ -67,7 +67,8 @@ export function terminalDisambiguatedKeySequence(
   } else if (
     // Ctrl+/ otherwise becomes Ctrl+_. Ctrl+Alt punctuation drops Control,
     // and Ctrl+Shift letters lose Shift (or produce no input at all).
-    (event.ctrlKey && event.key === "/") ||
+    (event.ctrlKey &&
+      (event.key === "/" || (event.shiftKey && event.key === "?"))) ||
     (event.ctrlKey &&
       event.altKey &&
       /^[ -~]$/.test(event.key) &&

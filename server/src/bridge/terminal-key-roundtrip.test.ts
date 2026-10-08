@@ -35,6 +35,17 @@ describe("hardware terminal key round trips", () => {
         MOD_CONTROL | MOD_ALT,
       ],
       [
+        event("?", {
+          code: "Slash",
+          keyCode: 191,
+          ctrlKey: true,
+          shiftKey: true,
+        }),
+        KEY.Char,
+        63,
+        MOD_CONTROL | MOD_SHIFT,
+      ],
+      [
         event("Backspace", { ctrlKey: true }),
         KEY.Backspace,
         undefined,

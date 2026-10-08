@@ -194,9 +194,9 @@ describe("terminal disambiguated control keys", () => {
     expect(terminalDisambiguatedKeySequence({ ...slash, altKey: true })).toBe(
       "\x1b[47;7u",
     );
-    expect(terminalDisambiguatedKeySequence({ ...slash, shiftKey: true })).toBe(
-      "\x1b[47;6u",
-    );
+    expect(
+      terminalDisambiguatedKeySequence({ ...slash, key: "?", shiftKey: true }),
+    ).toBe("\x1b[63;6u");
   });
 
   test("leaves Apple Option text, AltGr text, and Meta shortcuts alone", () => {

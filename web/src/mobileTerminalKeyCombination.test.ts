@@ -11,6 +11,7 @@ import { mobileTerminalKeyCombinationBytes } from "./mobileTerminalKeyCombinatio
 describe("mobile terminal key identity", () => {
   test.each([
     ["/", true, false, false, KEY.Char, 47, MOD_CONTROL],
+    ["/", true, false, true, KEY.Char, 63, MOD_CONTROL | MOD_SHIFT],
     ["/", true, true, false, KEY.Char, 47, MOD_CONTROL | MOD_ALT],
     ["/", true, true, true, KEY.Char, 63, MOD_CONTROL | MOD_ALT | MOD_SHIFT],
     ["[", true, true, false, KEY.Char, 91, MOD_CONTROL | MOD_ALT],
@@ -76,7 +77,6 @@ describe("mobile terminal key identity", () => {
     ["7", false, "\x1f"],
     ["8", false, "\x7f"],
     ["6", true, "\x1e"],
-    ["/", true, "\x7f"],
   ] as const)(
     "retains the Ctrl+%s legacy alias (Shift=%s)",
     (key, shift, sequence) => {

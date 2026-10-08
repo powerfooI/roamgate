@@ -7,6 +7,7 @@ import { terminalPageScroll } from "./terminalScroll";
 describe("mobile terminal shortcut execution", () => {
   test.each([
     ["/", true, false, false, "\x1f"],
+    ["/", true, false, true, "\x7f"],
     ["/", true, true, false, "\x1b\x1f"],
     ["/", true, true, true, "\x1b\x7f"],
     ["Backspace", true, false, false, "\b"],

@@ -97,7 +97,9 @@ export function mobileTerminalKeyCombinationBytes(
       // incomplete escape sequence. Keep the intentional legacy aliases below.
       if (
         preserveKeyIdentity &&
-        ((ctrl && (sequence === "/" || (shift && /^[A-Z]$/.test(sequence)))) ||
+        ((ctrl &&
+          (sequence === "/" ||
+            (shift && (sequence === "?" || /^[A-Z]$/.test(sequence))))) ||
           (ctrl && alt && /^[^A-Za-z0-9 ]$/.test(sequence)) ||
           (alt && !ctrl && (sequence === "[" || sequence === "O")))
       ) {
