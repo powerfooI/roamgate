@@ -43,7 +43,10 @@ export const MOBILE_TERMINAL_CUSTOM_SPECIAL_KEYS = [
 const supportedKeys = new Set(MOBILE_TERMINAL_CUSTOM_SPECIAL_KEYS);
 
 /** Fixed xterm-style sequences, matching the mobile presets; no text or macros. */
-export function mobileTerminalKeyCombinationBytes(value: unknown): number[] {
+export function mobileTerminalKeyCombinationBytes(
+  value: unknown,
+  preserveKeyIdentity = true,
+): number[] {
   if (!value || typeof value !== "object") return [];
   const raw = value as Record<string, unknown>;
   if (
@@ -71,15 +74,18 @@ export function mobileTerminalKeyCombinationBytes(value: unknown): number[] {
   } else if (key === "Enter") {
     sequence = modifier === 1 ? "\r" : `\x1b[13${suffix}u`;
   } else {
+    let disambiguatedCode: number | null = null;
     if (key === "Tab") {
       if (ctrl || alt) return [];
       sequence = shift ? "\x1b[Z" : "\t";
     } else if (key === "Escape") {
       if (ctrl || shift) return [];
       sequence = "\x1b";
+      if (alt && preserveKeyIdentity) disambiguatedCode = 27;
     } else if (key === "Backspace") {
       if (shift) return [];
       sequence = ctrl ? "\b" : "\x7f";
+      if (ctrl && preserveKeyIdentity) disambiguatedCode = 127;
     } else {
       sequence = key === "Space" ? " " : key;
       if (shift) {
@@ -87,7 +93,16 @@ export function mobileTerminalKeyCombinationBytes(value: unknown): number[] {
         sequence =
           index >= 0 ? '~!@#$%^&*()_+{}|:"<>?'[index] : sequence.toUpperCase();
       }
-      if (ctrl) {
+      // Preserve combinations that otherwise alias another key or begin an
+      // incomplete escape sequence. Keep the intentional legacy aliases below.
+      if (
+        preserveKeyIdentity &&
+        ((ctrl && (sequence === "/" || (shift && /^[A-Z]$/.test(sequence)))) ||
+          (ctrl && alt && /^[^A-Za-z0-9 ]$/.test(sequence)) ||
+          (alt && !ctrl && (sequence === "[" || sequence === "O")))
+      ) {
+        disambiguatedCode = sequence.charCodeAt(0);
+      } else if (ctrl) {
         const code = sequence.toUpperCase().charCodeAt(0);
         if (code >= 0x40 && code <= 0x5f)
           sequence = String.fromCharCode(code - 0x40);
@@ -99,7 +114,9 @@ export function mobileTerminalKeyCombinationBytes(value: unknown): number[] {
         else return [];
       }
     }
-    if (alt) sequence = `\x1b${sequence}`;
+    if (disambiguatedCode !== null)
+      sequence = `\x1b[${disambiguatedCode};${modifier}u`;
+    else if (alt) sequence = `\x1b${sequence}`;
   }
   return Array.from(sequence, (character) => character.charCodeAt(0));
 }

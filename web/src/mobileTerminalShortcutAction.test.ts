@@ -1,8 +1,40 @@
 import { describe, expect, test } from "bun:test";
 import { mobileTerminalShortcutExecution } from "./mobileTerminalShortcutAction";
+import { mobileTerminalKeyCombinationBytes } from "./mobileTerminalKeyCombination";
+import { mobileTerminalShortcutBytes } from "./mobileTerminalShortcuts";
 import { terminalPageScroll } from "./terminalScroll";
 
 describe("mobile terminal shortcut execution", () => {
+  test.each([
+    ["/", true, false, false, "\x1f"],
+    ["/", true, true, false, "\x1b\x1f"],
+    ["/", true, true, true, "\x1b\x7f"],
+    ["Backspace", true, false, false, "\b"],
+    ["Backspace", true, true, false, "\x1b\b"],
+    ["Escape", false, true, false, "\x1b\x1b"],
+    ["[", false, true, false, "\x1b["],
+    ["O", false, true, false, "\x1bO"],
+    ["o", false, true, true, "\x1bO"],
+    ["x", true, false, true, "\x18"],
+    ["x", true, true, true, "\x1b\x18"],
+    ["[", true, true, false, "\x1b\x1b"],
+    ["@", true, true, false, "\x1b\x00"],
+    [";", true, true, false, ""],
+    [",", true, true, false, ""],
+    ["Enter", false, false, true, "\x1b[13;2u"],
+  ] as const)(
+    "keeps raw-PTY bytes for %s (Ctrl=%s Alt=%s Shift=%s)",
+    (key, ctrl, alt, shift, sequence) => {
+      const action = { key, ctrl, alt, shift };
+      const bytes = Array.from(Buffer.from(sequence));
+      expect(mobileTerminalKeyCombinationBytes(action, false)).toEqual(bytes);
+      expect(mobileTerminalShortcutBytes(action, false)).toEqual(bytes);
+      expect(mobileTerminalShortcutExecution(action, false)).toEqual(
+        bytes.length ? { type: "input", bytes } : null,
+      );
+    },
+  );
+
   test("sends ordinary configured keys as terminal input", () => {
     expect(mobileTerminalShortcutExecution("ctrl-c")).toEqual({
       type: "input",

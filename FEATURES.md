@@ -433,9 +433,12 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   Alt, and Shift and pick one letter, number, symbol, or basic key; expand **More keys**
   for navigation keys and F1-F12 in separate groups. Set a label and edit or clear individual slots;
   defaults stay available. Buttons send only that combination, with no extra
-  Enter. Shift uses US symbols; Ctrl letters ignore case and can share bytes with
-  other keys, while Alt sends an Escape prefix. Modified Enter requires application
-  support. Custom PageUp/PageDown sends application input; the presets scroll
+  Enter. Shift uses US symbols. Endpoint terminals preserve ambiguous modified
+  keys such as Ctrl+/, Ctrl+Backspace, Ctrl+Shift+letters, and Alt+Escape;
+  ordinary Ctrl aliases (such as Ctrl+I for Tab) remain available. Legacy/shared
+  terminals retain their traditional byte encodings; combinations available only
+  on endpoint terminals are disabled there with an explanation. Modified Enter
+  requires application support. Custom PageUp/PageDown sends application input; the presets scroll
   history. Unsupported combinations, such as Ctrl+1, identify the affected slot
   and block saving. Buttons bypass browser keyboard
   shortcuts, but application keybindings still apply. Cmd/Meta, text macros,

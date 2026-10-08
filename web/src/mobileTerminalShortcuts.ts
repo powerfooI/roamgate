@@ -373,7 +373,10 @@ export function mobileTerminalShortcutOption(
 
 export function mobileTerminalShortcutBytes(
   action: MobileTerminalShortcutAction,
+  preserveKeyIdentity = true,
 ): number[] {
+  if (typeof action === "object")
+    return mobileTerminalKeyCombinationBytes(action, preserveKeyIdentity);
   return [...(mobileTerminalShortcutOption(action)?.bytes ?? [])];
 }
 

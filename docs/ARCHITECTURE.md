@@ -142,6 +142,15 @@ Input waits for readiness and revalidates attachment/session/runtime leases;
 it is never replayed into a replacement terminal. Disconnect rejects pending
 requests and invalidates clipboard ownership.
 
+- Endpoint keyboard input uses bounded basic CSI-u for modified Enter,
+  Backspace, Escape, and ambiguous printable ASCII combinations. The bridge
+  reconstructs key identity and modifiers before Herdr encodes for the target
+  application. Hardware and custom mobile shortcuts preserve Ctrl+/ separately
+  from Ctrl+_, and Alt+[ / Alt+O cannot consume following text as escape prefixes.
+  Configured terminal actions take precedence; composition, AltGr, and Apple
+  Option text remain native. Legacy/shared attachments retain raw-byte encoding
+  because they bypass the semantic classifier. Browser/OS-reserved shortcuts
+  are available only if the browser delivers their key events.
 - Full PageUp/PageDown sends semantic input for Herdr to route by PTY mode;
   explicit half-page history uses `pane.scroll`, even in mouse-aware apps.
   Legacy attachments retain PageKey/Wheel routing.
