@@ -457,6 +457,7 @@ async function registerDomTests() {
       await click(fixture.button(label));
       expect(fixture.changes).toHaveLength(0);
       await fixture.render(initial, false);
+      await act(async () => browser.happyDOM.whenAsyncComplete());
       expect(document.querySelector(".themed-select-content") === null).toBe(
         true,
       );
