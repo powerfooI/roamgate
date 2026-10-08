@@ -82,6 +82,86 @@ function sessionIdentity(value: unknown) {
   };
 }
 
+export async function readAssistantPaneOccupant(
+  call: (method: string, params: Record<string, unknown>) => Promise<unknown>,
+  workspaceId: string,
+  paneId: string,
+) {
+  const paneResult = await call("pane.get", { pane_id: paneId });
+  const pane = isRecord(paneResult) ? paneResult.pane : undefined;
+  if (!isRecord(pane)) throw new Error("Action pane changed");
+  // agent.get lists detected agents only; an empty shell uses pane.get.
+  const agentResult = pane.agent
+    ? await call("agent.get", { target: paneId })
+    : { agent: pane };
+  const agent = isRecord(agentResult) ? agentResult.agent : undefined;
+  const processResult = await call("pane.process_info", { pane_id: paneId });
+  const process = isRecord(processResult)
+    ? processResult.process_info
+    : undefined;
+  if (
+    !isRecord(agent) ||
+    !isRecord(process) ||
+    pane.pane_id !== paneId ||
+    agent.pane_id !== paneId ||
+    process.pane_id !== paneId ||
+    pane.workspace_id !== workspaceId ||
+    agent.workspace_id !== workspaceId ||
+    typeof pane.terminal_id !== "string" ||
+    !pane.terminal_id ||
+    agent.terminal_id !== pane.terminal_id ||
+    (pane.agent ?? null) !== (agent.agent ?? null)
+  )
+    throw new Error("Action pane changed");
+  const processes = list(process.foreground_processes ?? [])
+    .map((entry) => {
+      if (!Number.isSafeInteger(entry.pid) || Number(entry.pid) <= 0)
+        throw new Error("Cannot verify the target process");
+      return { pid: entry.pid, name: entry.name };
+    })
+    .sort((left, right) => Number(left.pid) - Number(right.pid));
+  if (
+    (!Number.isSafeInteger(process.shell_pid) ||
+      Number(process.shell_pid) <= 0) &&
+    !processes.length
+  )
+    throw new Error("Cannot verify the target process");
+  const session = sessionIdentity(agent.agent_session);
+  const identity = createHash("sha256")
+    .update(
+      JSON.stringify({
+        terminal_id: pane.terminal_id,
+        tab_id: pane.tab_id,
+        agent: agent.agent ?? null,
+        name: agent.name ?? null,
+        session,
+        shell_pid: process.shell_pid,
+        foreground_process_group_id: process.foreground_process_group_id,
+        processes,
+      }),
+    )
+    .digest("hex");
+  const agentIdentity =
+    session && session.value.trim()
+      ? createHash("sha256")
+          .update(
+            JSON.stringify({
+              terminal_id: pane.terminal_id,
+              agent: agent.agent,
+              session,
+            }),
+          )
+          .digest("hex")
+      : null;
+  return {
+    pane: { ...pane },
+    agent: { ...agent },
+    process: { ...process },
+    identity,
+    agentIdentity,
+  };
+}
+
 /** Only context's approved turn leases may reach this preparation function. */
 export async function prepareAssistantAction(args: {
   kind: AssistantActionKind;
@@ -218,60 +298,8 @@ export async function prepareAssistantAction(args: {
       terminal_id: validateConnectionId(pane.terminal_id),
     };
   }
-  async function occupant(paneId: string) {
-    const pane = (await call("pane.get", { pane_id: paneId }))?.pane;
-    if (!isRecord(pane)) throw new Error("Action pane changed");
-    // agent.get lists detected agents only; an empty shell is inspected through pane.get.
-    const agent = pane.agent
-      ? (await call("agent.get", { target: paneId }))?.agent
-      : pane;
-    const process = (await call("pane.process_info", { pane_id: paneId }))
-      ?.process_info;
-    if (
-      !isRecord(pane) ||
-      !isRecord(agent) ||
-      !isRecord(process) ||
-      pane.pane_id !== paneId ||
-      agent.pane_id !== paneId ||
-      process.pane_id !== paneId ||
-      pane.workspace_id !== target.workspace_id ||
-      agent.workspace_id !== target.workspace_id ||
-      typeof pane.terminal_id !== "string" ||
-      !pane.terminal_id ||
-      agent.terminal_id !== pane.terminal_id ||
-      (pane.agent ?? null) !== (agent.agent ?? null)
-    )
-      throw new Error("Action pane changed");
-    const processes = list(process.foreground_processes ?? [])
-      .map((entry) => {
-        if (!Number.isSafeInteger(entry.pid) || Number(entry.pid) <= 0)
-          throw new Error("Cannot verify the target process");
-        return { pid: entry.pid, name: entry.name };
-      })
-      .sort((left, right) => Number(left.pid) - Number(right.pid));
-    if (
-      (!Number.isSafeInteger(process.shell_pid) ||
-        Number(process.shell_pid) <= 0) &&
-      !processes.length
-    )
-      throw new Error("Cannot verify the target process");
-    const identity = JSON.stringify({
-      terminal_id: pane.terminal_id,
-      tab_id: pane.tab_id,
-      agent: agent.agent ?? null,
-      name: agent.name ?? null,
-      session: sessionIdentity(agent.agent_session),
-      shell_pid: process.shell_pid,
-      foreground_process_group_id: process.foreground_process_group_id,
-      processes,
-    });
-    return {
-      pane: { ...pane },
-      agent: { ...agent },
-      process: { ...process },
-      identity,
-    };
-  }
+  const occupant = (paneId: string) =>
+    readAssistantPaneOccupant(call, target.workspace_id, paneId);
   async function hookState(current: Record<string, unknown>, root: string) {
     const source = { ...current, cwd: checkoutPath(current) || root };
     const hooks = await read(() =>

@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AssistantMentionTarget } from "../../../shared/assistant";
 import { openTaskStorage, type TaskStorage } from "./task-storage";
 import {
   type PreparedTask,
@@ -269,7 +270,7 @@ test("SQLite round trips queryable plans and keeps admissions only for unfinishe
     expect(db.query("PRAGMA journal_mode").get()).toEqual({
       journal_mode: "wal",
     });
-    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 2 });
+    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 3 });
     expect(db.query("SELECT id, status, title FROM tasks").get()).toEqual({
       id: saved.tasks[0]!.task.id,
       status: "active",
@@ -309,7 +310,7 @@ test("version one migrates every table and retains the default notification beha
   expect(loaded).toEqual(expected);
   expect(loaded.tasks[0]!.notifications).toBeUndefined();
   inspect(path, (db) => {
-    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 2 });
+    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 3 });
     expect(
       db.query("SELECT notification_mode, notifications FROM tasks").get(),
     ).toEqual({ notification_mode: null, notifications: "[]" });
@@ -349,6 +350,81 @@ test("agent mode and notification receipts survive reload and pruning their sour
       notifications: JSON.stringify(entry.notifications),
     }),
   );
+});
+
+test("version two retains existing plans, admissions, proposals and notifications during migration", () => {
+  const path = directory();
+  const saved = state();
+  createVersionOne(path, saved);
+  const receipt = notification(saved);
+  inspect(path, (db) => {
+    db.exec(`
+      ALTER TABLE tasks ADD COLUMN notification_mode TEXT;
+      ALTER TABLE tasks ADD COLUMN notifications TEXT NOT NULL DEFAULT '[]';
+      PRAGMA user_version = 2;
+    `);
+    db.query("UPDATE tasks SET notification_mode = ?, notifications = ?").run(
+      "agent",
+      JSON.stringify([receipt]),
+    );
+  });
+  const storage = open(path);
+  const loaded = storage.load();
+  expect(loaded.tasks[0]!.input).toEqual({
+    ...saved.tasks[0]!.input,
+    notification_mode: "agent",
+  });
+  expect(loaded.tasks[0]!.notifications).toEqual([receipt]);
+  expect(loaded.tasks[0]!.runs[0]).toEqual(saved.tasks[0]!.runs[0]);
+  expect(loaded.proposals).toEqual(saved.proposals);
+  expect(loaded.requests).toEqual(saved.requests);
+  inspect(path, (db) => {
+    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 3 });
+    expect(db.query("SELECT mentions FROM tasks").get()).toEqual({
+      mentions: null,
+    });
+  });
+  storage.close();
+  expect(open(path).load()).toEqual(loaded);
+});
+
+test("mention bindings round trip tasks, proposals and admitted runs without keeping completed admissions", () => {
+  const path = directory();
+  const saved = state();
+  const mentions: AssistantMentionTarget[] = [
+    {
+      kind: "agent",
+      connection_id: "local",
+      workspace_id: "workspace",
+      connection_label: "Local",
+      workspace_label: "Workspace",
+      label: "Codex session",
+      runtime_generation: 1,
+      pane_id: "pane",
+      terminal_id: "terminal",
+      agent: "codex",
+      agent_identity: "c".repeat(64),
+    },
+  ];
+  saved.tasks[0]!.input.mentions = mentions;
+  saved.tasks[0]!.runs[0]!.input!.mentions = structuredClone(mentions);
+  saved.tasks[0]!.runs[1]!.input!.mentions = structuredClone(mentions);
+  saved.proposals[0]!.prepared.input.mentions = structuredClone(mentions);
+  saved.proposals[0]!.proposal.mentions = structuredClone(mentions);
+  const storage = open(path);
+  storage.save(saved);
+  const loaded = storage.load();
+  expect(loaded.tasks[0]!.input.mentions).toEqual(mentions);
+  expect(loaded.tasks[0]!.runs[0]!.input!.mentions).toEqual(mentions);
+  expect(loaded.tasks[0]!.runs[1]!.input).toBeUndefined();
+  expect(loaded.proposals).toEqual(saved.proposals);
+  inspect(path, (db) =>
+    expect(db.query("SELECT mentions FROM tasks").get()).toEqual({
+      mentions: JSON.stringify(mentions),
+    }),
+  );
+  storage.close();
+  expect(open(path).load()).toEqual(loaded);
 });
 
 test.each([undefined, "status"] as const)(
@@ -477,7 +553,7 @@ test("deleting every plan preserves an authoritative initialized empty database"
   storage.close();
   expect(open(path).load()).toEqual(empty());
   inspect(path, (db) =>
-    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 2 }),
+    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 3 }),
   );
 });
 
@@ -490,6 +566,8 @@ test.each([
   "notification-mode",
   "notification-json",
   "notification-receipt",
+  "mention-json",
+  "mention-identity",
 ] as const)(
   "%s SQLite data fails closed without clearing the database",
   (damage) => {
@@ -506,7 +584,7 @@ test.each([
       inspect(path, (db) =>
         db.exec(
           damage === "future-version"
-            ? "PRAGMA user_version = 3"
+            ? "PRAGMA user_version = 4"
             : damage === "missing-table"
               ? "DROP TABLE requests"
               : damage === "notification-mode"
@@ -515,7 +593,11 @@ test.each([
                   ? "UPDATE tasks SET notifications = 'not JSON'"
                   : damage === "notification-receipt"
                     ? "UPDATE tasks SET notifications = '[{}]'"
-                    : "UPDATE runs SET admission = NULL WHERE status = 'running'",
+                    : damage === "mention-json"
+                      ? "UPDATE tasks SET mentions = 'not JSON'"
+                      : damage === "mention-identity"
+                        ? "UPDATE tasks SET mentions = '[{}]'"
+                        : "UPDATE runs SET admission = NULL WHERE status = 'running'",
         ),
       );
     }

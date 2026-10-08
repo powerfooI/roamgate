@@ -207,6 +207,15 @@ function TaskForm({
           title: title.trim(),
           prompt: prompt.trim(),
           scope,
+          ...(task?.mentions
+            ? {
+                mentions: task.mentions.filter((mention) =>
+                  scope.some(
+                    (ref) => workspaceKey(ref) === workspaceKey(mention),
+                  ),
+                ),
+              }
+            : {}),
           schedule,
           ...(notificationMode === "agent" ||
           task?.notification_mode !== undefined
@@ -273,6 +282,22 @@ function TaskForm({
             value={prompt}
             onChange={(event) => setPrompt(event.currentTarget.value)}
           />
+          {task?.mentions?.length ? (
+            <small className="assistant-hint">
+              References:{" "}
+              {task.mentions
+                .filter((mention) =>
+                  scope.some(
+                    (ref) => workspaceKey(ref) === workspaceKey(mention),
+                  ),
+                )
+                .map(
+                  (mention) => `${mention.label} (${mention.connection_label})`,
+                )
+                .join(", ") || "None in the selected workspaces"}
+              .
+            </small>
+          ) : null}
         </label>
         <div className="form-field">
           <span>Notifications</span>

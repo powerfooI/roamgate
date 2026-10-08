@@ -514,6 +514,67 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
     }
   });
 
+  test("task editing preserves bound targets and removes references outside the selected workspace scope", async () => {
+    const ui = await install();
+    const local = {
+      kind: "workspace" as const,
+      ...workspace,
+      workspace_label: workspace.label,
+    };
+    const remote = {
+      ...local,
+      connection_id: "offline",
+      connection_label: "Offline",
+    };
+    try {
+      await ui.render(
+        snapshot([
+          task("bound", {
+            scope: [local, remote].map(({ connection_id, workspace_id }) => ({
+              connection_id,
+              workspace_id,
+            })),
+            mentions: [local, remote],
+          }),
+        ]),
+      );
+      await React.act(async () =>
+        ui.container
+          .querySelector<HTMLButtonElement>(".assistant-task-row")!
+          .click(),
+      );
+      await ui.click("Edit");
+      expect(ui.container.textContent).toContain(
+        "References: Project (Local), Project (Offline)",
+      );
+      await ui.click("Remove unavailable selections");
+      await ui.submit();
+      expect(ui.call).toHaveBeenLastCalledWith(
+        "task.update",
+        expect.objectContaining({
+          task_id: "bound",
+          scope: [
+            {
+              connection_id: local.connection_id,
+              workspace_id: local.workspace_id,
+            },
+          ],
+          mentions: [local],
+        }),
+      );
+      await ui.render();
+      await ui.click("Edit");
+      await ui.input("Task prompt", "Inspect again");
+      await ui.submit();
+      expect(ui.call).toHaveBeenLastCalledWith(
+        "task.update",
+        expect.objectContaining({ mentions: [local] }),
+      );
+    } finally {
+      await ui.close();
+    }
+  });
+
   test("notification requests open their historical run and refresh repeated or different targets", async () => {
     const ui = await install();
     try {

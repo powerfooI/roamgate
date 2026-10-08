@@ -1,18 +1,25 @@
 import { createHash, randomUUID } from "node:crypto";
 import type {
   AssistantActionKind,
+  AssistantMentionCatalog,
+  AssistantMentionTarget,
   AssistantSource,
   AssistantWorkspace,
   AssistantWorkspaceCatalog,
   AssistantWorkspaceRef,
 } from "../../../shared/assistant";
-import { ASSISTANT_MAX_WORKSPACES } from "../../../shared/assistant";
+import {
+  ASSISTANT_MAX_MENTIONS,
+  ASSISTANT_MAX_WORKSPACES,
+  isAssistantMentionTarget,
+} from "../../../shared/assistant";
 import { isRecord } from "../agent/session-utils";
 import { validateConnectionId } from "../connections/protocol";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
 import { sanitizeExplorerPath } from "../workspace/file-paths";
 import {
   prepareAssistantAction,
+  readAssistantPaneOccupant,
   type AssistantWorktreeCreator,
 } from "./actions";
 import {
@@ -139,6 +146,10 @@ export function createAssistantContext(args: {
   // Keep each turn's original leases, including runtime identity, out of model data.
   const scopes = new WeakMap<AssistantWorkspace[], Map<string, RuntimeLease>>();
   const workspaceIdentities = new WeakMap<AssistantWorkspace[], string[]>();
+  const mentionGuards = new WeakMap<
+    AssistantWorkspace[],
+    Map<string, Extract<AssistantMentionTarget, { kind: "agent" }>>
+  >();
 
   function fingerprint(connectionId: string): string | undefined {
     const value = args.recoveryFingerprint?.(connectionId);
@@ -209,6 +220,246 @@ export function createAssistantContext(args: {
       throw new Error(`Workspace ${workspaceId} is no longer available`);
     }
     return item;
+  }
+
+  function mentionLabel(value: unknown, fallback: string) {
+    const label =
+      typeof value === "string"
+        ? value
+            .replace(/[\u0000-\u001f\u007f]/g, " ")
+            .trim()
+            .slice(0, 200)
+        : "";
+    return label || fallback.slice(0, 200);
+  }
+
+  function workspaceMention(
+    target: AssistantWorkspace,
+  ): AssistantMentionTarget {
+    const label = mentionLabel(target.label, target.workspace_id);
+    return {
+      kind: "workspace",
+      connection_id: target.connection_id,
+      workspace_id: target.workspace_id,
+      runtime_generation: target.runtime_generation,
+      connection_label: mentionLabel(
+        target.connection_label,
+        target.connection_id,
+      ),
+      workspace_label: label,
+      label,
+    };
+  }
+
+  async function agentMention(
+    target: AssistantWorkspace,
+    lease: RuntimeLease,
+    paneId: string,
+    signal?: AbortSignal,
+  ): Promise<Extract<AssistantMentionTarget, { kind: "agent" }>> {
+    const occupant = await readAssistantPaneOccupant(
+      (method, params) =>
+        readLeased(
+          lease,
+          () => lease.runtime.herdr.call(method, params, 5000),
+          `agent identity for pane ${paneId}`,
+          signal,
+        ),
+      target.workspace_id,
+      paneId,
+    );
+    if (
+      !occupant.agentIdentity ||
+      typeof occupant.agent.agent !== "string" ||
+      !occupant.agent.agent
+    )
+      throw new Error("Agent session is not available for mention");
+    const result = {
+      ...workspaceMention(target),
+      kind: "agent" as const,
+      pane_id: identifier(paneId, "pane_id"),
+      terminal_id: identifier(occupant.pane.terminal_id, "terminal_id"),
+      agent: occupant.agent.agent,
+      agent_identity: occupant.agentIdentity,
+      label: mentionLabel(
+        occupant.agent.name || occupant.pane.label,
+        occupant.agent.agent,
+      ),
+    };
+    if (!isAssistantMentionTarget(result))
+      throw new Error("Agent session is not available for mention");
+    return result;
+  }
+
+  const agentKey = (target: AssistantWorkspaceRef & { pane_id: string }) =>
+    JSON.stringify([target.connection_id, target.workspace_id, target.pane_id]);
+
+  async function assertMentionAgent(
+    captured: AssistantWorkspace[],
+    target: AssistantWorkspace,
+    paneId: string,
+    signal?: AbortSignal,
+  ) {
+    const expected = mentionGuards
+      .get(captured)
+      ?.get(agentKey({ ...target, pane_id: paneId }));
+    if (!expected) return;
+    const lease = scopes.get(captured)?.get(target.connection_id);
+    if (!lease) throw new Error("Ranger workspace scope was not approved");
+    const current = await agentMention(target, lease, paneId, signal);
+    if (
+      current.terminal_id !== expected.terminal_id ||
+      current.agent !== expected.agent ||
+      current.agent_identity !== expected.agent_identity
+    )
+      throw new Error("Mentioned agent session changed; select it again");
+  }
+
+  async function mentionCatalog(
+    captured: AssistantWorkspace[],
+    signal?: AbortSignal,
+  ): Promise<AssistantMentionCatalog> {
+    const leases = scopes.get(captured);
+    if (!leases || !captured.length)
+      throw new Error("Ranger workspace scope was not approved");
+    const targets = captured.map(workspaceMention);
+    const errors: string[] = [];
+    let truncated = captured.length > 64;
+    // ponytail: scan 64 workspaces and 200 agents; add paged discovery when these limits matter.
+    const lists = await mapScopeReads(
+      captured.slice(0, 64),
+      async (target, _index, readSignal) => {
+        const lease = leases.get(target.connection_id)!;
+        try {
+          await workspace(lease, target.workspace_id, readSignal);
+          const result = await readLeased(
+            lease,
+            () =>
+              lease.runtime.herdr.call(
+                "pane.list",
+                { workspace_id: target.workspace_id },
+                5000,
+              ),
+            `panes for workspace ${target.workspace_id}`,
+            readSignal,
+          );
+          if (!Array.isArray(result?.panes))
+            throw new Error("Invalid pane list");
+          const panes = records(result.panes).filter(
+            (pane) => pane.workspace_id === target.workspace_id && pane.agent,
+          );
+          truncated ||= panes.length > 200;
+          return panes.slice(0, 200).map((pane) => ({
+            target,
+            paneId: identifier(pane.pane_id, "pane_id"),
+          }));
+        } catch {
+          readSignal.throwIfAborted();
+          assertCurrent(lease, readSignal);
+          errors.push(
+            `Agents unavailable in ${mentionLabel(target.label, target.workspace_id)}`,
+          );
+          return [];
+        }
+      },
+      signal,
+    );
+    const candidates = lists.flat();
+    truncated ||= candidates.length > 200;
+    const agents = await mapScopeReads(
+      candidates.slice(0, 200),
+      async ({ target, paneId }, _index, readSignal) => {
+        const lease = leases.get(target.connection_id)!;
+        try {
+          return await agentMention(target, lease, paneId, readSignal);
+        } catch {
+          readSignal.throwIfAborted();
+          assertCurrent(lease, readSignal);
+          errors.push(
+            `Agent unavailable in ${mentionLabel(target.label, target.workspace_id)} / ${paneId}`,
+          );
+          return null;
+        }
+      },
+      signal,
+    );
+    for (const lease of leases.values()) assertCurrent(lease, signal);
+    targets.push(...agents.filter((target) => target !== null));
+    return { targets, errors, ...(truncated ? { truncated: true } : {}) };
+  }
+
+  async function bindMentions(
+    captured: AssistantWorkspace[],
+    targets: AssistantMentionTarget[],
+    signal?: AbortSignal,
+  ): Promise<AssistantMentionTarget[]> {
+    const leases = scopes.get(captured);
+    if (
+      !leases ||
+      !captured.length ||
+      !Array.isArray(targets) ||
+      targets.length > ASSISTANT_MAX_MENTIONS ||
+      !targets.every(isAssistantMentionTarget)
+    )
+      throw new Error("Invalid Ranger mentions or unapproved workspace scope");
+    const guards = new Map(mentionGuards.get(captured));
+    const canonical = await mapScopeReads(
+      targets.map((target) => ({ ...target })),
+      async (mention, _index, readSignal) => {
+        const target = captured.find(
+          (item) =>
+            item.connection_id === mention.connection_id &&
+            item.workspace_id === mention.workspace_id &&
+            item.runtime_generation === mention.runtime_generation,
+        );
+        if (!target)
+          throw new Error(
+            "Mention is outside the approved scope or its connection changed",
+          );
+        const lease = leases.get(target.connection_id)!;
+        const currentWorkspace = await workspace(
+          lease,
+          target.workspace_id,
+          readSignal,
+        );
+        const currentTarget = {
+          ...target,
+          label: mentionLabel(currentWorkspace.label, target.workspace_id),
+        };
+        if (mention.kind === "workspace")
+          return workspaceMention(currentTarget);
+        const current = await agentMention(
+          currentTarget,
+          lease,
+          mention.pane_id,
+          readSignal,
+        );
+        if (
+          current.terminal_id !== mention.terminal_id ||
+          current.agent !== mention.agent ||
+          current.agent_identity !== mention.agent_identity
+        )
+          throw new Error("Mentioned agent session changed; select it again");
+        const previous = guards.get(agentKey(current));
+        if (previous && previous.agent_identity !== current.agent_identity)
+          throw new Error("Mentioned agent session changed; select it again");
+        guards.set(agentKey(current), Object.freeze({ ...current }));
+        return current;
+      },
+      signal,
+    );
+    for (const lease of leases.values()) assertCurrent(lease, signal);
+    const merged = new Map(mentionGuards.get(captured));
+    for (const [key, guard] of guards) {
+      if (
+        merged.has(key) &&
+        merged.get(key)!.agent_identity !== guard.agent_identity
+      )
+        throw new Error("Mentioned agent session changed; select it again");
+      merged.set(key, guard);
+    }
+    mentionGuards.set(captured, merged);
+    return canonical;
   }
 
   async function catalog(): Promise<AssistantWorkspaceCatalog> {
@@ -616,6 +867,7 @@ export function createAssistantContext(args: {
             "Pane is outside the approved workspace or is no longer available",
           );
         }
+        await assertMentionAgent(captured, target, paneId, signal);
         if (kind === "history") {
           const history = await readLeased(
             lease,
@@ -785,6 +1037,7 @@ export function createAssistantContext(args: {
           };
         }
       }
+      if (paneId) await assertMentionAgent(captured, target, paneId, signal);
       assertCurrent(lease, signal);
       const base = { ...target, read_at: new Date().toISOString() };
       output.push({
@@ -848,13 +1101,39 @@ export function createAssistantContext(args: {
     if (!target) throw new Error("Action is outside the approved Ranger scope");
     const lease = leases.get(connectionId)!;
     assertCurrent(lease, signal);
-    return prepareAssistantAction({
+    const paneId =
+      typeof params.pane_id === "string" ? params.pane_id : undefined;
+    if (paneId) await assertMentionAgent(captured, target, paneId, signal);
+    const prepared = await prepareAssistantAction({
       kind,
       target,
       lease,
       params,
       signal,
       createWorktree: args.createWorktree,
+    });
+    if (paneId) await assertMentionAgent(captured, target, paneId, signal);
+    if (
+      !paneId ||
+      !mentionGuards
+        .get(captured)
+        ?.has(agentKey({ ...target, pane_id: paneId }))
+    )
+      return prepared;
+    return Object.freeze({
+      ...prepared,
+      execute: async (authorized?: () => boolean) => {
+        try {
+          await assertMentionAgent(captured, target, paneId);
+        } catch {
+          return {
+            status: "failed" as const,
+            detail:
+              "Mentioned agent session changed or is unavailable. Nothing was sent; select it again.",
+          };
+        }
+        return prepared.execute(authorized);
+      },
     });
   }
 
@@ -863,6 +1142,8 @@ export function createAssistantContext(args: {
     captureScope,
     recoveryScope,
     restoreScope,
+    mentionCatalog,
+    bindMentions,
     read,
     prepareAction,
   };
@@ -870,11 +1151,19 @@ export function createAssistantContext(args: {
 
 export type AssistantContext = Omit<
   ReturnType<typeof createAssistantContext>,
-  "prepareAction" | "recoveryScope" | "restoreScope"
+  | "prepareAction"
+  | "recoveryScope"
+  | "restoreScope"
+  | "mentionCatalog"
+  | "bindMentions"
 > &
   Partial<
     Pick<
       ReturnType<typeof createAssistantContext>,
-      "prepareAction" | "recoveryScope" | "restoreScope"
+      | "prepareAction"
+      | "recoveryScope"
+      | "restoreScope"
+      | "mentionCatalog"
+      | "bindMentions"
     >
   >;

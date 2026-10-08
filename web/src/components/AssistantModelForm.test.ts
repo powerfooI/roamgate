@@ -126,6 +126,7 @@ async function registerDomTests() {
       connectionStatus: "connected",
       supported: true,
       draft: "",
+      draftMentions: [],
     };
     const state = spyOn(assistant, "useAssistantState").mockImplementation(
       () => clientState,

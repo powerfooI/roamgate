@@ -1,4 +1,5 @@
 export const ASSISTANT_MAX_WORKSPACES = 512;
+export const ASSISTANT_MAX_MENTIONS = 32;
 export const ASSISTANT_MAX_CUSTOM_MODELS = 100;
 export const ASSISTANT_MAX_TOOL_ARGUMENTS = 8_000;
 export const ASSISTANT_MAX_TOOL_OUTPUT = 16_000;
@@ -22,6 +23,36 @@ export type AssistantWorkspaceCatalog = {
   connection_ids?: string[];
   /** Connections whose workspace listings are complete and authoritative. */
   complete_connection_ids?: string[];
+  truncated?: boolean;
+};
+
+type AssistantMentionBase = AssistantWorkspaceRef & {
+  runtime_generation: number;
+  connection_label: string;
+  workspace_label: string;
+  label: string;
+};
+
+export type AssistantMentionTarget =
+  | (AssistantMentionBase & { kind: "workspace" })
+  | (AssistantMentionBase & {
+      kind: "agent";
+      pane_id: string;
+      terminal_id: string;
+      agent: string;
+      /** Opaque identity of the selected session and pane occupant. */
+      agent_identity: string;
+    });
+
+export type AssistantMention = AssistantMentionTarget & {
+  /** UTF-16 offsets of the exact @label marker in the message text. */
+  start: number;
+  end: number;
+};
+
+export type AssistantMentionCatalog = {
+  targets: AssistantMentionTarget[];
+  errors: string[];
   truncated?: boolean;
 };
 
@@ -152,6 +183,7 @@ export type AssistantMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
+  mentions?: AssistantMention[];
   sent_at: string;
   tools: AssistantToolActivity[];
   sources: AssistantSource[];
@@ -167,6 +199,7 @@ export type AssistantTaskSchedule =
 export type AssistantTaskInput = {
   title: string;
   prompt: string;
+  mentions?: AssistantMentionTarget[];
   scope: AssistantWorkspaceRef[];
   schedule: AssistantTaskSchedule;
   notification_mode?: "status" | "agent";
@@ -333,6 +366,91 @@ function generation(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
+function mentionText(value: unknown, max = 200): value is string {
+  return (
+    text(value) &&
+    !!value.trim() &&
+    value.length <= max &&
+    !/[\u0000-\u001f\u007f]/.test(value)
+  );
+}
+
+export function isAssistantMentionTarget(
+  value: unknown,
+): value is AssistantMentionTarget {
+  return (
+    record(value) &&
+    mentionText(value.connection_id, 500) &&
+    mentionText(value.workspace_id, 500) &&
+    generation(value.runtime_generation) &&
+    mentionText(value.connection_label) &&
+    mentionText(value.workspace_label) &&
+    mentionText(value.label) &&
+    Object.keys(value).every((key) =>
+      [
+        "kind",
+        "connection_id",
+        "workspace_id",
+        "runtime_generation",
+        "connection_label",
+        "workspace_label",
+        "label",
+        ...(value.kind === "agent"
+          ? ["pane_id", "terminal_id", "agent", "agent_identity"]
+          : []),
+      ].includes(key),
+    ) &&
+    (value.kind === "workspace" ||
+      (value.kind === "agent" &&
+        mentionText(value.pane_id, 500) &&
+        mentionText(value.terminal_id, 500) &&
+        mentionText(value.agent) &&
+        text(value.agent_identity) &&
+        /^[a-f0-9]{64}$/.test(value.agent_identity)))
+  );
+}
+
+export function isAssistantMentionCatalog(
+  value: unknown,
+): value is AssistantMentionCatalog {
+  return (
+    record(value) &&
+    Array.isArray(value.targets) &&
+    value.targets.length <= ASSISTANT_MAX_WORKSPACES + 200 &&
+    value.targets.every(isAssistantMentionTarget) &&
+    Array.isArray(value.errors) &&
+    value.errors.every(text) &&
+    (value.truncated === undefined || typeof value.truncated === "boolean")
+  );
+}
+
+export function isAssistantMentions(
+  value: unknown,
+  messageText: string,
+): value is AssistantMention[] {
+  if (!Array.isArray(value) || value.length > ASSISTANT_MAX_MENTIONS)
+    return false;
+  let previousEnd = 0;
+  return value.every((mention) => {
+    if (!record(mention)) return false;
+    const { start, end, ...target } = mention;
+    if (
+      !isAssistantMentionTarget(target) ||
+      typeof start !== "number" ||
+      typeof end !== "number" ||
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(end) ||
+      start < previousEnd ||
+      end <= start ||
+      end > messageText.length ||
+      messageText.slice(start, end) !== `@${target.label}`
+    )
+      return false;
+    previousEnd = end;
+    return true;
+  });
+}
+
 function timestamp(value: unknown): value is string {
   return text(value) && Number.isFinite(Date.parse(value));
 }
@@ -348,6 +466,10 @@ export function isAssistantTaskInput(
     !text(value.prompt) ||
     !value.prompt.trim() ||
     value.prompt.length > 32_000 ||
+    (value.mentions !== undefined &&
+      (!Array.isArray(value.mentions) ||
+        value.mentions.length > ASSISTANT_MAX_MENTIONS ||
+        !value.mentions.every(isAssistantMentionTarget))) ||
     (value.notification_mode !== undefined &&
       value.notification_mode !== "status" &&
       value.notification_mode !== "agent") ||
@@ -361,6 +483,19 @@ export function isAssistantTaskInput(
       ),
     ).size !== value.scope.length ||
     !record(value.schedule)
+  )
+    return false;
+  const scope = value.scope;
+  if (
+    value.mentions !== undefined &&
+    value.mentions.some(
+      (mention) =>
+        !scope.some(
+          (ref) =>
+            ref.connection_id === mention.connection_id &&
+            ref.workspace_id === mention.workspace_id,
+        ),
+    )
   )
     return false;
   const schedule = value.schedule;
@@ -522,6 +657,8 @@ export function isAssistantMessage(value: unknown): value is AssistantMessage {
     text(value.id) &&
     (value.role === "user" || value.role === "assistant") &&
     text(value.text) &&
+    (value.mentions === undefined ||
+      isAssistantMentions(value.mentions, value.text)) &&
     text(value.sent_at) &&
     (value.actions === undefined ||
       (Array.isArray(value.actions) &&

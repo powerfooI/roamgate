@@ -417,6 +417,32 @@ fetches state after reconnect without replaying sends. Request IDs deduplicate
 explicit retries. Hiding the window only changes presentation; stopping work is
 a separate RPC.
 
+`bridge.assistant.mentions` lists reference candidates within an authorized,
+captured workspace scope. Workspace references include connection and workspace
+IDs plus the runtime generation; Agent references additionally pin the pane,
+terminal, and an opaque hash of the detected session identity. Raw session paths
+and process metadata stay private. Candidate discovery scans at most 64
+workspaces and 200 Agents, reports partial results explicitly, and can be scoped
+to a particular workspace. Only Agents with verifiable sessions are offered.
+
+Messages may include up to 32 structured references with UTF-16 offsets matching
+their exact visible `@label` text. The server validates and canonicalizes their
+targets before admission, while preserving submitted labels in the transcript.
+References are metadata, not permission grants or prompt-delivery operations;
+the model reads bounded evidence through the existing tools. Agent identity is
+rechecked before and after referenced history/terminal reads, during proposal
+preparation, and before execution. Follow-up reads retain the last explicit
+session binding for a pane. Replaced sessions fail without selecting another
+Agent by name. Durable recovery restores references only after verifying the
+original workspace identities. Scheduled proposals inherit referenced targets
+within their fixed scope, and task plans/runs preserve those targets. Notification
+deduplication also includes the referenced session identity.
+
+Unsent text and references remain browser-tab-local and separate per conversation.
+The native composer keeps bindings consistent with text edits and stores them in
+its local undo history. Old messages without references remain valid. Reference
+navigation refreshes the candidate and checks its identity before opening it.
+
 Model credentials default to the separate Roamgate Ranger store. Reusing the
 bridge OS account's Pi credentials requires an explicit source choice. Login
 captures that choice and updates only the selected store; configuration changes

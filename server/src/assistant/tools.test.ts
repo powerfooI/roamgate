@@ -38,6 +38,8 @@ test("task tools validate the published schedule and reject effects outside the 
     ).resolves.toEqual({ text: "Pending preview" });
   for (const params of [
     { ...proposal, execute: true },
+    { ...proposal, mentions: [] },
+    { ...proposal, agent_identity: "invented-session" },
     { ...proposal, scope: [] },
     {
       ...proposal,

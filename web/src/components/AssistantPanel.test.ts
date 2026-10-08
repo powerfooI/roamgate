@@ -14,6 +14,7 @@ import type { RangerTaskNotificationTarget } from "../taskNotifications";
 import { terminalFocusBlockedByOverlay } from "../terminalFocus";
 import { AssistantPanel, assistantAuthUrl } from "./AssistantPanel";
 import { AssistantChatControls } from "./AssistantChatControls";
+import { AssistantMentionComposer } from "./AssistantMentionComposer";
 import * as taskControls from "./AssistantTasks";
 
 test("assistant sign-in links only open explicit http or https destinations", () => {
@@ -116,6 +117,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       connectionStatus: "connected",
       supported: true,
       draft: "",
+      draftMentions: [],
     };
     const state = spyOn(assistant, "useAssistantState").mockImplementation(
       () => clientState,
@@ -335,6 +337,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       connectionStatus: "connected",
       supported: true,
       draft: "",
+      draftMentions: [],
     });
     const unavailable = "Connection sshtx1 is not ready.";
     let contextResult: AssistantWorkspaceCatalog = {
@@ -542,6 +545,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       connectionStatus: "connected",
       supported: true,
       draft: "",
+      draftMentions: [],
     };
     const state = spyOn(assistant, "useAssistantState").mockImplementation(
       () => clientState,
@@ -742,6 +746,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       connectionStatus: "connected" as const,
       supported: true,
       draft: "",
+      draftMentions: [],
     };
     const state = spyOn(assistant, "useAssistantState").mockImplementation(
       () => clientState,
@@ -1158,6 +1163,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       connectionStatus: "connected",
       supported: true,
       draft: "Next question",
+      draftMentions: [],
     };
     let contextWorkspaces = [workspace];
     let acknowledge: (snapshot: AssistantSnapshot) => void = () => {};
@@ -2249,6 +2255,7 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
     connectionStatus: "connected" as "connected" | "disconnected",
     supported: true,
     draft: "Explain the changes",
+    draftMentions: [],
   };
   const states: unknown[] = [];
   const refs: React.RefObject<unknown>[] = [];
@@ -2312,11 +2319,22 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
       (current) => refs[refIndex++] ?? (refs[refIndex - 1] = { current }),
     ),
     spyOn(React, "useEffect").mockImplementation(() => {}),
+    spyOn(React, "useLayoutEffect").mockImplementation(() => {}),
+    spyOn(React, "useId").mockReturnValue("mention-picker"),
+    spyOn(React, "useMemo").mockImplementation((create) => create()),
   ];
   function visit(node: React.ReactNode) {
     React.Children.forEach(node, (child) => {
       if (!React.isValidElement<Record<string, unknown>>(child)) return;
       elements.push(child);
+      if (child.type === AssistantMentionComposer) {
+        visit(
+          AssistantMentionComposer(
+            child.props as Parameters<typeof AssistantMentionComposer>[0],
+          ),
+        );
+        return;
+      }
       visit(child.props.children as React.ReactNode);
     });
   }
@@ -2348,7 +2366,17 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
     const callback = find(prop, value).props[handler] as (
       event: unknown,
     ) => void;
-    callback(event);
+    callback(
+      handler === "onCompositionEnd"
+        ? {
+            currentTarget: {
+              value: clientState.draft,
+              selectionStart: clientState.draft.length,
+              selectionEnd: clientState.draft.length,
+            },
+          }
+        : event,
+    );
     render();
   }
   const key = (isComposing = false, shiftKey = false) => ({

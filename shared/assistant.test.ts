@@ -1,9 +1,13 @@
 import { expect, test } from "bun:test";
 import {
   ASSISTANT_MAX_WORKSPACES,
+  ASSISTANT_MAX_MENTIONS,
   ASSISTANT_MAX_TOOL_ARGUMENTS,
   ASSISTANT_MAX_TOOL_OUTPUT,
   isAssistantMessage,
+  isAssistantMentionTarget,
+  isAssistantMentionCatalog,
+  isAssistantMentions,
   isAssistantTaskDetail,
   isAssistantTaskInput,
   isAssistantTaskNotification,
@@ -331,4 +335,115 @@ test("all-workspace consent is explicit metadata and legacy auto snapshots remai
         config: { ...snapshot.config, workspace_scope },
       }),
     ).toBe(workspace_scope === undefined || workspace_scope === "all");
+});
+
+const mentionWorkspace = {
+  kind: "workspace" as const,
+  connection_id: "local",
+  workspace_id: "workspace",
+  runtime_generation: 1,
+  connection_label: "Local",
+  workspace_label: "Workspace",
+  label: "Workspace",
+};
+
+test("mentions validate bounded typed targets without extra private metadata", () => {
+  const agent = {
+    ...mentionWorkspace,
+    kind: "agent" as const,
+    label: "Fix login",
+    pane_id: "p1",
+    terminal_id: "term1",
+    agent: "codex",
+    agent_identity: "a".repeat(64),
+  };
+  expect(isAssistantMentionTarget(mentionWorkspace)).toBe(true);
+  expect(isAssistantMentionTarget(agent)).toBe(true);
+  for (const invalid of [
+    { ...agent, kind: "file" },
+    { ...agent, agent_identity: "session-path" },
+    { ...agent, agent_identity: "A".repeat(64) },
+    { ...agent, runtime_generation: -1 },
+    { ...agent, label: "x".repeat(201) },
+    { ...agent, label: "Agent\nPrompt" },
+    { ...agent, path: "/secret/session" },
+    { ...mentionWorkspace, pane_id: "p1" },
+  ])
+    expect(isAssistantMentionTarget(invalid)).toBe(false);
+  expect(
+    isAssistantMentionCatalog({
+      targets: [mentionWorkspace, agent],
+      errors: [],
+      truncated: true,
+    }),
+  ).toBe(true);
+  expect(isAssistantMentionCatalog({ targets: [agent], errors: [null] })).toBe(
+    false,
+  );
+  expect(
+    isAssistantMentionCatalog({
+      targets: Array(713).fill(mentionWorkspace),
+      errors: [],
+    }),
+  ).toBe(false);
+});
+
+test("mention ranges use exact UTF-16 markers, ordered nonoverlapping ranges and legacy messages", () => {
+  const text = "\u{1f600} @Workspace and @Workspace";
+  const first = { ...mentionWorkspace, start: 3, end: 13 };
+  const second = { ...mentionWorkspace, start: 18, end: 28 };
+  expect(isAssistantMentions([first, second], text)).toBe(true);
+  for (const invalid of [
+    [{ ...first, start: 2 }],
+    [{ ...first, end: 12 }],
+    [{ ...first, start: -1 }],
+    [{ ...first, end: 99 }],
+    [{ ...first, start: 3.5 }],
+    [{ ...first, label: "Other" }],
+    [second, first],
+    [first, first],
+    Array(ASSISTANT_MAX_MENTIONS + 1).fill(first),
+  ])
+    expect(isAssistantMentions(invalid, text)).toBe(false);
+  const message = {
+    id: "message",
+    role: "user",
+    text,
+    sent_at: "2026-10-08T00:00:00Z",
+    tools: [],
+    sources: [],
+  };
+  expect(isAssistantMessage(message)).toBe(true);
+  expect(isAssistantMessage({ ...message, mentions: [first, second] })).toBe(
+    true,
+  );
+  expect(
+    isAssistantMessage({
+      ...message,
+      mentions: [{ ...first, path: "/secret" }],
+    }),
+  ).toBe(false);
+});
+
+test("task mention targets remain inside the saved workspace scope", () => {
+  const task = {
+    title: "Watch",
+    prompt: "Check the workspace",
+    scope: [{ connection_id: "local", workspace_id: "workspace" }],
+    schedule: { type: "interval", minutes: 5 },
+    mentions: [mentionWorkspace],
+  };
+  expect(isAssistantTaskInput(task)).toBe(true);
+  expect(
+    isAssistantTaskInput({
+      ...task,
+      mentions: [{ ...mentionWorkspace, workspace_id: "private" }],
+    }),
+  ).toBe(false);
+  expect(
+    isAssistantTaskInput({
+      ...task,
+      mentions: Array(33).fill(mentionWorkspace),
+    }),
+  ).toBe(false);
 });

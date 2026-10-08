@@ -204,6 +204,18 @@ The conversation stays available when switching workspaces or connections.
   to be selected separately. Confirmed deleted workspaces are removed from the
   list and saved selection; temporary disconnects preserve saved choices.
   The scope stays fixed while Ranger streams an answer.
+- Type **@** in the message input to search authorized workspaces and concrete
+  Agent sessions. Candidates show their host and workspace so names can be
+  distinguished across connections. Use Up/Down and Enter or Tab to select;
+  Escape closes the picker and Shift+Enter inserts a new line. Selected objects
+  appear as removable references below the input and remain bound when switching
+  chats. Editing a reference's text removes its binding; ordinary pasted names
+  are plain text. Click a reference in the conversation to open its verified
+  workspace or Agent pane.
+  References focus the question without changing workspace permissions or
+  sending prompts. Ranger reads evidence as needed. Changed or unavailable Agent
+  sessions require reselection, and monitoring tasks preserve the selected
+  session instead of following a replacement Agent in the same pane.
 - Expand **Work performed**, then an individual tool card to inspect its
   **Arguments** and **Result** or **Error**, including tools that manage tasks or
   propose actions. Long details are marked when truncated; older calls show

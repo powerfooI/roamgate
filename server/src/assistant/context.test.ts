@@ -1,6 +1,10 @@
 import { describe, expect, mock, test } from "bun:test";
 import { createHash } from "node:crypto";
-import type { AssistantWorkspaceRef } from "../../../shared/assistant";
+import {
+  isAssistantMentionCatalog,
+  type AssistantMentionTarget,
+  type AssistantWorkspaceRef,
+} from "../../../shared/assistant";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
 import {
   AssistantRecoveryNotReadyError,
@@ -44,16 +48,18 @@ function fixture(recovery = false) {
       pane_id: "w1:p1",
       workspace_id: "w1",
       tab_id: "w1:t1",
+      terminal_id: "term1",
       label: "Agent",
       agent: "pi",
       agent_status: "working",
-      agent_session: { value: "/secret/session" },
+      agent_session: { kind: "path", value: "/secret/session" },
       api_key: "private-key",
     },
     {
       pane_id: "w2:p1",
       workspace_id: "w2",
       tab_id: "w2:t1",
+      terminal_id: "term2",
       label: "PRIVATE PANE",
       agent: "codex",
       agent_status: "blocked",
@@ -74,6 +80,16 @@ function fixture(recovery = false) {
       if (method === "pane.list") return { panes };
       if (method === "pane.get")
         return { pane: panes.find((item) => item.pane_id === params.pane_id) };
+      if (method === "agent.get")
+        return { agent: panes.find((item) => item.pane_id === params.target) };
+      if (method === "pane.process_info")
+        return {
+          process_info: {
+            pane_id: params.pane_id,
+            shell_pid: 101,
+            foreground_processes: [{ pid: 202, name: "pi" }],
+          },
+        };
       if (method === "pane.read")
         return {
           type: "pane_read",
@@ -1375,5 +1391,281 @@ describe("assistant approved context", () => {
     expect(diff.text.length).toBeLessThan(32_100);
     expect(diff.text).toContain("[truncated]");
     expect(diff.text).toContain("partial evidence");
+  });
+});
+
+describe("Ranger structured mention targets", () => {
+  async function selectedAgent(
+    f: ReturnType<typeof fixture>,
+    captured: Awaited<ReturnType<typeof f.context.captureScope>>,
+  ) {
+    const catalog = await f.context.mentionCatalog(captured);
+    const agent = catalog.targets.find((target) => target.kind === "agent");
+    expect(agent?.kind).toBe("agent");
+    return agent as Extract<AssistantMentionTarget, { kind: "agent" }>;
+  }
+
+  test("catalog includes authorized canonical objects and only opaque concrete agent identities", async () => {
+    const f = fixture();
+    const captured = await f.context.captureScope([first]);
+    const catalog = await f.context.mentionCatalog(captured);
+    expect(isAssistantMentionCatalog(catalog)).toBe(true);
+    expect(catalog.targets).toHaveLength(2);
+    expect(catalog.targets[0]).toMatchObject({
+      kind: "workspace",
+      ...first,
+      label: "Allowed",
+      workspace_label: "Allowed",
+      connection_label: "Local",
+      runtime_generation: 1,
+    });
+    expect(catalog.targets[1]).toMatchObject({
+      kind: "agent",
+      ...first,
+      pane_id: "w1:p1",
+      terminal_id: "term1",
+      agent: "pi",
+    });
+    const serialized = JSON.stringify(catalog);
+    for (const secret of [
+      "/secret",
+      "api_key",
+      "private-key",
+      "foreground_processes",
+      "PRIVATE WORKSPACE",
+      "PRIVATE PANE",
+    ])
+      expect(serialized).not.toContain(secret);
+    const calls = f.call.mock.calls.length;
+    await expect(f.context.mentionCatalog([...captured])).rejects.toThrow(
+      "not approved",
+    );
+    expect(f.call.mock.calls).toHaveLength(calls);
+  });
+
+  test("duplicate display names preserve parent identity and cross-workspace or forged references are denied", async () => {
+    const f = fixture();
+    f.workspaces[1]!.label = "Allowed";
+    Object.assign(f.panes[1]!, {
+      label: "Agent",
+      agent_session: { kind: "id", value: "different-session" },
+    });
+    const captured = await f.context.captureScope([
+      first,
+      { ...first, workspace_id: "w2" },
+    ]);
+    const catalog = await f.context.mentionCatalog(captured);
+    const agents = catalog.targets.filter((target) => target.kind === "agent");
+    expect(agents.map((target) => target.label)).toEqual(["Agent", "Agent"]);
+    expect(agents.map((target) => target.workspace_id)).toEqual(["w1", "w2"]);
+    for (const change of [
+      { connection_id: "other" },
+      { workspace_id: "private" },
+      { runtime_generation: 2 },
+      { workspace_id: "w2" },
+      { agent_identity: "b".repeat(64) },
+    ])
+      await expect(
+        f.context.bindMentions(captured, [{ ...agents[0]!, ...change }]),
+      ).rejects.toThrow();
+    await expect(
+      f.context.bindMentions([...captured], agents),
+    ).rejects.toThrow();
+    await expect(
+      f.context.bindMentions(captured, [
+        { ...agents[0]!, path: "/secret" } as AssistantMentionTarget,
+      ]),
+    ).rejects.toThrow();
+  });
+
+  test("catalog does not invent an agent-session binding when the concrete session is unavailable", async () => {
+    const f = fixture();
+    const captured = await f.context.captureScope([first]);
+    Object.assign(f.panes[0]!, { agent_session: null });
+    const catalog = await f.context.mentionCatalog(captured);
+    expect(catalog.targets.map((target) => target.kind)).toEqual(["workspace"]);
+    expect(catalog.errors).toHaveLength(1);
+  });
+
+  test("workspace rename and bridge reconnect preserve concrete agent identity without relaxing generation checks", async () => {
+    const f = fixture();
+    const captured = await f.context.captureScope([first]);
+    const selected = await selectedAgent(f, captured);
+    f.workspaces[0]!.label = "Renamed";
+    f.panes[0]!.label = "Renamed agent";
+    const canonical = await f.context.bindMentions(captured, [selected]);
+    expect(canonical[0]).toMatchObject({
+      workspace_label: "Renamed",
+      label: "Renamed agent",
+      agent_identity: selected.agent_identity,
+    });
+    f.retire();
+    await expect(f.context.bindMentions(captured, [selected])).rejects.toThrow(
+      "Connection changed",
+    );
+    const restored = await f.context.captureScope([first]);
+    const current = await selectedAgent(f, restored);
+    expect(current.agent_identity).toBe(selected.agent_identity);
+    await expect(f.context.bindMentions(restored, [selected])).rejects.toThrow(
+      "connection changed",
+    );
+    await expect(
+      f.context.bindMentions(restored, [
+        { ...selected, runtime_generation: current.runtime_generation },
+      ]),
+    ).resolves.toHaveLength(1);
+  });
+
+  test("selection and bound history or terminal reads fail when the agent session changes", async () => {
+    for (const kind of ["history", "terminal"] as const) {
+      const f = fixture();
+      const captured = await f.context.captureScope([first]);
+      const selected = await selectedAgent(f, captured);
+      await f.context.bindMentions(captured, [selected]);
+      f.panes[0]!.agent_session!.value = "/secret/new-session";
+      await expect(
+        f.context.bindMentions(captured, [selected]),
+      ).rejects.toThrow("session changed");
+      await expect(
+        f.context.read(kind, captured, { ...first, pane_id: selected.pane_id }),
+      ).rejects.toThrow("session changed");
+      expect(f.readHistory).not.toHaveBeenCalled();
+      expect(f.call.mock.calls.some(([method]) => method === "pane.read")).toBe(
+        false,
+      );
+    }
+  });
+
+  test("a replacement during history reading is rejected before evidence can leave the context", async () => {
+    const f = fixture();
+    const captured = await f.context.captureScope([first]);
+    const selected = await selectedAgent(f, captured);
+    await f.context.bindMentions(captured, [selected]);
+    f.readHistory.mockImplementationOnce(async () => {
+      f.panes[0]!.agent_session!.value = "/secret/replaced";
+      return {
+        pane_id: selected.pane_id,
+        workspace_id: "w1",
+        agent: "pi",
+        status: "ok",
+        messages: [{ role: "assistant", text: "Wrong agent private data" }],
+      };
+    });
+    await expect(
+      f.context.read("history", captured, {
+        ...first,
+        pane_id: selected.pane_id,
+      }),
+    ).rejects.toThrow("session changed");
+    expect(f.readHistory).toHaveBeenCalledTimes(1);
+  });
+
+  test("binding another subset does not erase existing agent guards", async () => {
+    const f = fixture();
+    const captured = await f.context.captureScope([first]);
+    const catalog = await f.context.mentionCatalog(captured);
+    const selected = catalog.targets.find((target) => target.kind === "agent")!;
+    await f.context.bindMentions(captured, [selected]);
+    await f.context.bindMentions(captured, [catalog.targets[0]!]);
+    f.panes[0]!.terminal_id = "replacement-terminal";
+    await expect(
+      f.context.read("history", captured, { ...first, pane_id: "w1:p1" }),
+    ).rejects.toThrow("session changed");
+  });
+
+  test("a replacement during terminal reading is rejected after the native read", async () => {
+    const f = fixture();
+    const captured = await f.context.captureScope([first]);
+    const selected = await selectedAgent(f, captured);
+    await f.context.bindMentions(captured, [selected]);
+    f.call.mockImplementation(async (method, params = {}) => {
+      if (method === "workspace.get") return { workspace: f.workspaces[0] };
+      if (method === "pane.get") return { pane: f.panes[0] };
+      if (method === "agent.get") return { agent: f.panes[0] };
+      if (method === "pane.process_info")
+        return {
+          process_info: {
+            pane_id: params.pane_id,
+            shell_pid: 101,
+            foreground_processes: [{ pid: 202, name: "pi" }],
+          },
+        };
+      if (method === "pane.read") {
+        f.panes[0]!.agent_session!.value = "/secret/replaced";
+        return {
+          read: {
+            pane_id: "w1:p1",
+            workspace_id: "w1",
+            text: "Wrong agent private output",
+          },
+        };
+      }
+      throw new Error("Unexpected RPC");
+    });
+    await expect(
+      f.context.read("terminal", captured, {
+        ...first,
+        pane_id: selected.pane_id,
+      }),
+    ).rejects.toThrow("session changed");
+    expect(
+      f.call.mock.calls.filter(([method]) => method === "pane.read"),
+    ).toHaveLength(1);
+  });
+
+  test("agent replacements block both proposal preparation and later confirmation without sending a prompt", async () => {
+    const f = fixture();
+    const captured = await f.context.captureScope([first]);
+    const selected = await selectedAgent(f, captured);
+    await f.context.bindMentions(captured, [selected]);
+    const params = { ...first, pane_id: selected.pane_id, prompt: "Continue" };
+    const prepared = await f.context.prepareAction(
+      "send_prompt",
+      captured,
+      params,
+    );
+    f.panes[0]!.agent_session!.value = "/secret/replaced";
+    await expect(
+      f.context.prepareAction("send_prompt", captured, params),
+    ).rejects.toThrow("session changed");
+    expect(await prepared.execute()).toMatchObject({
+      status: "failed",
+      detail: expect.stringContaining("Nothing was sent"),
+    });
+    expect(
+      f.call.mock.calls.some(([method]) => method === "agent.prompt"),
+    ).toBe(false);
+  });
+
+  test("catalog discovery bounds large inventories while preserving the requested workspace order", async () => {
+    const f = scopeFixture(65);
+    const captured = await f.context.captureScope([...f.refs].reverse());
+    const catalog = await f.context.mentionCatalog(captured);
+    expect(
+      catalog.targets.filter((target) => target.kind === "workspace"),
+    ).toHaveLength(65);
+    expect(catalog.targets[0]!.workspace_id).toBe("w65");
+    expect(catalog.truncated).toBe(true);
+    expect(
+      f.call.mock.calls.filter(([method]) => method === "pane.list"),
+    ).toHaveLength(64);
+    const many = fixture();
+    many.panes.splice(1, 1);
+    many.panes.push(
+      ...Array.from({ length: 200 }, (_, index) => ({
+        ...many.panes[0]!,
+        pane_id: `w1:p${index + 2}`,
+        terminal_id: `term${index + 2}`,
+      })),
+    );
+    const scope = await many.context.captureScope([first]);
+    const limited = await many.context.mentionCatalog(scope);
+    expect(
+      limited.targets.filter((target) => target.kind === "agent"),
+    ).toHaveLength(200);
+    expect(limited.truncated).toBe(true);
+    expect(
+      many.call.mock.calls.filter(([method]) => method === "agent.get"),
+    ).toHaveLength(200);
   });
 });

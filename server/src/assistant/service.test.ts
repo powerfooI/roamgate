@@ -14,6 +14,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   AssistantSnapshot,
+  AssistantMention,
+  AssistantMentionTarget,
   AssistantTaskNotification,
   AssistantWorkspace,
 } from "../../../shared/assistant";
@@ -53,6 +55,17 @@ const configured = {
   credential_source: "assistant" as const,
   allowed_workspaces: [{ connection_id: "local", workspace_id: "ws" }],
 };
+const mentionedAgent: AssistantMentionTarget = {
+  ...workspace,
+  workspace_label: workspace.label,
+  kind: "agent",
+  label: "Codex",
+  pane_id: "pane",
+  terminal_id: "terminal",
+  agent: "codex",
+  agent_identity: "c".repeat(64),
+};
+const agentMarker: AssistantMention = { ...mentionedAgent, start: 6, end: 12 };
 const temporary: string[] = [];
 const services: ReturnType<typeof createAssistantService>[] = [];
 function setup(
@@ -3845,6 +3858,84 @@ test("streaming task proposals keep the admitted model and effort while direct t
 });
 
 describe("Ranger workspace inventory reconciliation", () => {
+  test.each(["running", "recovering"])(
+    "pruning an unrelated grant while %s preserves the original durable root",
+    async (phase) => {
+      const pointer = [{ type: "ranger-durable", id: randomUUID() }];
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const f = setup({
+        run: async (input) => {
+          input.checkpoint?.(pointer);
+          entered.resolve();
+          await release.promise;
+          return pointer;
+        },
+        dispose: async () => {
+          release.resolve();
+        },
+      });
+      stableTaskIdentity(f.context);
+      const other = { ...workspace, workspace_id: "other" };
+      let listed = [workspace, other];
+      f.context.catalog = async () => ({
+        workspaces: listed,
+        errors: [],
+        connection_ids: ["local"],
+        complete_connection_ids: ["local"],
+      });
+      f.context.captureScope = async (scope) =>
+        scope.map((ref) => ({ ...workspace, ...ref }));
+      await f.service.handle("configure", {
+        ...configured,
+        allowed_workspaces: [workspace, other].map(
+          ({ connection_id, workspace_id }) => ({
+            connection_id,
+            workspace_id,
+          }),
+        ),
+      });
+      await f.service.handle("send", {
+        request_id: "recover-after-pruning",
+        text: "Read only the retained workspace",
+        scope: configured.allowed_workspaces,
+      });
+      await entered.promise;
+      listed = [workspace];
+      if (phase === "running") {
+        await f.service.workspaceCatalog();
+        const saved = JSON.parse(
+          readFileSync(join(f.directory, "state.json"), "utf8"),
+        );
+        expect(saved.entries).toEqual(pointer);
+        expect(saved.active_run.request_id).toBe("recover-after-pruning");
+      }
+      await f.service.dispose();
+      let resumed: Parameters<AssistantDriver["run"]>[0] | undefined;
+      const service = createAssistantService({
+        directory: f.directory,
+        context: f.context,
+        driver: {
+          ...f.driver,
+          run: async (input) => {
+            resumed = input;
+            return input.entries;
+          },
+        },
+        publish: () => {},
+      });
+      services.push(service);
+      await service.resume();
+      await until(() => !service.peek().running);
+      expect(service.peek().config.allowed_workspaces).toEqual(
+        configured.allowed_workspaces,
+      );
+      expect(resumed?.recover).toBe(true);
+      expect(resumed?.requestId).toBe("recover-after-pruning");
+      expect(resumed?.entries).toEqual(pointer);
+    },
+  );
+
   test("complete inventories prune missing workspaces and removed connections durably", async () => {
     const f = setup();
     const extra = { connection_id: "local", workspace_id: "deleted" };
@@ -4694,4 +4785,403 @@ describe("High workspace permission", () => {
       (await f.service.taskDetail({ task_id: taskId })).runs[0]!.status,
     ).toBe("succeeded");
   });
+});
+
+describe("Ranger mentions", () => {
+  test("catalog admits only granted workspaces and rechecks permissions after discovery", async () => {
+    const f = setup();
+    let queries = 0;
+    f.context.mentionCatalog = async () => {
+      queries++;
+      return { targets: [mentionedAgent], errors: [] };
+    };
+    await f.service.handle("configure", configured);
+    await expect(
+      f.service.mentionCatalog({
+        scope: [{ connection_id: "local", workspace_id: "private" }],
+      }),
+    ).rejects.toThrow("authorized");
+    expect(queries).toBe(0);
+    expect(
+      (await f.service.mentionCatalog({ scope: configured.allowed_workspaces }))
+        .targets,
+    ).toEqual([mentionedAgent]);
+    f.context.mentionCatalog = async () => {
+      await f.service.handle("configure", {
+        ...configured,
+        allowed_workspaces: [],
+      });
+      return { targets: [mentionedAgent], errors: [] };
+    };
+    await expect(
+      f.service.mentionCatalog({ scope: configured.allowed_workspaces }),
+    ).rejects.toThrow("authorized");
+  });
+
+  test("binds references before model admission and preserves original labels through history and retries", async () => {
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const f = setup({
+      run: async (input) => {
+        inputs.push(input);
+        return [];
+      },
+    });
+    f.context.bindMentions = async (_scope, targets) =>
+      targets.map((target) => ({ ...target, label: "Renamed Agent" }));
+    await f.service.handle("configure", configured);
+    const submission = {
+      text: "Check @Codex",
+      mentions: [agentMarker],
+      request_id: "mention",
+    };
+    await f.service.handle("send", submission);
+    await until(() => !f.service.peek().running);
+    expect(inputs[0]!.text).toContain('"label":"Renamed Agent"');
+    expect(inputs[0]!.text).toContain(
+      mentionedAgent.kind === "agent" ? mentionedAgent.agent_identity : "",
+    );
+    expect(f.service.peek().messages[0]!.mentions).toEqual([agentMarker]);
+    await f.service.handle("send", submission);
+    expect(inputs).toHaveLength(1);
+    await f.service.handle("new_session", {});
+    const original = f.service
+      .peek()
+      .sessions!.find((session) => session.message_count > 0)!;
+    await f.service.handle("select_session", { session_id: original.id });
+    expect(f.service.peek().messages[0]!.mentions).toEqual([agentMarker]);
+  });
+
+  test("invalid spans and changed sessions fail without admitting the model or losing the retry", async () => {
+    let runs = 0;
+    const f = setup({
+      run: async () => {
+        runs++;
+        return [];
+      },
+    });
+    let changed = true;
+    f.context.bindMentions = async (_scope, targets) => {
+      if (changed)
+        throw new Error("Mentioned agent session changed; select it again");
+      return targets;
+    };
+    await f.service.handle("configure", configured);
+    await expect(
+      f.service.handle("send", {
+        text: "Check @Codex",
+        request_id: "retry-mention",
+        mentions: [{ ...agentMarker, end: 11 }],
+      }),
+    ).rejects.toThrow("Invalid Ranger mentions");
+    await expect(
+      f.service.handle("send", {
+        text: "Check @Codex",
+        request_id: "retry-mention",
+        mentions: [agentMarker],
+      }),
+    ).rejects.toThrow("session changed");
+    expect(runs).toBe(0);
+    expect(f.service.peek().messages).toHaveLength(0);
+    changed = false;
+    await f.service.handle("send", {
+      text: "Check @Codex",
+      request_id: "retry-mention",
+      mentions: [agentMarker],
+    });
+    await until(() => !f.service.peek().running);
+    expect(runs).toBe(1);
+  });
+
+  test("follow-up reads revalidate the last explicitly mentioned session", async () => {
+    let changed = false;
+    let runs = 0;
+    const f = setup({
+      run: async (input) => {
+        runs++;
+        if (runs === 2)
+          await input.read("history", {
+            connection_id: "local",
+            workspace_id: "ws",
+            pane_id: "pane",
+          });
+        return [];
+      },
+    });
+    f.context.bindMentions = async (_scope, targets) => {
+      if (changed)
+        throw new Error("Mentioned agent session changed; select it again");
+      return targets;
+    };
+    await f.service.handle("configure", configured);
+    await f.service.handle("send", {
+      text: "Check @Codex",
+      request_id: "first-mention",
+      mentions: [agentMarker],
+    });
+    await until(() => !f.service.peek().running);
+    changed = true;
+    await f.service.handle("send", {
+      text: "Read its history",
+      request_id: "follow-up-mention",
+    });
+    await until(() => !f.service.peek().running);
+    expect(runs).toBe(2);
+    expect(f.reads).toHaveLength(0);
+    expect(f.service.peek().error).toBeTruthy();
+  });
+
+  test("task proposals inherit bound targets rather than only their names", async () => {
+    const f = setup({
+      run: async (input) => {
+        await input.task!("create", {
+          title: "Monitor Agent",
+          prompt: "Notify when the selected Agent finishes",
+          scope: configured.allowed_workspaces,
+          schedule: { type: "interval", minutes: 1 },
+        });
+        return [];
+      },
+    });
+    stableTaskIdentity(f.context);
+    f.context.bindMentions = async (_scope, targets) => targets;
+    await f.service.handle("configure", configured);
+    await f.service.handle("send", {
+      text: "Check @Codex",
+      request_id: "task-mention",
+      mentions: [agentMarker],
+    });
+    await until(() => !f.service.peek().running);
+    expect(
+      f.service.peek().messages.at(-1)!.task_proposals![0]!.mentions,
+    ).toEqual([mentionedAgent]);
+  });
+
+  test("durable recovery rebinds the same agent identity after verified workspace recovery", async () => {
+    const closed = Promise.withResolvers<void>();
+    const f = setup({
+      run: async (input) => {
+        input.checkpoint?.([{ type: "ranger-durable", id: "context" }]);
+        await closed.promise;
+        return input.entries;
+      },
+      dispose: async () => {
+        closed.resolve();
+      },
+    });
+    stableTaskIdentity(f.context);
+    const bindings: AssistantMentionTarget[][] = [];
+    f.context.bindMentions = async (_scope, targets) => {
+      bindings.push(targets);
+      return targets;
+    };
+    await f.service.handle("configure", configured);
+    await f.service.handle("send", {
+      text: "Check @Codex",
+      request_id: "recover-mention",
+      mentions: [agentMarker],
+    });
+    await until(
+      () =>
+        JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8"))
+          .entries.length > 0,
+    );
+    await f.service.dispose();
+    f.context.restoreScope = async () => [
+      { ...workspace, runtime_generation: 8 },
+    ];
+    let recovered = false;
+    const service = createAssistantService({
+      directory: f.directory,
+      context: f.context,
+      driver: {
+        ...f.driver,
+        run: async (input) => {
+          recovered = input.recover === true;
+          return [];
+        },
+      },
+      publish: () => {},
+    });
+    services.push(service);
+    await service.resume();
+    await until(() => !service.peek().running);
+    expect(recovered).toBe(true);
+    expect(bindings.at(-1)).toEqual([
+      { ...mentionedAgent, runtime_generation: 8 },
+    ]);
+  });
+});
+
+test.each(["repeated", "follow-up"])(
+  "monitoring preserves unique references from a %s mention",
+  async (variant) => {
+    let runs = 0;
+    const f = setup({
+      run: async (input) => {
+        runs++;
+        if (variant === "repeated" || runs === 2)
+          await input.task!("create", {
+            title: "Monitor selected Agent",
+            prompt: "Notify when it finishes",
+            scope: configured.allowed_workspaces,
+            schedule: { type: "interval", minutes: 1 },
+          });
+        return [];
+      },
+    });
+    stableTaskIdentity(f.context);
+    f.context.bindMentions = async (_scope, targets) => targets;
+    await f.service.handle("configure", configured);
+    await f.service.handle("send", {
+      text: variant === "repeated" ? "Check @Codex and @Codex" : "Check @Codex",
+      request_id: `monitor-${variant}`,
+      mentions:
+        variant === "repeated"
+          ? [agentMarker, { ...agentMarker, start: 17, end: 23 }]
+          : [agentMarker],
+    });
+    await until(() => !f.service.peek().running);
+    if (variant === "follow-up") {
+      await f.service.handle("send", {
+        text: "Notify when it finishes",
+        request_id: "follow-up-monitor",
+      });
+      await until(() => !f.service.peek().running);
+    }
+    expect(f.service.peek().error).toBeNull();
+    expect(
+      f.service.peek().messages.at(-1)!.task_proposals![0]!.mentions,
+    ).toEqual([mentionedAgent]);
+  },
+);
+
+test("editing a saved reference after reconnect verifies its original workspace before rebinding", async () => {
+  const f = setup();
+  stableTaskIdentity(f.context);
+  let generation = 7;
+  let restored = false;
+  f.context.captureScope = async () => [
+    { ...workspace, runtime_generation: generation },
+  ];
+  f.context.restoreScope = async () => {
+    restored = true;
+    return [{ ...workspace, runtime_generation: generation }];
+  };
+  f.context.bindMentions = async (_scope, targets) => {
+    expect(
+      targets.every((target) => target.runtime_generation === generation),
+    ).toBe(true);
+    if (generation === 8) expect(restored).toBe(true);
+    return targets;
+  };
+  await f.service.handle("configure", configured);
+  const task = {
+    title: "Monitor",
+    prompt: "Watch Agent",
+    scope: configured.allowed_workspaces,
+    schedule: { type: "interval" as const, minutes: 5 },
+    mentions: [mentionedAgent],
+  };
+  await f.service.handle("task.create", { ...task, request_id: randomUUID() });
+  const id = f.service.peek().tasks![0]!.id;
+  generation = 8;
+  restored = false;
+  await f.service.handle("task.update", {
+    ...task,
+    task_id: id,
+    title: "Renamed monitor",
+  });
+  expect(f.service.peek().error).toBeNull();
+  expect(f.service.peek().tasks![0]!.title).toBe("Renamed monitor");
+  expect(f.service.peek().tasks![0]!.mentions).toEqual([
+    { ...mentionedAgent, runtime_generation: 8 },
+  ]);
+});
+
+test("monitoring an earlier Agent retains its identity after a workspace-only mention", async () => {
+  let runs = 0;
+  const f = setup({
+    run: async (input) => {
+      if (++runs === 3) {
+        await input.read("history", {
+          connection_id: "local",
+          workspace_id: "ws",
+          pane_id: "pane",
+        });
+        const saved = JSON.parse(
+          readFileSync(join(f.directory, "state.json"), "utf8"),
+        );
+        expect(
+          saved.active_run.mentions.every(
+            (target: AssistantMentionTarget) => target.workspace_id === "ws",
+          ),
+        ).toBe(true);
+        await input.task!("create", {
+          title: "Monitor earlier Agent",
+          prompt: "Notify when the earlier Agent finishes",
+          scope: configured.allowed_workspaces,
+          schedule: { type: "interval", minutes: 1 },
+        });
+      }
+      return [];
+    },
+  });
+  stableTaskIdentity(f.context);
+  const other = { ...workspace, workspace_id: "other", label: "Other" };
+  f.context.catalog = async () => ({
+    workspaces: [workspace, other],
+    errors: [],
+  });
+  f.context.captureScope = async (scope) =>
+    [workspace, other].filter((target) =>
+      scope.some((ref) => ref.workspace_id === target.workspace_id),
+    );
+  f.context.bindMentions = async (_scope, targets) => targets;
+  await f.service.handle("configure", {
+    ...configured,
+    allowed_workspaces: [
+      ...configured.allowed_workspaces,
+      { connection_id: "local", workspace_id: "other" },
+    ],
+  });
+  await f.service.handle("send", {
+    text: "Check @Codex",
+    request_id: "earlier-agent",
+    mentions: [agentMarker],
+  });
+  await until(() => !f.service.peek().running);
+  const workspaceMention: AssistantMention = {
+    ...workspace,
+    workspace_label: workspace.label,
+    kind: "workspace",
+    start: 6,
+    end: 16,
+  };
+  await f.service.handle("send", {
+    text: "Check @Workspace and @Other",
+    request_id: "intermediate-workspace",
+    mentions: [
+      workspaceMention,
+      {
+        ...workspaceMention,
+        workspace_id: "other",
+        label: "Other",
+        workspace_label: "Other",
+        start: 21,
+        end: 27,
+      },
+    ],
+  });
+  await until(() => !f.service.peek().running);
+  await f.service.handle("send", {
+    text: "Read and monitor the earlier Agent",
+    request_id: "monitor-earlier-agent",
+    scope: configured.allowed_workspaces,
+  });
+  await until(() => !f.service.peek().running);
+  expect(f.service.peek().error).toBeNull();
+  expect(f.reads).toHaveLength(1);
+  expect(
+    f.service.peek().messages.at(-1)!.task_proposals![0]!.mentions,
+  ).toContainEqual(mentionedAgent);
 });

@@ -30,6 +30,7 @@ import {
   type AssistantAuthState,
   type AssistantConfig,
   type AssistantMessage,
+  type AssistantMentionTarget,
   type AssistantModelConnection,
   type AssistantSnapshot,
   type AssistantSource,
@@ -41,6 +42,7 @@ import type { RangerTaskNotificationTarget } from "../taskNotifications";
 import {
   assistantActionExecuting,
   callAssistant,
+  getAssistantMentions,
   parseAssistantContext,
   permittedAssistantWorkspaces,
   pruneAssistantWorkspaceRefs,
@@ -64,10 +66,44 @@ import {
 } from "../assistantModels";
 import { AssistantConversationMap } from "./AssistantConversationMap";
 import { AssistantTasks, TaskProposalCard } from "./AssistantTasks";
+import { AssistantMentionComposer } from "./AssistantMentionComposer";
+import { assistantMentionKey } from "../assistantMentions";
 import "./AssistantPanel.css";
 
 function workspaceKey(workspace: AssistantWorkspaceRef) {
   return JSON.stringify([workspace.connection_id, workspace.workspace_id]);
+}
+
+export function AssistantUserMessage({
+  message,
+  onOpenMention,
+}: {
+  message: AssistantMessage;
+  onOpenMention: (target: AssistantMentionTarget) => void;
+}) {
+  let end = 0;
+  return (
+    <p className="assistant-user-text">
+      {message.mentions?.map((mention) => {
+        const text = message.text.slice(end, mention.start);
+        end = mention.end;
+        return (
+          <Fragment key={`${mention.start}:${assistantMentionKey(mention)}`}>
+            {text}
+            <button
+              type="button"
+              className="assistant-message-mention"
+              title={`${mention.connection_label} / ${mention.workspace_label}`}
+              onClick={() => onOpenMention(mention)}
+            >
+              {message.text.slice(mention.start, mention.end)}
+            </button>
+          </Fragment>
+        );
+      })}
+      {message.text.slice(end)}
+    </p>
+  );
 }
 
 function includesWorkspace(
@@ -795,6 +831,13 @@ export function AssistantPanel({
 }) {
   const state = useAssistantState();
   const snapshot = state.snapshot;
+  const currentConnectionId = useStoreSelector(
+    (state) => state.activeConnectionId,
+  );
+  const currentWorkspaceId = useStoreSelector(
+    (state) =>
+      state.workspaces.find((workspace) => workspace.focused)?.workspace_id,
+  );
   const connectionSignature = useStoreSelector((snapshot) =>
     snapshot.connections
       .map(({ id, state, generation }) =>
@@ -1118,12 +1161,47 @@ export function AssistantPanel({
         throw new Error(truncatedScopeMessage);
       const scope = authorizedScope(available.workspaces, current?.config);
       if (!scope.length) throw new Error(unavailableScopeMessage);
-      await sendAssistant(state.draft, scope);
+      if (state.draftMentions?.length)
+        await sendAssistant(state.draft, scope, state.draftMentions);
+      else await sendAssistant(state.draft, scope);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       pendingAction.current = false;
       setBusy(false);
+    }
+  };
+
+  const openMention = async (target: AssistantMentionTarget) => {
+    setError(null);
+    try {
+      const catalog = await getAssistantMentions([
+        {
+          connection_id: target.connection_id,
+          workspace_id: target.workspace_id,
+        },
+      ]);
+      if (
+        !catalog.targets.some(
+          (current) =>
+            assistantMentionKey(current) === assistantMentionKey(target),
+        )
+      )
+        throw new Error(
+          "This workspace or agent reference is no longer available. Select it again before using it.",
+        );
+      onOpenSource({
+        id: assistantMentionKey(target),
+        title: target.label,
+        kind: target.kind === "agent" ? "history" : "status",
+        connection_id: target.connection_id,
+        workspace_id: target.workspace_id,
+        runtime_generation: target.runtime_generation,
+        ...(target.kind === "agent" ? { pane_id: target.pane_id } : {}),
+        read_at: new Date().toISOString(),
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     }
   };
 
@@ -2090,7 +2168,10 @@ export function AssistantPanel({
                         </span>
                       )
                     ) : (
-                      <p className="assistant-user-text">{message.text}</p>
+                      <AssistantUserMessage
+                        message={message}
+                        onOpenMention={(target) => void openMention(target)}
+                      />
                     )}
                     {message.role === "assistant" &&
                     message.text.length >= 32_000 ? (
@@ -2152,37 +2233,28 @@ export function AssistantPanel({
               void submit();
             }}
           >
-            <div className="assistant-compose-input">
-              <textarea
-                ref={inputRef}
-                aria-label="Message Ranger"
-                placeholder="Ask about your workspaces"
-                enterKeyHint={mobile ? "send" : undefined}
-                rows={3}
-                maxLength={20_000}
-                value={state.draft}
-                onChange={(event) =>
-                  setAssistantDraft(event.currentTarget.value)
-                }
-                onCompositionStart={() => {
-                  composing.current = true;
-                }}
-                onCompositionEnd={() => {
-                  composing.current = false;
-                }}
-                onKeyDown={(event) => {
-                  if (
-                    event.key !== "Enter" ||
-                    event.shiftKey ||
-                    event.nativeEvent.isComposing ||
-                    composing.current ||
-                    event.keyCode === 229
-                  )
-                    return;
-                  event.preventDefault();
-                  if (!event.repeat) void submit();
-                }}
-              />
+            <AssistantMentionComposer
+              value={state.draft}
+              mentions={state.draftMentions ?? []}
+              workspaces={permittedWorkspaces}
+              currentWorkspace={
+                currentWorkspaceId
+                  ? {
+                      connection_id: currentConnectionId,
+                      workspace_id: currentWorkspaceId,
+                    }
+                  : undefined
+              }
+              draftKey={`${snapshot.instance_id}:${snapshot.session_id ?? ""}`}
+              inputRef={inputRef}
+              mobile={mobile}
+              onChange={setAssistantDraft}
+              onSubmit={() => void submit()}
+              onCompositionChange={(value) => {
+                composing.current = value;
+              }}
+              onOpenMention={(target) => void openMention(target)}
+            >
               <div
                 className="assistant-compose-actions"
                 onMouseDown={
@@ -2228,7 +2300,7 @@ export function AssistantPanel({
                   </button>
                 )}
               </div>
-            </div>
+            </AssistantMentionComposer>
             <AssistantChatControls
               key={`${snapshot.instance_id}:${snapshot.session_id ?? ""}`}
               snapshot={snapshot}

@@ -477,8 +477,9 @@ timezone; daylight-saving gaps are skipped and overlaps fire only once.
 Plans, proposals, deduplication records and run receipts live in `tasks.sqlite`,
 with private per-run state under `tasks/<task UUID>/runs/<run UUID>/`. The task
 database and Pi Durable databases use WAL mode with `synchronous = FULL`.
-The task database upgrades schema 1 to schema 2 automatically and transactionally
-to store notification modes and custom-notification receipts. Older builds
+The task database upgrades schemas 1 and 2 to schema 3 automatically and
+transactionally to store notification modes, custom-notification receipts, and
+bound workspace/Agent references. Older builds
 cannot open the upgraded task database. If you need rollback, back up the Ranger
 data directory while the bridge is stopped before upgrading.
 An invalid database disables task scheduling instead of discarding saved plans.

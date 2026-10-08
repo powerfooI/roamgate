@@ -1,6 +1,7 @@
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import {
   type AssistantAction,
+  type AssistantMention,
   type AssistantSnapshot,
   type AssistantTaskDetail,
   isAssistantSnapshot,
@@ -11,6 +12,7 @@ import {
   assistantActionExecuting,
   callAssistant,
   getAssistantTask,
+  getAssistantMentions,
   readAssistantState,
   parseAssistantContext,
   permittedAssistantWorkspaces,
@@ -23,6 +25,16 @@ import {
 } from "./assistant";
 
 const scope = [{ connection_id: "local", workspace_id: "workspace" }];
+const mention: AssistantMention = {
+  ...scope[0]!,
+  kind: "workspace",
+  label: "Project",
+  workspace_label: "Project",
+  connection_label: "Local",
+  runtime_generation: 1,
+  start: 0,
+  end: 8,
+};
 function snapshot(revision = 0, instance = "bridge-1"): AssistantSnapshot {
   return {
     instance_id: instance,
@@ -475,6 +487,150 @@ test("history switching preserves each draft and stale snapshots cannot switch c
   );
   server.push(sessionSnapshot(4, sessionB));
   expect(readAssistantState().draft).toBe("Second chat draft");
+});
+
+test("reference drafts survive native undo and chat switching, while ordinary pasted names stay unbound", async () => {
+  const server = installBridge();
+  startAssistantClient();
+  await refreshAssistant();
+  server.push(sessionSnapshot(1, sessionA));
+  setAssistantDraft("@Project", [mention]);
+  setAssistantDraft("@Project!");
+  expect(readAssistantState().draftMentions).toEqual([mention]);
+  setAssistantDraft("@Projec!");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  setAssistantDraft("@Project!", undefined, "historyUndo");
+  expect(readAssistantState().draftMentions).toEqual([mention]);
+  setAssistantDraft("@Projec!", undefined, "historyRedo");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  setAssistantDraft("@Project!");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  setAssistantDraft("@Project", [mention]);
+  setAssistantDraft("@Project?", undefined, "historyUndo");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  setAssistantDraft("@Project", [mention]);
+  server.push(sessionSnapshot(2, sessionB));
+  setAssistantDraft("@Project");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  server.push(sessionSnapshot(3, sessionA));
+  expect(readAssistantState().draftMentions).toEqual([mention]);
+});
+
+test("identical-text pastes retain distinct binding states through repeated native undo and redo", () => {
+  const text = "@Project";
+  const paste = () =>
+    setAssistantDraft(text, undefined, "insertFromPaste", {
+      start: 0,
+      end: text.length,
+      inputType: "insertFromPaste",
+    });
+  setAssistantDraft(text, [mention]);
+  paste();
+  expect(readAssistantState().draftMentions).toEqual([]);
+  paste();
+  for (const expected of [[], [mention]]) {
+    setAssistantDraft(text, undefined, "historyUndo");
+    expect(readAssistantState().draft).toBe(text);
+    expect(readAssistantState().draftMentions).toEqual(expected);
+  }
+  for (let index = 0; index < 2; index++) {
+    setAssistantDraft(text, undefined, "historyRedo");
+    expect(readAssistantState().draft).toBe(text);
+    expect(readAssistantState().draftMentions).toEqual([]);
+  }
+  for (const expected of [[], [mention]]) {
+    setAssistantDraft(text, undefined, "historyUndo");
+    expect(readAssistantState().draftMentions).toEqual(expected);
+  }
+});
+
+test("picker bindings annotate their native insertion snapshot so redo restores the selected identity", () => {
+  setAssistantDraft("@", undefined, "insertText");
+  setAssistantDraft("@Project ", undefined, "insertText");
+  setAssistantDraft("@Project ", [mention]);
+  setAssistantDraft("@", undefined, "historyUndo");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  setAssistantDraft("@Project ", undefined, "historyRedo");
+  expect(readAssistantState().draftMentions).toEqual([mention]);
+  const remote = {
+    ...mention,
+    connection_id: "remote",
+    connection_label: "Remote",
+  };
+  setAssistantDraft("@Project ", undefined, "insertText", {
+    start: 0,
+    end: mention.end,
+    inputType: "insertText",
+  });
+  setAssistantDraft("@Project ", [remote]);
+  setAssistantDraft("@Project ", undefined, "historyUndo");
+  expect(readAssistantState().draftMentions).toEqual([mention]);
+  setAssistantDraft("@Project ", undefined, "historyRedo");
+  expect(readAssistantState().draftMentions).toEqual([remote]);
+});
+
+test("mention sends bind retry IDs to references and acknowledgements preserve a newly unlinked draft", async () => {
+  const server = installBridge();
+  startAssistantClient();
+  await refreshAssistant();
+  setAssistantDraft("@Project", [mention]);
+  server.call.mockRejectedValueOnce(new Error("Reply lost"));
+  await expect(sendAssistant("@Project", scope, [mention])).rejects.toThrow(
+    "Reply lost",
+  );
+  const first = server.call.mock.calls[server.call.mock.calls.length - 1]?.[1];
+  expect(first?.mentions).toEqual([mention]);
+  const reply = deferred();
+  server.call.mockReturnValueOnce(reply.promise);
+  const retry = sendAssistant("@Project", scope, [mention]);
+  expect(
+    server.call.mock.calls[server.call.mock.calls.length - 1]?.[1]?.request_id,
+  ).toBe(first?.request_id);
+  setAssistantDraft("@Project", []);
+  reply.resolve(snapshot(1));
+  await retry;
+  expect(readAssistantState().draft).toBe("@Project");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  server.call.mockRejectedValueOnce(new Error("Reply lost"));
+  await expect(sendAssistant("@Project", scope)).rejects.toThrow("Reply lost");
+  expect(
+    server.call.mock.calls[server.call.mock.calls.length - 1]?.[1]?.request_id,
+  ).not.toBe(first?.request_id);
+});
+
+test("mention catalogs reject malformed and reconnect-delayed replies without changing chat state", async () => {
+  const server = installBridge();
+  startAssistantClient();
+  await refreshAssistant();
+  const target = {
+    kind: mention.kind,
+    connection_id: mention.connection_id,
+    workspace_id: mention.workspace_id,
+    connection_label: mention.connection_label,
+    workspace_label: mention.workspace_label,
+    runtime_generation: mention.runtime_generation,
+    label: mention.label,
+  };
+  const catalog = { targets: [target], errors: [] };
+  const original = readAssistantState().snapshot;
+  server.call.mockResolvedValueOnce(catalog);
+  expect(await getAssistantMentions(scope)).toEqual(catalog);
+  expect(readAssistantState().snapshot).toBe(original);
+  server.call.mockResolvedValueOnce({ targets: [{}], errors: [] });
+  await expect(getAssistantMentions(scope)).rejects.toThrow(
+    "could not load Ranger references",
+  );
+  let acknowledge!: (value: unknown) => void;
+  server.call.mockReturnValueOnce(
+    new Promise((resolve) => {
+      acknowledge = resolve;
+    }),
+  );
+  const pending = getAssistantMentions(scope);
+  server.status("disconnected");
+  server.status("connected");
+  acknowledge(catalog);
+  await expect(pending).rejects.toThrow("connection changed");
 });
 
 test("sends identify their chat and delayed acknowledgements only clear the originating draft", async () => {
