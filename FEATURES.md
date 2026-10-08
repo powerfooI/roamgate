@@ -200,8 +200,10 @@ The conversation stays available when switching workspaces or connections.
   currently available workspaces; **Clear** removes every selection. Use
   **Save connection** to apply permission changes.
   Workspace choices use a compact grid that scrolls when the list is long.
-  No workspaces are authorized by default, and new workspaces need to be
-  selected separately. The scope stays fixed while Ranger streams an answer.
+  No workspaces are authorized by default. In normal mode, new workspaces need
+  to be selected separately. Confirmed deleted workspaces are removed from the
+  list and saved selection; temporary disconnects preserve saved choices.
+  The scope stays fixed while Ranger streams an answer.
 - Expand **Work performed**, then an individual tool card to inspect its
   **Arguments** and **Result** or **Error**, including tools that manage tasks or
   propose actions. Long details are marked when truncated; older calls show
@@ -224,12 +226,16 @@ The conversation stays available when switching workspaces or connections.
   Worktree previews include configured setup hooks. Results distinguish verified
   completion from partial or uncertain outcomes. An uncertain operation must be
   checked at its target before proposing another one; reconnects never replay it.
-  Newly created workspaces must be explicitly allowed before Ranger can use them.
+  In normal mode, newly created workspaces must be explicitly allowed before
+  Ranger can use them.
 - **High-permission mode** in Settings is off by default. Enable it explicitly
-  to let Ranger execute supported management operations and create scheduled
+  to authorize all current and newly discovered workspaces and let Ranger
+  execute supported management operations and create scheduled
   tasks without individual confirmations. Results remain visible in the chat.
-  Workspace authorization and each question's scope still apply. Disable the
-  mode at any time to require confirmation for subsequent operations. Existing
+  Each question and task keeps its concrete captured scope. Disable the
+  mode to restore normal-mode selections and require confirmation for subsequent
+  operations. Older saved High-mode settings keep their selected-workspace scope
+  until the broader permission is explicitly confirmed. Existing
   tasks keep their saved permission mode; edit a task while this mode is enabled
   to allow automatic operations in its future runs.
 - Closing the window hides it while work continues; the topbar indicator shows

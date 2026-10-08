@@ -374,15 +374,32 @@ authorized workspaces that are currently available; no workspaces are authorized
 by default.
 
 **High-permission mode** is a separate Settings control, off by default. Enabling
-it requires an explicit confirmation and applies immediately to new questions
-and newly created or edited tasks. Ranger can then execute its supported workspace,
+it requires an explicit confirmation and authorizes all currently discoverable
+workspaces, including new workspaces that appear while the mode is enabled,
+without individual selection. Workspace content may be sent to the selected
+model provider. Ranger can then execute its supported workspace,
 worktree, tab, pane, agent and prompt operations, and create schedules, without
-individual approval. It still uses only authorized workspaces; scheduled tasks
-retain their own saved scope. Disabling it takes effect before subsequent
+individual approval. Each admitted question and scheduled task retains its
+concrete workspace targets; new workspaces do not widen an already-running turn
+or an existing task. Disabling the mode restores the saved normal-mode workspace
+selection and takes effect before subsequent
 automatic operations, including in running tasks; an operation already dispatched
 may finish.
 Existing tasks retain their saved mode and need an edit to adopt high-permission
 mode. Ranger's built-in write/command tools remain disabled.
+
+Existing saved high-permission configurations from older versions keep their
+selected-workspace permissions. Confirm the updated all-workspaces option once
+to authorize the broader scope; upgrading alone does not grant it.
+
+Deleted workspaces are removed from the list and saved normal-mode selection
+after a successful complete inventory confirms their absence. Temporary
+disconnects, failed listings, and truncated inventories do not erase saved
+permissions. A deleted workspace that later reappears must be selected again in
+normal mode; high-permission mode includes it automatically. Inventories and
+concrete scopes are bounded to 512 workspaces. If an inventory is truncated,
+Ranger will not silently treat the partial result as all workspaces. Large scopes
+can take longer to validate and send more workspace context to the model.
 
 For a compatible endpoint, expand **Configure custom models** and enter a unique
 provider ID, API format, API base URL, model IDs, and API key. Enter one model ID
@@ -396,6 +413,20 @@ a blank key keeps its existing key. Stop running tasks before changing a model
 connection. Existing models outside the batch keep their settings.
 Use a separate provider ID for a different endpoint so existing providers keep
 their connection settings.
+
+Custom model IDs do not declare reasoning support automatically. For a model
+whose endpoint supports thinking, choose **Enable reasoning for all IDs** under
+**Reasoning capability** and save the custom models. Existing models can be
+edited in place; no new provider or API key is needed. The default **Keep
+existing / model defaults** preserves each model's declaration, while new IDs
+remain non-reasoning. An explicit enable or disable applies to every entered
+ID, so use separate batches for models with different capabilities. Existing
+Pi thinking-level maps and compatibility settings are preserved. Select the
+desired **Thinking effort** and save the connection, or use the chat selector.
+Pi determines the available levels and translates the selected effort into the
+chosen API format; declaring support does not verify a third-party endpoint's
+capabilities. Without a custom thinking-level map, reasoning models expose
+Off, Minimal, Low, Medium, and High; imported maps can restrict or extend these.
 
 **Provider** lists OAuth logins and API keys from the selected credential
 source. Click a saved provider to select it, or expand **Connect another provider**

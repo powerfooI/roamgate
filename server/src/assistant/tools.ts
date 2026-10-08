@@ -1,8 +1,9 @@
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import type {
-  AssistantNotificationInput,
-  AssistantSource,
+import {
+  ASSISTANT_MAX_WORKSPACES,
+  type AssistantNotificationInput,
+  type AssistantSource,
 } from "../../../shared/assistant";
 
 export const ASSISTANT_DEFAULT_TERMINAL_LINES = 120;
@@ -114,7 +115,7 @@ export const taskTools = [
         ),
         scope: Type.Array(
           Type.Object(actionTarget, { additionalProperties: false }),
-          { minItems: 1, maxItems: 64 },
+          { minItems: 1, maxItems: ASSISTANT_MAX_WORKSPACES },
         ),
         schedule: Type.Union([
           Type.Object(

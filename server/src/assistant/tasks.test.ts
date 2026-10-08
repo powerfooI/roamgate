@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ASSISTANT_MAX_WORKSPACES } from "../../../shared/assistant";
 import type {
   AssistantNotificationInput,
   AssistantNotificationReceipt,
@@ -1819,3 +1820,24 @@ test.each(["stop", "cancel"] as const)(
     }
   },
 );
+
+test("task input accepts the shared inventory bound and rejects overflow", () => {
+  const input = prepared().input;
+  input.scope = Array.from(
+    { length: ASSISTANT_MAX_WORKSPACES },
+    (_, index) => ({
+      connection_id: "local",
+      workspace_id: `w${index}`,
+    }),
+  );
+  expect(validateTaskInput(input).scope).toHaveLength(ASSISTANT_MAX_WORKSPACES);
+  expect(() =>
+    validateTaskInput({
+      ...input,
+      scope: [
+        ...input.scope,
+        { connection_id: "local", workspace_id: "overflow" },
+      ],
+    }),
+  ).toThrow("Invalid task input");
+});

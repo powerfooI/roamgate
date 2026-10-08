@@ -444,7 +444,18 @@ and returns their actual receipts to the model. Built-in tools and discovered ex
 prompts, and project instruction files are disabled. Evidence is bounded and
 treated as untrusted content. The service validates the selected turn scope
 against explicitly allowed connection/workspace pairs; none are allowed by
-default. Allowed and per-turn scopes each contain at most 64 workspace pairs.
+default. Explicitly confirmed high-permission mode also authorizes current and
+newly discovered workspaces without changing the saved normal-mode selection.
+The `workspace_scope: "all"` consent marker is required alongside automatic
+approval; legacy automatic approval alone retains its selected scope. Only the
+dedicated permission confirmation can grant the broader scope. Allowed and
+per-turn scopes each contain at most 512 workspace pairs, sharing the inventory
+bound. A truncated inventory cannot be used as a complete high-permission turn.
+Inventory reconciliation prunes saved selections only for removed configured
+connections or complete successful current workspace listings. Incomplete,
+failed, and disconnected listings do not prove deletion. Running turns and tasks
+retain concrete admitted identities; live permission checks still apply after
+the global mode changes.
 Each turn captures runtime identity/generation and rechecks its leases
 before and after reads. A replaced runtime or vanished workspace fails without
 falling back to another host or workspace.

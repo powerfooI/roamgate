@@ -2788,6 +2788,8 @@ describe("bridge-global assistant", () => {
     const f = setup();
     Object.assign(f.driver, createPiDriver(f.directory));
     const requests: { path: string; key: string | null }[] = [];
+    const bodies: { thinking?: { type: string; budget_tokens?: number } }[] =
+      [];
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -2796,7 +2798,7 @@ describe("bridge-global assistant", () => {
           path: new URL(request.url).pathname,
           key: request.headers.get("x-api-key"),
         });
-        await request.json();
+        bodies.push(await request.json());
         const events = [
           {
             type: "message_start",
@@ -2935,6 +2937,26 @@ describe("bridge-global assistant", () => {
           input.provider
         ].key,
       ).toBe(key);
+      // Existing v0.8.0 custom models can opt into reasoning without re-adding
+      // the provider or losing the saved key and unrelated model metadata.
+      const enabled = await f.service.handle("configure_model", {
+        ...input,
+        api_key: undefined,
+        reasoning: true,
+      });
+      expect(
+        enabled.models.find((model) => model.id === input.model),
+      ).toMatchObject({
+        thinking_levels: ["off", "minimal", "low", "medium", "high"],
+        custom: { reasoning: true },
+      });
+      expect(
+        JSON.parse(readFileSync(path, "utf8")).providers[input.provider].models,
+      ).toEqual(
+        updated.providers[input.provider].models.map((model: { id: string }) =>
+          model.id === input.model ? { ...model, reasoning: true } : model,
+        ),
+      );
       const before = readFileSync(path, "utf8");
       const authBefore = readFileSync(join(f.directory, "auth.json"), "utf8");
       for (const invalid of [
@@ -2944,6 +2966,9 @@ describe("bridge-global assistant", () => {
         { base_url: "https://secret:password@example.com" },
         { base_url: "https://example.com?api_key=secret-value" },
         { api: "unsupported" },
+        { reasoning: "true" },
+        { reasoning: null },
+        { reasoning: 1 },
         { api_key: "!touch secret-value" },
         { api_key: "$SECRET_VALUE" },
         { credential_source: "pi" },
@@ -2978,6 +3003,7 @@ describe("bridge-global assistant", () => {
         ...configured,
         provider: input.provider,
         model: input.model,
+        thinking_level: "high",
       });
       await f.service.handle("send", {
         request_id: "custom-first",
@@ -2987,6 +3013,27 @@ describe("bridge-global assistant", () => {
       expect(f.service.peek().messages.at(-1)?.text).toBe(
         "Custom model answer.",
       );
+      expect(bodies[0]?.thinking?.type).toBe("enabled");
+      expect(bodies[0]?.thinking?.budget_tokens).toBeGreaterThan(0);
+      const disabled = await f.service.handle("configure_model", {
+        ...input,
+        api_key: undefined,
+        reasoning: false,
+      });
+      expect(
+        disabled.models.find((model) => model.id === input.model),
+      ).toMatchObject({
+        thinking_levels: ["off"],
+        custom: { reasoning: false },
+      });
+      await expect(
+        f.service.handle("configure", {
+          ...configured,
+          provider: input.provider,
+          model: input.model,
+          thinking_level: "high",
+        }),
+      ).rejects.toThrow("could not be saved");
       updated.providers[input.provider].baseUrl = `${server.url.href}refreshed`;
       updated.providers[input.provider].models.push({ id: "external-model" });
       writeFileSync(path, JSON.stringify(updated));
@@ -3795,4 +3842,856 @@ test("streaming task proposals keep the admitted model and effort while direct t
   } finally {
     db.close();
   }
+});
+
+describe("Ranger workspace inventory reconciliation", () => {
+  test("complete inventories prune missing workspaces and removed connections durably", async () => {
+    const f = setup();
+    const extra = { connection_id: "local", workspace_id: "deleted" };
+    const removed = { connection_id: "removed", workspace_id: "ws" };
+    f.context.captureScope = async (scope) =>
+      scope.map((ref) => ({ ...workspace, ...ref }));
+    await f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [...configured.allowed_workspaces, extra, removed],
+    });
+    f.context.catalog = async () => ({
+      workspaces: [workspace],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    });
+    await f.service.workspaceCatalog();
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    expect(
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8")).config
+        .allowed_workspaces,
+    ).toEqual(configured.allowed_workspaces);
+    // A stale browser saving its old checked list must not reintroduce deleted IDs.
+    await f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [...configured.allowed_workspaces, extra, removed],
+    });
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    f.context.catalog = async () => ({
+      workspaces: [],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    });
+    await f.service.workspaceCatalog();
+    expect(f.service.peek().config.allowed_workspaces).toEqual([]);
+  });
+
+  test("legacy, disconnected, truncated and failed catalogs preserve the saved manual selection", async () => {
+    const f = setup();
+    await f.service.handle("configure", configured);
+    for (const inventory of [
+      { workspaces: [], errors: [] },
+      {
+        workspaces: [],
+        errors: ["Offline"],
+        connection_ids: ["local"],
+        complete_connection_ids: [],
+      },
+      {
+        workspaces: [],
+        errors: ["Truncated"],
+        connection_ids: ["local"],
+        complete_connection_ids: [],
+        truncated: true,
+      },
+    ]) {
+      f.context.catalog = async () => inventory;
+      await f.service.workspaceCatalog();
+      expect(f.service.peek().config.allowed_workspaces).toEqual(
+        configured.allowed_workspaces,
+      );
+    }
+    f.context.catalog = async () => {
+      throw new Error("Unavailable");
+    };
+    await expect(f.service.workspaceCatalog()).rejects.toThrow("Unavailable");
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+  });
+
+  test("an older inventory response cannot prune a newer verified selection", async () => {
+    const f = setup();
+    await f.service.handle("configure", configured);
+    const old =
+      Promise.withResolvers<Awaited<ReturnType<AssistantContext["catalog"]>>>();
+    let calls = 0;
+    const latest = {
+      workspaces: [workspace],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    };
+    f.context.catalog = async () => (++calls === 1 ? old.promise : latest);
+    const first = f.service.workspaceCatalog();
+    await f.service.workspaceCatalog();
+    old.resolve({ ...latest, workspaces: [] });
+    expect(await first).toEqual(latest);
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+  });
+
+  test("an inventory already in flight cannot prune a workspace granted after it started", async () => {
+    const f = setup();
+    await f.service.handle("configure", configured);
+    const other = { ...workspace, workspace_id: "new" };
+    const entered = Promise.withResolvers<void>();
+    const provider = Promise.withResolvers<void>();
+    const pending =
+      Promise.withResolvers<Awaited<ReturnType<AssistantContext["catalog"]>>>();
+    const fresh = {
+      workspaces: [workspace, other],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    };
+    f.context.catalog = async () => fresh;
+    f.context.captureScope = async (scope) =>
+      scope.map((ref) => ({ ...workspace, ...ref }));
+    f.driver.catalog = async () => {
+      entered.resolve();
+      await provider.promise;
+      return catalog;
+    };
+    const saving = f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [
+        ...configured.allowed_workspaces,
+        { connection_id: "local", workspace_id: "new" },
+      ],
+    });
+    await entered.promise;
+    let reads = 0;
+    f.context.catalog = async () => (++reads === 1 ? pending.promise : fresh);
+    const listing = f.service.workspaceCatalog();
+    provider.resolve();
+    await saving;
+    pending.resolve({ ...fresh, workspaces: [workspace] });
+    const received = await listing;
+    expect(received).toEqual(fresh);
+    expect(reads).toBe(2);
+    expect(f.service.peek().config.allowed_workspaces).toHaveLength(2);
+    expect(
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8")).config
+        .allowed_workspaces,
+    ).toHaveLength(2);
+    // A subsequent fresh, complete listing may prune the same grant.
+    f.context.catalog = async () => ({ ...fresh, workspaces: [workspace] });
+    await f.service.workspaceCatalog();
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+  });
+
+  test("a capture-verified manual addition can send after a stale catalog lands before its save", async () => {
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const f = setup({
+      run: async (input) => {
+        inputs.push(input);
+        return [];
+      },
+    });
+    await f.service.handle("configure", configured);
+    const other = { ...workspace, workspace_id: "new" };
+    const ref = {
+      connection_id: other.connection_id,
+      workspace_id: other.workspace_id,
+    };
+    const fresh = {
+      workspaces: [workspace, other],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    };
+    const entered = Promise.withResolvers<void>();
+    const provider = Promise.withResolvers<void>();
+    f.context.catalog = async () => fresh;
+    f.context.captureScope = async (scope) =>
+      scope.map((item) => ({ ...workspace, ...item }));
+    f.driver.catalog = async () => {
+      entered.resolve();
+      await provider.promise;
+      return catalog;
+    };
+    const saving = f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [...configured.allowed_workspaces, ref],
+    });
+    await entered.promise;
+    f.context.catalog = async () => ({ ...fresh, workspaces: [workspace] });
+    await f.service.workspaceCatalog();
+    provider.resolve();
+    await saving;
+    expect(f.service.peek().config.allowed_workspaces).toContainEqual(ref);
+    f.context.catalog = async () => fresh;
+    await f.service.handle("send", {
+      request_id: "manual-after-stale-cache",
+      text: "Read new",
+      scope: [ref],
+    });
+    await until(() => !f.service.peek().running);
+    expect(inputs[0]!.config.allowed_workspaces).toEqual([ref]);
+  });
+
+  test("repeated configuration races stop a refresh without discarding newer grants", async () => {
+    const f = setup();
+    await f.service.handle("configure", configured);
+    const second = { ...workspace, workspace_id: "second" };
+    const third = { ...workspace, workspace_id: "third" };
+    const fresh = {
+      workspaces: [workspace, second, third],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    };
+    const first =
+      Promise.withResolvers<Awaited<ReturnType<AssistantContext["catalog"]>>>();
+    const retry =
+      Promise.withResolvers<Awaited<ReturnType<AssistantContext["catalog"]>>>();
+    const retryEntered = Promise.withResolvers<void>();
+    let reads = 0;
+    f.context.catalog = async () => {
+      reads++;
+      if (reads === 1) return first.promise;
+      if (reads === 3) {
+        retryEntered.resolve();
+        return retry.promise;
+      }
+      return fresh;
+    };
+    f.context.captureScope = async (scope) =>
+      scope.map((ref) => ({ ...workspace, ...ref }));
+    const listing = f.service.workspaceCatalog();
+    const ref = (item: AssistantWorkspace) => ({
+      connection_id: item.connection_id,
+      workspace_id: item.workspace_id,
+    });
+    await f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [workspace, second].map(ref),
+    });
+    first.resolve({ ...fresh, workspaces: [workspace] });
+    await retryEntered.promise;
+    await f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: fresh.workspaces.map(ref),
+    });
+    retry.resolve({ ...fresh, workspaces: [workspace, second] });
+    await expect(listing).rejects.toThrow("changed during refresh");
+    expect(reads).toBe(4);
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      fresh.workspaces.map(ref),
+    );
+    expect(await f.service.workspaceCatalog()).toEqual(fresh);
+  });
+
+  test("a failed inventory save preserves the active stream's message references", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const f = setup({
+      run: async (input) => {
+        input.delta("Before ");
+        entered.resolve();
+        await release.promise;
+        input.delta("after");
+        return [];
+      },
+    });
+    await f.service.handle("configure", configured);
+    await f.service.handle("send", {
+      request_id: "inventory-save",
+      text: "Read",
+    });
+    await entered.promise;
+    f.context.catalog = async () => ({
+      workspaces: [],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+    });
+    const path = join(f.directory, "state.json");
+    renameSync(path, `${path}.backup`);
+    mkdirSync(path);
+    try {
+      await expect(f.service.workspaceCatalog()).rejects.toThrow(
+        "could not be saved",
+      );
+      expect(f.service.peek().config.allowed_workspaces).toEqual(
+        configured.allowed_workspaces,
+      );
+    } finally {
+      rmSync(path, { recursive: true });
+      renameSync(`${path}.backup`, path);
+      release.resolve();
+    }
+    await until(() => !f.service.peek().running);
+    expect(f.service.peek().messages.at(-1)?.text).toBe("Before after");
+    await f.service.workspaceCatalog();
+    expect(f.service.peek().config.allowed_workspaces).toEqual([]);
+  });
+});
+
+describe("High workspace permission", () => {
+  const other = { ...workspace, workspace_id: "other", label: "Other" };
+  const reference = (item: AssistantWorkspace) => ({
+    connection_id: item.connection_id,
+    workspace_id: item.workspace_id,
+  });
+  function inventory(
+    f: ReturnType<typeof setup>,
+    initial = [workspace, other],
+  ) {
+    let listed = initial;
+    f.context.catalog = async () => ({
+      workspaces: structuredClone(listed),
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    });
+    f.context.captureScope = async (scope) =>
+      scope.map((ref) => {
+        const item = listed.find(
+          (item) =>
+            item.connection_id === ref.connection_id &&
+            item.workspace_id === ref.workspace_id,
+        );
+        if (!item) throw new Error("Unknown workspace");
+        return structuredClone(item);
+      });
+    stableTaskIdentity(f.context);
+    return (next: AssistantWorkspace[]) => {
+      listed = next;
+    };
+  }
+  async function enable(f: ReturnType<typeof setup>) {
+    await f.service.handle("configure_approval", {
+      approval_mode: "auto",
+      workspace_scope: "all",
+    });
+  }
+
+  test("explicit High covers more than 64 current workspaces and future workspaces without altering manual grants", async () => {
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const f = setup({
+      run: async (input) => {
+        inputs.push(input);
+        return [];
+      },
+    });
+    const listed = Array.from({ length: 65 }, (_, i) => ({
+      ...workspace,
+      workspace_id: `ws-${i}`,
+    }));
+    const set = inventory(f, listed);
+    await f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [],
+    });
+    await enable(f);
+    await f.service.handle("send", { request_id: "all-65", text: "Read all" });
+    await until(() => !f.service.peek().running);
+    expect(inputs[0]!.config.allowed_workspaces).toEqual(listed.map(reference));
+    expect(f.service.peek().config.allowed_workspaces).toEqual([]);
+    const future = { ...workspace, workspace_id: "future" };
+    set([...listed, future]);
+    await f.service.handle("send", {
+      request_id: "future-explicit",
+      text: "Read future",
+      scope: [reference(future)],
+    });
+    await until(() => !f.service.peek().running);
+    expect(inputs[1]!.config.allowed_workspaces).toEqual([reference(future)]);
+    await f.service.handle("send", {
+      request_id: "future-all",
+      text: "Read all again",
+    });
+    await until(() => !f.service.peek().running);
+    expect(inputs[2]!.config.allowed_workspaces).toHaveLength(66);
+    expect(
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8")).config,
+    ).toMatchObject({ allowed_workspaces: [], workspace_scope: "all" });
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    expect(f.service.peek().config.allowed_workspaces).toEqual([]);
+    expect(f.service.peek().config.workspace_scope).toBeUndefined();
+    await expect(
+      f.service.handle("send", {
+        request_id: "revoked",
+        text: "Read future",
+        scope: [reference(future)],
+      }),
+    ).rejects.toThrow("authorized");
+  });
+
+  test("legacy auto and generic configuration cannot silently grant all workspaces", async () => {
+    const f = setup();
+    inventory(f);
+    await f.service.handle("configure", configured);
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    expect(f.service.peek().config.workspace_scope).toBeUndefined();
+    await expect(
+      f.service.handle("send", {
+        request_id: "legacy",
+        text: "Read other",
+        scope: [reference(other)],
+      }),
+    ).rejects.toThrow("authorized");
+    await f.service.handle("configure", {
+      ...configured,
+      approval_mode: "auto",
+      workspace_scope: "all",
+    });
+    expect(f.service.peek().config.workspace_scope).toBeUndefined();
+    await expect(
+      f.service.handle("configure_approval", {
+        approval_mode: "auto",
+        workspace_scope: "anything",
+      }),
+    ).rejects.toThrow();
+    await enable(f);
+    await f.service.handle("configure", configured);
+    expect(f.service.peek().config.workspace_scope).toBe("all");
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    await f.service.handle("configure", {
+      ...configured,
+      approval_mode: "auto",
+      workspace_scope: "all",
+    });
+    expect(f.service.peek().config).toMatchObject({
+      approval_mode: "manual",
+      allowed_workspaces: configured.allowed_workspaces,
+    });
+    expect(f.service.peek().config.workspace_scope).toBeUndefined();
+  });
+
+  test("a restarted legacy auto configuration stays restricted until explicit all-workspace consent", async () => {
+    const f = setup();
+    inventory(f);
+    await f.service.handle("configure", configured);
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    await f.service.dispose();
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const restored = createAssistantService({
+      directory: f.directory,
+      context: f.context,
+      driver: {
+        ...f.driver,
+        run: async (input) => {
+          inputs.push(input);
+          return [];
+        },
+      },
+      publish: () => {},
+    });
+    services.push(restored);
+    expect(restored.peek().config.workspace_scope).toBeUndefined();
+    await restored.handle("send", {
+      request_id: "legacy-default",
+      text: "Read",
+    });
+    await until(() => !restored.peek().running);
+    expect(inputs[0]!.config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    await expect(
+      restored.handle("send", {
+        request_id: "legacy-outside",
+        text: "Read other",
+        scope: [reference(other)],
+      }),
+    ).rejects.toThrow("authorized");
+    await restored.handle("configure_approval", {
+      approval_mode: "auto",
+      workspace_scope: "all",
+    });
+    await restored.handle("send", {
+      request_id: "consented",
+      text: "Read all",
+    });
+    await until(() => !restored.peek().running);
+    expect(inputs[1]!.config.allowed_workspaces).toEqual(
+      [workspace, other].map(reference),
+    );
+  });
+
+  test("a default manual send uses the surviving grants after authoritative pruning", async () => {
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const f = setup({
+      run: async (input) => {
+        inputs.push(input);
+        return [];
+      },
+    });
+    const set = inventory(f);
+    await f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [workspace, other].map(reference),
+    });
+    set([workspace]);
+    await f.service.handle("send", {
+      request_id: "surviving-manual",
+      text: "Read",
+    });
+    await until(() => !f.service.peek().running);
+    expect(inputs[0]!.config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+  });
+
+  test.each([false, true])(
+    "truncated High inventory fails closed with explicit scope: %s",
+    async (explicit) => {
+      let runs = 0;
+      const f = setup({
+        run: async () => {
+          runs++;
+          return [];
+        },
+      });
+      inventory(f);
+      await f.service.handle("configure", configured);
+      await enable(f);
+      f.context.catalog = async () => ({
+        workspaces: [workspace],
+        errors: ["Truncated"],
+        connection_ids: ["local"],
+        complete_connection_ids: [],
+        truncated: true,
+      });
+      await expect(
+        f.service.handle("send", {
+          request_id: "truncated",
+          text: "Read all",
+          ...(explicit ? { scope: configured.allowed_workspaces } : {}),
+        }),
+      ).rejects.toThrow("complete workspace list");
+      expect(runs).toBe(0);
+      expect(f.service.peek().config.allowed_workspaces).toEqual(
+        configured.allowed_workspaces,
+      );
+    },
+  );
+
+  test.each(["inventory", "provider", "capture", "recovery"])(
+    "High off during %s admission prevents the broader turn from starting",
+    async (stage) => {
+      let runs = 0;
+      const f = setup({
+        run: async () => {
+          runs++;
+          return [];
+        },
+      });
+      inventory(f);
+      await f.service.handle("configure", configured);
+      await enable(f);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const gate = async () => {
+        entered.resolve();
+        await release.promise;
+      };
+      if (stage === "inventory") {
+        const previous = f.context.catalog;
+        f.context.catalog = async () => {
+          const result = await previous();
+          await gate();
+          return result;
+        };
+      }
+      if (stage === "provider") {
+        const previous = f.driver.catalog;
+        f.driver.catalog = async (source) => {
+          const result = await previous(source);
+          await gate();
+          return result;
+        };
+      }
+      if (stage === "capture") {
+        const previous = f.context.captureScope;
+        f.context.captureScope = async (...args) => {
+          const result = await previous(...args);
+          await gate();
+          return result;
+        };
+      }
+      if (stage === "recovery") {
+        const previous = f.context.recoveryScope!;
+        f.context.recoveryScope = async (...args) => {
+          const result = await previous(...args);
+          await gate();
+          return result;
+        };
+      }
+      const send = f.service.handle("send", {
+        request_id: `race-${stage}`,
+        text: "Read all",
+      });
+      await entered.promise;
+      await f.service.handle("configure_approval", { approval_mode: "manual" });
+      release.resolve();
+      await expect(send).rejects.toThrow("unavailable");
+      expect(runs).toBe(0);
+      expect(f.service.peek().messages).toEqual([]);
+    },
+  );
+
+  test("High off rejects an in-flight read result and new action preparations", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<{ text: string; sources: [] }>();
+    const done = Promise.withResolvers<unknown[]>();
+    let input: Parameters<AssistantDriver["run"]>[0] | undefined;
+    let prepared = 0;
+    const f = setup({
+      run: async (value) => {
+        input = value;
+        return done.promise;
+      },
+      stop: async () => done.resolve([]),
+      dispose: async () => done.resolve([]),
+    });
+    inventory(f);
+    f.context.read = async () => {
+      entered.resolve();
+      return release.promise;
+    };
+    f.context.prepareAction = async () => {
+      prepared++;
+      return permissionAction(async () => ({
+        status: "succeeded",
+        detail: "Created",
+      }));
+    };
+    await f.service.handle("configure", configured);
+    await enable(f);
+    await f.service.handle("send", {
+      request_id: "live-read",
+      text: "Read all",
+    });
+    const reading = input!.read("status", {});
+    await entered.promise;
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    release.resolve({ text: "Private result", sources: [] });
+    await expect(reading).rejects.toThrow("authorized");
+    await expect(
+      input!.propose!("create_tab", reference(other)),
+    ).rejects.toThrow("authorized");
+    expect(prepared).toBe(0);
+    done.resolve([]);
+    await until(() => !f.service.peek().running);
+  });
+
+  test("High off while preparing a broader action prevents storing or executing its preview", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const done = Promise.withResolvers<unknown[]>();
+    let input: Parameters<AssistantDriver["run"]>[0] | undefined;
+    let writes = 0;
+    const f = setup({
+      run: async (value) => {
+        input = value;
+        return done.promise;
+      },
+      stop: async () => done.resolve([]),
+      dispose: async () => done.resolve([]),
+    });
+    inventory(f);
+    f.context.prepareAction = async () => {
+      entered.resolve();
+      await release.promise;
+      return permissionAction(async () => {
+        writes++;
+        return { status: "succeeded", detail: "Created" };
+      });
+    };
+    await f.service.handle("configure", configured);
+    await enable(f);
+    await f.service.handle("send", {
+      request_id: "live-preview",
+      text: "Create in other",
+    });
+    const preparing = input!.propose!("create_tab", reference(other));
+    await entered.promise;
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    release.resolve();
+    await expect(preparing).rejects.toThrow("authorized");
+    expect(writes).toBe(0);
+    expect(f.service.peek().messages.at(-1)?.actions ?? []).toEqual([]);
+    done.resolve([]);
+    await until(() => !f.service.peek().running);
+  });
+
+  test("a High turn and its recovery retain their original concrete scope", async () => {
+    const stopped = Promise.withResolvers<unknown[]>();
+    const f = setup({
+      run: async () => stopped.promise,
+      dispose: async () => stopped.resolve([]),
+    });
+    const set = inventory(f);
+    await f.service.handle("configure", configured);
+    await enable(f);
+    await f.service.handle("send", {
+      request_id: "recover-high",
+      text: "Read all",
+    });
+    const saved = JSON.parse(
+      readFileSync(join(f.directory, "state.json"), "utf8"),
+    );
+    expect(saved.config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    expect(saved.active_run.config.allowed_workspaces).toEqual(
+      [workspace, other].map(reference),
+    );
+    const future = { ...workspace, workspace_id: "future" };
+    set([workspace, other, future]);
+    await f.service.workspaceCatalog();
+    await f.service.dispose();
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const restored = createAssistantService({
+      directory: f.directory,
+      context: f.context,
+      driver: {
+        ...f.driver,
+        run: async (input) => {
+          inputs.push(input);
+          return [];
+        },
+      },
+      publish: () => {},
+    });
+    services.push(restored);
+    await restored.resume();
+    await until(() => !restored.peek().running);
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]!.config.allowed_workspaces).toEqual(
+      [workspace, other].map(reference),
+    );
+    expect(restored.peek().config.workspace_scope).toBe("all");
+    await restored.handle("configure_approval", { approval_mode: "manual" });
+    expect(restored.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+  });
+
+  test("High scheduled tasks keep fixed targets and reject global High off during reads", async () => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    const done = Promise.withResolvers<unknown[]>();
+    let input: Parameters<AssistantDriver["run"]>[0] | undefined;
+    const f = setup({}, () => ({
+      catalog: async () => catalog,
+      login: async () => {},
+      run: async (value) => {
+        input = value;
+        return done.promise;
+      },
+      stop: async () => done.resolve([]),
+      dispose: async () => done.resolve([]),
+    }));
+    const set = inventory(f);
+    await f.service.handle("configure", configured);
+    await enable(f);
+    const taskId = (
+      await f.service.handle("task.create", {
+        request_id: randomUUID(),
+        title: "Other only",
+        prompt: "Read other",
+        scope: [reference(other)],
+        schedule: { type: "interval", minutes: 1 },
+      })
+    ).tasks![0]!.id;
+    set([workspace, other, { ...workspace, workspace_id: "future" }]);
+    await f.service.resume();
+    await f.service.handle("task.run_now", { task_id: taskId });
+    jest.advanceTimersByTime(0);
+    await flushTasks();
+    expect(input!.config.allowed_workspaces).toEqual([reference(other)]);
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    await expect(input!.read("status", {})).rejects.toThrow();
+    expect(f.reads).toHaveLength(0);
+    done.resolve([]);
+    await flushTasks();
+  });
+
+  test("a disconnected High-only scheduled target waits and resumes without adding targets", async () => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const f = setup({}, () => ({
+      catalog: async () => catalog,
+      login: async () => {},
+      run: async (input) => {
+        inputs.push(input);
+        return [];
+      },
+      stop: async () => {},
+      dispose: async () => {},
+    }));
+    inventory(f);
+    await f.service.handle("configure", configured);
+    await enable(f);
+    const taskId = (
+      await f.service.handle("task.create", {
+        request_id: randomUUID(),
+        title: "Wait for other",
+        prompt: "Read other",
+        scope: [reference(other)],
+        schedule: { type: "once", at: "2026-10-04T00:00:01.000Z" },
+      })
+    ).tasks![0]!.id;
+    const readyCatalog = f.context.catalog;
+    const restore = f.context.restoreScope!;
+    f.context.catalog = async () => ({
+      workspaces: [],
+      errors: ["Offline"],
+      connection_ids: ["local"],
+      complete_connection_ids: [],
+      truncated: false,
+    });
+    f.context.restoreScope = async () => {
+      throw new AssistantRecoveryNotReadyError("Offline");
+    };
+    await f.service.resume();
+    jest.advanceTimersByTime(1_000);
+    await flushTasks();
+    expect(inputs).toHaveLength(0);
+    expect(
+      (await f.service.taskDetail({ task_id: taskId })).runs[0]!.status,
+    ).toBe("queued");
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    f.context.catalog = readyCatalog;
+    f.context.restoreScope = restore;
+    jest.advanceTimersByTime(5_000);
+    await flushTasks();
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]!.config.allowed_workspaces).toEqual([reference(other)]);
+    expect(
+      (await f.service.taskDetail({ task_id: taskId })).runs[0]!.status,
+    ).toBe("succeeded");
+  });
 });

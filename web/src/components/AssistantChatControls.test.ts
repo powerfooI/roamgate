@@ -339,6 +339,50 @@ async function registerDomTests() {
     );
   });
 
+  test("saving reasoning capability enables the existing custom model chip without remounting", async () => {
+    const initial = snapshot();
+    initial.models[0] = {
+      ...initial.models[0]!,
+      thinking_levels: ["off"],
+      default_thinking_level: "off",
+      custom: { base_url: "https://example.com/v1", api: "openai-completions" },
+    };
+    const fixture = await mount(initial);
+    expect(fixture.button("Thinking effort").disabled).toBe(true);
+    const enabled: AssistantSnapshot = {
+      ...initial,
+      revision: 2,
+      models: initial.models.map((model, index) =>
+        index === 0
+          ? {
+              ...model,
+              custom: { ...model.custom!, reasoning: true },
+              thinking_levels: ["off", "minimal", "low", "medium", "high"],
+            }
+          : model,
+      ),
+    };
+    await fixture.render(enabled);
+    expect(fixture.button("Thinking effort").disabled).toBe(false);
+    await click(fixture.button("Thinking effort"));
+    expect(items().map((item) => item.dataset.value)).toEqual([
+      "default",
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+    ]);
+    await click(option("high"));
+    expect(fixture.changes[0]?.thinking_level).toBe("high");
+    await fixture.render({
+      ...enabled,
+      revision: 3,
+      config: { ...enabled.config, thinking_level: "high" },
+    });
+    expect(fixture.button("Thinking effort").textContent).toContain("High");
+  });
+
   test("a stale saved effort can reset to Default when the refreshed model only supports Off", async () => {
     const initial = snapshot();
     initial.config.thinking_level = "high";

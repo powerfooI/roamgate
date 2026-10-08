@@ -129,6 +129,8 @@ function config(value: Record<string, unknown>): AssistantConfig {
     value.approval_mode !== "auto"
   )
     throw new Error("Invalid approval mode");
+  if (value.workspace_scope !== undefined && value.workspace_scope !== "all")
+    throw new Error("Invalid workspace permission mode");
   if (
     value.thinking_level !== undefined &&
     !isAssistantThinkingLevel(value.thinking_level)
@@ -142,6 +144,9 @@ function config(value: Record<string, unknown>): AssistantConfig {
     model: value.model === "" ? "" : string(value.model, "model"),
     credential_source: value.credential_source,
     allowed_workspaces: refs(value.allowed_workspaces),
+    ...(value.workspace_scope === "all"
+      ? { workspace_scope: "all" as const }
+      : {}),
     ...(value.approval_mode !== undefined
       ? { approval_mode: value.approval_mode }
       : {}),
@@ -163,6 +168,7 @@ function authUrl(value: string): string | undefined {
 export type AssistantService = {
   resume(): Promise<void>;
   snapshot(): Promise<AssistantSnapshot>;
+  workspaceCatalog(): ReturnType<AssistantContext["catalog"]>;
   peek(): AssistantSnapshot;
   handle(
     method: string,
@@ -186,6 +192,8 @@ export function createAssistantService(options: {
   ): AssistantDriver;
   taskRun?: SavedTaskRun;
   globalAllowed?(): AssistantWorkspaceRef[];
+  globalWorkspaceAllowed?(ref: AssistantWorkspaceRef): boolean;
+  refreshGlobalScope?(): Promise<unknown>;
   globalApprovalMode?(): AssistantConfig["approval_mode"];
 }): AssistantService {
   const directory = options.directory ?? assistantDirectory();
@@ -197,32 +205,34 @@ export function createAssistantService(options: {
     createPiDriver(directory);
   let tasks: ReturnType<typeof createAssistantTasks> | undefined;
   const baseContext = options.context;
+  function globallyAllowed(ref: AssistantWorkspaceRef) {
+    return (
+      options.globalWorkspaceAllowed?.(ref) ??
+      options
+        .globalAllowed?.()
+        .some((allowed) => refKey(allowed) === refKey(ref)) ??
+      false
+    );
+  }
   function assertTaskAllowed() {
     if (
       options.taskRun &&
-      options.taskRun.targets.some(
-        (target) =>
-          !new Set(options.globalAllowed?.().map(refKey)).has(refKey(target)),
-      )
+      options.taskRun.targets.some((target) => !globallyAllowed(target))
     )
       throw new Error("The task workspace permission was removed.");
   }
   const checkTaskScope = async (signal?: AbortSignal) => {
     if (!options.taskRun) return;
-    const allowed = new Set(options.globalAllowed?.().map(refKey));
+    await options.refreshGlobalScope?.();
+    signal?.throwIfAborted();
     if (
-      options.taskRun.targets.some((target) => !allowed.has(refKey(target))) ||
+      options.taskRun.targets.some((target) => !globallyAllowed(target)) ||
       !baseContext.restoreScope
     )
       throw new Error("The task workspace permission was removed.");
     await baseContext.restoreScope(options.taskRun.targets, signal);
     signal?.throwIfAborted();
-    if (
-      options.taskRun.targets.some(
-        (target) =>
-          !new Set(options.globalAllowed?.().map(refKey)).has(refKey(target)),
-      )
-    )
+    if (options.taskRun.targets.some((target) => !globallyAllowed(target)))
       throw new Error("The task workspace permission was removed.");
   };
   const context: AssistantContext = options.taskRun
@@ -312,6 +322,108 @@ export function createAssistantService(options: {
     error: null,
     auth: null,
   };
+  let workspaceInventory:
+    | Awaited<ReturnType<AssistantContext["catalog"]>>
+    | undefined;
+  let inventoryRequest = 0;
+  let inventoryApplied = 0;
+  let inventoryGrants: AssistantWorkspaceRef[] | undefined;
+  function workspaceRemoved(ref: AssistantWorkspaceRef) {
+    return (
+      !!workspaceInventory &&
+      ((workspaceInventory.connection_ids !== undefined &&
+        !workspaceInventory.connection_ids.includes(ref.connection_id)) ||
+        (workspaceInventory.complete_connection_ids?.includes(
+          ref.connection_id,
+        ) === true &&
+          !workspaceInventory.workspaces.some(
+            (item) => refKey(item) === refKey(ref),
+          )))
+    );
+  }
+  function allWorkspaces(selection = state.config) {
+    return (
+      !options.taskRun &&
+      selection.approval_mode === "auto" &&
+      selection.workspace_scope === "all"
+    );
+  }
+  function workspaceAllowed(ref: AssistantWorkspaceRef) {
+    if (workspaceRemoved(ref)) return false;
+    if (options.taskRun && !globallyAllowed(ref)) return false;
+    // High mode is a dynamic grant, while task runs retain their fixed scope.
+    return (
+      allWorkspaces() ||
+      state.config.allowed_workspaces.some(
+        (item) => refKey(item) === refKey(ref),
+      )
+    );
+  }
+  function effectiveScope(selection = state.config): AssistantWorkspaceRef[] {
+    return allWorkspaces(selection)
+      ? (workspaceInventory?.workspaces ?? []).map(
+          ({ connection_id, workspace_id }) => ({
+            connection_id,
+            workspace_id,
+          }),
+        )
+      : structuredClone(state.config.allowed_workspaces);
+  }
+  function assertScopeAllowed(scope: AssistantWorkspaceRef[]) {
+    if (!scope.length || scope.some((ref) => !workspaceAllowed(ref)))
+      throw new Error("Choose an authorized workspace scope");
+  }
+  async function workspaceCatalog(
+    retried = false,
+  ): ReturnType<AssistantContext["catalog"]> {
+    if (disposed) throw new Error("Ranger unavailable");
+    const request = ++inventoryRequest;
+    const granted = state.config.allowed_workspaces;
+    const result = await baseContext.catalog();
+    if (disposed) throw new Error("Ranger unavailable");
+    // A slower, older listing must not resurrect deleted scopes or overwrite a
+    // newer connection snapshot supplied by another browser or task validator.
+    if (
+      request < inventoryApplied &&
+      inventoryGrants === state.config.allowed_workspaces
+    )
+      return workspaceInventory!;
+    if (
+      request < inventoryApplied ||
+      granted !== state.config.allowed_workspaces
+    ) {
+      // A concurrent configuration save is newer evidence than this listing.
+      // Refresh once before publishing authoritative absence to any client.
+      if (retried)
+        throw new Error(
+          "Workspace permissions changed during refresh. Try again.",
+        );
+      return workspaceCatalog(true);
+    }
+    inventoryApplied = request;
+    workspaceInventory = result;
+    if (!options.taskRun) {
+      const retained = state.config.allowed_workspaces.filter(
+        (ref) => !workspaceRemoved(ref),
+      );
+      if (retained.length !== state.config.allowed_workspaces.length) {
+        const previousConfig = state.config;
+        const previousEntries = entries;
+        state.config = { ...state.config, allowed_workspaces: retained };
+        entries = [];
+        try {
+          persist();
+        } catch {
+          state.config = previousConfig;
+          entries = previousEntries;
+          throw new Error("The workspace permissions could not be saved.");
+        }
+        publish(true);
+      }
+    }
+    inventoryGrants = state.config.allowed_workspaces;
+    return result;
+  }
   function autoApprove(admitted: AssistantConfig) {
     return (
       !disposed &&
@@ -319,11 +431,7 @@ export function createAssistantService(options: {
       state.config.approval_mode === "auto" &&
       (!options.taskRun ||
         (options.globalApprovalMode?.() === "auto" &&
-          options.taskRun.targets.every((target) =>
-            options
-              .globalAllowed?.()
-              .some((ref) => refKey(ref) === refKey(target)),
-          )))
+          options.taskRun.targets.every((target) => globallyAllowed(target))))
     );
   }
   try {
@@ -807,13 +915,11 @@ export function createAssistantService(options: {
     // The persisted action ID is the receipt; concurrent browsers never replay it.
     if (action.status !== "pending") return;
     idle();
+    await workspaceCatalog();
+    if (action.status !== "pending") return;
+    idle();
     const prepared = preparedActions.get(id);
-    if (
-      !prepared ||
-      !state.config.allowed_workspaces.some(
-        (ref) => refKey(ref) === refKey(action),
-      )
-    ) {
+    if (!prepared || !workspaceAllowed(action)) {
       action.status = "cancelled";
       action.detail =
         "The approved target is no longer available. Ask Ranger for a fresh preview.";
@@ -822,7 +928,7 @@ export function createAssistantService(options: {
       return;
     }
     reserveAction(action, true);
-    startAction(action, prepared);
+    startAction(action, prepared, () => !disposed && workspaceAllowed(action));
   }
   function reserveAction(action: AssistantAction, clearContext: boolean) {
     // Durably reserve the operation before any effect. A crash leaves an
@@ -911,13 +1017,14 @@ export function createAssistantService(options: {
       "message",
       options.taskRun ? 32_000 : 20_000,
     );
-    const scope =
-      params.scope === undefined
-        ? structuredClone(state.config.allowed_workspaces)
-        : refs(params.scope);
-    const allowed = new Set(state.config.allowed_workspaces.map(refKey));
-    if (!scope.length || scope.some((ref) => !allowed.has(refKey(ref))))
-      throw new Error("Choose an authorized workspace scope");
+    const requestedScope =
+      params.scope === undefined ? undefined : refs(params.scope);
+    if (!allWorkspaces()) {
+      const selected = requestedScope ?? state.config.allowed_workspaces;
+      const granted = new Set(state.config.allowed_workspaces.map(refKey));
+      if (!selected.length || selected.some((ref) => !granted.has(refKey(ref))))
+        throw new Error("Choose an authorized workspace scope");
+    }
     if (!state.config.provider || !state.config.model)
       throw new Error("Connect a provider and select a model first");
     // Reserve admission before any await so two browser connections cannot start a turn.
@@ -927,8 +1034,21 @@ export function createAssistantService(options: {
     const controller = new AbortController();
     turnController = controller;
     const turnConfig = structuredClone(state.config);
+    let incompleteCatalog = false;
     try {
+      const inventory = await workspaceCatalog();
+      controller.signal.throwIfAborted();
+      if (allWorkspaces(turnConfig) && inventory.truncated) {
+        incompleteCatalog = true;
+        throw new Error("The workspace catalog is incomplete.");
+      }
+      const scope = requestedScope ?? effectiveScope(turnConfig);
+      assertScopeAllowed(scope);
+      // Persist the concrete admitted scope, never the dynamic High grant.
+      turnConfig.allowed_workspaces = structuredClone(scope);
       await catalog();
+      controller.signal.throwIfAborted();
+      assertScopeAllowed(scope);
       if (
         !state.providers.some(
           (provider) =>
@@ -943,6 +1063,8 @@ export function createAssistantService(options: {
         throw new Error("The selected model is not configured");
       checkThinking(turnConfig, state.models);
       const captured = await context.captureScope(scope, controller.signal);
+      controller.signal.throwIfAborted();
+      assertScopeAllowed(scope);
       if (disposed) throw new Error("Ranger unavailable");
       const capturedKey = JSON.stringify(captured);
       if (entryScope !== capturedKey) entries = [];
@@ -960,6 +1082,7 @@ export function createAssistantService(options: {
       if (disposed) throw new Error("Ranger unavailable");
       await checkTaskScope(controller.signal);
       assertTaskAllowed();
+      assertScopeAllowed(captured);
       const prompt = `Authorized workspace scope for this turn (only these IDs may be read or used as action targets):\n${JSON.stringify(captured)}\n\nRecorded operation outcomes (server receipts, not proof of task completion):\n${JSON.stringify(
         state.messages
           .flatMap((item) => item.actions ?? [])
@@ -1011,7 +1134,9 @@ export function createAssistantService(options: {
       throw new Error(
         controller.signal.aborted
           ? "The Ranger request was stopped."
-          : "The workspace scope or provider connection is unavailable",
+          : incompleteCatalog
+            ? "The workspace catalog is incomplete. High permission requires a complete workspace list."
+            : "The workspace scope or provider connection is unavailable",
       );
     }
   }
@@ -1039,6 +1164,7 @@ export function createAssistantService(options: {
       try {
         if (controller.signal.aborted) return;
         assertTaskAllowed();
+        assertScopeAllowed(captured);
         entries = await driver.run({
           config: autoApprove(turnConfig)
             ? turnConfig
@@ -1091,6 +1217,7 @@ export function createAssistantService(options: {
                   ? AbortSignal.any([signal, controller.signal])
                   : controller.signal;
                 combined.throwIfAborted();
+                assertScopeAllowed(captured);
                 if (kind === "list") {
                   const approved = new Set(captured.map(refKey));
                   return {
@@ -1161,6 +1288,7 @@ export function createAssistantService(options: {
               ? AbortSignal.any([signal, controller.signal])
               : controller.signal;
             combined.throwIfAborted();
+            assertScopeAllowed(captured);
             if (!context.prepareAction)
               throw new Error("Action previews are unavailable.");
             if ((draft.actions?.length ?? 0) >= 8)
@@ -1172,6 +1300,7 @@ export function createAssistantService(options: {
               combined,
             );
             combined.throwIfAborted();
+            assertScopeAllowed(captured);
             if ((draft.actions?.length ?? 0) >= 8)
               throw new Error("This turn already has eight action previews.");
             const action: AssistantAction = {
@@ -1202,7 +1331,10 @@ export function createAssistantService(options: {
               await startAction(
                 action,
                 prepared,
-                () => autoApprove(turnConfig) && !combined.aborted,
+                () =>
+                  autoApprove(turnConfig) &&
+                  !combined.aborted &&
+                  workspaceAllowed(action),
               );
             }
             return { text: JSON.stringify(action) };
@@ -1212,8 +1344,10 @@ export function createAssistantService(options: {
               ? AbortSignal.any([signal, controller.signal])
               : controller.signal;
             combined.throwIfAborted();
+            assertScopeAllowed(captured);
             const result = await context.read(kind, captured, args, combined);
             combined.throwIfAborted();
+            assertScopeAllowed(captured);
             for (const source of result.sources) {
               if (
                 draft.sources.length < 64 &&
@@ -1294,14 +1428,15 @@ export function createAssistantService(options: {
     const controller = turnController!;
     recovering = true;
     try {
-      const allowed = new Set(state.config.allowed_workspaces.map(refKey));
+      await workspaceCatalog();
+      controller.signal.throwIfAborted();
       const approved = new Set(pending.config.allowed_workspaces.map(refKey));
       if (
         !pending.recovery_targets.length ||
         !context.restoreScope ||
         pending.recovery_targets.some(
           (target) =>
-            !allowed.has(refKey(target)) || !approved.has(refKey(target)),
+            !workspaceAllowed(target) || !approved.has(refKey(target)),
         )
       )
         throw new Error("The original scope cannot be restored");
@@ -1330,6 +1465,7 @@ export function createAssistantService(options: {
       if (disposed || activeRun !== pending) return;
       await checkTaskScope(controller.signal);
       assertTaskAllowed();
+      assertScopeAllowed(captured);
       entryScope = JSON.stringify(captured);
       executeTurn(pending, captured, controller, true);
       publish(true);
@@ -1487,11 +1623,12 @@ export function createAssistantService(options: {
       throw new AssistantRecoveryNotReadyError(
         "The model connection is changing.",
       );
-    const allowed = new Set(state.config.allowed_workspaces.map(refKey));
+    await workspaceCatalog();
+    signal?.throwIfAborted();
     if (
       !prepared.targets.length ||
       !context.restoreScope ||
-      prepared.targets.some((target) => !allowed.has(refKey(target)))
+      prepared.targets.some((target) => !workspaceAllowed(target))
     )
       throw new Error("The original task permission is unavailable.");
     const available = await driver.catalog(prepared.config.credential_source);
@@ -1503,12 +1640,7 @@ export function createAssistantService(options: {
       );
     if (
       disposed ||
-      prepared.targets.some(
-        (target) =>
-          !new Set(state.config.allowed_workspaces.map(refKey)).has(
-            refKey(target),
-          ),
-      ) ||
+      prepared.targets.some((target) => !workspaceAllowed(target)) ||
       !available.providers.some(
         (provider) =>
           provider.id === prepared.config.provider && provider.configured,
@@ -1532,11 +1664,14 @@ export function createAssistantService(options: {
     // A tool proposal belongs to the admitted turn, even if another browser
     // selected a different model for the next message while it was streaming.
     const taskConfig = structuredClone(admittedConfig ?? state.config);
-    const allowed = new Set(state.config.allowed_workspaces.map(refKey));
-    const turn = capturedTurn ? new Set(capturedTurn.map(refKey)) : allowed;
+    await workspaceCatalog();
+    signal?.throwIfAborted();
+    const turn = capturedTurn ? new Set(capturedTurn.map(refKey)) : undefined;
     if (
       input.scope.some(
-        (ref) => !allowed.has(refKey(ref)) || !turn.has(refKey(ref)),
+        (ref) =>
+          !workspaceAllowed(ref) ||
+          (turn !== undefined && !turn.has(refKey(ref))),
       )
     )
       throw new Error("Choose an authorized task scope.");
@@ -1578,7 +1713,8 @@ export function createAssistantService(options: {
           directory: childDirectory,
           context: baseContext,
           taskRun,
-          globalAllowed: () => state.config.allowed_workspaces,
+          globalWorkspaceAllowed: workspaceAllowed,
+          refreshGlobalScope: workspaceCatalog,
           globalApprovalMode: () => state.config.approval_mode,
           sendNotification: options.notify
             ? (notification, signal) =>
@@ -1632,6 +1768,7 @@ export function createAssistantService(options: {
       await tasks?.resume();
     },
     peek: current,
+    workspaceCatalog,
     async taskDetail(params) {
       if (disposed || !tasks) throw new Error("Ranger tasks unavailable");
       if (
@@ -1828,15 +1965,23 @@ export function createAssistantService(options: {
         }
         case "configure_approval": {
           if (
-            Object.keys(params).some((key) => key !== "approval_mode") ||
+            Object.keys(params).some(
+              (key) => !["approval_mode", "workspace_scope"].includes(key),
+            ) ||
             (params.approval_mode !== "manual" &&
-              params.approval_mode !== "auto")
+              params.approval_mode !== "auto") ||
+            (params.workspace_scope !== undefined &&
+              (params.workspace_scope !== "all" ||
+                params.approval_mode !== "auto"))
           )
             throw new Error("Invalid approval mode");
           if (params.approval_mode === "auto") idle();
           const approval_mode = params.approval_mode;
           const previous = state.config;
           state.config = { ...previous, approval_mode };
+          delete state.config.workspace_scope;
+          if (params.workspace_scope === "all")
+            state.config.workspace_scope = "all";
           try {
             persist();
           } catch {
@@ -1875,6 +2020,7 @@ export function createAssistantService(options: {
                     "provider",
                     "model",
                     "models",
+                    "reasoning",
                     "base_url",
                     "api",
                     "api_key",
@@ -1909,7 +2055,9 @@ export function createAssistantService(options: {
                 (!models.includes(model) ||
                   models.some((id) => /[\u0000-\u001f\u007f]/.test(id)))) ||
               !isAssistantModelEndpoint(base_url) ||
-              !isAssistantModelApi(params.api)
+              !isAssistantModelApi(params.api) ||
+              (params.reasoning !== undefined &&
+                typeof params.reasoning !== "boolean")
             )
               throw new Error("Invalid model connection");
             const api_key =
@@ -1926,6 +2074,9 @@ export function createAssistantService(options: {
                 provider,
                 model,
                 ...(models ? { models } : {}),
+                ...(params.reasoning !== undefined
+                  ? { reasoning: params.reasoning }
+                  : {}),
                 base_url,
                 api: params.api,
                 api_key,
@@ -1956,7 +2107,11 @@ export function createAssistantService(options: {
           );
           changing = true;
           try {
+            await workspaceCatalog();
             const previous = state.config;
+            next.allowed_workspaces = next.allowed_workspaces.filter(
+              (ref) => !workspaceRemoved(ref),
+            );
             const existing = new Set(previous.allowed_workspaces.map(refKey));
             const added = next.allowed_workspaces.filter(
               (ref) => !existing.has(refKey(ref)),
@@ -1983,7 +2138,13 @@ export function createAssistantService(options: {
             saveChange(() => {
               state.config = config({
                 ...next,
+                allowed_workspaces: next.allowed_workspaces.filter(
+                  (ref) =>
+                    added.some((item) => refKey(item) === refKey(ref)) ||
+                    !workspaceRemoved(ref),
+                ),
                 approval_mode: state.config.approval_mode,
+                workspace_scope: state.config.workspace_scope,
               });
               cancelPendingActions(
                 "The Ranger configuration changed. Ask for a fresh preview.",

@@ -42,6 +42,9 @@ import {
   assistantActionExecuting,
   callAssistant,
   parseAssistantContext,
+  permittedAssistantWorkspaces,
+  pruneAssistantWorkspaceRefs,
+  reconcileAssistantConfig,
   readAssistantState,
   refreshAssistant,
   sendAssistant,
@@ -240,6 +243,7 @@ function AssistantModelForm({
   const [baseUrl, setBaseUrl] = useState(custom?.base_url ?? "");
   const [api, setApi] = useState(custom?.api ?? "openai-completions");
   const [apiKey, setApiKey] = useState("");
+  const [reasoning, setReasoning] = useState("preserve");
   const models = [
     ...new Set(
       model
@@ -251,6 +255,12 @@ function AssistantModelForm({
   const keySaved = providers.some(
     (item) => item.id === providerId.trim() && item.configured,
   );
+  const savedReasoning =
+    providerId.trim() === selectedModel?.provider &&
+    models.length === 1 &&
+    models[0] === selectedModel.id
+      ? selectedModel.custom?.reasoning
+      : undefined;
   return (
     <details className="assistant-custom-model">
       <summary>
@@ -274,10 +284,15 @@ function AssistantModelForm({
               base_url: baseUrl.trim(),
               api,
               ...(apiKey ? { api_key: apiKey } : {}),
+              ...(reasoning !== "preserve"
+                ? { reasoning: reasoning === "enabled" }
+                : {}),
               credential_source: config.credential_source,
             })
-          )
+          ) {
             setApiKey("");
+            setReasoning("preserve");
+          }
         }}
       >
         <label className="form-field">
@@ -340,6 +355,31 @@ function AssistantModelForm({
           One ID per line, or separated by commas. Up to{" "}
           {ASSISTANT_MAX_CUSTOM_MODELS} IDs, 500 characters each. The first ID
           will be selected.
+        </p>
+        <label className="form-field">
+          <span>Reasoning capability</span>
+          <ThemedSelect
+            aria-label="Custom reasoning capability"
+            value={reasoning}
+            options={[
+              {
+                value: "preserve",
+                label:
+                  savedReasoning === undefined
+                    ? "Keep existing / model defaults"
+                    : `Keep current (reasoning ${savedReasoning ? "enabled" : "disabled"})`,
+              },
+              { value: "enabled", label: "Enable reasoning for all IDs" },
+              { value: "disabled", label: "Disable reasoning for all IDs" },
+            ]}
+            onChange={setReasoning}
+          />
+        </label>
+        <p className="assistant-hint">
+          Keep existing / model defaults preserves each model's settings. New
+          unknown models default to no reasoning. Enable only if your endpoint
+          supports reasoning for every ID above; this makes the Effort control
+          available.
         </p>
         <label className="form-field">
           <span>API key</span>
@@ -779,6 +819,7 @@ export function AssistantPanel({
   const [confirmApproval, setConfirmApproval] = useState(false);
   const [panelWidth, setPanelWidth] = useState(380);
   const [maximumWidth, setMaximumWidth] = useState(380);
+  const [contextTruncated, setContextTruncated] = useState(false);
   useEffect(() => {
     if (!requestedTask) return;
     setSettingsOpen(false);
@@ -791,6 +832,16 @@ export function AssistantPanel({
   const composing = useRef(false);
   const pendingAction = useRef(false);
   const contextSequence = useRef(0);
+  const savedWorkspaceGrants = JSON.stringify([
+    snapshot?.instance_id,
+    snapshot?.config.allowed_workspaces,
+  ]);
+  const latestSavedWorkspaceGrants = useRef(savedWorkspaceGrants);
+  latestSavedWorkspaceGrants.current = savedWorkspaceGrants;
+  const previousConfig = useRef<{
+    instanceId: string;
+    config: AssistantConfig;
+  } | null>(null);
   const panelRef = useRef<HTMLElement>(null);
   const resizeStart = useRef<{
     pointerId: number;
@@ -833,8 +884,13 @@ export function AssistantPanel({
         thinking_level: snapshot.config.thinking_level,
         credential_source: snapshot.config.credential_source,
         allowed_workspaces: snapshot.config.allowed_workspaces,
+        approval_mode: snapshot.config.approval_mode,
+        workspace_scope: snapshot.config.workspace_scope,
       })
     : "";
+  const highPermission = snapshot?.config.approval_mode === "auto";
+  const allWorkspacesAllowed =
+    highPermission && snapshot?.config.workspace_scope === "all";
   const connected = state.connectionStatus === "connected";
   const ready = !!snapshot && connectionReady(snapshot);
   const showSettings = settingsOpen ?? (!!snapshot && !ready);
@@ -855,25 +911,49 @@ export function AssistantPanel({
     .filter((action) => !["pending", "executing"].includes(action.status))
     .map((action) => `${action.id}:${action.status}`)
     .join(",");
-  const authorizedScope = (available: AssistantWorkspaceRef[]) =>
-    (snapshot?.config.allowed_workspaces ?? [])
-      .filter((workspace) => includesWorkspace(available, workspace))
-      .map(({ connection_id, workspace_id }) => ({
+  const authorizedScope = (
+    available: AssistantWorkspaceRef[],
+    config = snapshot?.config,
+  ) =>
+    permittedAssistantWorkspaces(config, available).map(
+      ({ connection_id, workspace_id }) => ({
         connection_id,
         workspace_id,
-      }));
-  const scope = authorizedScope(workspaces);
+      }),
+    );
+  const scope =
+    allWorkspacesAllowed && contextTruncated ? [] : authorizedScope(workspaces);
+  const truncatedScopeMessage =
+    "The workspace list exceeds Ranger's limit. High-permission questions require the full list. Reduce the number of workspaces or turn off high-permission mode and select a smaller scope.";
   const unavailableScopeMessage =
-    "No authorized workspaces are currently available. Reconnect or refresh in Ranger settings.";
+    allWorkspacesAllowed && contextTruncated
+      ? truncatedScopeMessage
+      : "No authorized workspaces are currently available. Reconnect or refresh in Ranger settings.";
 
   useEffect(() => {
     if (!savedConfig) return;
-    setConfig(JSON.parse(savedConfig) as AssistantConfig);
-  }, [savedConfig]);
+    const saved = JSON.parse(savedConfig) as AssistantConfig;
+    const previous = previousConfig.current;
+    setConfig((draft) =>
+      reconcileAssistantConfig(
+        draft,
+        previous && previous.instanceId === snapshot?.instance_id
+          ? previous.config
+          : undefined,
+        saved,
+      ),
+    );
+    previousConfig.current = {
+      instanceId: snapshot!.instance_id,
+      config: saved,
+    };
+  }, [savedConfig, snapshot?.instance_id]);
 
   const loadContext = async () => {
     if (!connected || !state.supported) return;
     const sequence = ++contextSequence.current;
+    const requestedSavedGrants = savedWorkspaceGrants;
+    const requestedDraftGrants = JSON.stringify(config?.allowed_workspaces);
     setContextLoading(true);
     setContextErrors([]);
     try {
@@ -883,8 +963,34 @@ export function AssistantPanel({
       if (sequence === contextSequence.current) {
         setWorkspaces(result.workspaces);
         setContextErrors(result.errors);
+        setContextTruncated(result.truncated ?? false);
+        setConfig((draft) => {
+          const current = readAssistantState().snapshot;
+          const currentSavedGrants = current
+            ? JSON.stringify([
+                current.instance_id,
+                current.config.allowed_workspaces,
+              ])
+            : latestSavedWorkspaceGrants.current;
+          // A complete listing still predates grants checked locally or pushed
+          // from another client while this request was in flight. Only prune
+          // the unchanged draft that the request originally observed.
+          if (
+            !draft ||
+            requestedSavedGrants !== currentSavedGrants ||
+            requestedDraftGrants !== JSON.stringify(draft.allowed_workspaces)
+          )
+            return draft;
+          return {
+            ...draft,
+            allowed_workspaces: pruneAssistantWorkspaceRefs(
+              draft.allowed_workspaces,
+              result,
+            ),
+          };
+        });
       }
-      return result.workspaces;
+      return result;
     } catch (cause) {
       if (sequence === contextSequence.current)
         setContextErrors([
@@ -903,7 +1009,14 @@ export function AssistantPanel({
     };
     // Refresh when hosts change or actions finish, keeping unsaved config intact.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, connected, state.supported, completedActions, connectionSignature]);
+  }, [
+    open,
+    connected,
+    state.supported,
+    completedActions,
+    connectionSignature,
+    snapshot?.instance_id,
+  ]);
 
   useEffect(() => {
     if (executing || snapshot?.running) {
@@ -997,7 +1110,13 @@ export function AssistantPanel({
         throw new Error(
           "The Ranger model settings changed. Check the selection before sending.",
         );
-      const scope = authorizedScope(available);
+      if (
+        current?.config.approval_mode === "auto" &&
+        current.config.workspace_scope === "all" &&
+        available.truncated
+      )
+        throw new Error(truncatedScopeMessage);
+      const scope = authorizedScope(available.workspaces, current?.config);
       if (!scope.length) throw new Error(unavailableScopeMessage);
       await sendAssistant(state.draft, scope);
     } catch (cause) {
@@ -1062,10 +1181,9 @@ export function AssistantPanel({
     (model) =>
       model.provider === config?.provider && model.id === config?.model,
   );
-  const permittedWorkspaces = workspaces.filter(
-    (workspace) =>
-      !!snapshot &&
-      includesWorkspace(snapshot.config.allowed_workspaces, workspace),
+  const permittedWorkspaces = permittedAssistantWorkspaces(
+    snapshot?.config,
+    workspaces,
   );
   const allAllowedWorkspaces = Array.from(
     new Map(
@@ -1175,10 +1293,20 @@ export function AssistantPanel({
             {snapshot?.config.approval_mode === "auto" ? (
               <span
                 className="assistant-panel-access"
-                aria-label="High-permission mode enabled"
-                title="High-permission mode enabled"
+                aria-label={
+                  allWorkspacesAllowed
+                    ? "High permission: all workspaces"
+                    : "High permission: selected workspaces"
+                }
+                title={
+                  allWorkspacesAllowed
+                    ? "High permission: all current and future workspaces"
+                    : "High permission: selected workspaces"
+                }
               >
-                Full access
+                {allWorkspacesAllowed
+                  ? "Full access"
+                  : "High permission: selected workspaces"}
               </span>
             ) : (
               <span className="assistant-panel-experimental">Experimental</span>
@@ -1569,12 +1697,18 @@ export function AssistantPanel({
           <div className="assistant-section-heading">
             <h3>High-permission mode</h3>
             <span className="assistant-hint">
-              {snapshot.config.approval_mode === "auto" ? "Enabled" : "Off"}
+              {allWorkspacesAllowed
+                ? "All workspaces"
+                : highPermission
+                  ? "Selected workspaces"
+                  : "Off"}
             </span>
           </div>
           <p className="assistant-hint">
-            Skip action and schedule confirmations in authorized workspaces. New
-            or edited tasks keep this mode; started operations may finish.
+            {highPermission && !allWorkspacesAllowed
+              ? "High permission currently applies only to your selected workspaces. Enable all-workspace access below to include every current and future workspace."
+              : "Automatically allow every current and future workspace and skip action and schedule confirmations."}{" "}
+            New or edited tasks keep this mode; started operations may finish.
           </p>
           <button
             type="button"
@@ -1596,6 +1730,21 @@ export function AssistantPanel({
               ? "Disable high-permission mode"
               : "Enable high-permission mode"}
           </button>
+          {highPermission && !allWorkspacesAllowed ? (
+            <button
+              type="button"
+              disabled={
+                busy ||
+                !connected ||
+                !!authPending ||
+                executing ||
+                snapshot.running
+              }
+              onClick={() => setConfirmApproval(true)}
+            >
+              Enable high permission for all workspaces
+            </button>
+          ) : null}
           <div className="assistant-section-heading">
             <h3>Allowed workspaces</h3>
             <button
@@ -1609,53 +1758,58 @@ export function AssistantPanel({
             </button>
           </div>
           <p className="assistant-hint">
-            Select workspaces Ranger may read and manage. Each question uses
-            saved authorized workspaces that are currently available. Actions
-            require confirmation unless high-permission mode is enabled.
-            Selected status, conversations, terminal output, and diffs may be
+            {allWorkspacesAllowed
+              ? "All current and future workspaces are allowed automatically. Turn off high-permission mode to restore your manual workspace selection."
+              : highPermission
+                ? "Select workspaces Ranger may read and manage. Each question uses saved authorized workspaces that are currently available. Supported actions execute automatically in these selected workspaces."
+                : "Select workspaces Ranger may read and manage. Each question uses saved authorized workspaces that are currently available. Actions require confirmation."}{" "}
+            Workspace status, conversations, terminal output, and diffs may be
             sent to your model provider.
           </p>
-          <div className="assistant-workspace-actions">
-            <button
-              type="button"
-              aria-label="Select all available Ranger workspaces"
-              disabled={
-                contextLoading ||
-                operationBusy ||
-                snapshot.running ||
-                !connected ||
-                !workspaces.length ||
-                allAllowedWorkspaces.length > ASSISTANT_MAX_WORKSPACES ||
-                workspaces.every((workspace) =>
-                  includesWorkspace(config.allowed_workspaces, workspace),
-                )
-              }
-              onClick={() =>
-                setConfig({
-                  ...config,
-                  allowed_workspaces: allAllowedWorkspaces,
-                })
-              }
-            >
-              Select all
-            </button>
-            <button
-              type="button"
-              className="ghost"
-              aria-label="Clear allowed Ranger workspaces"
-              disabled={
-                contextLoading ||
-                operationBusy ||
-                snapshot.running ||
-                !connected ||
-                !config.allowed_workspaces.length
-              }
-              onClick={() => setConfig({ ...config, allowed_workspaces: [] })}
-            >
-              Clear
-            </button>
-          </div>
-          {allAllowedWorkspaces.length > ASSISTANT_MAX_WORKSPACES ? (
+          {!allWorkspacesAllowed ? (
+            <div className="assistant-workspace-actions">
+              <button
+                type="button"
+                aria-label="Select all available Ranger workspaces"
+                disabled={
+                  contextLoading ||
+                  operationBusy ||
+                  snapshot.running ||
+                  !connected ||
+                  !workspaces.length ||
+                  allAllowedWorkspaces.length > ASSISTANT_MAX_WORKSPACES ||
+                  workspaces.every((workspace) =>
+                    includesWorkspace(config.allowed_workspaces, workspace),
+                  )
+                }
+                onClick={() =>
+                  setConfig({
+                    ...config,
+                    allowed_workspaces: allAllowedWorkspaces,
+                  })
+                }
+              >
+                Select all
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                aria-label="Clear allowed Ranger workspaces"
+                disabled={
+                  contextLoading ||
+                  operationBusy ||
+                  snapshot.running ||
+                  !connected ||
+                  !config.allowed_workspaces.length
+                }
+                onClick={() => setConfig({ ...config, allowed_workspaces: [] })}
+              >
+                Clear
+              </button>
+            </div>
+          ) : null}
+          {!allWorkspacesAllowed &&
+          allAllowedWorkspaces.length > ASSISTANT_MAX_WORKSPACES ? (
             <p className="assistant-hint">
               {`Select up to ${ASSISTANT_MAX_WORKSPACES} workspaces individually; Select all exceeds this limit.`}
             </p>
@@ -1671,14 +1825,15 @@ export function AssistantPanel({
               >
                 <input
                   type="checkbox"
-                  checked={includesWorkspace(
-                    config.allowed_workspaces,
-                    workspace,
-                  )}
+                  checked={
+                    allWorkspacesAllowed ||
+                    includesWorkspace(config.allowed_workspaces, workspace)
+                  }
                   disabled={
-                    config.allowed_workspaces.length >=
+                    allWorkspacesAllowed ||
+                    (config.allowed_workspaces.length >=
                       ASSISTANT_MAX_WORKSPACES &&
-                    !includesWorkspace(config.allowed_workspaces, workspace)
+                      !includesWorkspace(config.allowed_workspaces, workspace))
                   }
                   onChange={() =>
                     setConfig({
@@ -1703,38 +1858,14 @@ export function AssistantPanel({
                   : "No connected workspaces available"}
               </span>
             ) : null}
-            {config.allowed_workspaces
-              .filter(
-                (workspace) =>
-                  !workspaces.some(
-                    (item) => workspaceKey(item) === workspaceKey(workspace),
-                  ),
-              )
-              .map((workspace) => (
-                <label
-                  key={workspaceKey(workspace)}
-                  className="assistant-workspace-choice"
-                >
-                  <input
-                    type="checkbox"
-                    checked
-                    onChange={() =>
-                      setConfig({
-                        ...config,
-                        allowed_workspaces: toggleWorkspace(
-                          config.allowed_workspaces,
-                          workspace,
-                        ),
-                      })
-                    }
-                  />
-                  <span>
-                    {workspace.workspace_id}
-                    <small>Unavailable ({workspace.connection_id})</small>
-                  </span>
-                </label>
-              ))}
           </fieldset>
+          {contextTruncated ? (
+            <p className="assistant-hint" role="alert">
+              {allWorkspacesAllowed
+                ? truncatedScopeMessage
+                : "Only part of the workspace list is available. Refresh after reducing the number of workspaces."}
+            </p>
+          ) : null}
           {contextErrors.map((message) => (
             <p key={message} className="assistant-hint">
               {message}
@@ -1812,7 +1943,8 @@ export function AssistantPanel({
                   ? "Provider sign-in is in progress. Open model settings to continue."
                   : !ready
                     ? "Connect a provider and choose a model to send messages."
-                    : !snapshot.config.allowed_workspaces.length
+                    : !allWorkspacesAllowed &&
+                        !snapshot.config.allowed_workspaces.length
                       ? "Allow workspaces in Ranger settings to send messages."
                       : contextLoading
                         ? "Loading authorized workspaces"
@@ -2127,10 +2259,13 @@ export function AssistantPanel({
       <ConfirmDialog
         open={confirmApproval}
         title="Enable high-permission mode?"
-        message="Ranger can run supported operations and create schedules without approval in authorized workspaces. Operations may run setup hooks or start agents. Applies to new questions and new or edited tasks until disabled."
+        message="Ranger will be allowed to read and manage all current and future workspaces across your connections. Workspace status, conversations, terminal output, and diffs may be sent to your selected model provider. Ranger can run supported operations and create schedules without approval, including setup hooks and starting agents. Applies to new questions and new or edited tasks until disabled. Disabling restores your manual workspace selection."
         confirmLabel="Enable high-permission mode"
         onConfirm={() =>
-          void run("configure_approval", { approval_mode: "auto" })
+          void run("configure_approval", {
+            approval_mode: "auto",
+            workspace_scope: "all",
+          })
         }
         onClose={() => setConfirmApproval(false)}
       />

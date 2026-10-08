@@ -2056,3 +2056,284 @@ test("Pi durable resolves an unsupported off default using the SDK's model capab
     await f.cleanup();
   }
 });
+
+test("custom model reasoning edits preserve mixed batches, imported maps and overriding declarations", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "roamgate-custom-reasoning-"));
+  const path = join(directory, "models.json");
+  const saved = {
+    providers: {
+      custom: {
+        api: "openai-responses",
+        baseUrl: "http://127.0.0.1:1234/v1",
+        apiKey: "synthetic-test-key",
+        models: [
+          { id: "legacy", name: "Legacy model", contextWindow: 8192 },
+          { id: "disabled", reasoning: false },
+          {
+            id: "reasoner",
+            reasoning: true,
+            thinkingLevelMap: { off: null, minimal: null, xhigh: "xhigh" },
+          },
+          { id: "overridden", reasoning: true },
+        ],
+        modelOverrides: {
+          overridden: { reasoning: false, maxTokens: 2048 },
+          reasoner: { contextWindow: 4096 },
+        },
+      },
+      other: {
+        api: "openai-completions",
+        baseUrl: "http://127.0.0.1:9999/v1",
+        apiKey: "synthetic-other-key",
+        models: [{ id: "other", reasoning: false }],
+      },
+    },
+  };
+  writeFileSync(path, JSON.stringify(saved));
+  const driver = createPiDriver(directory);
+  const save = (path: string, value: unknown) =>
+    writeFileSync(path, JSON.stringify(value));
+  const input = {
+    credential_source: "assistant" as const,
+    provider: "custom",
+    model: "legacy",
+    base_url: saved.providers.custom.baseUrl,
+    api: "openai-responses" as const,
+  };
+  try {
+    const before = await driver.catalog("assistant");
+    expect(
+      before.models.find((model) => model.id === "legacy")?.thinking_levels,
+    ).toEqual(["off"]);
+    expect(
+      before.models.find((model) => model.id === "legacy")?.custom?.reasoning,
+    ).toBeUndefined();
+    expect(
+      before.models.find((model) => model.id === "overridden")?.custom
+        ?.reasoning,
+    ).toBe(false);
+    await driver.configureModel!(
+      {
+        ...input,
+        models: ["legacy", "disabled", "reasoner", "overridden", "new"],
+      },
+      save,
+    );
+    let updated = JSON.parse(readFileSync(path, "utf8"));
+    expect(updated.providers.custom.modelOverrides).toEqual(
+      saved.providers.custom.modelOverrides,
+    );
+    expect(
+      updated.providers.custom.models.map(
+        (model: { reasoning?: boolean }) => model.reasoning,
+      ),
+    ).toEqual([undefined, false, true, true, undefined]);
+    expect(updated.providers.other).toEqual(saved.providers.other);
+    await driver.configureModel!(
+      {
+        ...input,
+        models: ["legacy", "overridden", "new-reasoner"],
+        reasoning: true,
+      },
+      save,
+    );
+    updated = JSON.parse(readFileSync(path, "utf8"));
+    expect(updated.providers.custom.models[0]).toMatchObject({
+      ...saved.providers.custom.models[0],
+      reasoning: true,
+    });
+    expect(updated.providers.custom.models[1].reasoning).toBe(false);
+    expect(updated.providers.custom.models[2].thinkingLevelMap).toEqual(
+      saved.providers.custom.models[2]!.thinkingLevelMap,
+    );
+    expect(updated.providers.custom.modelOverrides).toEqual({
+      ...saved.providers.custom.modelOverrides,
+      overridden: { reasoning: true, maxTokens: 2048 },
+    });
+    const enabled = await driver.catalog("assistant");
+    for (const id of ["legacy", "overridden", "new-reasoner"])
+      expect(enabled.models.find((model) => model.id === id)).toMatchObject({
+        custom: { reasoning: true },
+        thinking_levels: ["off", "minimal", "low", "medium", "high"],
+      });
+    expect(
+      enabled.models.find((model) => model.id === "reasoner")?.thinking_levels,
+    ).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(
+      enabled.models.find((model) => model.id === "disabled")?.thinking_levels,
+    ).toEqual(["off"]);
+    await driver.configureModel!(
+      { ...input, model: "overridden", reasoning: false },
+      save,
+    );
+    expect(
+      (await driver.catalog("assistant")).models.find(
+        (model) => model.id === "overridden",
+      ),
+    ).toMatchObject({ custom: { reasoning: false }, thinking_levels: ["off"] });
+  } finally {
+    await driver.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  "openai-completions",
+  "openai-responses",
+  "anthropic-messages",
+] as const)(
+  "configured custom reasoning reaches the %s request",
+  async (api) => {
+    const directory = mkdtempSync(join(tmpdir(), "roamgate-reasoning-wire-"));
+    const requests: {
+      reasoning_effort?: string;
+      reasoning?: { effort?: string };
+      thinking?: { type: string; budget_tokens?: number };
+    }[] = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        requests.push((await request.json()) as (typeof requests)[number]);
+        if (api === "anthropic-messages")
+          return modelReply(requests.length, [
+            ...text("Done"),
+            ...finish("end_turn"),
+          ]);
+        const body =
+          api === "openai-completions"
+            ? `data: ${JSON.stringify({
+                id: `reply-${requests.length}`,
+                object: "chat.completion.chunk",
+                model: "unknown-reasoner",
+                choices: [
+                  {
+                    index: 0,
+                    delta: { role: "assistant", content: "Done" },
+                    finish_reason: "stop",
+                  },
+                ],
+                usage: {
+                  prompt_tokens: 10,
+                  completion_tokens: 1,
+                  total_tokens: 11,
+                },
+              })}\n\ndata: [DONE]\n\n`
+            : events([
+                {
+                  type: "response.output_item.added",
+                  output_index: 0,
+                  item: {
+                    id: "message-1",
+                    type: "message",
+                    role: "assistant",
+                    content: [],
+                  },
+                },
+                {
+                  type: "response.output_text.delta",
+                  output_index: 0,
+                  delta: "Done",
+                },
+                {
+                  type: "response.output_item.done",
+                  output_index: 0,
+                  item: {
+                    id: "message-1",
+                    type: "message",
+                    role: "assistant",
+                    content: [
+                      { type: "output_text", text: "Done", annotations: [] },
+                    ],
+                  },
+                },
+                {
+                  type: "response.completed",
+                  response: {
+                    id: `reply-${requests.length}`,
+                    status: "completed",
+                    output: [],
+                    usage: {
+                      input_tokens: 10,
+                      output_tokens: 1,
+                      total_tokens: 11,
+                    },
+                  },
+                },
+              ]);
+        return new Response(body, {
+          headers: { "content-type": "text/event-stream" },
+        });
+      },
+    });
+    const driver = createPiDriver(directory);
+    const save = (path: string, value: unknown) =>
+      writeFileSync(path, JSON.stringify(value));
+    const connection = {
+      provider: "local-wire",
+      model: "unknown-reasoner",
+      base_url: server.url.href,
+      api,
+      credential_source: "assistant" as const,
+    };
+    const messages: string[] = [];
+    const input: Parameters<AssistantDriver["run"]>[0] = {
+      config: { ...connection, allowed_workspaces: [] },
+      entries: [],
+      requestId: "high-effort",
+      text: "Reply Done.",
+      signal: new AbortController().signal,
+      read: async () => ({ text: "Unused" }),
+      delta: () => {},
+      message: (message) => messages.push(message),
+      tool: () => {},
+      error: () => {},
+    };
+    try {
+      await driver.configureModel!(
+        { ...connection, api_key: "synthetic-local-key" },
+        save,
+      );
+      expect(
+        (await driver.catalog("assistant")).models[0]?.thinking_levels,
+      ).toEqual(["off"]);
+      await driver.configureModel!({ ...connection, reasoning: true }, save);
+      const entries = await driver.run({
+        ...input,
+        config: { ...input.config, thinking_level: "high" },
+      });
+      expect(messages).toEqual(["Done"]);
+      expect(requests).toHaveLength(1);
+      if (api === "openai-completions")
+        expect(requests[0]!.reasoning_effort).toBe("high");
+      else if (api === "openai-responses")
+        expect(requests[0]!.reasoning?.effort).toBe("high");
+      else
+        expect(requests[0]!.thinking).toMatchObject({
+          type: "enabled",
+          budget_tokens: 15360,
+        });
+      await driver.run({ ...input, entries, requestId: "default-effort" });
+      expect(messages).toEqual(["Done", "Done"]);
+      expect(requests).toHaveLength(2);
+      if (api === "openai-completions")
+        expect(requests[1]!.reasoning_effort).toBeUndefined();
+      else if (api === "openai-responses")
+        expect(requests[1]!.reasoning?.effort).toBe("none");
+      else expect(requests[1]!.thinking).toEqual({ type: "disabled" });
+      await driver.configureModel!({ ...connection, reasoning: false }, save);
+      await expect(
+        driver.run({
+          ...input,
+          requestId: "disabled-effort",
+          config: { ...input.config, thinking_level: "high" },
+        }),
+      ).rejects.toThrow("not supported");
+      expect(requests).toHaveLength(2);
+    } finally {
+      await driver.dispose();
+      server.stop(true);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);

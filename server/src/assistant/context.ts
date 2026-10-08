@@ -3,6 +3,7 @@ import type {
   AssistantActionKind,
   AssistantSource,
   AssistantWorkspace,
+  AssistantWorkspaceCatalog,
   AssistantWorkspaceRef,
 } from "../../../shared/assistant";
 import { ASSISTANT_MAX_WORKSPACES } from "../../../shared/assistant";
@@ -19,9 +20,9 @@ import {
   ASSISTANT_MAX_TERMINAL_LINES,
 } from "./tools";
 
+const MAX_SCOPE_READS = 8;
 const MAX_ITEMS = 80;
 const MAX_TEXT = 32_000;
-const MAX_CATALOG_WORKSPACES = 512;
 const INCOMPLETE_NOTICE =
   "Some data was truncated. This is partial evidence; do not infer that omitted records do not exist.";
 
@@ -90,6 +91,42 @@ function relativePath(value: unknown): string {
   const path = sanitizeExplorerPath(value);
   if (!path) throw new Error("Diff path must be a relative workspace path");
   return path;
+}
+
+/** Keep admission reads bounded, ordered and fail-closed without queued work escaping. */
+async function mapScopeReads<T, R>(
+  items: readonly T[],
+  read: (item: T, index: number, signal: AbortSignal) => Promise<R>,
+  signal?: AbortSignal,
+): Promise<R[]> {
+  signal?.throwIfAborted();
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  signal?.addEventListener("abort", abort, { once: true });
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function worker() {
+    while (!controller.signal.aborted && next < items.length) {
+      const index = next++;
+      try {
+        results[index] = await read(items[index]!, index, controller.signal);
+      } catch (error) {
+        // Preserve the first failure and stop every leased read and queued item.
+        controller.abort(error);
+      }
+    }
+  }
+  try {
+    // Only these fixed workers are concurrent. Leased reads stop promptly on
+    // abort; uncancellable transport calls are still bounded by this limit.
+    await Promise.all(
+      Array.from({ length: Math.min(MAX_SCOPE_READS, items.length) }, worker),
+    );
+    controller.signal.throwIfAborted();
+    return results;
+  } finally {
+    signal?.removeEventListener("abort", abort);
+  }
 }
 
 export function createAssistantContext(args: {
@@ -174,22 +211,24 @@ export function createAssistantContext(args: {
     return item;
   }
 
-  async function catalog(): Promise<{
-    workspaces: AssistantWorkspace[];
-    errors: string[];
-  }> {
-    const connections = args.catalog();
+  async function catalog(): Promise<AssistantWorkspaceCatalog> {
+    const connections = args.catalog().map(({ id, label }) => ({ id, label }));
     const settled = await Promise.allSettled(
       connections.map(async (connection) => {
         const connectionId = identifier(connection.id, "connection_id");
         const lease = args.lease(connectionId);
         if (!lease)
           return {
+            connectionId,
+            lease,
+            endpoint: undefined,
+            truncated: false,
             workspaces: [],
             errors: [
               `Connection ${limitedText(connection.label)} is not ready`,
             ],
           };
+        const endpoint = fingerprint(connectionId);
         const payload = await readLeased(
           lease,
           () => lease.runtime.herdr.call("workspace.list", {}, 5000),
@@ -197,43 +236,87 @@ export function createAssistantContext(args: {
         );
         if (!Array.isArray(payload?.workspaces))
           throw new Error("Invalid workspace list");
-        const listed = records(payload.workspaces);
-        return {
-          workspaces: listed.slice(0, MAX_CATALOG_WORKSPACES).map(
-            (item): AssistantWorkspace => ({
+        const seen = new Set<string>();
+        const truncated = payload.workspaces.length > ASSISTANT_MAX_WORKSPACES;
+        const listed = Array.from(
+          payload.workspaces.slice(0, ASSISTANT_MAX_WORKSPACES),
+          (item: unknown): AssistantWorkspace => {
+            if (!isRecord(item)) throw new Error("Invalid workspace list");
+            const workspaceId = identifier(item.workspace_id, "workspace_id");
+            if (seen.has(workspaceId))
+              throw new Error("Invalid workspace list");
+            seen.add(workspaceId);
+            return {
               connection_id: connectionId,
-              workspace_id: identifier(item.workspace_id, "workspace_id"),
+              workspace_id: workspaceId,
               connection_label: limitedText(connection.label),
               label: limitedText(item.label),
               runtime_generation: lease.generation,
-            }),
-          ),
-          errors:
-            listed.length > MAX_CATALOG_WORKSPACES
-              ? [
-                  `Workspace list for connection ${limitedText(connection.label)} was truncated to ${MAX_CATALOG_WORKSPACES} entries`,
-                ]
-              : [],
+            };
+          },
+        );
+        return {
+          connectionId,
+          lease,
+          endpoint,
+          truncated,
+          workspaces: listed,
+          errors: truncated
+            ? [
+                `Workspace list for connection ${limitedText(connection.label)} was truncated to ${ASSISTANT_MAX_WORKSPACES} entries`,
+              ]
+            : [],
         };
       }),
     );
+    // A new connection may have been configured while another list was pending.
+    // Use the current snapshot so its saved selection cannot be mistaken for a
+    // removed connection, and recheck every successful lease at this boundary.
+    const connectionIds = new Set(
+      args.catalog().map(({ id }) => identifier(id, "connection_id")),
+    );
     const workspaces: AssistantWorkspace[] = [];
     const errors: string[] = [];
+    const completeConnectionIds: string[] = [];
+    let truncated = false;
     settled.forEach((result, index) => {
       if (result.status === "fulfilled") {
-        workspaces.push(...result.value.workspaces);
-        errors.push(...result.value.errors);
-      } else {
-        errors.push(
-          `Unable to list workspaces for connection ${limitedText(connections[index]?.label)}`,
-        );
+        const listed = result.value;
+        if (!listed.lease) {
+          errors.push(...listed.errors);
+          return;
+        }
+        if (
+          connectionIds.has(listed.connectionId) &&
+          listed.lease.isCurrent() &&
+          fingerprint(listed.connectionId) === listed.endpoint
+        ) {
+          workspaces.push(...listed.workspaces);
+          errors.push(...listed.errors);
+          truncated ||= listed.truncated;
+          if (!listed.truncated)
+            completeConnectionIds.push(listed.connectionId);
+          return;
+        }
       }
-    });
-    if (workspaces.length > MAX_CATALOG_WORKSPACES)
       errors.push(
-        `Workspace catalog was truncated to ${MAX_CATALOG_WORKSPACES} entries`,
+        `Unable to list workspaces for connection ${limitedText(connections[index]?.label)}`,
       );
-    return { workspaces: workspaces.slice(0, MAX_CATALOG_WORKSPACES), errors };
+    });
+    if (workspaces.length > ASSISTANT_MAX_WORKSPACES) {
+      truncated = true;
+      completeConnectionIds.length = 0;
+      errors.push(
+        `Workspace catalog was truncated to ${ASSISTANT_MAX_WORKSPACES} entries`,
+      );
+    }
+    return {
+      workspaces: workspaces.slice(0, ASSISTANT_MAX_WORKSPACES),
+      errors,
+      connection_ids: [...connectionIds],
+      complete_connection_ids: completeConnectionIds,
+      truncated,
+    };
   }
 
   async function captureScope(
@@ -260,56 +343,62 @@ export function createAssistantContext(args: {
     });
     const connections = args.catalog();
     const leases = new Map<string, RuntimeLease>();
-    const captured: AssistantWorkspace[] = [];
-    const identities: string[] = [];
-    const checkedConnections = new Set<string>();
+    const bootIds = new Map<string, Promise<string | null>>();
     const seen = new Set<string>();
-    for (const ref of requested) {
-      const connectionId = ref.connection_id;
-      const workspaceId = ref.workspace_id;
-      const key = `${connectionId}\0${workspaceId}`;
-      if (seen.has(key)) throw new Error("Duplicate Ranger workspace scope");
-      seen.add(key);
-      const connection = connections.find((item) => item.id === connectionId);
-      if (!connection) throw new Error(`Unknown connection ${connectionId}`);
-      const expected = recoveryTargets?.[captured.length];
-      if (
-        expected &&
-        fingerprint(connectionId) !== expected.endpoint_fingerprint
-      )
-        throw new Error("Ranger recovery endpoint changed");
-      const lease = leases.get(connectionId) ?? args.lease(connectionId);
-      if (!lease) {
-        if (recoveryTargets)
-          throw new AssistantRecoveryNotReadyError(
-            `Connection ${connectionId} is not ready`,
-          );
-        throw new Error(`Connection ${connectionId} is not ready`);
-      }
-      leases.set(connectionId, lease);
-      if (expected) {
-        if (!checkedConnections.has(connectionId)) {
-          const bootId = await recoveryIdentity(lease, signal);
+    const validated = await mapScopeReads(
+      requested,
+      async (ref, index, readSignal) => {
+        const connectionId = ref.connection_id;
+        const workspaceId = ref.workspace_id;
+        const key = `${connectionId}\0${workspaceId}`;
+        if (seen.has(key)) throw new Error("Duplicate Ranger workspace scope");
+        seen.add(key);
+        const connection = connections.find((item) => item.id === connectionId);
+        if (!connection) throw new Error(`Unknown connection ${connectionId}`);
+        const expected = recoveryTargets?.[index];
+        if (
+          expected &&
+          fingerprint(connectionId) !== expected.endpoint_fingerprint
+        )
+          throw new Error("Ranger recovery endpoint changed");
+        const lease = leases.get(connectionId) ?? args.lease(connectionId);
+        if (!lease) {
+          if (recoveryTargets)
+            throw new AssistantRecoveryNotReadyError(
+              `Connection ${connectionId} is not ready`,
+            );
+          throw new Error(`Connection ${connectionId} is not ready`);
+        }
+        leases.set(connectionId, lease);
+        if (expected) {
+          let pending = bootIds.get(connectionId);
+          if (!pending) {
+            pending = recoveryIdentity(lease, readSignal);
+            bootIds.set(connectionId, pending);
+          }
+          const bootId = await pending;
           if (!bootId || bootId !== expected.herdr_boot_id)
             throw new Error("Ranger recovery server identity changed");
-          checkedConnections.add(connectionId);
         }
-      }
-      const item = await workspace(lease, workspaceId, signal);
-      const identity = workspaceIdentity(item);
-      if (expected && identity !== expected.workspace_identity)
-        throw new Error("Ranger recovery workspace changed");
-      identities.push(identity);
-      captured.push(
-        Object.freeze({
-          connection_id: connectionId,
-          workspace_id: workspaceId,
-          connection_label: limitedText(connection.label),
-          label: limitedText(item.label),
-          runtime_generation: lease.generation,
-        }),
-      );
-    }
+        const item = await workspace(lease, workspaceId, readSignal);
+        const identity = workspaceIdentity(item);
+        if (expected && identity !== expected.workspace_identity)
+          throw new Error("Ranger recovery workspace changed");
+        return {
+          identity,
+          workspace: Object.freeze({
+            connection_id: connectionId,
+            workspace_id: workspaceId,
+            connection_label: limitedText(connection.label),
+            label: limitedText(item.label),
+            runtime_generation: lease.generation,
+          }),
+        };
+      },
+      signal,
+    );
+    const captured = validated.map((item) => item.workspace);
+    const identities = validated.map((item) => item.identity);
     for (const lease of leases.values()) assertCurrent(lease, signal);
     for (const expected of recoveryTargets ?? [])
       if (fingerprint(expected.connection_id) !== expected.endpoint_fingerprint)
@@ -339,31 +428,46 @@ export function createAssistantContext(args: {
     const identities = workspaceIdentities.get(captured);
     if (!leases || !identities || !captured.length)
       throw new Error("Ranger workspace scope was not approved");
-    const targets: RecoveryTarget[] = [];
-    const bootIds = new Map<string, string>();
-    for (const [index, ref] of captured.entries()) {
-      const lease = leases.get(ref.connection_id)!;
-      assertCurrent(lease, signal);
-      const endpoint = fingerprint(ref.connection_id);
-      if (!endpoint) return [];
-      const bootId =
-        bootIds.get(ref.connection_id) ??
-        (await recoveryIdentity(lease, signal));
-      if (!bootId) return [];
-      bootIds.set(ref.connection_id, bootId);
-      if (
-        workspaceIdentity(await workspace(lease, ref.workspace_id, signal)) !==
-        identities[index]
-      )
-        throw new Error("Ranger recovery workspace changed");
-      targets.push({
-        connection_id: ref.connection_id,
-        workspace_id: ref.workspace_id,
-        endpoint_fingerprint: endpoint,
-        herdr_boot_id: bootId,
-        workspace_identity: identities[index]!,
-      });
-    }
+    const connectionIdentities = await mapScopeReads(
+      [...leases],
+      async ([connectionId, lease], _index, readSignal) => {
+        assertCurrent(lease, readSignal);
+        const endpoint = fingerprint(connectionId);
+        const bootId = endpoint
+          ? await recoveryIdentity(lease, readSignal)
+          : null;
+        return { connectionId, endpoint, bootId };
+      },
+      signal,
+    );
+    if (
+      connectionIdentities.some(({ endpoint, bootId }) => !endpoint || !bootId)
+    )
+      return [];
+    const byConnection = new Map(
+      connectionIdentities.map((identity) => [identity.connectionId, identity]),
+    );
+    const targets = await mapScopeReads(
+      captured,
+      async (ref, index, readSignal): Promise<RecoveryTarget> => {
+        const lease = leases.get(ref.connection_id)!;
+        const { endpoint, bootId } = byConnection.get(ref.connection_id)!;
+        if (
+          workspaceIdentity(
+            await workspace(lease, ref.workspace_id, readSignal),
+          ) !== identities[index]
+        )
+          throw new Error("Ranger recovery workspace changed");
+        return {
+          connection_id: ref.connection_id,
+          workspace_id: ref.workspace_id,
+          endpoint_fingerprint: endpoint!,
+          herdr_boot_id: bootId!,
+          workspace_identity: identities[index]!,
+        };
+      },
+      signal,
+    );
     for (const lease of leases.values()) assertCurrent(lease, signal);
     for (const target of targets)
       if (fingerprint(target.connection_id) !== target.endpoint_fingerprint)

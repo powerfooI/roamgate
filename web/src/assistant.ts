@@ -3,7 +3,8 @@ import {
   isAssistantSnapshot,
   isAssistantTaskDetail,
   type AssistantSnapshot,
-  type AssistantWorkspace,
+  type AssistantConfig,
+  type AssistantWorkspaceCatalog,
   type AssistantWorkspaceRef,
   type AssistantTaskDetail,
 } from "../../shared/assistant";
@@ -87,14 +88,15 @@ export function setAssistantDraft(draft: string) {
   publish({ draft });
 }
 
-export function parseAssistantContext(value: unknown): {
-  workspaces: AssistantWorkspace[];
-  errors: string[];
-} {
-  const result = value as {
-    workspaces?: AssistantWorkspace[];
-    errors?: string[];
-  } | null;
+export function parseAssistantContext(
+  value: unknown,
+): AssistantWorkspaceCatalog {
+  const result = value as Partial<AssistantWorkspaceCatalog> | null;
+  const connectionIdsValid = (ids: unknown) =>
+    ids === undefined ||
+    (Array.isArray(ids) &&
+      ids.every((id) => typeof id === "string" && !!id) &&
+      new Set(ids).size === ids.length);
   if (
     !Array.isArray(result?.workspaces) ||
     !result.workspaces.every(
@@ -109,12 +111,111 @@ export function parseAssistantContext(value: unknown): {
         Number.isSafeInteger(workspace.runtime_generation) &&
         workspace.runtime_generation >= 0,
     ) ||
+    !connectionIdsValid(result.connection_ids) ||
+    !connectionIdsValid(result.complete_connection_ids) ||
+    (result.truncated !== undefined && typeof result.truncated !== "boolean") ||
+    (result.connection_ids !== undefined &&
+      (result.workspaces.some(
+        (workspace) =>
+          !result.connection_ids!.includes(workspace.connection_id),
+      ) ||
+        result.complete_connection_ids?.some(
+          (id) => !result.connection_ids!.includes(id),
+        ))) ||
     (result.errors !== undefined &&
       (!Array.isArray(result.errors) ||
         !result.errors.every((error) => typeof error === "string")))
   )
     throw new Error("Invalid Ranger workspace list received from the bridge.");
-  return { workspaces: result.workspaces, errors: result.errors ?? [] };
+  return {
+    workspaces: result.workspaces,
+    errors: result.errors ?? [],
+    ...(result.connection_ids ? { connection_ids: result.connection_ids } : {}),
+    ...(result.complete_connection_ids
+      ? { complete_connection_ids: result.complete_connection_ids }
+      : {}),
+    ...(result.truncated !== undefined ? { truncated: result.truncated } : {}),
+  };
+}
+
+function sameWorkspace(
+  left: AssistantWorkspaceRef,
+  right: AssistantWorkspaceRef,
+) {
+  return (
+    left.connection_id === right.connection_id &&
+    left.workspace_id === right.workspace_id
+  );
+}
+
+// An absent workspace is only deleted when its connection was fully listed,
+// or when the authoritative connection inventory no longer contains its host.
+export function pruneAssistantWorkspaceRefs(
+  refs: AssistantWorkspaceRef[],
+  context: AssistantWorkspaceCatalog,
+) {
+  return refs.filter((ref) => {
+    if (
+      context.connection_ids &&
+      !context.connection_ids.includes(ref.connection_id)
+    )
+      return false;
+    return (
+      !context.complete_connection_ids?.includes(ref.connection_id) ||
+      context.workspaces.some((workspace) => sameWorkspace(ref, workspace))
+    );
+  });
+}
+
+export function permittedAssistantWorkspaces<T extends AssistantWorkspaceRef>(
+  config: AssistantConfig | undefined,
+  available: T[],
+): T[] {
+  return available.filter(
+    (workspace) =>
+      (config?.approval_mode === "auto" && config.workspace_scope === "all") ||
+      config?.allowed_workspaces.some((ref) => sameWorkspace(ref, workspace)),
+  );
+}
+
+// Context refreshes may prune saved permissions while settings have local edits.
+// Merge permission-only updates without resetting the model or draft selections.
+export function reconcileAssistantConfig(
+  draft: AssistantConfig | null,
+  previous: AssistantConfig | undefined,
+  saved: AssistantConfig,
+): AssistantConfig {
+  if (
+    !draft ||
+    !previous ||
+    ["provider", "model", "thinking_level", "credential_source"].some(
+      (key) =>
+        previous[key as keyof AssistantConfig] !==
+        saved[key as keyof AssistantConfig],
+    )
+  )
+    return saved;
+  return {
+    ...draft,
+    approval_mode: saved.approval_mode,
+    workspace_scope: saved.workspace_scope,
+    allowed_workspaces: [
+      ...draft.allowed_workspaces.filter(
+        (ref) =>
+          !previous.allowed_workspaces.some((item) =>
+            sameWorkspace(ref, item),
+          ) ||
+          saved.allowed_workspaces.some((item) => sameWorkspace(ref, item)),
+      ),
+      ...saved.allowed_workspaces.filter(
+        (ref) =>
+          !previous.allowed_workspaces.some((item) =>
+            sameWorkspace(ref, item),
+          ) &&
+          !draft.allowed_workspaces.some((item) => sameWorkspace(ref, item)),
+      ),
+    ],
+  };
 }
 
 export async function callAssistant(

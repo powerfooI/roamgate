@@ -1,4 +1,4 @@
-export const ASSISTANT_MAX_WORKSPACES = 64;
+export const ASSISTANT_MAX_WORKSPACES = 512;
 export const ASSISTANT_MAX_CUSTOM_MODELS = 100;
 export const ASSISTANT_MAX_TOOL_ARGUMENTS = 8_000;
 export const ASSISTANT_MAX_TOOL_OUTPUT = 16_000;
@@ -13,6 +13,16 @@ export type AssistantWorkspace = AssistantWorkspaceRef & {
   connection_label: string;
   label: string;
   runtime_generation: number;
+};
+
+export type AssistantWorkspaceCatalog = {
+  workspaces: AssistantWorkspace[];
+  errors: string[];
+  /** Current configured connections; absent on older bridges. */
+  connection_ids?: string[];
+  /** Connections whose workspace listings are complete and authoritative. */
+  complete_connection_ids?: string[];
+  truncated?: boolean;
 };
 
 export const ASSISTANT_THINKING_LEVELS = [
@@ -39,6 +49,8 @@ export type AssistantConfig = {
   credential_source: "assistant" | "pi";
   allowed_workspaces: AssistantWorkspaceRef[];
   approval_mode?: "manual" | "auto";
+  /** Explicit all-workspace consent; legacy auto alone retains selected scope. */
+  workspace_scope?: "all";
 };
 
 /** Compare selection rather than stream revisions to detect stale browser writes. */
@@ -57,6 +69,8 @@ export type AssistantModelConnection = {
   provider: string;
   model: string;
   models?: string[];
+  /** Explicit capability for every submitted model; omitted preserves declarations. */
+  reasoning?: boolean;
   base_url: string;
   api: AssistantModelApi;
   api_key?: string;
@@ -284,7 +298,11 @@ export type AssistantSnapshot = {
     label: string;
     thinking_levels?: AssistantThinkingLevel[];
     default_thinking_level?: AssistantThinkingLevel;
-    custom?: { base_url: string; api: AssistantModelApi };
+    custom?: {
+      base_url: string;
+      api: AssistantModelApi;
+      reasoning?: boolean;
+    };
   }[];
   messages: AssistantMessage[];
   running: boolean;
@@ -596,7 +614,10 @@ export function isAssistantSnapshot(
     (config.approval_mode !== undefined &&
       config.approval_mode !== "manual" &&
       config.approval_mode !== "auto") ||
+    (config.workspace_scope !== undefined &&
+      config.workspace_scope !== "all") ||
     !Array.isArray(config.allowed_workspaces) ||
+    config.allowed_workspaces.length > ASSISTANT_MAX_WORKSPACES ||
     !config.allowed_workspaces.every(workspaceRef) ||
     !Array.isArray(value.providers) ||
     !value.providers.every(
@@ -636,7 +657,9 @@ export function isAssistantSnapshot(
         (model.custom === undefined ||
           (record(model.custom) &&
             isAssistantModelEndpoint(model.custom.base_url) &&
-            isAssistantModelApi(model.custom.api))),
+            isAssistantModelApi(model.custom.api) &&
+            (model.custom.reasoning === undefined ||
+              typeof model.custom.reasoning === "boolean"))),
     ) ||
     (value.tasks !== undefined &&
       (!Array.isArray(value.tasks) ||

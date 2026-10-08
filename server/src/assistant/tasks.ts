@@ -15,6 +15,7 @@ import type {
   AssistantWorkspace,
 } from "../../../shared/assistant";
 import {
+  ASSISTANT_MAX_WORKSPACES,
   isAssistantSnapshot,
   isAssistantThinkingLevel,
 } from "../../../shared/assistant";
@@ -110,7 +111,7 @@ export function validateTaskInput(value: unknown): AssistantTaskInput {
       value.notification_mode !== "agent") ||
     !Array.isArray(value.scope) ||
     !value.scope.length ||
-    value.scope.length > 64
+    value.scope.length > ASSISTANT_MAX_WORKSPACES
   )
     throw new Error("Invalid task input");
   const scope = value.scope.map((ref) => {

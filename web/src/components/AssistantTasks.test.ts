@@ -302,6 +302,81 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
     };
   }
 
+  test("task editors hide removed workspace rows but require an explicit scope change", async () => {
+    const ui = await install();
+    try {
+      const missing = {
+        ...workspace,
+        workspace_id: "gone-project",
+        label: "Removed project",
+      };
+      const entry = task("existing", {
+        scope: [
+          {
+            connection_id: workspace.connection_id,
+            workspace_id: workspace.workspace_id,
+          },
+          {
+            connection_id: missing.connection_id,
+            workspace_id: missing.workspace_id,
+          },
+        ],
+        workspaces: [workspace, missing],
+      });
+      await ui.render({
+        ...snapshot(),
+        tasks: [entry],
+        config: {
+          ...snapshot().config,
+          approval_mode: "auto",
+          workspace_scope: "all",
+          allowed_workspaces: [],
+        },
+      });
+      await React.act(async () =>
+        ui.container
+          .querySelector<HTMLButtonElement>(".assistant-task-row")!
+          .click(),
+      );
+      await ui.click("Edit");
+      expect(
+        ui.container.querySelectorAll(
+          ".assistant-task-scope .assistant-workspace-choice",
+        ),
+      ).toHaveLength(1);
+      expect(
+        ui.container.querySelector(".assistant-task-scope")?.textContent,
+      ).not.toContain("Removed project");
+      expect(ui.container.textContent).toContain(
+        "The saved scope is unchanged",
+      );
+      expect(ui.container.textContent).toContain(
+        "All available workspaces are allowed",
+      );
+      expect(ui.button("Save changes").disabled).toBe(true);
+      await ui.submit();
+      expect(ui.call).not.toHaveBeenCalled();
+      expect(entry.scope).toHaveLength(2);
+      await ui.click("Remove unavailable selections");
+      expect(ui.button("Save changes").disabled).toBe(false);
+      await ui.submit();
+      expect(ui.call).toHaveBeenLastCalledWith(
+        "task.update",
+        expect.objectContaining({
+          task_id: "existing",
+          scope: [
+            {
+              connection_id: workspace.connection_id,
+              workspace_id: workspace.workspace_id,
+            },
+          ],
+        }),
+      );
+    } finally {
+      await ui.close();
+    }
+  });
+
   test("task forms require scope, convert local time, validate schedules and preserve paused edits", async () => {
     const ui = await install();
     try {

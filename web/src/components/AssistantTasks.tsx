@@ -129,6 +129,7 @@ function TaskForm({
   busy,
   ready,
   highPermission = false,
+  allWorkspacesAllowed = false,
   onSave,
   onCancel,
   onOpenSettings,
@@ -139,6 +140,7 @@ function TaskForm({
   busy: boolean;
   ready: boolean;
   highPermission?: boolean;
+  allWorkspacesAllowed?: boolean;
   onSave: (input: AssistantTaskInput) => Promise<void>;
   onCancel: () => void;
   onOpenSettings: () => void;
@@ -177,13 +179,12 @@ function TaskForm({
   useEffect(() => {
     if (active) nameRef.current?.focus({ preventScroll: true });
   }, [active]);
-  const choices = Array.from(
-    new Map(
-      [...workspaces, ...(task?.workspaces ?? [])].map((ref) => [
-        workspaceKey(ref),
-        ref,
-      ]),
-    ).values(),
+  const choices = workspaces;
+  const unavailableScope = scope.filter(
+    (ref) =>
+      !workspaces.some(
+        (workspace) => workspaceKey(ref) === workspaceKey(workspace),
+      ),
   );
   return (
     <form
@@ -191,7 +192,7 @@ function TaskForm({
       aria-label={task ? "Edit task" : "Create task"}
       onSubmit={async (event) => {
         event.preventDefault();
-        if (busy || !ready) return;
+        if (busy || !ready || unavailableScope.length) return;
         const date = new Date(at);
         const schedule: AssistantTaskSchedule =
           kind === "once"
@@ -360,12 +361,37 @@ function TaskForm({
         )}
         <fieldset className="assistant-task-scope">
           <legend>Workspaces</legend>
+          {allWorkspacesAllowed ? (
+            <p className="assistant-hint">
+              All available workspaces are allowed. Choose the workspaces this
+              task should use; its scope stays fixed when new workspaces appear.
+            </p>
+          ) : null}
+          {unavailableScope.length ? (
+            <div className="assistant-setup-notice" role="alert">
+              <span>
+                {unavailableScope.length} selected workspace
+                {unavailableScope.length === 1 ? " is" : "s are"} unavailable or
+                no longer allowed. The saved scope is unchanged. Reconnect or
+                refresh workspace settings, or remove these selections before
+                saving.
+              </span>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() =>
+                  setScope(
+                    scope.filter((ref) => !unavailableScope.includes(ref)),
+                  )
+                }
+              >
+                Remove unavailable selections
+              </button>
+            </div>
+          ) : null}
           <div className="assistant-workspaces">
             {choices.map((workspace) => {
               const checked = scope.some(
-                (ref) => workspaceKey(ref) === workspaceKey(workspace),
-              );
-              const available = workspaces.some(
                 (ref) => workspaceKey(ref) === workspaceKey(workspace),
               );
               return (
@@ -377,8 +403,7 @@ function TaskForm({
                     type="checkbox"
                     checked={checked}
                     disabled={
-                      !checked &&
-                      (!available || scope.length >= ASSISTANT_MAX_WORKSPACES)
+                      !checked && scope.length >= ASSISTANT_MAX_WORKSPACES
                     }
                     onChange={() =>
                       setScope(
@@ -399,17 +424,16 @@ function TaskForm({
                   />
                   <span>
                     {workspace.label}
-                    <small>
-                      {workspace.connection_label}
-                      {available ? "" : " / Unavailable or no longer allowed"}
-                    </small>
+                    <small>{workspace.connection_label}</small>
                   </span>
                 </label>
               );
             })}
             {!choices.length ? (
               <span className="assistant-hint">
-                Allow connected workspaces in Ranger settings first.
+                {allWorkspacesAllowed
+                  ? "No connected workspaces available. Reconnect or refresh in Ranger settings."
+                  : "Allow connected workspaces in Ranger settings first."}
               </span>
             ) : null}
           </div>
@@ -437,7 +461,12 @@ function TaskForm({
         <button
           type="submit"
           disabled={
-            busy || !ready || !title.trim() || !prompt.trim() || !scope.length
+            busy ||
+            !ready ||
+            !title.trim() ||
+            !prompt.trim() ||
+            !scope.length ||
+            !!unavailableScope.length
           }
         >
           {task ? "Save changes" : "Save and enable"}
@@ -652,6 +681,10 @@ export function AssistantTasks({
           busy={busy || !connected}
           ready={ready}
           highPermission={snapshot.config.approval_mode === "auto"}
+          allWorkspacesAllowed={
+            snapshot.config.approval_mode === "auto" &&
+            snapshot.config.workspace_scope === "all"
+          }
           onOpenSettings={onOpenSettings}
           onCancel={() => setEditor(null)}
           onSave={async (input) => {

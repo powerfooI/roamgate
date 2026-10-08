@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  ASSISTANT_MAX_WORKSPACES,
   ASSISTANT_MAX_TOOL_ARGUMENTS,
   ASSISTANT_MAX_TOOL_OUTPUT,
   isAssistantMessage,
@@ -219,4 +220,115 @@ test("thinking metadata validates exact SDK levels and remains optional for old 
       models: [{ ...snapshot.models[0], thinking_levels: [] }],
     }),
   ).toBe(true);
+});
+
+test("custom model reasoning declarations validate booleans and accept legacy metadata", async () => {
+  const { isAssistantSnapshot } = await import("./assistant");
+  const snapshot = {
+    instance_id: "bridge",
+    revision: 0,
+    config: {
+      provider: "custom",
+      model: "model",
+      credential_source: "assistant",
+      allowed_workspaces: [],
+    },
+    providers: [],
+    messages: [],
+    running: false,
+    error: null,
+    auth: null,
+  };
+  for (const reasoning of [undefined, true, false, null, "true", 1]) {
+    expect(
+      isAssistantSnapshot({
+        ...snapshot,
+        models: [
+          {
+            provider: "custom",
+            id: "model",
+            label: "Model",
+            custom: {
+              base_url: "https://example.com/v1",
+              api: "openai-completions",
+              reasoning,
+            },
+          },
+        ],
+      }),
+    ).toBe(reasoning === undefined || typeof reasoning === "boolean");
+  }
+});
+
+test("task scope uses the shared 512-workspace inventory boundary", () => {
+  expect(ASSISTANT_MAX_WORKSPACES).toBe(512);
+  const input = {
+    title: "Status",
+    prompt: "Summarize workspace status",
+    schedule: { type: "interval", minutes: 5 },
+    scope: Array.from({ length: ASSISTANT_MAX_WORKSPACES }, (_, index) => ({
+      connection_id: "local",
+      workspace_id: `w${index}`,
+    })),
+  };
+  expect(isAssistantTaskInput(input)).toBe(true);
+  expect(
+    isAssistantTaskInput({
+      ...input,
+      scope: [
+        ...input.scope,
+        { connection_id: "local", workspace_id: "overflow" },
+      ],
+    }),
+  ).toBe(false);
+});
+
+test("all-workspace consent is explicit metadata and legacy auto snapshots remain valid", async () => {
+  const { isAssistantSnapshot } = await import("./assistant");
+  const snapshot = {
+    instance_id: "bridge",
+    revision: 0,
+    config: {
+      provider: "custom",
+      model: "model",
+      credential_source: "assistant",
+      allowed_workspaces: [],
+      approval_mode: "auto",
+    },
+    providers: [],
+    models: [],
+    messages: [],
+    running: false,
+    error: null,
+    auth: null,
+  };
+  const allowed = Array.from(
+    { length: ASSISTANT_MAX_WORKSPACES },
+    (_, index) => ({ connection_id: "local", workspace_id: `w${index}` }),
+  );
+  expect(
+    isAssistantSnapshot({
+      ...snapshot,
+      config: { ...snapshot.config, allowed_workspaces: allowed },
+    }),
+  ).toBe(true);
+  expect(
+    isAssistantSnapshot({
+      ...snapshot,
+      config: {
+        ...snapshot.config,
+        allowed_workspaces: [
+          ...allowed,
+          { connection_id: "local", workspace_id: "overflow" },
+        ],
+      },
+    }),
+  ).toBe(false);
+  for (const workspace_scope of [undefined, "all", "selected", true, null])
+    expect(
+      isAssistantSnapshot({
+        ...snapshot,
+        config: { ...snapshot.config, workspace_scope },
+      }),
+    ).toBe(workspace_scope === undefined || workspace_scope === "all");
 });

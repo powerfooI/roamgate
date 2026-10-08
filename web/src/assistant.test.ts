@@ -13,6 +13,9 @@ import {
   getAssistantTask,
   readAssistantState,
   parseAssistantContext,
+  permittedAssistantWorkspaces,
+  pruneAssistantWorkspaceRefs,
+  reconcileAssistantConfig,
   refreshAssistant,
   sendAssistant,
   setAssistantDraft,
@@ -90,6 +93,164 @@ test("workspace context validates scope identities and reports partial connectio
     expect(() => parseAssistantContext(result)).toThrow(
       "Invalid Ranger workspace list",
     );
+});
+
+test("workspace catalog metadata is optional but must be authoritative and consistent", () => {
+  const workspace = {
+    ...scope[0],
+    connection_label: "Local",
+    label: "Project",
+    runtime_generation: 1,
+  };
+  const catalog = {
+    workspaces: [workspace],
+    errors: [],
+    connection_ids: ["local", "offline"],
+    complete_connection_ids: ["local"],
+    truncated: false,
+  };
+  expect(parseAssistantContext(catalog)).toEqual(catalog);
+  expect(
+    parseAssistantContext({
+      workspaces: [],
+      connection_ids: [],
+      complete_connection_ids: [],
+    }),
+  ).toEqual({
+    workspaces: [],
+    errors: [],
+    connection_ids: [],
+    complete_connection_ids: [],
+  });
+  for (const invalid of [
+    { connection_ids: [1] },
+    { connection_ids: [""] },
+    { connection_ids: ["local", "local"] },
+    { complete_connection_ids: "local" },
+    { connection_ids: ["offline"] },
+    { complete_connection_ids: ["removed"] },
+    { truncated: "yes" },
+  ])
+    expect(() => parseAssistantContext({ ...catalog, ...invalid })).toThrow(
+      "Invalid Ranger workspace list",
+    );
+});
+
+test("High permissions include every available and newly discovered workspace without changing manual grants", () => {
+  const config: AssistantSnapshot["config"] = {
+    ...snapshot().config,
+    allowed_workspaces: [],
+  };
+  const available = Array.from({ length: 100 }, (_, index) => ({
+    connection_id: "local",
+    workspace_id: `project-${index}`,
+  }));
+  expect(permittedAssistantWorkspaces(config, available)).toEqual([]);
+  expect(
+    permittedAssistantWorkspaces(
+      { ...config, approval_mode: "auto", workspace_scope: "all" },
+      available,
+    ),
+  ).toEqual(available);
+  expect(
+    permittedAssistantWorkspaces(
+      { ...config, approval_mode: "auto" },
+      available,
+    ),
+  ).toEqual([]);
+  expect(config.allowed_workspaces).toEqual([]);
+  config.allowed_workspaces = [available[0]!];
+  const newlyAvailable = [
+    ...available,
+    { connection_id: "new-host", workspace_id: "new-project" },
+  ];
+  expect(
+    permittedAssistantWorkspaces(
+      { ...config, approval_mode: "auto", workspace_scope: "all" },
+      newlyAvailable,
+    ),
+  ).toEqual(newlyAvailable);
+  expect(
+    permittedAssistantWorkspaces(
+      { ...config, approval_mode: "manual" },
+      newlyAvailable,
+    ),
+  ).toEqual([available[0]!]);
+});
+
+test("workspace selections are pruned only by complete connection listings", () => {
+  const refs = [
+    ...scope,
+    { connection_id: "local", workspace_id: "deleted" },
+    { connection_id: "offline", workspace_id: "project" },
+    { connection_id: "removed-host", workspace_id: "project" },
+  ];
+  const workspaces = [
+    {
+      ...scope[0],
+      connection_label: "Local",
+      label: "Project",
+      runtime_generation: 1,
+    },
+  ];
+  expect(pruneAssistantWorkspaceRefs(refs, { workspaces, errors: [] })).toEqual(
+    refs,
+  );
+  expect(
+    pruneAssistantWorkspaceRefs(refs, {
+      workspaces: [],
+      errors: ["Disconnected"],
+      connection_ids: ["local", "offline", "removed-host"],
+      complete_connection_ids: [],
+    }),
+  ).toEqual(refs);
+  expect(
+    pruneAssistantWorkspaceRefs(refs, {
+      workspaces,
+      errors: ["Offline"],
+      connection_ids: ["local", "offline"],
+      complete_connection_ids: ["local"],
+    }),
+  ).toEqual([scope[0]!, refs[2]!]);
+  expect(
+    pruneAssistantWorkspaceRefs(refs, {
+      workspaces: [],
+      errors: [],
+      connection_ids: ["local", "offline"],
+      complete_connection_ids: ["local"],
+    }),
+  ).toEqual([refs[2]!]);
+  expect(
+    pruneAssistantWorkspaceRefs(refs, {
+      workspaces,
+      errors: [],
+      connection_ids: ["local", "offline", "removed-host"],
+      complete_connection_ids: [],
+      truncated: true,
+    }),
+  ).toEqual(refs);
+});
+
+test("permission-only snapshot updates preserve unsaved model and workspace edits", () => {
+  const deleted = { connection_id: "local", workspace_id: "deleted" };
+  const unchecked = { connection_id: "local", workspace_id: "unchecked" };
+  const added = { connection_id: "local", workspace_id: "added" };
+  const previous = {
+    ...snapshot().config,
+    allowed_workspaces: [...scope, deleted, unchecked],
+  };
+  const draft = {
+    ...previous,
+    model: "unsaved-model",
+    thinking_level: "high" as const,
+    allowed_workspaces: [...scope, deleted, added],
+  };
+  const saved = { ...previous, allowed_workspaces: [...scope, unchecked] };
+  expect(reconcileAssistantConfig(draft, previous, saved)).toEqual({
+    ...draft,
+    allowed_workspaces: [...scope, added],
+  });
+  expect(reconcileAssistantConfig(draft, undefined, saved)).toEqual(saved);
 });
 
 function installBridge(supported = true) {
