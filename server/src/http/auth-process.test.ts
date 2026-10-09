@@ -24,6 +24,8 @@ async function withAuthServer(
       PORT: "0",
       OPEN_BROWSER: "0",
       ROAMGATE_PASSWORD: password,
+      ROAMGATE_PIN: "",
+      HERDR_GUI_PIN: "",
       ROAMGATE_CONNECTIONS_PATH: join(root, "connections.json"),
       ROAMGATE_SETTINGS_PATH: join(root, "settings.json"),
       HERDR_SOCKET_PATH: join(root, "missing-control.sock"),
@@ -417,3 +419,56 @@ test("instance name save failures preserve the current name and permit retry", a
     await rm(root, { recursive: true, force: true });
   }
 }, 20_000);
+
+test("PIN login uses a separate endpoint and preserves password recovery during PIN cooldown", async () => {
+  await withAuthServer(
+    async (base) => {
+      const request = (path: string, init?: RequestInit) =>
+        fetch(`${base}${path}`, { ...init, signal: AbortSignal.timeout(5000) });
+      const page = await (await request("/login")).text();
+      expect(page).toContain('inputmode="numeric"');
+      expect(page).toContain("Use password or token instead");
+      const pinLogin = (pin: string) =>
+        request("/api/login/pin", {
+          method: "POST",
+          body: JSON.stringify({ pin }),
+        });
+      const loggedIn = await pinLogin("012345");
+      expect(loggedIn.status).toBe(200);
+      const cookie = loggedIn.headers.get("set-cookie")!.split(";", 1)[0]!;
+      expect(cookie).toContain("herdr_auth=");
+      expect((await request("/", { headers: { cookie } })).status).toBe(200);
+      for (let i = 0; i < 5; i++)
+        expect((await pinLogin("654321")).status).toBe(401);
+      const blocked = await pinLogin("012345");
+      expect(blocked.status).toBe(429);
+      expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
+      const recovered = await request("/api/login", {
+        method: "POST",
+        body: JSON.stringify({ password }),
+      });
+      expect(recovered.status).toBe(200);
+      expect(recovered.headers.has("set-cookie")).toBe(true);
+      expect((await pinLogin("012345")).status).toBe(429);
+    },
+    { ROAMGATE_PIN: "012345" },
+  );
+});
+
+test("PIN endpoint is disabled by default", async () => {
+  await withAuthServer(
+    async (base) => {
+      const response = await fetch(`${base}/api/login/pin`, {
+        method: "POST",
+        body: JSON.stringify({ pin: "012345" }),
+        signal: AbortSignal.timeout(5000),
+      });
+      expect(response.status).toBe(404);
+      expect(response.headers.has("set-cookie")).toBe(false);
+      expect(await (await fetch(`${base}/login`)).text()).not.toContain(
+        'inputmode="numeric"',
+      );
+    },
+    { ROAMGATE_PIN: "", HERDR_GUI_PIN: "" },
+  );
+});

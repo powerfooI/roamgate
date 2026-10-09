@@ -21,7 +21,7 @@ import { loadOrCreateSessionSecret } from "./session-secret";
 
 const tempDirs: string[] = [];
 const password = "correct horse battery staple";
-const pin = "9876";
+const pin = "987654";
 
 function tempHome(): string {
   const path = mkdtempSync(join(tmpdir(), "roamgate-session-secret-"));

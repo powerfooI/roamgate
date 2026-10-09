@@ -127,7 +127,10 @@ const config = loadServerConfig(APP_VERSION);
 let sessionSecret = "";
 if (config.authRequired) {
   try {
-    sessionSecret = loadOrCreateSessionSecret([config.password]);
+    sessionSecret = loadOrCreateSessionSecret([
+      config.password,
+      ...(config.pin ? [config.pin] : []),
+    ]);
   } catch (cause) {
     console.error(
       `[bridge] FATAL: could not load the session signing secret: ${(cause as Error).message}`,
@@ -137,6 +140,11 @@ if (config.authRequired) {
 }
 configureServerLogger(config.logLevel);
 const logger = serverLogger;
+if (config.authRequired && config.pin) {
+  logger.warn(
+    "PIN login is enabled. Use only behind a trusted private network or VPN; keep your password/token available for recovery.",
+  );
+}
 const cpuProfile = config.profile
   ? (await import("./utils/cpu-profile")).startCpuProfile(
       config.profile,
@@ -160,11 +168,13 @@ const {
   sessionToken,
   handleTokenLogin,
   handleLogin,
+  handlePinLogin,
   handleLogout,
   loginPage,
 } = createAuthHandlers({
   authRequired: config.authRequired,
   password: config.password,
+  pin: config.pin,
   sessionSecret,
   urlLoginToken: config.generatedAuthToken,
   secureCookies: Boolean(config.tls),
@@ -1453,6 +1463,9 @@ function main() {
           }
 
           // Auth endpoints are always reachable.
+          if (url.pathname === "/api/login/pin" && req.method === "POST") {
+            return handlePinLogin(req, clientIp);
+          }
           if (url.pathname === "/api/login" && req.method === "POST") {
             return handleLogin(req, clientIp);
           }

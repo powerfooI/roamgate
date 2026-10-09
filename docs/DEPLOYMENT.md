@@ -274,6 +274,7 @@ explicit connection registry paths remain authoritative, including empty values.
 | `--host <addr>` | `HOST` | `127.0.0.1` |
 | `--port <n>` | `PORT` | `8787` |
 | `--password <pw>` | `ROAMGATE_PASSWORD` | Generated token when authentication is enabled |
+| None | `ROAMGATE_PIN` | Disabled; optional 6-12 digit login for private networks only |
 | `--tls-cert <path>` | `ROAMGATE_TLS_CERT` | Disabled; PEM chain, requires key |
 | `--tls-key <path>` | `ROAMGATE_TLS_KEY` | Disabled; PEM key, requires certificate |
 | `--socket-path <path>` | `HERDR_SOCKET_PATH` | Default control socket/pipe |
@@ -313,6 +314,26 @@ For a fixed password, prefer `ROAMGATE_PASSWORD` over process-visible
 range stop startup, including existing short passwords. Normal runtime requires
 login; see [Security](../SECURITY.md#trust-model) for the local development
 exception, login limits, and remote access guidance.
+
+### Optional PIN login
+
+For a server reachable only through a trusted private network or VPN, set
+`ROAMGATE_PIN` to 6-12 ASCII digits in the process environment or protected
+service environment file, then restart. There is deliberately no CLI flag.
+Unset or empty disables it; invalid values stop startup. Keep leading zeros.
+A PIN adds a weaker alternative credential and grants full access, so do not
+use it on a public listener. The server prints a warning when it is enabled.
+
+The form starts in numeric PIN mode and can switch to password/token login.
+`ROAMGATE_PASSWORD` still selects the strong login credential; when it is absent,
+the existing generated token and token URLs remain available. The PIN never
+replaces a signing key. Ten consecutive failures across all sources pause PIN
+login for one hour; per-source limits also apply. Strong-credential login remains
+available during that cooldown. See [PIN security and limits](../SECURITY.md#optional-pin-login).
+
+Adding, changing, or removing the PIN rotates the independent session signing
+secret at the next listener startup, just like changing the strong credential.
+Stop all listeners sharing the data directory before changing credentials.
 
 ### Host file reveal
 

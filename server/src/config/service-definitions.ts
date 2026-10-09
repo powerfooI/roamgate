@@ -21,6 +21,9 @@ PORT=8787
 
 # Optional fixed password (15..1024 characters). Otherwise a token is generated.
 # ROAMGATE_PASSWORD=replace-with-a-strong-password
+# Optional convenience PIN: 6..12 digits, private networks/VPN only.
+# Keeps password/token login available for recovery.
+# ROAMGATE_PIN=
 
 # Optional native HTTPS. Set both to absolute PEM file paths.
 # ROAMGATE_TLS_CERT=/path/to/cert-chain.pem

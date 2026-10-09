@@ -30,7 +30,11 @@ import {
 } from "./data-paths";
 import { roamgateEnv } from "./environment";
 import { resolveLaunchdEnvironment } from "./launchd-environment";
-import { assertValidAuthPassword, loadOrCreateAuthToken } from "./auth-token";
+import {
+  assertValidAuthPassword,
+  assertValidAuthPin,
+  loadOrCreateAuthToken,
+} from "./auth-token";
 import {
   browserUrlFor,
   getLanIPs,
@@ -379,6 +383,8 @@ function prepareServiceAccess(
   const password =
     readValue("ROAMGATE_PASSWORD") ?? readValue("HERDR_GUI_PASSWORD") ?? "";
   if (password) assertValidAuthPassword(password);
+  const pin = readValue("ROAMGATE_PIN") ?? readValue("HERDR_GUI_PIN") ?? "";
+  if (pin) assertValidAuthPin(pin);
 
   const host = readValue("HOST") ?? "127.0.0.1";
   const port = Number(readValue("PORT") ?? 8787);

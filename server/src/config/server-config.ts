@@ -8,6 +8,7 @@ import { validateSshDestination } from "../bridge/ssh-command";
 import { assertSshTunnelPlatformSupported } from "../bridge/ssh-tunnel";
 import {
   assertValidAuthPassword,
+  assertValidAuthPin,
   defaultAuthTokenPath,
   loadOrCreateAuthToken,
   MAX_PASSWORD_LENGTH,
@@ -48,6 +49,7 @@ export type ServerConfig = {
   port: number;
   password: string;
   authRequired: boolean;
+  pin?: string;
   tls?: { cert: Buffer; key: Buffer };
   generatedAuthToken?: string;
   generatedAuthTokenPath?: string;
@@ -166,6 +168,7 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
   --port <n>                 listen port           (env PORT,            default 8787)
   --password <pw>            fixed login password, ${MIN_PASSWORD_LENGTH}..${MAX_PASSWORD_LENGTH} characters
                              (env ROAMGATE_PASSWORD; otherwise a token is generated)
+  (env ROAMGATE_PIN)         optional 6..12 digit convenience login; private networks only
   --tls-cert <path>          PEM certificate chain (env ROAMGATE_TLS_CERT; requires --tls-key)
   --tls-key <path>           PEM private key       (env ROAMGATE_TLS_KEY; requires --tls-cert)
   --socket-path <path>       control socket        (env HERDR_SOCKET_PATH)
@@ -242,6 +245,13 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
     console.error(`[bridge] ${(error as Error).message}`);
     process.exit(2);
   }
+  const pin = roamgateEnv("PIN") || undefined;
+  try {
+    if (pin !== undefined) assertValidAuthPin(pin);
+  } catch (error) {
+    console.error(`[bridge] ${(error as Error).message}`);
+    process.exit(2);
+  }
   const configuredPassword = String(
     args.password ?? roamgateEnv("PASSWORD") ?? "",
   );
@@ -300,6 +310,7 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
     port,
     password,
     authRequired,
+    pin,
     tls,
     generatedAuthToken,
     generatedAuthTokenPath,

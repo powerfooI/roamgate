@@ -2080,3 +2080,36 @@ test("service run honors explicit new and legacy supervisor overrides", () => {
     else process.env.HERDR_GUI_RESTART_SUPERVISOR = previousOld;
   }
 });
+
+test.each(["12345", "1234567890123", "12345a"])(
+  "rejects an invalid service PIN before installation: %s",
+  (pin) => {
+    const homeDir = tempHome();
+    const paths = resolveServicePaths("systemd", homeDir);
+    mkdirSync(dirname(paths.config), { recursive: true });
+    const contents = `HOST=127.0.0.1\nROAMGATE_PASSWORD=strong-test-password\nROAMGATE_PIN=${pin}\n`;
+    writeFileSync(paths.config, contents);
+    const commands: string[][] = [],
+      errors: string[] = [];
+    expect(
+      runServiceCommand(["service", "install"], {
+        runtime: {
+          platform: "linux",
+          homeDir,
+          execPath: "/opt/roamgate",
+          argv: ["/opt/roamgate", "service", "install"],
+        },
+        runCommand: (argv) => {
+          commands.push(argv);
+          return 0;
+        },
+        error: (message) => errors.push(message),
+      }),
+    ).toBe(1);
+    expect(commands).toEqual([]);
+    expect(errors.join("\n")).toContain("6 to 12 ASCII digits");
+    expect(errors.join("\n")).not.toContain(pin);
+    expect(readFileSync(paths.config, "utf8")).toBe(contents);
+    expect(existsSync(paths.definition)).toBe(false);
+  },
+);

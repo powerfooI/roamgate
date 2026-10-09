@@ -1,4 +1,5 @@
-export const LOGIN_HTML = `<!doctype html>
+export function renderLoginPage(pinEnabled: boolean): string {
+  return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -39,7 +40,7 @@ export const LOGIN_HTML = `<!doctype html>
   .submit:hover:not(:disabled){background:#fff}
   .submit:disabled{opacity:.65;cursor:wait}
   .err{color:var(--error);font-size:13px;line-height:1.5;min-height:24px;margin:10px 0 6px}
-  .note{margin-top:24px;text-align:center;font-size:12px}
+  ${pinEnabled ? ".method{display:block;width:100%;min-height:44px;margin-top:12px;padding:8px;border:0;border-radius:7px;background:transparent;color:var(--accent);font-size:13px}.method:disabled{opacity:.65;cursor:wait}\n  " : ""}.note{margin-top:24px;text-align:center;font-size:12px}
   footer{margin-top:24px;text-align:center;color:var(--muted);font-size:12px;line-height:1.6}
   @media(prefers-color-scheme:light){
     :root{background:#f5f5f3;color:#252629;color-scheme:light;--panel:#fff;--border:#dcdde0;
@@ -56,22 +57,28 @@ export const LOGIN_HTML = `<!doctype html>
     <h1 id="heading">Welcome back</h1>
     <p>Log in to access your workspaces.</p>
     <form id="login">
-      <label for="pw">Password or token</label>
+      ${pinEnabled ? '<label id="credential-label" for="pw">PIN</label>' : '<label for="pw">Password or token</label>'}
       <div class="password">
-        <input id="pw" name="password" type="password" placeholder="Password or token"
+        <input id="pw" ${pinEnabled ? 'name="pin" type="password" placeholder="6-12 digit PIN" inputmode="numeric" pattern="[0-9]{6,12}" minlength="6" maxlength="12"' : 'name="password" type="password" placeholder="Password or token"'}
           autocomplete="current-password" autocapitalize="none" spellcheck="false" required autofocus aria-describedby="err">
-        <button class="reveal" id="reveal" type="button" aria-label="Show password" aria-controls="pw" aria-pressed="false">Show</button>
+        <button class="reveal" id="reveal" type="button" aria-label="${pinEnabled ? "Show PIN" : "Show password"}" aria-controls="pw" aria-pressed="false">Show</button>
       </div>
       <div class="err" id="err" role="alert" aria-live="polite"></div>
       <button class="submit" id="btn" type="submit">Log in</button>
-    </form>
-    <p class="note">Use the password or token configured on your server.</p>
+    ${pinEnabled ? '  <button class="method" id="method" type="button" aria-controls="pw">Use password or token instead</button>\n    ' : ""}</form>
+    <p class="note"${pinEnabled ? ' id="credential-note"' : ""}>${pinEnabled ? "Use the 6-12 digit PIN configured on your server." : "Use the password or token configured on your server."}</p>
     <noscript><p class="err">Enable JavaScript to log in to Roamgate.</p></noscript>
   </section>
   <footer>Your workspace, wherever you are.</footer>
 </main>
 <script>
-  const form=document.getElementById('login'),pw=document.getElementById('pw'),btn=document.getElementById('btn'),err=document.getElementById('err'),reveal=document.getElementById('reveal');
+${pinEnabled ? PIN_LOGIN_SCRIPT : PASSWORD_LOGIN_SCRIPT}
+</script>
+</body>
+</html>`;
+}
+
+const PASSWORD_LOGIN_SCRIPT = `  const form=document.getElementById('login'),pw=document.getElementById('pw'),btn=document.getElementById('btn'),err=document.getElementById('err'),reveal=document.getElementById('reveal');
   reveal.onclick=()=>{
     const show=pw.type==='password';
     pw.type=show?'text':'password';
@@ -97,7 +104,89 @@ export const LOGIN_HTML = `<!doctype html>
       }else{err.textContent='Unable to log in. Please try again.';}
     }catch{err.textContent='Cannot reach the server. Check your connection and try again.';}
     finally{btn.disabled=false;btn.textContent='Log in';}
+  };`;
+
+const PIN_LOGIN_SCRIPT = `
+  const form=document.getElementById('login'),pw=document.getElementById('pw'),btn=document.getElementById('btn'),err=document.getElementById('err'),reveal=document.getElementById('reveal');
+  const method=document.getElementById('method'),label=document.getElementById('credential-label'),note=document.getElementById('credential-note');
+  let pinMode=true,submitting=false;
+  const hideSecret=()=>{
+    pw.type='password';
+    reveal.textContent='Show';
+    reveal.setAttribute('aria-label',pinMode?'Show PIN':'Show password');
+    reveal.setAttribute('aria-pressed','false');
   };
-</script>
-</body>
-</html>`;
+  method.onclick=()=>{
+    if(submitting)return;
+    pinMode=!pinMode;
+    pw.value='';
+    err.textContent='';
+    pw.removeAttribute('aria-invalid');
+    hideSecret();
+    pw.name=pinMode?'pin':'password';
+    pw.placeholder=pinMode?'6-12 digit PIN':'Password or token';
+    pw.setAttribute('inputmode',pinMode?'numeric':'text');
+    if(pinMode){
+      pw.setAttribute('pattern','[0-9]{6,12}');
+      pw.setAttribute('minlength','6');
+      pw.setAttribute('maxlength','12');
+    }else{
+      pw.removeAttribute('pattern');
+      pw.removeAttribute('minlength');
+      pw.removeAttribute('maxlength');
+    }
+    label.textContent=pinMode?'PIN':'Password or token';
+    note.textContent=pinMode?'Use the 6-12 digit PIN configured on your server.':'Use the password or token configured on your server.';
+    method.textContent=pinMode?'Use password or token instead':'Use PIN instead';
+    pw.focus();
+  };
+  reveal.onclick=()=>{
+    if(submitting)return;
+    const show=pw.type==='password';
+    pw.type=show?'text':'password';
+    reveal.textContent=show?'Hide':'Show';
+    reveal.setAttribute('aria-label',(show?'Hide ':'Show ')+(pinMode?'PIN':'password'));
+    reveal.setAttribute('aria-pressed',String(show));
+  };
+  form.onsubmit=async event=>{
+    event.preventDefault();
+    if(submitting)return;
+    err.textContent='';
+    pw.removeAttribute('aria-invalid');
+    if(pinMode&&!/^[0-9]{6,12}$/.test(pw.value)){
+      err.textContent='Enter a PIN with 6-12 digits (0-9).';
+      pw.setAttribute('aria-invalid','true');pw.focus();return;
+    }
+    if(!pinMode&&!pw.value){
+      err.textContent='Enter your password or token.';
+      pw.setAttribute('aria-invalid','true');pw.focus();return;
+    }
+    submitting=true;
+    btn.disabled=true;btn.textContent='Logging in...';
+    method.disabled=true;reveal.disabled=true;pw.readOnly=true;
+    let loggedIn=false,focusSecret=false;
+    try{
+      const r=await fetch(pinMode?'/api/login/pin':'/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(pinMode?{pin:pw.value}:{password:pw.value})});
+      if(r.ok){loggedIn=true;location.replace('/'+location.hash);return;}
+      if(r.status===401){
+        err.textContent=pinMode?'Wrong PIN. Try again or use your password or token.':'Wrong password or token. Try again.';
+        hideSecret();
+        pw.setAttribute('aria-invalid','true');pw.value='';focusSecret=true;
+      }else if(r.status===429){
+        const retryAfter=Number(r.headers.get('retry-after'));
+        const seconds=Number.isFinite(retryAfter)&&retryAfter>0?Math.ceil(retryAfter):60;
+        err.textContent=pinMode?'Too many PIN attempts. Try again in '+seconds+' seconds, or use your password or token.':'Too many login attempts. Try again in '+seconds+' seconds.';
+      }else{err.textContent='Unable to log in. Please try again.';}
+    }catch{err.textContent='Cannot reach the server. Check your connection and try again.';}
+    finally{
+      if(!loggedIn){
+        submitting=false;
+        btn.disabled=false;btn.textContent='Log in';
+        method.disabled=false;reveal.disabled=false;pw.readOnly=false;
+        if(focusSecret)pw.focus();
+      }
+    }
+  };
+`;
+
+export const LOGIN_HTML = renderLoginPage(false);

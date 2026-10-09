@@ -27,6 +27,12 @@ export function assertValidAuthPassword(password: string): void {
   }
 }
 
+export function assertValidAuthPin(pin: string): void {
+  if (!/^[0-9]{6,12}$/.test(pin)) {
+    throw new Error("ROAMGATE_PIN must contain 6 to 12 ASCII digits.");
+  }
+}
+
 export function defaultAuthTokenPath(
   homeDir = homedir(),
   platform = process.platform,

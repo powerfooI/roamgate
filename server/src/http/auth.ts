@@ -1,8 +1,11 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
-import { assertValidAuthPassword } from "../config/auth-token";
+import {
+  assertValidAuthPassword,
+  assertValidAuthPin,
+} from "../config/auth-token";
 import { readJsonBody } from "./json-body";
-import { LOGIN_HTML } from "./login-page";
+import { renderLoginPage } from "./login-page";
 
 const AUTH_COOKIE = "herdr_auth";
 const AUTH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -12,6 +15,8 @@ const LOGIN_MAX_FAILURES = 5;
 const LOGIN_COOLDOWN_MS = 5 * 60_000;
 const LOGIN_MAX_IPS = 4096;
 const LOGIN_MAX_BODY_BYTES = 16 * 1024;
+const PIN_MAX_FAILURES = 10;
+const PIN_COOLDOWN_MS = 60 * 60_000;
 
 interface LoginAttempts {
   count: number;
@@ -41,6 +46,7 @@ export function createAuthHandlers(args: {
   authRequired?: boolean;
   password: string;
   sessionSecret: string;
+  pin?: string;
   urlLoginToken?: string;
   secureCookies?: boolean;
 }) {
@@ -53,8 +59,29 @@ export function createAuthHandlers(args: {
       );
     }
   }
+  if (args.pin !== undefined) assertValidAuthPin(args.pin);
   // ponytail: process-local IP limits; use shared storage for multiple replicas.
   const loginAttempts = new Map<string, LoginAttempts>();
+  // PIN throttling must never consume the password/token recovery budget.
+  const pinAttempts = new Map<string, LoginAttempts>();
+  let pinFailures = 0;
+  let pinBlockedUntil = 0;
+
+  function checkPinCooldown(): Response | null {
+    const now = Date.now();
+    if (pinBlockedUntil > now) return tooManyAttempts(pinBlockedUntil - now);
+    if (pinBlockedUntil) {
+      pinFailures = 0;
+      pinBlockedUntil = 0;
+    }
+    return null;
+  }
+
+  function failPinLogin() {
+    if (++pinFailures >= PIN_MAX_FAILURES) {
+      pinBlockedUntil = Date.now() + PIN_COOLDOWN_MS;
+    }
+  }
 
   function tooManyAttempts(waitMs: number): Response {
     return Response.json(
@@ -84,15 +111,18 @@ export function createAuthHandlers(args: {
     return null;
   }
 
-  function beginLogin(ip: string): LoginAttempts | Response {
+  function beginLogin(
+    ip: string,
+    records = loginAttempts,
+  ): LoginAttempts | Response {
     const now = Date.now();
-    for (const [address, attempts] of loginAttempts) {
-      if (attempts.expiresAt <= now) loginAttempts.delete(address);
+    for (const [address, attempts] of records) {
+      if (attempts.expiresAt <= now) records.delete(address);
     }
-    let attempts = loginAttempts.get(ip);
+    let attempts = records.get(ip);
     if (!attempts) {
       // Fail closed rather than evicting an IP's active cooldown.
-      if (loginAttempts.size >= LOGIN_MAX_IPS) {
+      if (records.size >= LOGIN_MAX_IPS) {
         return tooManyAttempts(LOGIN_WINDOW_MS);
       }
       attempts = {
@@ -102,7 +132,7 @@ export function createAuthHandlers(args: {
         blockedUntil: 0,
         expiresAt: now + LOGIN_COOLDOWN_MS,
       };
-      loginAttempts.set(ip, attempts);
+      records.set(ip, attempts);
     }
     attempts.expiresAt = now + LOGIN_COOLDOWN_MS;
     const cooldown = checkCooldown(attempts, now);
@@ -255,9 +285,19 @@ export function createAuthHandlers(args: {
     });
   }
 
-  async function handleLogin(req: Request, ip: string): Promise<Response> {
+  async function handleCredentialLogin(
+    req: Request,
+    ip: string,
+    usePin: boolean,
+  ): Promise<Response> {
+    if (usePin && !args.pin) return new Response("not found", { status: 404 });
     if (!authRequired) return Response.json({ ok: true });
-    const attempts = beginLogin(ip);
+    if (usePin) {
+      const cooldown = checkPinCooldown();
+      if (cooldown) return cooldown;
+    }
+    const records = usePin ? pinAttempts : loginAttempts;
+    const attempts = beginLogin(ip, records);
     if (attempts instanceof Response) return attempts;
     let body: any;
     let invalidBodyStatus = 0;
@@ -267,16 +307,18 @@ export function createAuthHandlers(args: {
       invalidBodyStatus = error instanceof RangeError ? 413 : 400;
     }
     // A slow body must not authorize using an expired or replaced IP record.
-    if (
-      loginAttempts.get(ip) !== attempts ||
-      attempts.expiresAt <= Date.now()
-    ) {
+    if (records.get(ip) !== attempts || attempts.expiresAt <= Date.now()) {
       return tooManyAttempts(LOGIN_WINDOW_MS);
     }
     const cooldown = checkCooldown(attempts, Date.now());
     if (cooldown) return cooldown;
+    if (usePin) {
+      const cooldown = checkPinCooldown();
+      if (cooldown) return cooldown;
+    }
     if (invalidBodyStatus) {
       failLogin(attempts);
+      if (usePin) failPinLogin();
       return Response.json(
         {
           error:
@@ -287,14 +329,18 @@ export function createAuthHandlers(args: {
         { status: invalidBodyStatus },
       );
     }
-    if (
-      typeof body?.password !== "string" ||
-      !secretsEqual(body.password, args.password)
-    ) {
+    const supplied = usePin ? body?.pin : body?.password;
+    const expected = usePin ? args.pin! : args.password;
+    if (typeof supplied !== "string" || !secretsEqual(supplied, expected)) {
       failLogin(attempts);
-      return Response.json({ error: "wrong password" }, { status: 401 });
+      if (usePin) failPinLogin();
+      return Response.json(
+        { error: usePin ? "wrong PIN" : "wrong password" },
+        { status: 401 },
+      );
     }
     attempts.failures = 0;
+    if (usePin) pinFailures = 0;
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: {
@@ -305,6 +351,14 @@ export function createAuthHandlers(args: {
     });
   }
 
+  function handleLogin(req: Request, ip: string): Promise<Response> {
+    return handleCredentialLogin(req, ip, false);
+  }
+
+  function handlePinLogin(req: Request, ip: string): Promise<Response> {
+    return handleCredentialLogin(req, ip, true);
+  }
+
   function loginPage(): Response {
     if (!authRequired) {
       return new Response(null, {
@@ -312,7 +366,7 @@ export function createAuthHandlers(args: {
         headers: { location: "/", "cache-control": "no-store" },
       });
     }
-    return new Response(LOGIN_HTML, {
+    return new Response(renderLoginPage(Boolean(args.pin)), {
       headers: {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-store",
@@ -326,6 +380,7 @@ export function createAuthHandlers(args: {
     sessionToken,
     handleTokenLogin,
     handleLogin,
+    handlePinLogin,
     handleLogout,
     loginPage,
   };

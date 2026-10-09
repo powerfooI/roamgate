@@ -31,7 +31,7 @@ const MAX_MESSAGE_LENGTH = 500;
 const MAX_FIELD_LENGTH = 300;
 const MAX_FIELDS = 24;
 const SENSITIVE_FIELD =
-  /^(?:password|passphrase|token|secret|cookie|authorization|api[_-]?key|access[_-]?token|refresh[_-]?token)$/i;
+  /^(?:password|passphrase|(?:roamgate_|herdr_gui_)?pin|sessionSecret|token|secret|cookie|authorization|api[_-]?key|access[_-]?token|refresh[_-]?token)$/i;
 
 function defaultStdout(line: string): void {
   process.stdout.write(`${line}\n`);
@@ -59,7 +59,7 @@ function redactSensitiveText(value: string): string {
   return value
     .replace(/([a-z][a-z\d+.-]*:\/\/)([^@\s/]+)@/gi, "$1***@")
     .replace(
-      /([?&](?:access[_-]?token|refresh[_-]?token|api[_-]?key|password|token|secret)=)[^&#\s]+/gi,
+      /([?&](?:access[_-]?token|refresh[_-]?token|api[_-]?key|password|pin|token|secret)=)[^&#\s]+/gi,
       "$1***",
     )
     .replace(
@@ -67,7 +67,7 @@ function redactSensitiveText(value: string): string {
       "$1: $2 ***",
     )
     .replace(
-      /(["']?)(access[_-]?token|refresh[_-]?token|api[_-]?key|password|passphrase|token|secret)\1(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;&}\]]+)/gi,
+      /(["']?)(access[_-]?token|refresh[_-]?token|api[_-]?key|password|passphrase|pin|sessionSecret|token|secret)\1(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;&}\]]+)/gi,
       "$1$2$1$3***",
     );
 }
