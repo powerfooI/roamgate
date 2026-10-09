@@ -474,7 +474,9 @@ export function createTerminalBridge(args: {
       // can never receive ServerMessage::Clipboard there. Skip the relay and
       // use the endpoint session's clipboard events instead. Only the explicit
       // legacy fallback still lacks OSC 52; browser copy/paste is unaffected.
-      const protocol = await args.herdrProtocol();
+      // The attach that got here already resolved the protocol, so this does
+      // not pay another control round trip against the relay wait.
+      const protocol = await bridgeProtocol();
       if (disposed) return;
       if (isTerminalHelloProtocol(protocol)) {
         clipboardRelaySkipped = true;
@@ -487,7 +489,7 @@ export function createTerminalBridge(args: {
         return;
       }
 
-      const relay = new ThinClient(args.clientSocketPath, args.herdrProtocol);
+      const relay = new ThinClient(args.clientSocketPath, bridgeProtocol);
       clipboardRelay = relay;
       clipboardRelaySize = { cols, rows };
       relay.on("clipboard", ({ data }) => {
@@ -802,7 +804,7 @@ export function createTerminalBridge(args: {
             undefined,
             surfaceCodecsEnabled,
           )
-        : new ThinClient(args.clientSocketPath, args.herdrProtocol);
+        : new ThinClient(args.clientSocketPath, bridgeProtocol);
     let resolveFirstFrame!: (seen: boolean) => void;
     const firstFrame = new Promise<boolean>((resolve) => {
       resolveFirstFrame = resolve;
