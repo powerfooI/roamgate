@@ -1,8 +1,12 @@
 export async function runProcess(
   argv: string[],
   input?: string,
+  options: { timeoutMs?: number } = {},
 ): Promise<{ stdout: string; stderr: string }> {
-  const { code, stdout, stderr } = await runProcessWithCode(argv, input);
+  const { code, stdout, stderr } =
+    options.timeoutMs !== undefined && input === undefined
+      ? await runProcessWithCodeTimeout(argv, options.timeoutMs)
+      : await runProcessWithCode(argv, input);
   if (code !== 0) {
     throw new Error(
       `${argv[0]} exited ${code}: ${stderr.trim() || stdout.trim()}`,

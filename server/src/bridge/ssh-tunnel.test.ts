@@ -109,6 +109,29 @@ describe("SSH tunnel readiness lifecycle", () => {
     expect(spawns).toBe(0);
   });
 
+  test("the remote HOME probe runs with a deadline", async () => {
+    const probe = deferred<{ timeoutMs?: number } | undefined>();
+    const manager = createSshTunnelManager({
+      config: config(),
+      runProcess: async (_argv, _input, options) => {
+        probe.resolve(options);
+        return { stdout: "/home/test", stderr: "" };
+      },
+      dependencies: {
+        remove: () => undefined,
+        spawn: () => ({
+          exited: new Promise<number>(() => {}),
+          kill: () => undefined,
+        }),
+      },
+    });
+
+    const starting = manager.startAutoSshTunnel();
+    expect(await probe.promise).toEqual({ timeoutMs: 20_000 });
+    await manager.cleanupAutoSshTunnel();
+    await starting.catch(() => undefined);
+  });
+
   test("cleanup cancels readiness polling and the starting process", async () => {
     const exited = deferred<number>();
     let killed = 0;

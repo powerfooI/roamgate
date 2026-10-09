@@ -21,6 +21,13 @@ export const SSH_NONINTERACTIVE_ARGS = [
   "ConnectTimeout=8",
   "-o",
   "ConnectionAttempts=1",
+  // ConnectTimeout only covers the TCP connect and key exchange. Keepalives
+  // end a session that stalls afterwards (network change, sleeping peer)
+  // instead of leaving the process, and whatever awaits it, hung forever.
+  "-o",
+  "ServerAliveInterval=10",
+  "-o",
+  "ServerAliveCountMax=3",
 ] as const;
 
 export function validateSshDestination(value: unknown): string {
@@ -74,10 +81,6 @@ export function sshTunnelArgv(
     ...SSH_NONINTERACTIVE_ARGS,
     "-o",
     "ExitOnForwardFailure=yes",
-    "-o",
-    "ServerAliveInterval=20",
-    "-o",
-    "ServerAliveCountMax=3",
     "-o",
     "StreamLocalBindUnlink=yes",
     "-o",
