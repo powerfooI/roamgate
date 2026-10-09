@@ -1,6 +1,7 @@
 import { existsSync, rmSync } from "node:fs";
 import { type Logger, silentLogger } from "../utils/logger";
-import { sshCommandArgv, sshTunnelArgv } from "./ssh-command";
+import { sshReadCommandArgv, sshTunnelArgv } from "./ssh-command";
+import { createSshMaster, type SshMaster } from "./ssh-master";
 import { createWindowsSshTunnel } from "./ssh-windows";
 import { annotateSshArgv, trackSshProcess } from "./ssh-metrics";
 
@@ -150,6 +151,8 @@ export type SshTunnelConfig = {
   ownedRuntimeDirectory?: string;
   remotePlatform?: "windows";
   remoteHerdrPath?: string;
+  /** Control socket of the runtime's command master; unset disables it. */
+  masterControlPath?: string;
 };
 
 export type RunProcess = (
@@ -203,6 +206,7 @@ export function createSshTunnelManager(args: {
     processStopTimeoutMs?: number;
     processForceKillTimeoutMs?: number;
     platform?: string;
+    createMaster?: (destination: string, controlPath: string) => SshMaster;
   };
 }): SshTunnelManager {
   if (args.config.remotePlatform === "windows") {
@@ -262,14 +266,28 @@ export function createSshTunnelManager(args: {
   let lifecycleGeneration = 0;
   let disposed = false;
   let cleanupTask: Promise<void> | null = null;
+  // Connection B: outlives tunnel reconnects and stops only on cleanup.
+  const master =
+    args.config.sshHost && args.config.masterControlPath
+      ? (
+          args.dependencies?.createMaster ??
+          ((destination, controlPath) =>
+            createSshMaster({
+              destination,
+              controlPath,
+              connectionId: args.connectionId,
+              logger,
+            }))
+        )(args.config.sshHost, args.config.masterControlPath)
+      : null;
 
   async function remoteHome(host: string): Promise<string> {
     if (cachedRemoteHome?.host === host) return cachedRemoteHome.home;
     const { stdout } = await args.runProcess(
-      annotateSshArgv(sshCommandArgv(host, `printf %s "$HOME"`), {
-        tag: "home.probe",
-        connection: args.connectionId,
-      }),
+      annotateSshArgv(
+        sshReadCommandArgv(host, `printf %s "$HOME"`, [], "home.probe"),
+        { connection: args.connectionId },
+      ),
       undefined,
       { timeoutMs: REMOTE_HOME_PROBE_TIMEOUT_MS },
     );
@@ -413,6 +431,9 @@ export function createSshTunnelManager(args: {
     const host = args.config.sshHost;
     if (!host) return;
     assertSshTunnelPlatformSupported(platform);
+    // Started alongside the tunnel and never awaited: until it is ready,
+    // commands (including the HOME probe below) open their own connection.
+    void master?.ensure();
     const generation = ++lifecycleGeneration;
     activeSocketWait?.cancel();
     activeSocketWait = null;
@@ -544,7 +565,12 @@ export function createSshTunnelManager(args: {
     const paths = autoSshTunnelPaths;
     autoSshTunnelPaths = [];
     cleanupTask = (async () => {
-      await stopTunnelProcess();
+      const [tunnelStop, masterStop] = await Promise.allSettled([
+        stopTunnelProcess(),
+        master?.stop(),
+      ]);
+      if (tunnelStop.status === "rejected") throw tunnelStop.reason;
+      if (masterStop.status === "rejected") throw masterStop.reason;
       for (const path of paths) remove(path);
       if (args.config.ownedRuntimeDirectory) {
         removeDirectory(args.config.ownedRuntimeDirectory);

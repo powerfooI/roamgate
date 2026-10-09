@@ -5,6 +5,8 @@ export type SshProcessAnnotation = {
   /** Short, stable caller name, for example `git.status`. */
   tag?: string;
   connection?: string;
+  /** Multiplexed over the runtime's command master. */
+  master?: boolean;
 };
 
 // sshd drops connections beyond MaxStartups before the banner exchange; the
@@ -13,9 +15,6 @@ const STARTUP_FAILURE = /\b(?:kex|ssh)_exchange_identification\b/;
 
 // Annotations ride on the argv array itself, so call sites that only build an
 // argv can name themselves without threading new parameters through helpers.
-// They are keyed on the array's identity: a copy (spread, slice, concat) of an
-// annotated argv carries no annotation and logs as untagged, so annotate the
-// array that is actually spawned.
 const annotations = new WeakMap<readonly string[], SshProcessAnnotation>();
 
 export function annotateSshArgv<T extends readonly string[]>(
@@ -64,6 +63,7 @@ export function createSshProcessMonitor(
       logger.debug("ssh process exited", {
         tag: annotation?.tag ?? "untagged",
         connection: annotation?.connection,
+        master: annotation?.master || undefined,
         host,
         code,
         total_ms: Math.round(now() - startedAt),

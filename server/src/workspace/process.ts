@@ -1,9 +1,19 @@
 import { trackSshProcess } from "../bridge/ssh-metrics";
+import { runSshCommand } from "../bridge/ssh-sessions";
 
 export async function runBinaryProcessWithTimeout(
   argv: string[],
   timeoutMs: number,
 ) {
+  return runSshCommand(
+    argv,
+    (argv, remainingMs) =>
+      spawnBinaryWithTimeout(argv, remainingMs ?? timeoutMs),
+    { timeoutMs },
+  );
+}
+
+async function spawnBinaryWithTimeout(argv: string[], timeoutMs: number) {
   const proc = Bun.spawn(argv, {
     env: { ...process.env, COPYFILE_DISABLE: "1" },
     stdin: "ignore",
@@ -43,6 +53,19 @@ function ignoreBrokenStdin(result: number | Promise<number>) {
 }
 
 export async function runProcessWithInputTimeout(
+  argv: string[],
+  input: Buffer | string,
+  timeoutMs: number,
+) {
+  return runSshCommand(
+    argv,
+    (argv, remainingMs) =>
+      spawnWithInputTimeout(argv, input, remainingMs ?? timeoutMs),
+    { timeoutMs },
+  );
+}
+
+async function spawnWithInputTimeout(
   argv: string[],
   input: Buffer | string,
   timeoutMs: number,

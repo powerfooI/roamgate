@@ -6,7 +6,6 @@ import * as path from "node:path";
 import { tmpdir } from "node:os";
 import { BinReader, BinWriter, encodeFrame } from "./bincode";
 import {
-  ECHO_SAMPLE_MAX_MS,
   EndpointTerminalSession,
   cropFrame,
   frameHyperlinkAt,
@@ -4955,7 +4954,7 @@ test("debug echo timing samples one typed character until the next surface", asy
     senders[0](panes);
     await settleUntil(() => echoes().length === 1);
     expect(echoes()[0]).toMatch(
-      /terminal echo terminal=term_1 input_to_surface_max_ms=\d+ surface_to_send_ms=\d+$/,
+      /terminal echo terminal=term_1 input_to_surface_ms=\d+ surface_to_send_ms=\d+$/,
     );
 
     // The sample is consumed: an unprompted surface logs nothing more.
@@ -4964,51 +4963,6 @@ test("debug echo timing samples one typed character until the next surface", asy
     await settleUntil(() => frames.length > count);
     expect(echoes()).toHaveLength(1);
   } finally {
-    session.close();
-  }
-});
-
-test("debug echo timing drops a typed character older than 5 s", async () => {
-  const panes: TestPane[] = [{ paneId: "w1:p1", x: 0, mouseReporting: false }];
-  const senders: Array<(panes: TestPane[]) => void> = [];
-  const socketPath = await startSessionServer({
-    panes,
-    onConnection: (send) => senders.push(send),
-  });
-  const lines: string[] = [];
-  const session = new EndpointTerminalSession(
-    socketPath,
-    "term_1",
-    async () => "w1:p1",
-    createLogger({ level: "debug", stdout: (line) => lines.push(line) }),
-  );
-  const frames: unknown[] = [];
-  session.on("terminal", (frame) => frames.push(frame));
-  const echoes = () => lines.filter((line) => line.includes("terminal echo"));
-  let clock = 1_000;
-  const now = spyOn(performance, "now").mockImplementation(() => clock);
-  try {
-    await session.connect(80, 24);
-    await settleUntil(() => frames.length > 0 && senders.length > 0);
-
-    // A stale pending character gives way to the next one typed.
-    session.input(Buffer.from("a"));
-    clock += ECHO_SAMPLE_MAX_MS + 1;
-    session.input(Buffer.from("b"));
-    clock += 20;
-    senders[0](panes);
-    await settleUntil(() => echoes().length === 1);
-    expect(echoes()[0]).toContain("input_to_surface_max_ms=20 ");
-
-    // A surface more than 5 s after the character is not sampled.
-    session.input(Buffer.from("c"));
-    clock += ECHO_SAMPLE_MAX_MS + 1;
-    const count = frames.length;
-    senders[0](panes);
-    await settleUntil(() => frames.length > count);
-    expect(echoes()).toHaveLength(1);
-  } finally {
-    now.mockRestore();
     session.close();
   }
 });

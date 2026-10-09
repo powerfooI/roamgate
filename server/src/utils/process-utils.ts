@@ -1,4 +1,5 @@
 import { trackSshProcess } from "../bridge/ssh-metrics";
+import { runSshCommand } from "../bridge/ssh-sessions";
 
 export async function runProcess(
   argv: string[],
@@ -21,6 +22,13 @@ export async function runProcessWithCode(
   argv: string[],
   input?: string,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
+  return runSshCommand(argv, (argv) => spawnWithCode(argv, input));
+}
+
+async function spawnWithCode(
+  argv: string[],
+  input?: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(argv, {
     stdin: input === undefined ? "ignore" : Buffer.from(input),
     stdout: "pipe",
@@ -40,6 +48,19 @@ export async function runProcessWithCodeTimeout(
   argv: string[],
   timeoutMs: number,
   options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return runSshCommand(
+    argv,
+    (argv, remainingMs) =>
+      spawnWithCodeTimeout(argv, remainingMs ?? timeoutMs, options),
+    { timeoutMs },
+  );
+}
+
+async function spawnWithCodeTimeout(
+  argv: string[],
+  timeoutMs: number,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(argv, {
     ...options,

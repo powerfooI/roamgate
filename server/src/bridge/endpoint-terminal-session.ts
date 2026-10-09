@@ -21,9 +21,6 @@ export function isTypedCharacter(data: Uint8Array): boolean {
 }
 
 const ESC_FLUSH_MS = 25;
-// A typed character the next surface has not followed within this long is
-// dropped from echo timing: the sample would mostly measure idle time.
-export const ECHO_SAMPLE_MAX_MS = 5000;
 const FIRST_SURFACE_WAIT_MS = 10_000;
 // Boot correction plus rounding follow-ups; nested splits can need three.
 const SURFACE_FIT_MAX_ATTEMPTS = 3;
@@ -67,9 +64,6 @@ export class EndpointTerminalSession extends EventEmitter {
   private closed = false;
   private seq = 0;
   // Debug echo timing: when the oldest unanswered typed character was sent.
-  // The next surface for the pane may come from unrelated output, so the
-  // sample is an upper bound on the echo, and it expires after
-  // ECHO_SAMPLE_MAX_MS.
   private pendingEchoAt: number | null = null;
   private readonly linkSessionId = crypto.randomUUID();
   private linkLookupEpoch = 0;
@@ -305,11 +299,7 @@ export class EndpointTerminalSession extends EventEmitter {
       return;
     }
     const surfaceAt = performance.now();
-    const echoSentAt =
-      this.pendingEchoAt !== null &&
-      surfaceAt - this.pendingEchoAt <= ECHO_SAMPLE_MAX_MS
-        ? this.pendingEchoAt
-        : null;
+    const echoSentAt = this.pendingEchoAt;
     this.pendingEchoAt = null;
     this.fitSurface(surface, pane);
     const previousMaxOffset = this.lastScroll?.maxOffsetFromBottom;
@@ -401,8 +391,7 @@ export class EndpointTerminalSession extends EventEmitter {
       if (echoSentAt !== null) {
         this.logger.debug("terminal echo", {
           terminal: this.terminalId,
-          // The next surface, not necessarily the echo itself.
-          input_to_surface_max_ms: Math.round(surfaceAt - echoSentAt),
+          input_to_surface_ms: Math.round(surfaceAt - echoSentAt),
           surface_to_send_ms: Math.round(performance.now() - surfaceAt),
         });
       }
@@ -585,14 +574,12 @@ export class EndpointTerminalSession extends EventEmitter {
   input(data: Buffer) {
     this.linkFrame = null;
     if (!this.paneId || this.closed) return;
-    if (this.logger.enabled("debug") && isTypedCharacter(data)) {
-      const now = performance.now();
-      if (
-        this.pendingEchoAt === null ||
-        now - this.pendingEchoAt > ECHO_SAMPLE_MAX_MS
-      ) {
-        this.pendingEchoAt = now;
-      }
+    if (
+      this.pendingEchoAt === null &&
+      this.logger.enabled("debug") &&
+      isTypedCharacter(data)
+    ) {
+      this.pendingEchoAt = performance.now();
     }
     // Typing or application input supersedes a queued history gesture.
     if (data.length > 0) {

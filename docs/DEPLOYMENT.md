@@ -212,19 +212,20 @@ environment file. `roamgate --help` lists everything.
 | `--profile-dir <path>`                  | `ROAMGATE_PROFILE_DIR`         | `<data dir>/profiles`                             |
 | `--open`                                | `OPEN_BROWSER=1`               | Disabled                                          |
 
-| Other environment variable                             | Purpose                                      |
-| ------------------------------------------------------ | -------------------------------------------- |
-| `ROAMGATE_UPDATE_BASE_URL`                             | HTTPS update mirror directory                |
-| `ROAMGATE_DISABLE_UPDATE_CHECK=1`                      | Disable update checks                        |
-| `ROAMGATE_RESTART_SUPERVISOR=0\|1`                     | Override supervisor detection                |
-| `ROAMGATE_DISABLE_ENDPOINT=1`                          | Force legacy terminal mode                   |
-| `ROAMGATE_ALLOW_FILE_REVEAL=1`                         | Enable [host file reveal](#host-file-reveal) |
-| `ROAMGATE_UPLOAD_MAX_BYTES`                            | Max terminal upload size (default 100 MiB)   |
-| `ROAMGATE_UPLOAD_RETENTION_HOURS`                      | Upload retention (default 24)                |
-| `ROAMGATE_SETTINGS_PATH`                               | GUI settings file (one per bridge)           |
-| `ROAMGATE_CONNECTIONS_PATH`                            | Connection profiles file                     |
-| `ROAMGATE_ASSISTANT_DIR`                               | Ranger data directory                        |
-| `ROAMGATE_WEB_PUSH_PATH` / `ROAMGATE_WEB_PUSH_SUBJECT` | [Web Push](#web-push-notifications)          |
+| Other environment variable                             | Purpose                                                                                         |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `ROAMGATE_UPDATE_BASE_URL`                             | HTTPS update mirror directory                                                                   |
+| `ROAMGATE_DISABLE_UPDATE_CHECK=1`                      | Disable update checks                                                                           |
+| `ROAMGATE_RESTART_SUPERVISOR=0\|1`                     | Override supervisor detection                                                                   |
+| `ROAMGATE_DISABLE_ENDPOINT=1`                          | Force legacy terminal mode                                                                      |
+| `ROAMGATE_DISABLE_SSH_MASTER=1`                        | Give every SSH host command its own login; see [SSH transport](./ARCHITECTURE.md#ssh-transport) |
+| `ROAMGATE_ALLOW_FILE_REVEAL=1`                         | Enable [host file reveal](#host-file-reveal)                                                    |
+| `ROAMGATE_UPLOAD_MAX_BYTES`                            | Max terminal upload size (default 100 MiB)                                                      |
+| `ROAMGATE_UPLOAD_RETENTION_HOURS`                      | Upload retention (default 24)                                                                   |
+| `ROAMGATE_SETTINGS_PATH`                               | GUI settings file (one per bridge)                                                              |
+| `ROAMGATE_CONNECTIONS_PATH`                            | Connection profiles file                                                                        |
+| `ROAMGATE_ASSISTANT_DIR`                               | Ranger data directory                                                                           |
+| `ROAMGATE_WEB_PUSH_PATH` / `ROAMGATE_WEB_PUSH_SUBJECT` | [Web Push](#web-push-notifications)                                                             |
 
 Legacy `HERDR_GUI_*` names still work; the `ROAMGATE_*` name wins, even when
 empty.
@@ -378,13 +379,11 @@ managed service.
 At `debug`, the server logs one line per Herdr control call (`herdr call`:
 method, sizes, `total_ms`, `connect_ms`, `first_byte_ms` from request write to
 first response byte), per ssh child exit (`ssh process exited`: caller `tag`,
-`connection`, `host`, `code`, `total_ms`, live children, and
+`connection`, `host`, `code`, `total_ms`, live children, `master=true` when
+the command multiplexed over the profile's command master, and
 `startup_failures` for sshd `kex_exchange_identification` drops), and per typed
-character echo (`terminal echo`: `input_to_surface_max_ms`,
-`surface_to_send_ms`). The echo sample runs to the pane's next surface, which
-other output can trigger first, so it is an upper bound; a character with no
-surface within 5 s is not sampled. Tags ride on the argv array itself, so an
-argv copied before it is spawned logs as `untagged`. Attach phases appear in `endpoint connected`.
+character echo (`terminal echo`: `input_to_surface_ms`, `surface_to_send_ms`).
+Attach phases appear in `endpoint connected`.
 
 The browser keeps its samples off by default. Add `?debugLatency` to the page
 URL, or run `localStorage.setItem("roamgate:debugLatency", "1")` and reload,
@@ -437,7 +436,11 @@ with `--allow-unelevated-clients`.
 Profiles are stored in `~/.config/roamgate/connections.json`
 (`%APPDATA%\roamgate\connections.json`). `auto_connect` controls whether a
 profile connects at startup. Transient SSH failures retry; authentication and
-host-key failures do not. GUI preferences live in `settings.json` beside it.
+host-key failures do not. A Unix-host SSH profile holds two connections to its
+host: the terminal tunnel and a command master shared by file, Git, search, and
+upload commands; Roamgate keeps at most eight of these command sessions per
+host, within sshd's default `MaxSessions 10`. A Windows-host profile opens one
+connection per bridged socket client and has no command master. GUI preferences live in `settings.json` beside it.
 Give each bridge on the same account its own `ROAMGATE_SETTINGS_PATH` (an
 absolute, stable path; changing it requires logging in again).
 
