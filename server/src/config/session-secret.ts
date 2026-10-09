@@ -1,4 +1,5 @@
 import {
+  createHash,
   createHmac,
   randomBytes,
   randomUUID,
@@ -22,6 +23,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { lockSync } from "proper-lockfile";
 import { assertSafeDataPath, dataRoot } from "./data-paths";
+import { roamgateEnv } from "./environment";
 
 const SECRET_PATTERN = /^[a-f0-9]{64}$/;
 const LOCK_WAIT_MS = 5_000;
@@ -175,9 +177,14 @@ function writeSessionSecret(path: string, state: SessionSecretState): void {
 /** Persist independent signing material, rotating it when login credentials change. */
 export function loadOrCreateSessionSecret(
   credentials: readonly string[],
-  path = join(dataRoot(), "session-secret.json"),
+  path?: string,
 ): string {
-  path = resolve(path);
+  const settingsPath = roamgateEnv("SETTINGS_PATH");
+  // Settings identify the instance; signing material stays in private storage.
+  const filename = settingsPath
+    ? `session-secret-${createHash("sha256").update(resolve(settingsPath)).digest("hex")}.json`
+    : "session-secret.json";
+  path = resolve(path ?? join(dataRoot(), filename));
   assertSafeDataPath(path);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const release = acquireSessionLock(path);

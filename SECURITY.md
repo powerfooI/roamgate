@@ -32,19 +32,27 @@ persistent 256-bit random token and reports its protected file path. Read that
 file to log in, or use `--open` to open a token URL automatically. Service
 installation and URL tools can also provide token URLs; keep them private.
 
-Session cookies are signed by a separate, randomly generated 256-bit secret in
-`session-secret.json` beside the auth-token file, with owner-only permissions.
+Session cookies are signed by a separate, randomly generated 256-bit secret with
+owner-only permissions in the Roamgate data directory. The default file is
+`session-secret.json`. A nonempty `ROAMGATE_SETTINGS_PATH` (or its legacy alias)
+selects `session-secret-<sha256>.json` in that directory, using the full SHA-256
+digest of the normalized absolute settings path. Separate settings paths isolate
+signing keys; changing that path requires logging in again. Keep custom paths
+absolute and stable.
+
 The login password/token is never the cookie signing key. Ordinary restarts keep
 sessions valid for their original 30-day lifetime. Changing the effective login
-password/token or adding, changing, or removing the PIN rotates the signing secret at startup and invalidates earlier cookies,
-even if a previous credential is later restored. Stop all listeners sharing the
-data directory before changing credentials; already-running processes retain
-their in-memory configuration. Keep this file private and persistent, and never
-copy it into a different installation. Corrupt or unsafe secret files stop startup.
+password/token or adding, changing, or removing the PIN rotates that instance's
+signing secret at startup and invalidates earlier cookies, even if a previous
+credential is later restored. Stop all listeners for the same instance before
+changing credentials; already-running processes retain their in-memory
+configuration. Keep signing state private and persistent, and never copy it into
+a different installation. Corrupt or unsafe secret files stop startup.
 
 Upgrading from password/token-signed cookies requires one new login; legacy
-cookies are deliberately not accepted. Removing `session-secret.json` while the
-server is stopped resets all sessions without changing the login credential.
+cookies are deliberately not accepted. Removing the instance's signing state
+while all its listeners are stopped resets its sessions without changing the
+login credential. See [signing state and lock recovery](docs/DEPLOYMENT.md#run-as-a-user-service).
 
 Password login (`POST /api/login`) and token-URL login share limits by the
 connection's source IP: at most 20 attempts per 60-second window, and five
@@ -91,7 +99,8 @@ listeners multiply the guessing budget. Do not use PIN login across replicas
 without shared outer rate limiting. Forwarded IP headers remain untrusted.
 Distributed attempts can temporarily deny the PIN convenience path, so retain
 access to the strong credential. If attacked, remove `ROAMGATE_PIN` and restart
-all listeners; changing/removing the PIN also revokes existing session cookies.
+all listeners for that instance; changing/removing the PIN also revokes its
+existing session cookies.
 
 ### Access and session safety
 

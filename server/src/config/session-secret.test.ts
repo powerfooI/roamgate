@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -158,6 +159,8 @@ describe("session signing secret", () => {
           HOME: home,
           USERPROFILE: home,
           APPDATA: appData,
+          ROAMGATE_SETTINGS_PATH: undefined,
+          HERDR_GUI_SETTINGS_PATH: undefined,
         },
         stdout: "pipe",
         stderr: "pipe",
@@ -169,6 +172,54 @@ describe("session signing secret", () => {
     expect(values[0]).toMatch(/^[a-f0-9]{64}$/);
     expect(values[1]).toBe(values[0]);
     expect(storedState(path).secret).toBe(values[0]);
+  });
+
+  test("isolates signing state by the effective settings path", () => {
+    const home = tempHome();
+    const appData = join(home, "AppData", "Roaming");
+    const root = dataRoot(home, process.platform, appData);
+    const settingsA = join(realpathSync(home), "a.json");
+    const settingsB = join(realpathSync(home), "b.json");
+    const load = (currentPath?: string, legacyPath?: string) => {
+      const child = Bun.spawnSync(
+        [
+          process.execPath,
+          "-e",
+          `import { loadOrCreateSessionSecret } from ${JSON.stringify(join(import.meta.dir, "session-secret.ts"))}; console.log(loadOrCreateSessionSecret([${JSON.stringify(password)}]));`,
+        ],
+        {
+          cwd: home,
+          env: {
+            ...process.env,
+            HOME: home,
+            USERPROFILE: home,
+            APPDATA: appData,
+            ROAMGATE_SETTINGS_PATH: currentPath,
+            HERDR_GUI_SETTINGS_PATH: legacyPath,
+          },
+        },
+      );
+      expect(child.stderr.toString()).toBe("");
+      expect(child.exitCode).toBe(0);
+      return child.stdout.toString().trim();
+    };
+    const defaultSecret = load();
+    const secretA = load("./a.json");
+    const secretB = load(settingsB);
+    expect(new Set([defaultSecret, secretA, secretB]).size).toBe(3);
+    expect(load(settingsA, settingsB)).toBe(secretA);
+    expect(load(undefined, settingsA)).toBe(secretA);
+    expect(load(settingsB)).toBe(secretB);
+    expect(load("", settingsA)).toBe(defaultSecret);
+    expect(storedState(join(root, "session-secret.json")).secret).toBe(
+      defaultSecret,
+    );
+    const hash = createHash("sha256").update(settingsA).digest("hex");
+    expect(storedState(join(root, `session-secret-${hash}.json`)).secret).toBe(
+      secretA,
+    );
+    expect(readdirSync(root)).toHaveLength(3);
+    expect(existsSync(settingsA)).toBeFalse();
   });
 
   test("fingerprints the credential set without mutating the caller", () => {

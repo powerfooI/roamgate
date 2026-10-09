@@ -333,7 +333,7 @@ available during that cooldown. See [PIN security and limits](../SECURITY.md#opt
 
 Adding, changing, or removing the PIN rotates the independent session signing
 secret at the next listener startup, just like changing the strong credential.
-Stop all listeners sharing the data directory before changing credentials.
+Stop all listeners for the same instance before changing credentials.
 
 ### Host file reveal
 
@@ -698,7 +698,9 @@ resource budget; disconnect unused profiles.
 GUI preferences and worktree source relationships live in
 `~/.config/roamgate/settings.json` (Windows: `%APPDATA%\roamgate\settings.json`).
 Use `ROAMGATE_SETTINGS_PATH` to give another bridge its own settings file;
-`HERDR_GUI_SETTINGS_PATH` remains a supported alias.
+`HERDR_GUI_SETTINGS_PATH` remains a supported alias. Separate settings paths also
+isolate session signing keys. Use stable absolute paths; changing the normalized
+absolute path requires logging in again.
 
 Explicit CLI/environment connection settings create a read-only `legacy-default`
 profile. Change those settings to edit it. Old browser preferences migrate once
@@ -858,20 +860,31 @@ curl -fsS http://127.0.0.1:8787/healthz
 ```
 
 Tokens live in `~/.config/roamgate/auth-token` or `%APPDATA%\roamgate\auth-token`.
-A separate `session-secret.json` in the same directory stores the private random
-cookie signing secret; preserve it across restarts and protect it like the login
-token. `ROAMGATE_PASSWORD` and the generated token are login credentials only.
-The first upgrade from credential-signed cookies requires logging in again.
-Changing the effective credential rotates the signing secret at startup, so old
+Private random cookie signing state lives in the same data directory. With no or
+an empty settings-path override, its file is `session-secret.json`. A nonempty
+`ROAMGATE_SETTINGS_PATH` (or `HERDR_GUI_SETTINGS_PATH`) selects
+`session-secret-<sha256>.json`, where `<sha256>` is the full SHA-256 digest of the
+normalized absolute settings path. The key stays in the data directory even when
+the settings file is elsewhere. Different settings paths isolate signing keys;
+keep custom paths absolute and stable. Changing the normalized path requires
+logging in again. Preserve the signing state across restarts and protect it like
+the login token.
+
+`ROAMGATE_PASSWORD` and the generated token are login credentials only. The first
+upgrade from credential-signed cookies requires logging in again. Changing an
+effective credential rotates that instance's signing secret at startup, so old
 sessions stay revoked even if that credential is later restored. Stop all
-listeners sharing this directory before credential changes. To revoke every
-session without changing the login credential, stop the server, remove only
-`session-secret.json`, then restart. Malformed or unsafe signing state fails
-startup rather than silently resetting authentication. Concurrent startups use a
-short-lived `session-secret.json.lock` directory. If startup was killed while
-holding it, stop all listeners using this data directory, confirm no startup is
-running, and remove that lock directory before restarting. A busy lock fails
-closed after a bounded wait; it is never stolen from a potentially live writer.
+listeners for the same instance before credential changes. To revoke its sessions
+without changing credentials, stop those listeners, remove only its signing
+state file, then restart. Malformed or unsafe signing state fails startup rather
+than silently resetting authentication.
+
+Concurrent startups use a short-lived `<signing-state-file>.lock` directory,
+such as `session-secret.json.lock` or `session-secret-<sha256>.json.lock`. If
+startup was killed while holding it, stop all listeners for that instance,
+confirm no startup is running, and remove only its matching lock directory before
+restarting. A busy lock fails closed after a bounded wait; it is never stolen
+from a potentially live writer.
 
 A `?token=...` visit sets an HttpOnly cookie and removes the URL token. To rotate,
 stop the service, replace the file with a fresh 64-character lowercase hexadecimal
