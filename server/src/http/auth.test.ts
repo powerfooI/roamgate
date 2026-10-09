@@ -48,12 +48,16 @@ describe("request authentication boundaries", () => {
   });
 
   test("requires authentication by default", () => {
-    const handlers = createAuthHandlers({ password: "test-login-secret" });
+    const handlers = createAuthHandlers({
+      sessionSecret: "a".repeat(64),
+      password: "test-login-secret",
+    });
     expect(handlers.isAuthed(new Request("http://localhost/"))).toBe(false);
   });
 
   test("explicitly disabled development authentication needs no password or cookie", async () => {
     const handlers = createAuthHandlers({
+      sessionSecret: "a".repeat(64),
       authRequired: false,
       password: "",
       urlLoginToken: "ignored-token",
@@ -80,6 +84,7 @@ describe("request authentication boundaries", () => {
 
   test("brands the login page as Roamgate", async () => {
     const handlers = createAuthHandlers({
+      sessionSecret: "a".repeat(64),
       password: "fixed-test-password",
     });
     const html = await handlers.loginPage().text();
@@ -95,6 +100,7 @@ describe("request authentication boundaries", () => {
 
   test("login preserves same-origin notification launch fragments", async () => {
     const handlers = createAuthHandlers({
+      sessionSecret: "a".repeat(64),
       password: "test-login-secret",
     });
     const html = await handlers.loginPage().text();
@@ -125,6 +131,7 @@ describe("request authentication boundaries", () => {
     "login recovers from %s failures and prevents duplicate submissions",
     async (failure) => {
       const handlers = createAuthHandlers({
+        sessionSecret: "a".repeat(64),
         password: "test-login-secret",
       });
       const html = await handlers.loginPage().text();
@@ -203,6 +210,7 @@ describe("request authentication boundaries", () => {
 
   test("does not derive authorization from reverse-proxy authorities", async () => {
     const handlers = createAuthHandlers({
+      sessionSecret: "a".repeat(64),
       password: "fixed-test-password",
     });
     const login = await handlers.handleLogin(
@@ -227,6 +235,7 @@ describe("request authentication boundaries", () => {
     "sets Secure for both login paths only with native TLS (%s)",
     async (secureCookies) => {
       const handlers = createAuthHandlers({
+        sessionSecret: "a".repeat(64),
         password: "test-login-secret",
         urlLoginToken: "test-login-secret",
         secureCookies,
@@ -273,6 +282,7 @@ describe("login attempt limits", () => {
       jest.useFakeTimers({ now: 1_700_000_000_000 });
       try {
         const handlers = createAuthHandlers({
+          sessionSecret: "a".repeat(64),
           password: "test-login-secret",
           urlLoginToken: "test-login-secret",
         });
@@ -357,7 +367,10 @@ describe("login attempt limits", () => {
   );
 
   test("reserves concurrent attempts before reading JSON and counts malformed failures", async () => {
-    const handlers = createAuthHandlers({ password: "test-login-secret" });
+    const handlers = createAuthHandlers({
+      sessionSecret: "a".repeat(64),
+      password: "test-login-secret",
+    });
     const request = (body: string, ip: string) =>
       handlers.handleLogin(
         new Request("http://example.test/api/login", { method: "POST", body }),
@@ -389,6 +402,7 @@ describe("login attempt limits", () => {
     jest.useFakeTimers({ now: 1_700_000_000_000 });
     try {
       const handlers = createAuthHandlers({
+        sessionSecret: "a".repeat(64),
         password: "test-login-secret",
         urlLoginToken: "test-login-secret",
       });
@@ -409,7 +423,10 @@ describe("login attempt limits", () => {
   });
 
   test("rejects oversized streamed JSON and cancels reading without Content-Length", async () => {
-    const handlers = createAuthHandlers({ password: "test-login-secret" });
+    const handlers = createAuthHandlers({
+      sessionSecret: "a".repeat(64),
+      password: "test-login-secret",
+    });
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -432,7 +449,10 @@ describe("login attempt limits", () => {
   test("slow login bodies cannot bypass a replaced IP record's cooldown", async () => {
     jest.useFakeTimers({ now: 1_700_000_000_000 });
     try {
-      const handlers = createAuthHandlers({ password: "test-login-secret" });
+      const handlers = createAuthHandlers({
+        sessionSecret: "a".repeat(64),
+        password: "test-login-secret",
+      });
       let controller!: ReadableStreamDefaultController<Uint8Array>;
       const body = new ReadableStream<Uint8Array>({
         start(value) {
@@ -476,7 +496,10 @@ describe("login attempt limits", () => {
     async (failure) => {
       jest.useFakeTimers({ now: 1_700_000_000_000 });
       try {
-        const handlers = createAuthHandlers({ password: "test-login-secret" });
+        const handlers = createAuthHandlers({
+          sessionSecret: "a".repeat(64),
+          password: "test-login-secret",
+        });
         const login = (body: string | ReadableStream<Uint8Array>) =>
           handlers.handleLogin(
             new Request("http://example.test/api/login", {
@@ -531,6 +554,7 @@ describe("browser logout", () => {
     "%s reauthentication preserves the current cookie and its expiry",
     async (mode) => {
       const handlers = createAuthHandlers({
+        sessionSecret: "a".repeat(64),
         password: "test-login-secret",
         urlLoginToken: "test-login-secret",
       });
@@ -568,7 +592,10 @@ describe("browser logout", () => {
       const expiredPayload = Buffer.from(JSON.stringify({ exp: 0 })).toString(
         "base64url",
       );
-      const expiredSignature = createHmac("sha256", "test-login-secret")
+      const expiredSignature = createHmac(
+        "sha256",
+        Buffer.from("a".repeat(64), "hex"),
+      )
         .update(expiredPayload)
         .digest("hex");
       for (const cookie of [
@@ -592,6 +619,7 @@ describe("browser logout", () => {
     "expires the cookie with matching attributes (TLS %s)",
     async (secureCookies) => {
       const handlers = createAuthHandlers({
+        sessionSecret: "a".repeat(64),
         password: "test-login-secret",
         secureCookies,
       });
@@ -634,6 +662,7 @@ describe("browser logout", () => {
 
   test("rejects GET and cross-site logout, but allows retry without a cookie", () => {
     const handlers = createAuthHandlers({
+      sessionSecret: "a".repeat(64),
       password: "test-login-secret",
     });
     for (const method of ["GET", "HEAD", "OPTIONS"]) {
@@ -669,6 +698,7 @@ describe("browser logout", () => {
 describe("generated token login", () => {
   test("exchanges a URL token for a signed cookie and strips it", () => {
     const handlers = createAuthHandlers({
+      sessionSecret: "a".repeat(64),
       password: "generated-secret",
       urlLoginToken: "generated-secret",
     });
@@ -694,6 +724,7 @@ describe("generated token login", () => {
 
   test("removes an invalid token without creating a session", () => {
     const handlers = createAuthHandlers({
+      sessionSecret: "a".repeat(64),
       password: "generated-secret",
       urlLoginToken: "generated-secret",
     });
@@ -709,6 +740,7 @@ describe("generated token login", () => {
 
   test("ignores token parameters when URL login is not enabled", () => {
     const handlers = createAuthHandlers({
+      sessionSecret: "a".repeat(64),
       password: "fixed-test-password",
     });
 
@@ -722,6 +754,7 @@ describe("generated token login", () => {
 
   test("preserves fixed-test-password login behavior", async () => {
     const handlers = createAuthHandlers({
+      sessionSecret: "a".repeat(64),
       password: "fixed-test-password",
     });
     const response = await handlers.handleLogin(
@@ -751,9 +784,77 @@ describe("generated token login", () => {
 
   test("rejects an empty authentication secret", () => {
     expect(() =>
-      createAuthHandlers({
-        password: "",
-      }),
+      createAuthHandlers({ sessionSecret: "a".repeat(64), password: "" }),
     ).toThrow("at least 15 characters");
+  });
+});
+
+describe("independent session signing key", () => {
+  test("password and URL token cannot forge a session cookie", async () => {
+    const password = "test-login-secret";
+    const sessionSecret = "a".repeat(64);
+    const handlers = createAuthHandlers({
+      password,
+      sessionSecret,
+      urlLoginToken: password,
+    });
+    const response = await handlers.handleLogin(
+      new Request("http://localhost/api/login", {
+        method: "POST",
+        body: JSON.stringify({ password }),
+      }),
+      "127.0.0.1",
+    );
+    const cookie = cookieHeader(response);
+    const payload = cookie.slice("herdr_auth=".length).split(".")[0]!;
+    const forged = createHmac("sha256", password).update(payload).digest("hex");
+    expect(
+      handlers.isAuthed(
+        new Request("http://localhost/", {
+          headers: { cookie: `herdr_auth=${payload}.${forged}` },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      createAuthHandlers({ password, sessionSecret }).isAuthed(
+        new Request("http://localhost/", {
+          headers: { cookie },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      createAuthHandlers({ password, sessionSecret: "b".repeat(64) }).isAuthed(
+        new Request("http://localhost/", {
+          headers: { cookie },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      (
+        await handlers.handleLogin(
+          new Request("http://localhost/api/login", {
+            method: "POST",
+            body: JSON.stringify({ password: sessionSecret }),
+          }),
+          "127.0.0.2",
+        )
+      ).status,
+    ).toBe(401);
+  });
+
+  test("rejects missing or malformed signing secrets instead of falling back to password", () => {
+    for (const sessionSecret of [
+      undefined,
+      "",
+      "password-as-signing-key",
+      "a".repeat(63),
+    ]) {
+      expect(() =>
+        createAuthHandlers({
+          password: "test-login-secret",
+          sessionSecret: sessionSecret as string,
+        }),
+      ).toThrow("256-bit session signing secret");
+    }
   });
 });

@@ -40,11 +40,19 @@ function base64UrlDecode(value: string) {
 export function createAuthHandlers(args: {
   authRequired?: boolean;
   password: string;
+  sessionSecret: string;
   urlLoginToken?: string;
   secureCookies?: boolean;
 }) {
   const authRequired = args.authRequired ?? true;
-  if (authRequired) assertValidAuthPassword(args.password);
+  if (authRequired) {
+    assertValidAuthPassword(args.password);
+    if (!/^[a-f0-9]{64}$/.test(args.sessionSecret)) {
+      throw new Error(
+        "Authentication requires a 256-bit session signing secret.",
+      );
+    }
+  }
   // ponytail: process-local IP limits; use shared storage for multiple replicas.
   const loginAttempts = new Map<string, LoginAttempts>();
 
@@ -133,7 +141,9 @@ export function createAuthHandlers(args: {
   }
 
   function sign(payload: string): string {
-    return createHmac("sha256", args.password).update(payload).digest("hex");
+    return createHmac("sha256", Buffer.from(args.sessionSecret, "hex"))
+      .update(payload)
+      .digest("hex");
   }
 
   function signedToken(): string {

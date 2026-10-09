@@ -837,6 +837,21 @@ curl -fsS http://127.0.0.1:8787/healthz
 ```
 
 Tokens live in `~/.config/roamgate/auth-token` or `%APPDATA%\roamgate\auth-token`.
+A separate `session-secret.json` in the same directory stores the private random
+cookie signing secret; preserve it across restarts and protect it like the login
+token. `ROAMGATE_PASSWORD` and the generated token are login credentials only.
+The first upgrade from credential-signed cookies requires logging in again.
+Changing the effective credential rotates the signing secret at startup, so old
+sessions stay revoked even if that credential is later restored. Stop all
+listeners sharing this directory before credential changes. To revoke every
+session without changing the login credential, stop the server, remove only
+`session-secret.json`, then restart. Malformed or unsafe signing state fails
+startup rather than silently resetting authentication. Concurrent startups use a
+short-lived `session-secret.json.lock` directory. If startup was killed while
+holding it, stop all listeners using this data directory, confirm no startup is
+running, and remove that lock directory before restarting. A busy lock fails
+closed after a bounded wait; it is never stolen from a potentially live writer.
+
 A `?token=...` visit sets an HttpOnly cookie and removes the URL token. To rotate,
 stop the service, replace the file with a fresh 64-character lowercase hexadecimal
 secret (mode `0600`), then restart. **Deleting only the new file can restore a

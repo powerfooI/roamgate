@@ -189,6 +189,7 @@ test("authenticated, non-CSRF device mutations persist privately across restart 
   const f = fixture();
   try {
     const auth = createAuthHandlers({
+      sessionSecret: randomBytes(32).toString("hex"),
       password: randomBytes(32).toString("hex"),
     });
     const handle = (req: Request) =>

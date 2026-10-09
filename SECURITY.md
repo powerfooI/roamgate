@@ -32,6 +32,20 @@ persistent 256-bit random token and reports its protected file path. Read that
 file to log in, or use `--open` to open a token URL automatically. Service
 installation and URL tools can also provide token URLs; keep them private.
 
+Session cookies are signed by a separate, randomly generated 256-bit secret in
+`session-secret.json` beside the auth-token file, with owner-only permissions.
+The login password/token is never the cookie signing key. Ordinary restarts keep
+sessions valid for their original 30-day lifetime. Changing the effective login
+credential rotates the signing secret at startup and invalidates earlier cookies,
+even if a previous credential is later restored. Stop all listeners sharing the
+data directory before changing credentials; already-running processes retain
+their in-memory configuration. Keep this file private and persistent, and never
+copy it into a different installation. Corrupt or unsafe secret files stop startup.
+
+Upgrading from password/token-signed cookies requires one new login; legacy
+cookies are deliberately not accepted. Removing `session-secret.json` while the
+server is stopped resets all sessions without changing the login credential.
+
 Password login (`POST /api/login`) and token-URL login share limits by the
 connection's source IP: at most 20 attempts per 60-second window, and five
 consecutive failures trigger a five-minute cooldown. Successful login clears

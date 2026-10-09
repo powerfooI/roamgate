@@ -664,3 +664,44 @@ describe("nativeSocketPath", () => {
     expect(nativeSocketPath(logical, "linux")).toBe(logical);
   });
 });
+
+test("reading configuration for management commands does not create or rotate session signing state", () => {
+  const dir = mkdtempSync(join(tmpdir(), "roamgate-session-config-"));
+  try {
+    const statePath = join(
+      dir,
+      process.platform === "win32" ? "roamgate" : ".config/roamgate",
+      "session-secret.json",
+    );
+    const load = (password: string) => {
+      const result = Bun.spawnSync(
+        [
+          process.execPath,
+          "-e",
+          `import {loadServerConfig} from ${JSON.stringify(join(import.meta.dir, "server-config.ts"))}; process.argv = [process.execPath, "roamgate"]; loadServerConfig("test");`,
+        ],
+        {
+          env: {
+            ...process.env,
+            HOME: dir,
+            APPDATA: dir,
+            NODE_ENV: "production",
+            ROAMGATE_PASSWORD: password,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      expect(result.exitCode).toBe(0);
+    };
+    load("first-test-password");
+    expect(existsSync(statePath)).toBe(false);
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, "existing-signing-state");
+    load("other-test-password");
+    load("");
+    expect(readFileSync(statePath, "utf8")).toBe("existing-signing-state");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

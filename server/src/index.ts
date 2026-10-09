@@ -1,3 +1,4 @@
+import { loadOrCreateSessionSecret } from "./config/session-secret";
 import type { ServerWebSocket } from "bun";
 import { createHash } from "node:crypto";
 import { createAssistantContext } from "./assistant/context";
@@ -121,6 +122,19 @@ if (herdrCommandResult !== null) {
   process.exit(herdrCommandResult);
 }
 const config = loadServerConfig(APP_VERSION);
+// Only a listener startup may rotate sessions. Management commands also read
+// ServerConfig, sometimes with a different environment from the running service.
+let sessionSecret = "";
+if (config.authRequired) {
+  try {
+    sessionSecret = loadOrCreateSessionSecret([config.password]);
+  } catch (cause) {
+    console.error(
+      `[bridge] FATAL: could not load the session signing secret: ${(cause as Error).message}`,
+    );
+    process.exit(1);
+  }
+}
 configureServerLogger(config.logLevel);
 const logger = serverLogger;
 const cpuProfile = config.profile
@@ -151,6 +165,7 @@ const {
 } = createAuthHandlers({
   authRequired: config.authRequired,
   password: config.password,
+  sessionSecret,
   urlLoginToken: config.generatedAuthToken,
   secureCookies: Boolean(config.tls),
 });
