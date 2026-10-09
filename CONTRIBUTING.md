@@ -49,6 +49,8 @@ rather than repeating it manually on the same revision. Without the hook, run
 bypass the gate.
 
 PR CI runs format/lint/types, site build, and the complete `test:quick` suite.
+Focused Ranger storage, history-reader and service-environment tests also run on
+macOS ARM64 and Intel to cover system SQLite and Apple Bash differences.
 Automated tests do not launch Chrome or WebKit. Browser-specific focus, layout,
 input, accessibility, and security enforcement require manual validation against
 a real backend for affected changes:

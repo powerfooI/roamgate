@@ -24,3 +24,23 @@ jobs:
             - run: bun run typecheck
             - run: bun run build:site
             - run: bun run test:quick
+
+    macos-storage:
+        name: macOS Ranger storage (${{ matrix.runner }})
+        runs-on: ${{ matrix.runner }}
+        timeout-minutes: 10
+        strategy:
+            fail-fast: false
+            matrix:
+                runner: [macos-15, macos-15-intel]
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  persist-credentials: false
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+              with:
+                  bun-version: "1.4.1"
+                  no-cache: true
+            - run: bun install --frozen-lockfile
+            - name: Check Ranger storage and service environment
+              run: bun test server/src/assistant/durable-storage.test.ts server/src/assistant/pi-driver.test.ts server/src/assistant/task-storage.test.ts server/src/config/launchd-environment.test.ts --parallel=1

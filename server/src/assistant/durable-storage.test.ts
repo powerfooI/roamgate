@@ -28,6 +28,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { openPrivateDurableStorage } from "./durable-storage";
 
@@ -189,7 +190,13 @@ test.each([
           "This is not a SQLite database",
         );
       else {
-        const database = new DatabaseSync(f.path, { readOnly: true });
+        // Recovery has released its owner and closed the database. An immutable
+        // read inspects the checkpointed WAL file without creating sidecars.
+        const before = readFileSync(f.path);
+        const files = readdirSync(join(f.directory, "durable", f.id)).sort();
+        const uri = pathToFileURL(f.path);
+        uri.search = "mode=ro&immutable=1";
+        const database = new DatabaseSync(uri, { readOnly: true });
         try {
           if (failure === "missing root")
             expect(
@@ -208,6 +215,10 @@ test.each([
         } finally {
           database.close();
         }
+        expect(readFileSync(f.path)).toEqual(before);
+        expect(readdirSync(join(f.directory, "durable", f.id)).sort()).toEqual(
+          files,
+        );
       }
     } finally {
       f.cleanup();

@@ -58,14 +58,32 @@ test("CI keeps the complete non-browser validation gate", () => {
   const workflow = Bun.YAML.parse(
     readFileSync(new URL(".github/workflows/ci.yml", root), "utf8"),
   ) as {
-    jobs: Record<string, { if?: string; steps: { run?: string }[] }>;
+    jobs: Record<
+      string,
+      {
+        if?: string;
+        "runs-on"?: string;
+        strategy?: { matrix?: { runner?: string[] } };
+        steps: { run?: string }[];
+      }
+    >;
   };
   const requireRoot = createRequire(new URL("package.json", root));
   const { scripts } = requireRoot("./package.json");
   expect(scripts.test).toBe("bun test");
   expect(scripts["test:quick"]).toBe("bun test --parallel=4");
   expect(scripts["test:browser"]).toBeUndefined();
-  expect(Object.keys(workflow.jobs)).toEqual(["validate"]);
+  expect(Object.keys(workflow.jobs)).toEqual(["validate", "macos-storage"]);
+  const macos = workflow.jobs["macos-storage"];
+  expect(macos.if).toBeUndefined();
+  expect(macos["runs-on"]).toBe("${{ matrix.runner }}");
+  expect(macos.strategy?.matrix?.runner).toEqual([
+    "macos-15",
+    "macos-15-intel",
+  ]);
+  expect(macos.steps.at(-1)?.run).toBe(
+    "bun test server/src/assistant/durable-storage.test.ts server/src/assistant/pi-driver.test.ts server/src/assistant/task-storage.test.ts server/src/config/launchd-environment.test.ts --parallel=1",
+  );
   expect(workflow.jobs.validate.if).toBeUndefined();
   expect(
     workflow.jobs.validate.steps.flatMap((step) =>

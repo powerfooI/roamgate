@@ -48,7 +48,7 @@ function durableEntries(directory: string, entries: unknown[]) {
   }
 }
 
-test("historical tool details are bounded read-only text and leave ambiguous calls unavailable", async () => {
+test("closed WAL historical tool details are bounded read-only text and leave ambiguous calls unavailable", async () => {
   const directory = mkdtempSync(join(tmpdir(), "roamgate-tool-details-"));
   const id = randomUUID();
   const root = join(directory, "durable", id);
@@ -120,7 +120,11 @@ test("historical tool details are bounded read-only text and leave ambiguous cal
     },
     2,
   );
+  // Switch the checkpointed fixture to WAL without creating pending writes.
+  database.exec("PRAGMA journal_mode = WAL");
   database.close();
+  expect(existsSync(`${path}-wal`)).toBe(false);
+  expect(existsSync(`${path}-shm`)).toBe(false);
   const driver = createPiDriver(directory, async () => {
     throw new Error("SDK model runtime must not load");
   });
