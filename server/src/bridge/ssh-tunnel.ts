@@ -2,6 +2,7 @@ import { existsSync, rmSync } from "node:fs";
 import { type Logger, silentLogger } from "../utils/logger";
 import { sshCommandArgv, sshTunnelArgv } from "./ssh-command";
 import { createWindowsSshTunnel } from "./ssh-windows";
+import { annotateSshArgv, trackSshProcess } from "./ssh-metrics";
 
 const SSH_STDERR_MAX_BYTES = 16 * 1024;
 
@@ -233,9 +234,11 @@ export function createSshTunnelManager(args: {
         stderr: "pipe",
         env: { ...process.env, LC_ALL: "C" },
       });
+      const stderr = readBoundedStderr(proc.stderr);
+      trackSshProcess(argv, proc.exited, stderr);
       return {
         exited: proc.exited,
-        stderr: readBoundedStderr(proc.stderr),
+        stderr,
         kill: (signal) => proc.kill(signal),
       };
     });
@@ -263,7 +266,10 @@ export function createSshTunnelManager(args: {
   async function remoteHome(host: string): Promise<string> {
     if (cachedRemoteHome?.host === host) return cachedRemoteHome.home;
     const { stdout } = await args.runProcess(
-      sshCommandArgv(host, `printf %s "$HOME"`),
+      annotateSshArgv(sshCommandArgv(host, `printf %s "$HOME"`), {
+        tag: "home.probe",
+        connection: args.connectionId,
+      }),
       undefined,
       { timeoutMs: REMOTE_HOME_PROBE_TIMEOUT_MS },
     );
@@ -445,7 +451,10 @@ export function createSshTunnelManager(args: {
     autoSshTunnelPaths = forwards.map((forward) => forward.local);
     for (const path of autoSshTunnelPaths) remove(path);
 
-    const argv = sshTunnelArgv(host, forwards);
+    const argv = annotateSshArgv(sshTunnelArgv(host, forwards), {
+      tag: "tunnel",
+      connection: args.connectionId,
+    });
 
     logger.debug("starting SSH tunnel", {
       connection: args.connectionId ?? "legacy-default",

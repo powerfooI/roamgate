@@ -1,4 +1,5 @@
 import { sshCommandArgv } from "../bridge/ssh-command";
+import { trackSshProcess } from "../bridge/ssh-metrics";
 
 export type FileSearchResult = {
   path: string;
@@ -69,6 +70,8 @@ export async function searchWorkspaceFiles({
       ? sshCommandArgv(
           host,
           `git -C ${shQuote(root)} ${args.map(shQuote).join(" ")}`,
+          [],
+          "file.search",
         )
       : ["git", "-C", root, ...args];
     const proc = Bun.spawn(argv, {
@@ -76,6 +79,8 @@ export async function searchWorkspaceFiles({
       stdout: "pipe",
       stderr: "pipe",
     });
+    const stderrText = new Response(proc.stderr).text();
+    trackSshProcess(argv, proc.exited, stderrText);
     const decoder = new TextDecoder();
     let pending = "";
     let path = "";
@@ -154,10 +159,7 @@ export async function searchWorkspaceFiles({
         }
         if (truncated) break;
       }
-      const [code, stderr] = await Promise.all([
-        proc.exited,
-        new Response(proc.stderr).text(),
-      ]);
+      const [code, stderr] = await Promise.all([proc.exited, stderrText]);
       if (timedOut) throw new Error("File search timed out");
       if (!truncated && code !== 0 && !(mode === "content" && code === 1)) {
         throw new Error(stderr.trim().slice(0, 1000) || "File search failed");

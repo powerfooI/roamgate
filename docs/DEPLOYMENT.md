@@ -373,6 +373,25 @@ Logs have one line per event. `info` covers lifecycle events and failures. Use
 include paths and IDs, but never URL tokens. `roamgate service logs -f` follows a
 managed service.
 
+### Latency samples
+
+At `debug`, the server logs one line per Herdr control call (`herdr call`:
+method, sizes, `total_ms`, `connect_ms`, `first_byte_ms` from request write to
+first response byte), per ssh child exit (`ssh process exited`: caller `tag`,
+`connection`, `host`, `code`, `total_ms`, live children, and
+`startup_failures` for sshd `kex_exchange_identification` drops), and per typed
+character echo (`terminal echo`: `input_to_surface_max_ms`,
+`surface_to_send_ms`). The echo sample runs to the pane's next surface, which
+other output can trigger first, so it is an upper bound; a character with no
+surface within 5 s is not sampled. Tags ride on the argv array itself, so an
+argv copied before it is spawned logs as `untagged`. Attach phases appear in `endpoint connected`.
+
+The browser keeps its samples off by default. Add `?debugLatency` to the page
+URL, or run `localStorage.setItem("roamgate:debugLatency", "1")` and reload,
+then show the console's Verbose level. Lines start with `[latency]`: `refresh`
+and `refresh call` per connection and method, `terminal echo` with
+`input_to_frame_ms`, and `attach watchdog fired`.
+
 ### Performance profiling
 
 Run a short CPU capture on a spare port, then reproduce the slow interaction in
