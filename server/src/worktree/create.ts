@@ -32,11 +32,34 @@ export async function syncWorktreeBase({
       GIT_PULL_TIMEOUT_MS,
     );
   };
-  return {
-    workspace_id: workspaceId,
-    root,
-    ...(await fetchOriginDefaultBranch(runGit, shQuote)),
-  };
+  try {
+    return {
+      workspace_id: workspaceId,
+      root,
+      ...(await fetchOriginDefaultBranch(runGit, shQuote)),
+    };
+  } catch (error) {
+    // A repository without an origin has nothing to refresh: branch from the
+    // commit that is checked out instead of failing.
+    if (!/'origin' does not appear to be a git repository/.test(String(error)))
+      throw error;
+    const probe = async () => {
+      if ((await runGit("remote get-url origin")).code === 0) return null;
+      const head = await runGit("rev-parse --verify 'HEAD^{commit}'");
+      return head.code === 0 ? head.stdout.trim() : null;
+    };
+    const commit = await probe().catch(() => null);
+    if (!commit) throw error;
+    return {
+      workspace_id: workspaceId,
+      root,
+      base: "HEAD",
+      commit,
+      command: "",
+      stdout: "",
+      stderr: "",
+    };
+  }
 }
 
 /** Shared by the workspace UI and Ranger's confirmed operations. */
