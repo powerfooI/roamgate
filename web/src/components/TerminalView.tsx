@@ -30,6 +30,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import type { IBufferRange, ITheme } from "@xterm/xterm";
 import { Terminal } from "@xterm/xterm";
+import { installTerminalCompositionRepair } from "../terminalComposition";
 import {
   Columns2,
   Keyboard,
@@ -1018,6 +1019,7 @@ export function TerminalView({
     term.loadAddon(new UnicodeGraphemesAddon());
     term.loadAddon(fit);
     term.open(container);
+    const compositionRepair = installTerminalCompositionRepair(term);
     if (isApplePlatform()) {
       term.element?.classList.add("xterm-apple-row-spacing-fix");
     }
@@ -2789,6 +2791,7 @@ export function TerminalView({
           .call("terminal.detach", { terminal_id: terminalId })
           .catch(() => null);
       }
+      compositionRepair.dispose();
       term.dispose();
       termRef.current = null;
       setTermInstance(null);

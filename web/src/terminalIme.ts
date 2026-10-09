@@ -284,9 +284,9 @@ export class TerminalImeFallbackTracker {
  * input's recovery cycle, including a handled flush with no missing text.
  * The guard is timer-free; windows expire lazily on the next check.
  *
- * xterm-internal double finalization from a non-229 keydown mid-composition
- * remains out of scope. A finalize emission delayed past the capture window
- * simply leaves the guard unarmed, i.e. the pre-fix behavior.
+ * xterm-internal double finalization is handled separately at its composition
+ * helper boundary by installTerminalCompositionRepair. A finalize emission
+ * delayed past this capture window simply leaves this OS-replay guard unarmed.
  */
 export class TerminalImeCommitGuard {
   private captureUntil = 0;
