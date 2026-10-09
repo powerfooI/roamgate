@@ -419,6 +419,9 @@ export function createPiDriver(
       // Recreate without availability checks: refresh() can execute !command keys.
       const models = await runtime(source, true);
       const { saved } = modelConfiguration(source);
+      const { getSupportedThinkingLevels, clampThinkingLevel } = await import(
+        "@earendil-works/pi-ai/models"
+      );
       if (models.getError()) throw new Error("Invalid model configuration");
       const { builtinProviders } = await import(
         "@earendil-works/pi-ai/providers/all"
@@ -465,16 +468,46 @@ export function createPiDriver(
         models: models
           .getModels()
           .filter((model) => configured.has(model.provider))
-          .map((model) => ({
-            provider: model.provider,
-            id: model.id,
-            label: model.name,
-            ...(!builtinIds.has(model.provider) &&
-            isAssistantModelEndpoint(model.baseUrl) &&
-            isAssistantModelApi(model.api)
-              ? { custom: { base_url: model.baseUrl, api: model.api } }
-              : {}),
-          })),
+          .map((model) => {
+            const provider = saved.providers[model.provider];
+            const declaration =
+              isRecord(provider) && Array.isArray(provider.models)
+                ? provider.models.findLast(
+                    (entry: unknown) =>
+                      isRecord(entry) && entry.id === model.id,
+                  )
+                : undefined;
+            const override =
+              isRecord(provider) && isRecord(provider.modelOverrides)
+                ? provider.modelOverrides[model.id]
+                : undefined;
+            const reasoning =
+              isRecord(override) && typeof override.reasoning === "boolean"
+                ? override.reasoning
+                : isRecord(declaration)
+                  ? declaration.reasoning
+                  : undefined;
+            return {
+              provider: model.provider,
+              id: model.id,
+              label: model.name,
+              thinking_levels: getSupportedThinkingLevels(model),
+              ...(getSupportedThinkingLevels(model).length
+                ? { default_thinking_level: clampThinkingLevel(model, "off") }
+                : {}),
+              ...(!builtinIds.has(model.provider) &&
+              isAssistantModelEndpoint(model.baseUrl) &&
+              isAssistantModelApi(model.api)
+                ? {
+                    custom: {
+                      base_url: model.baseUrl,
+                      api: model.api,
+                      ...(typeof reasoning === "boolean" ? { reasoning } : {}),
+                    },
+                  }
+                : {}),
+            };
+          }),
       };
     },
     async configureModel(input, save) {
@@ -518,6 +551,23 @@ export function createPiDriver(
           [input.provider]: {
             ...previous,
             ...(!previous ? { baseUrl: input.base_url, api: input.api } : {}),
+            // Pi applies modelOverrides after declarations. An explicit choice
+            // must update that layer too, without replacing imported metadata.
+            ...(input.reasoning !== undefined &&
+            isRecord(previous?.modelOverrides)
+              ? {
+                  modelOverrides: Object.fromEntries(
+                    Object.entries(previous.modelOverrides).map(
+                      ([id, value]) => [
+                        id,
+                        ids.has(id) && isRecord(value)
+                          ? { ...value, reasoning: input.reasoning }
+                          : value,
+                      ],
+                    ),
+                  ),
+                }
+              : {}),
             models: [
               ...entries.map((model) =>
                 isRecord(model) && existing.has(model.id)
@@ -525,6 +575,9 @@ export function createPiDriver(
                       ...model,
                       baseUrl: input.base_url,
                       api: input.api,
+                      ...(input.reasoning !== undefined
+                        ? { reasoning: input.reasoning }
+                        : {}),
                     }
                   : model,
               ),
@@ -532,6 +585,9 @@ export function createPiDriver(
                 .filter((id) => !existing.has(id))
                 .map((id) => ({
                   id,
+                  ...(input.reasoning !== undefined
+                    ? { reasoning: input.reasoning }
+                    : {}),
                   ...(previous
                     ? { baseUrl: input.base_url, api: input.api }
                     : {}),
@@ -598,8 +654,22 @@ export function createPiDriver(
           runtime(input.config.credential_source),
           context,
         );
-        if (!modelRuntime.getModel(input.config.provider, input.config.model))
-          throw new Error("Model unavailable");
+        const model = modelRuntime.getModel(
+          input.config.provider,
+          input.config.model,
+        );
+        if (!model) throw new Error("Model unavailable");
+        const { getSupportedThinkingLevels, clampThinkingLevel } = await import(
+          "@earendil-works/pi-ai/models"
+        );
+        // Pi durable defaults to off. Resolve that against the actual model and
+        // set it explicitly so a reused durable root cannot retain an old effort.
+        const thinkingLevel =
+          input.config.thinking_level ?? clampThinkingLevel(model, "off");
+        if (!getSupportedThinkingLevels(model).includes(thinkingLevel))
+          throw new Error(
+            "The selected thinking effort is not supported by this model",
+          );
         const pointer = input.entries.find(
           (entry) => isRecord(entry) && entry.type === "ranger-durable",
         );
@@ -731,6 +801,7 @@ export function createPiDriver(
           context,
         );
         const agent = {
+          thinkingLevel,
           model: {
             provider: input.config.provider,
             modelId: input.config.model,

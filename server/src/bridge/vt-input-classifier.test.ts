@@ -101,6 +101,43 @@ describe("VtInputClassifier", () => {
     ]);
   });
 
+  test("preserves Ctrl+/ separately from the ambiguous legacy Ctrl+_ byte", () => {
+    const slash = {
+      type: "key",
+      code: KEY.Char,
+      char: 47,
+      modifiers: MOD_CONTROL,
+    };
+    expect(feed("\x1b[47;5u")).toMatchObject([slash]);
+    expect(feed([0x1f])).toMatchObject([
+      { type: "key", code: KEY.Char, char: 95, modifiers: MOD_CONTROL },
+    ]);
+    const sequence = Buffer.from("\x1b[47;5u");
+    for (let split = 1; split < sequence.length; split++) {
+      const classifier = new VtInputClassifier();
+      expect(classifier.feed(sequence.subarray(0, split))).toEqual([]);
+      expect(classifier.feed(sequence.subarray(split))).toMatchObject([slash]);
+    }
+  });
+
+  test("does not interpret unsupported or malformed CSI-u sequences", () => {
+    for (const sequence of [
+      "57358;5u",
+      "0;5u",
+      "128;5u",
+      "47;0u",
+      "47;17u",
+      "47;5;1u",
+      "47;5:2u",
+      "47:48;5u",
+    ]) {
+      expect(feed(`\x1b[${sequence}`)).toEqual([]);
+    }
+    expect(feed("\x1b[200~\x1b[47;5u\x1b[201~")).toEqual([
+      { type: "paste", text: "\x1b[47;5u" },
+    ]);
+  });
+
   test("ctrl+letter maps to Char with CONTROL", () => {
     expect(feed([0x03])).toEqual([
       {
@@ -380,6 +417,20 @@ describe("SGR cell mouse input", () => {
 });
 
 describe("encodePaneInput", () => {
+  test("encodes Ctrl+/ as a semantic slash press, not Ctrl+_", () => {
+    const reader = new BinReader(encodePaneInput("w1:p1", feed("\x1b[47;5u")));
+    expect(reader.variant()).toBe(13);
+    expect(reader.string()).toBe("w1:p1");
+    expect(reader.varint()).toBe(1);
+    expect(reader.variant()).toBe(0);
+    expect(reader.variant()).toBe(KEY.Char);
+    expect(reader.varint()).toBe(47);
+    expect(reader.u8()).toBe(MOD_CONTROL);
+    expect(reader.variant()).toBe(0); // Press
+    expect(reader.varint()).toBe(1);
+    for (let field = 0; field < 5; field++) expect(reader.bool()).toBe(false);
+  });
+
   test("encodes the ClientShellPaneInput frame", () => {
     const buf = encodePaneInput("w1:p1", [
       { type: "text", text: "hi" },

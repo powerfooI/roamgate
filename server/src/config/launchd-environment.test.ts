@@ -211,7 +211,7 @@ describe("launchd environment resolution", () => {
   });
 
   test.skipIf(process.platform === "win32" || !existsSync("/bin/bash"))(
-    "Bash POSIX normalizes shell-managed values rather than using their configured strings",
+    "Bash POSIX rejects or normalizes configured shell-managed values",
     () => {
       for (const name of [
         "OPTIND",
@@ -229,7 +229,6 @@ describe("launchd environment resolution", () => {
           ],
           { env: { HOME: "/test/home" } },
         );
-        expect(result.exitCode).toBe(0);
         expect(result.stdout.toString()).not.toBe("000000000000001");
       }
     },

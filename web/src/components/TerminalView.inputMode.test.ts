@@ -3,6 +3,7 @@ import { Window } from "happy-dom";
 import type { Root } from "react-dom/client";
 import type { TerminalPush } from "../api";
 import type { TerminalInputMode } from "../terminalInputMode";
+import type { MobileTerminalShortcutRows } from "../mobileTerminalShortcuts";
 
 // Real React commits are essential here: the safety and restore layout effects
 // must run in order before Type's synchronous, user-gesture focus handoff.
@@ -237,7 +238,10 @@ async function registerDomTests() {
     refresh = noop;
     reset = noop;
     clearSelection = noop;
-    attachCustomKeyEventHandler = noop;
+    keyHandler: (event: KeyboardEvent) => boolean = () => true;
+    attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
+      this.keyHandler = handler;
+    }
     selection = false;
     hasSelection = () => this.selection;
     getSelection = () => "";
@@ -275,6 +279,7 @@ async function registerDomTests() {
   let strict = false;
   let explicitPane: string | undefined;
   let terminalFontScale = 100;
+  let mobileShortcuts: MobileTerminalShortcutRows = [[], []];
   beforeEach(() => {
     state = initialState();
     calls.length = 0;
@@ -289,6 +294,7 @@ async function registerDomTests() {
     strict = false;
     explicitPane = undefined;
     terminalFontScale = 100;
+    mobileShortcuts = [[], []];
   });
   afterEach(async () => {
     if (root) await act(async () => root?.unmount());
@@ -313,7 +319,7 @@ async function registerDomTests() {
       terminalFontFamily: "monospace",
       terminalFontScale,
       showMobileKeys: false,
-      mobileShortcuts: [[], []],
+      mobileShortcuts,
       mobileSideShortcuts: [],
       composerOpen: open,
       onComposerOpenChange(next: boolean) {
@@ -391,6 +397,151 @@ async function registerDomTests() {
         expect(currentTerminal().options.disableStdin).toBe(false);
       }
     });
+  }
+
+  test("Ctrl+/ sends one unambiguous slash key and suppresses xterm's Ctrl+_ fallback", async () => {
+    await mount(true);
+    await choose("direct");
+    await frame(false);
+    const term = currentTerminal();
+    const event = new browser.KeyboardEvent("keydown", {
+      key: "/",
+      code: "Slash",
+      keyCode: 191,
+      ctrlKey: true,
+      cancelable: true,
+    }) as unknown as KeyboardEvent;
+    let handled: boolean | undefined;
+    await act(async () => {
+      handled = term.keyHandler(event);
+    });
+    expect(handled).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    const input = calls.filter((call) => call.method === "terminal.input");
+    expect(input).toHaveLength(1);
+    expect(atob(String(input[0]!.params.data))).toBe("\x1b[47;5u");
+    const up = new browser.KeyboardEvent("keyup", {
+      key: "/",
+      code: "Slash",
+      ctrlKey: true,
+    }) as unknown as KeyboardEvent;
+    await act(async () => {
+      expect(term.keyHandler(up)).toBe(true);
+    });
+    expect(
+      calls.filter((call) => call.method === "terminal.input"),
+    ).toHaveLength(1);
+    await patch({ connectionPaused: true });
+    await act(async () => {
+      expect(term.keyHandler(event)).toBe(false);
+    });
+    expect(
+      calls.filter((call) => call.method === "terminal.input"),
+    ).toHaveLength(1);
+  });
+
+  test("legacy terminals keep xterm's existing raw-key encoding", async () => {
+    await mount(true);
+    await choose("direct");
+    await frame();
+    for (const key of ["/", "Backspace", "Enter", "Escape", "["]) {
+      const event = new browser.KeyboardEvent("keydown", {
+        key,
+        ctrlKey: key === "/" || key === "Backspace",
+        altKey: !["/", "Backspace", "Enter"].includes(key),
+        cancelable: true,
+      }) as unknown as KeyboardEvent;
+      await act(async () => {
+        expect(currentTerminal().keyHandler(event)).toBe(true);
+      });
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(
+      calls.filter((call) => call.method === "terminal.input"),
+    ).toHaveLength(0);
+  });
+
+  test("a configured terminal action takes precedence over Ctrl+/ forwarding", async () => {
+    const {
+      getShortcutSnapshot,
+      updateShortcut,
+      selectShortcutPreset,
+      deleteShortcutPreset,
+    } = await import("../shortcutPreferences");
+    const previous = getShortcutSnapshot().preset.id;
+    updateShortcut("terminal.pageUp", ["Ctrl+Slash"]);
+    const custom = getShortcutSnapshot().preset.id;
+    try {
+      await mount(true);
+      await choose("direct");
+      await frame(false);
+      const event = new browser.KeyboardEvent("keydown", {
+        key: "/",
+        code: "Slash",
+        keyCode: 191,
+        ctrlKey: true,
+        cancelable: true,
+      }) as unknown as KeyboardEvent;
+      await act(async () => {
+        expect(currentTerminal().keyHandler(event)).toBe(false);
+      });
+      expect(event.defaultPrevented).toBe(true);
+      expect(
+        calls.filter((call) => call.method === "terminal.input"),
+      ).toHaveLength(0);
+      expect(
+        calls.filter((call) => call.method === "terminal.scroll"),
+      ).toHaveLength(1);
+    } finally {
+      selectShortcutPreset(previous);
+      deleteShortcutPreset(custom);
+    }
+  });
+
+  for (const mode of ["composer", "direct"] as const) {
+    for (const endpoint of [false, true]) {
+      test(`${mode} shortcut buttons preserve the ${endpoint ? "semantic" : "legacy"} transport`, async () => {
+        mobileShortcuts = [
+          [
+            {
+              id: "slash",
+              label: "Slash",
+              action: { key: "/", ctrl: true, alt: false, shift: false },
+            },
+            {
+              id: "punctuation",
+              label: "Punctuation",
+              action: { key: ";", ctrl: true, alt: true, shift: false },
+            },
+          ],
+          [],
+        ];
+        await mount(true);
+        await choose(mode);
+        await frame(endpoint ? false : undefined);
+        // Frame delivery updates the transport before rendering button state.
+        await act(async () => render());
+        await click('[aria-label="Send Ctrl+/"]');
+        const input = calls.filter((call) => call.method === "terminal.input");
+        expect(input).toHaveLength(1);
+        expect(atob(String(input[0]!.params.data))).toBe(
+          endpoint ? "\x1b[47;5u" : "\x1f",
+        );
+        const punctuation = container.querySelector<HTMLButtonElement>(
+          '[aria-label="Send Ctrl+Alt+;"]',
+        )!;
+        expect(punctuation.disabled).toBe(!endpoint);
+        if (endpoint) {
+          await click('[aria-label="Send Ctrl+Alt+;"]');
+          const last = calls
+            .filter((call) => call.method === "terminal.input")
+            .slice(-1)[0]!;
+          expect(atob(String(last.params.data))).toBe("\x1b[59;7u");
+        } else {
+          expect(punctuation.title).toContain("requires an endpoint terminal");
+        }
+      });
+    }
   }
 
   const scrollCalls = () =>

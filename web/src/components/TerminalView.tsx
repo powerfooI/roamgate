@@ -115,7 +115,10 @@ import {
   terminalImeFallbackText,
   terminalImeTextareaDelta,
 } from "../terminalIme";
-import { terminalShortcutSequence } from "../terminalKeys";
+import {
+  terminalDisambiguatedKeySequence,
+  terminalShortcutSequence,
+} from "../terminalKeys";
 import { TerminalHistorySelection } from "../terminalHistorySelection";
 import {
   TerminalTouchSelection,
@@ -1594,6 +1597,19 @@ export function TerminalView({
         }
       }
 
+      // User-configured terminal actions above take precedence over raw keys.
+      // Legacy/shared attachments forward raw PTY bytes and cannot decode
+      // this private frontend-to-endpoint disambiguation contract.
+      const disambiguatedSequence =
+        endpointPresentation.mouseReporting !== undefined
+          ? terminalDisambiguatedKeySequence(e, applePlatform)
+          : null;
+      if (disambiguatedSequence) {
+        e.preventDefault();
+        e.stopPropagation();
+        sendText(disambiguatedSequence);
+        return false;
+      }
       return true;
     });
 
@@ -3096,13 +3112,23 @@ export function TerminalView({
       detail: message,
     });
   };
-  const mobileShortcutReason = (shortcut: MobileTerminalShortcut) =>
-    mobileTerminalShortcutExecution(shortcut.action)?.type === "scroll" &&
-    pane?.terminal_id
-      ? store.terminalScrollReason(pane.terminal_id)
-      : null;
-  const runMobileShortcut = (shortcut: MobileTerminalShortcut) => {
+  const mobileShortcutReason = (shortcut: MobileTerminalShortcut) => {
     const execution = mobileTerminalShortcutExecution(shortcut.action);
+    if (execution?.type === "scroll" && pane?.terminal_id)
+      return store.terminalScrollReason(pane.terminal_id);
+    if (
+      execution?.type === "input" &&
+      endpointPresentationRef.current?.mouseReporting === undefined &&
+      !mobileTerminalShortcutExecution(shortcut.action, false)
+    )
+      return "This key combination requires an endpoint terminal.";
+    return null;
+  };
+  const runMobileShortcut = (shortcut: MobileTerminalShortcut) => {
+    const execution = mobileTerminalShortcutExecution(
+      shortcut.action,
+      endpointPresentationRef.current?.mouseReporting !== undefined,
+    );
     if (!execution) return;
     if (execution.type === "scroll") {
       scrollPage(execution.direction, execution.amount);

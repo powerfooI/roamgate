@@ -10,7 +10,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  ASSISTANT_MAX_MENTIONS,
+  ASSISTANT_MAX_WORKSPACES,
+} from "../../../shared/assistant";
 import type {
+  AssistantMentionTarget,
   AssistantNotificationInput,
   AssistantNotificationReceipt,
   AssistantSnapshot,
@@ -46,6 +51,22 @@ const customNotification = (
   kind: "completed",
   title: "Agent finished the requested work",
   body: "The tests passed. Open Ranger to review the evidence.",
+});
+const agentMention = (): Extract<
+  AssistantMentionTarget,
+  { kind: "agent" }
+> => ({
+  kind: "agent",
+  connection_id: "local",
+  workspace_id: "workspace",
+  connection_label: "Local",
+  workspace_label: "Workspace",
+  label: "Codex session",
+  runtime_generation: 1,
+  pane_id: "pane",
+  terminal_id: "terminal",
+  agent: "codex",
+  agent_identity: "c".repeat(64),
 });
 
 async function startRun(f: ReturnType<typeof fixture>, taskId: string) {
@@ -407,6 +428,132 @@ test("task inputs and saved notification history reject invalid modes and receip
   ).toThrow("Invalid saved tasks");
 });
 
+test("task mentions retain bounded identities within scope and reject duplicates", () => {
+  const input = prepared().input;
+  const agent = agentMention();
+  const workspace: AssistantMentionTarget = {
+    kind: "workspace",
+    connection_id: "local",
+    workspace_id: "workspace",
+    connection_label: "Local",
+    workspace_label: "Workspace",
+    label: "Workspace",
+    runtime_generation: 1,
+  };
+  expect(validateTaskInput({ ...input, mentions: [] }).mentions).toEqual([]);
+  expect(
+    validateTaskInput({ ...input, mentions: [workspace, agent] }).mentions,
+  ).toEqual([workspace, agent]);
+  const mentions = Array.from(
+    { length: ASSISTANT_MAX_MENTIONS },
+    (_, index) => ({
+      ...agent,
+      pane_id: `pane-${index}`,
+    }),
+  );
+  expect(validateTaskInput({ ...input, mentions }).mentions).toHaveLength(
+    ASSISTANT_MAX_MENTIONS,
+  );
+  for (const invalid of [
+    null,
+    {},
+    [{ ...agent, agent_identity: "invalid" }],
+    [...mentions, { ...agent, pane_id: "overflow" }],
+  ])
+    expect(() => validateTaskInput({ ...input, mentions: invalid })).toThrow(
+      "Invalid task mentions",
+    );
+  for (const duplicate of [
+    [workspace, { ...workspace, label: "Renamed" }],
+    [agent, { ...agent, agent_identity: "d".repeat(64) }],
+  ])
+    expect(() => validateTaskInput({ ...input, mentions: duplicate })).toThrow(
+      "Duplicate task mention",
+    );
+  expect(() =>
+    validateTaskInput({
+      ...input,
+      mentions: [{ ...agent, workspace_id: "other" }],
+    }),
+  ).toThrow("Task mention outside task scope");
+});
+
+test("task proposals, plans and admitted runs preserve session bindings across restart and edits", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const input = prepared();
+  const original = agentMention();
+  input.input.mentions = [original];
+  const proposal = await f.manager.propose(input);
+  original.agent_identity = "d".repeat(64);
+  await f.manager.dispose();
+  const restored = fixture(f.directory);
+  expect(restored.manager.proposal(proposal.id)?.mentions).toEqual(
+    proposal.mentions,
+  );
+  await restored.manager.confirmProposal(proposal.id);
+  const task = restored.manager.summaries()[0]!;
+  expect(task.mentions).toEqual(proposal.mentions);
+  await restored.manager.resume();
+  const admitted = await startRun(restored, task.id);
+  expect(admitted.run.input.mentions).toEqual(proposal.mentions);
+  const replacement = prepared();
+  replacement.input.mentions = [{ ...agentMention(), pane_id: "another-pane" }];
+  await restored.manager.update(task.id, replacement);
+  expect(admitted.run.input.mentions).toEqual(proposal.mentions);
+  await restored.manager.dispose();
+  const recovered = fixture(f.directory);
+  expect(recovered.manager.summaries()[0]!.mentions).toEqual(
+    replacement.input.mentions,
+  );
+  await recovered.manager.resume();
+  await flush();
+  expect(recovered.runs[0]!.run.input.mentions).toEqual(proposal.mentions);
+});
+
+test("prepared task access returns an isolated admission without mutable task state", async () => {
+  const f = fixture();
+  const input = prepared();
+  input.input.mentions = [agentMention()];
+  const task = await f.manager.create(input, randomUUID());
+  const copy = f.manager.prepared(task.id);
+  expect(copy).toEqual(input);
+  copy.input.mentions![0]!.label = "Changed reference";
+  copy.targets[0]!.workspace_identity = "d".repeat(64);
+  copy.config.allowed_workspaces[0]!.workspace_id = "another-workspace";
+  copy.workspaces[0]!.label = "Changed workspace";
+  expect(f.manager.prepared(task.id)).toEqual(input);
+});
+
+test("editing a monitored session isolates notification history and event deduplication from an admitted run", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const input = prepared();
+  input.input.mentions = [agentMention()];
+  const task = await f.manager.create(input, randomUUID());
+  await f.manager.resume();
+  const original = await startRun(f, task.id);
+  await f.manager.notifyRun(task.id, original.run.id, customNotification());
+  const replacement = prepared();
+  replacement.input.mentions = [
+    { ...agentMention(), agent_identity: "d".repeat(64) },
+  ];
+  await f.manager.update(task.id, replacement);
+  expect(f.manager.notificationHistory(task.id)).toEqual([]);
+  expect(f.manager.notificationHistory(task.id, original.run.id)).toHaveLength(
+    1,
+  );
+  original.complete();
+  const next = await startRun(f, task.id);
+  expect(
+    JSON.parse(
+      (await f.manager.notifyRun(task.id, next.run.id, customNotification()))
+        .text,
+    ),
+  ).toEqual({ accepted: true, delivery: "best_effort" });
+  expect(f.manager.notificationHistory(task.id)).toHaveLength(1);
+});
+
 test("saved task proposals validate their displayed input against the confirmed input with status as the default mode", () => {
   const input = prepared();
   const proposal = {
@@ -449,6 +596,7 @@ test("saved task proposals validate their displayed input against the confirmed 
     { notification_mode: "agent" },
     { title: "Another title" },
     { prompt: "Another prompt" },
+    { mentions: [agentMention()] },
     { scope: [{ connection_id: "local", workspace_id: "another-workspace" }] },
     { schedule: { type: "interval", minutes: 2 } },
     { title: "" },
@@ -1819,3 +1967,24 @@ test.each(["stop", "cancel"] as const)(
     }
   },
 );
+
+test("task input accepts the shared inventory bound and rejects overflow", () => {
+  const input = prepared().input;
+  input.scope = Array.from(
+    { length: ASSISTANT_MAX_WORKSPACES },
+    (_, index) => ({
+      connection_id: "local",
+      workspace_id: `w${index}`,
+    }),
+  );
+  expect(validateTaskInput(input).scope).toHaveLength(ASSISTANT_MAX_WORKSPACES);
+  expect(() =>
+    validateTaskInput({
+      ...input,
+      scope: [
+        ...input.scope,
+        { connection_id: "local", workspace_id: "overflow" },
+      ],
+    }),
+  ).toThrow("Invalid task input");
+});

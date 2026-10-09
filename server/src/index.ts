@@ -804,10 +804,15 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     try {
       const result =
         method === "bridge.assistant.context"
-          ? await assistantContext.catalog()
-          : method === "bridge.assistant.task.get"
-            ? await (await getAssistantService()).taskDetail(params ?? {})
-            : await (await getAssistantService()).handle(method, params ?? {});
+          ? await (await getAssistantService()).workspaceCatalog()
+          : method === "bridge.assistant.mentions"
+            ? await (await getAssistantService()).mentionCatalog(params ?? {})
+            : method === "bridge.assistant.task.get"
+              ? await (await getAssistantService()).taskDetail(params ?? {})
+              : await (await getAssistantService()).handle(
+                  method,
+                  params ?? {},
+                );
       sendReply({ id, result }, "assistant-rpc");
     } catch (error) {
       sendError("assistant-rpc-error", error);

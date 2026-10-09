@@ -321,9 +321,9 @@ export function createWorktreeHookRunner(args: {
     return runWorktreeHook({
       hook: "opened",
       checkoutPath: workspaceCheckoutPath(workspace),
-      sourceCheckoutPath: sourceWorkspace
-        ? workspaceCheckoutPath(sourceWorkspace)
-        : workspaceSourceCheckoutPath(workspace),
+      sourceCheckoutPath:
+        workspaceCheckoutPath(sourceWorkspace) ||
+        workspaceSourceCheckoutPath(workspace),
       repoSettingsKey: repoSettingsKey(workspace),
     });
   }

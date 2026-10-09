@@ -64,11 +64,19 @@ async function fixture() {
                       },
                     ],
                   }
-                : request.method === "pane.list"
-                  ? { panes: [] }
-                  : request.method === "agent.list"
-                    ? { agents: [] }
-                    : {};
+                : request.method === "workspace.get"
+                  ? {
+                      workspace: {
+                        workspace_id: "w1",
+                        label: "Allowed workspace",
+                        cwd: "/workspace/repo",
+                      },
+                    }
+                  : request.method === "pane.list"
+                    ? { panes: [] }
+                    : request.method === "agent.list"
+                      ? { agents: [] }
+                      : {};
           socket.write(`${JSON.stringify({ id: request.id, result })}\n`);
           if (request.method !== "events.subscribe") socket.end();
         });
@@ -434,3 +442,60 @@ test("authenticated bridge-global assistant routes preserve global replies and p
     await f.dispose();
   }
 }, 25_000);
+
+test("Ranger mention discovery is bridge-global, permission-bound and available before model setup", async () => {
+  const f = await fixture();
+  try {
+    const login = await fetch(`${f.base}/api/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: PASSWORD }),
+      redirect: "manual",
+    });
+    const cookie = login.headers.get("set-cookie")!.split(";", 1)[0]!;
+    const client = await browser(f.base, cookie, f.browsers);
+    await client.rpc("connections.connect", { id: "healthy" });
+    const scope = [{ connection_id: "healthy", workspace_id: "w1" }];
+    const denied = await client.rpc("bridge.assistant.mentions", { scope });
+    expect(denied.error.message).toContain("authorized");
+    const configured = await client.rpc("bridge.assistant.configure", {
+      provider: "",
+      model: "",
+      credential_source: "assistant",
+      allowed_workspaces: scope,
+    });
+    expect(configured.error).toBeUndefined();
+    const references = await client.rpc("bridge.assistant.mentions", { scope });
+    expect(references.error).toBeUndefined();
+    expect(references.connection_id).toBeUndefined();
+    expect(references.result.targets).toEqual([
+      {
+        kind: "workspace",
+        connection_id: "healthy",
+        workspace_id: "w1",
+        connection_label: "healthy",
+        workspace_label: "Allowed workspace",
+        label: "Allowed workspace",
+        runtime_generation: expect.any(Number),
+      },
+    ]);
+    expect(JSON.stringify(references.result)).not.toContain("PRIVATE_KEY");
+    expect(JSON.stringify(references.result)).not.toContain(
+      "/private/control.sock",
+    );
+    const wrapped = await client.rpc(
+      "bridge.assistant.mentions",
+      { scope },
+      { connection_id: "healthy" },
+    );
+    expect(wrapped.error.message).toContain(
+      "bridge-global method must not include connection identity",
+    );
+    const wrong = await client.rpc("bridge.assistant.mentions", {
+      scope: [{ connection_id: "healthy", workspace_id: "private" }],
+    });
+    expect(wrong.error.message).toContain("authorized");
+  } finally {
+    await f.dispose();
+  }
+}, 20_000);

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { ASSISTANT_MAX_WORKSPACES } from "../../../shared/assistant";
 import {
   type ActionToolProposer,
   actionTools,
@@ -37,6 +38,8 @@ test("task tools validate the published schedule and reject effects outside the 
     ).resolves.toEqual({ text: "Pending preview" });
   for (const params of [
     { ...proposal, execute: true },
+    { ...proposal, mentions: [] },
+    { ...proposal, agent_identity: "invented-session" },
     { ...proposal, scope: [] },
     {
       ...proposal,
@@ -549,4 +552,38 @@ test("action cancellation and callback failures expose only a fixed safe error",
     expect((error as Error).cause).toBeUndefined();
     expect(String(error)).not.toContain("synthetic-private-secret");
   }
+});
+
+test("task tool scope schema shares the bounded workspace limit", async () => {
+  const input = {
+    title: "Status",
+    prompt: "Summarize status",
+    schedule: { type: "interval", minutes: 5 },
+    scope: Array.from({ length: ASSISTANT_MAX_WORKSPACES }, (_, index) => ({
+      connection_id: "local",
+      workspace_id: `w${index}`,
+    })),
+  };
+  let calls = 0;
+  const handle = async () => {
+    calls++;
+    return { text: "Pending" };
+  };
+  await expect(
+    callTaskTool("propose_ranger_task", input, handle),
+  ).resolves.toEqual({ text: "Pending" });
+  await expect(
+    callTaskTool(
+      "propose_ranger_task",
+      {
+        ...input,
+        scope: [
+          ...input.scope,
+          { connection_id: "local", workspace_id: "overflow" },
+        ],
+      },
+      handle,
+    ),
+  ).rejects.toThrow("Invalid task tool parameters");
+  expect(calls).toBe(1);
 });

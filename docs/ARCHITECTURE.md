@@ -142,6 +142,15 @@ Input waits for readiness and revalidates attachment/session/runtime leases;
 it is never replayed into a replacement terminal. Disconnect rejects pending
 requests and invalidates clipboard ownership.
 
+- Endpoint keyboard input uses bounded basic CSI-u for modified Enter,
+  Backspace, Escape, and ambiguous printable ASCII combinations. The bridge
+  reconstructs key identity and modifiers before Herdr encodes for the target
+  application. Hardware and custom mobile shortcuts preserve Ctrl+/ separately
+  from Ctrl+_, and Alt+[ / Alt+O cannot consume following text as escape prefixes.
+  Configured terminal actions take precedence; composition, AltGr, and Apple
+  Option text remain native. Legacy/shared attachments retain raw-byte encoding
+  because they bypass the semantic classifier. Browser/OS-reserved shortcuts
+  are available only if the browser delivers their key events.
 - Full PageUp/PageDown sends semantic input for Herdr to route by PTY mode;
   explicit half-page history uses `pane.scroll`, even in mouse-aware apps.
   Legacy attachments retain PageKey/Wheel routing.
@@ -408,6 +417,32 @@ fetches state after reconnect without replaying sends. Request IDs deduplicate
 explicit retries. Hiding the window only changes presentation; stopping work is
 a separate RPC.
 
+`bridge.assistant.mentions` lists reference candidates within an authorized,
+captured workspace scope. Workspace references include connection and workspace
+IDs plus the runtime generation; Agent references additionally pin the pane,
+terminal, and an opaque hash of the detected session identity. Raw session paths
+and process metadata stay private. Candidate discovery scans at most 64
+workspaces and 200 Agents, reports partial results explicitly, and can be scoped
+to a particular workspace. Only Agents with verifiable sessions are offered.
+
+Messages may include up to 32 structured references with UTF-16 offsets matching
+their exact visible `@label` text. The server validates and canonicalizes their
+targets before admission, while preserving submitted labels in the transcript.
+References are metadata, not permission grants or prompt-delivery operations;
+the model reads bounded evidence through the existing tools. Agent identity is
+rechecked before and after referenced history/terminal reads, during proposal
+preparation, and before execution. Follow-up reads retain the last explicit
+session binding for a pane. Replaced sessions fail without selecting another
+Agent by name. Durable recovery restores references only after verifying the
+original workspace identities. Scheduled proposals inherit referenced targets
+within their fixed scope, and task plans/runs preserve those targets. Notification
+deduplication also includes the referenced session identity.
+
+Unsent text and references remain browser-tab-local and separate per conversation.
+The native composer keeps bindings consistent with text edits and stores them in
+its local undo history. Old messages without references remain valid. Reference
+navigation refreshes the candidate and checks its identity before opening it.
+
 Model credentials default to the separate Roamgate Ranger store. Reusing the
 bridge OS account's Pi credentials requires an explicit source choice. Login
 captures that choice and updates only the selected store; configuration changes
@@ -435,7 +470,18 @@ and returns their actual receipts to the model. Built-in tools and discovered ex
 prompts, and project instruction files are disabled. Evidence is bounded and
 treated as untrusted content. The service validates the selected turn scope
 against explicitly allowed connection/workspace pairs; none are allowed by
-default. Allowed and per-turn scopes each contain at most 64 workspace pairs.
+default. Explicitly confirmed high-permission mode also authorizes current and
+newly discovered workspaces without changing the saved normal-mode selection.
+The `workspace_scope: "all"` consent marker is required alongside automatic
+approval; legacy automatic approval alone retains its selected scope. Only the
+dedicated permission confirmation can grant the broader scope. Allowed and
+per-turn scopes each contain at most 512 workspace pairs, sharing the inventory
+bound. A truncated inventory cannot be used as a complete high-permission turn.
+Inventory reconciliation prunes saved selections only for removed configured
+connections or complete successful current workspace listings. Incomplete,
+failed, and disconnected listings do not prove deletion. Running turns and tasks
+retain concrete admitted identities; live permission checks still apply after
+the global mode changes.
 Each turn captures runtime identity/generation and rechecks its leases
 before and after reads. A replaced runtime or vanished workspace fails without
 falling back to another host or workspace.

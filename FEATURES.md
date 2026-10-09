@@ -189,13 +189,33 @@ The conversation stays available when switching workspaces or connections.
   endpoints by API address, format, key, and model IDs separated by commas or
   newlines. Shared mode also reads
   Pi's custom models. See [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
+- Change the model and **Thinking effort** with the compact selectors below the
+  chat input. Search models across connected providers. Effort choices come from
+  the selected model; **Default** shows its effective level, and models without
+  adjustable thinking show a disabled control. Changes are saved on the bridge
+  and apply to the next message, including when a reply is still streaming.
+  They preserve your draft, conversation, and workspace permissions.
 - Allow workspaces in Settings. Each question automatically uses saved
   authorized workspaces that are currently available. **Select all** adds the
   currently available workspaces; **Clear** removes every selection. Use
   **Save connection** to apply permission changes.
   Workspace choices use a compact grid that scrolls when the list is long.
-  No workspaces are authorized by default, and new workspaces need to be
-  selected separately. The scope stays fixed while Ranger streams an answer.
+  No workspaces are authorized by default. In normal mode, new workspaces need
+  to be selected separately. Confirmed deleted workspaces are removed from the
+  list and saved selection; temporary disconnects preserve saved choices.
+  The scope stays fixed while Ranger streams an answer.
+- Type **@** in the message input to search authorized workspaces and concrete
+  Agent sessions. Candidates show their host and workspace so names can be
+  distinguished across connections. Use Up/Down and Enter or Tab to select;
+  Escape closes the picker and Shift+Enter inserts a new line. Selected objects
+  appear as removable references below the input and remain bound when switching
+  chats. Editing a reference's text removes its binding; ordinary pasted names
+  are plain text. Click a reference in the conversation to open its verified
+  workspace or Agent pane.
+  References focus the question without changing workspace permissions or
+  sending prompts. Ranger reads evidence as needed. Changed or unavailable Agent
+  sessions require reselection, and monitoring tasks preserve the selected
+  session instead of following a replacement Agent in the same pane.
 - Expand **Work performed**, then an individual tool card to inspect its
   **Arguments** and **Result** or **Error**, including tools that manage tasks or
   propose actions. Long details are marked when truncated; older calls show
@@ -218,12 +238,16 @@ The conversation stays available when switching workspaces or connections.
   Worktree previews include configured setup hooks. Results distinguish verified
   completion from partial or uncertain outcomes. An uncertain operation must be
   checked at its target before proposing another one; reconnects never replay it.
-  Newly created workspaces must be explicitly allowed before Ranger can use them.
+  In normal mode, newly created workspaces must be explicitly allowed before
+  Ranger can use them.
 - **High-permission mode** in Settings is off by default. Enable it explicitly
-  to let Ranger execute supported management operations and create scheduled
+  to authorize all current and newly discovered workspaces and let Ranger
+  execute supported management operations and create scheduled
   tasks without individual confirmations. Results remain visible in the chat.
-  Workspace authorization and each question's scope still apply. Disable the
-  mode at any time to require confirmation for subsequent operations. Existing
+  Each question and task keeps its concrete captured scope. Disable the
+  mode to restore normal-mode selections and require confirmation for subsequent
+  operations. Older saved High-mode settings keep their selected-workspace scope
+  until the broader permission is explicitly confirmed. Existing
   tasks keep their saved permission mode; edit a task while this mode is enabled
   to allow automatic operations in its future runs.
 - Closing the window hides it while work continues; the topbar indicator shows
@@ -427,9 +451,12 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   Alt, and Shift and pick one letter, number, symbol, or basic key; expand **More keys**
   for navigation keys and F1-F12 in separate groups. Set a label and edit or clear individual slots;
   defaults stay available. Buttons send only that combination, with no extra
-  Enter. Shift uses US symbols; Ctrl letters ignore case and can share bytes with
-  other keys, while Alt sends an Escape prefix. Modified Enter requires application
-  support. Custom PageUp/PageDown sends application input; the presets scroll
+  Enter. Shift uses US symbols. Endpoint terminals preserve ambiguous modified
+  keys such as Ctrl+/, Ctrl+Backspace, Ctrl+Shift+letters, and Alt+Escape;
+  ordinary Ctrl aliases (such as Ctrl+I for Tab) remain available. Legacy/shared
+  terminals retain their traditional byte encodings; combinations available only
+  on endpoint terminals are disabled there with an explanation. Modified Enter
+  requires application support. Custom PageUp/PageDown sends application input; the presets scroll
   history. Unsupported combinations, such as Ctrl+1, identify the affected slot
   and block saving. Buttons bypass browser keyboard
   shortcuts, but application keybindings still apply. Cmd/Meta, text macros,

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { terminalShortcutSequence } from "./terminalKeys";
+import {
+  terminalDisambiguatedKeySequence,
+  terminalShortcutSequence,
+} from "./terminalKeys";
 import { defaultShortcutBindings } from "./shortcutBindings";
 type KeyEvent = Parameters<typeof terminalShortcutSequence>[0];
 const modifiedEnterSequence = (event: KeyEvent) =>
@@ -168,5 +171,63 @@ describe("terminal macOS Command editing keys", () => {
         true,
       ),
     ).toBeNull();
+  });
+});
+
+describe("terminal disambiguated control keys", () => {
+  const slash = keyEvent({
+    key: "/",
+    code: "Slash",
+    keyCode: 191,
+    ctrlKey: true,
+  });
+
+  test("preserves an unshifted Ctrl+/ by character rather than physical key", () => {
+    for (const code of ["Slash", "NumpadDivide", "Digit7"]) {
+      expect(terminalDisambiguatedKeySequence({ ...slash, code })).toBe(
+        "\x1b[47;5u",
+      );
+    }
+  });
+
+  test("retains additional slash modifiers instead of collapsing them to underscore", () => {
+    expect(terminalDisambiguatedKeySequence({ ...slash, altKey: true })).toBe(
+      "\x1b[47;7u",
+    );
+    expect(
+      terminalDisambiguatedKeySequence({ ...slash, key: "?", shiftKey: true }),
+    ).toBe("\x1b[63;6u");
+  });
+
+  test("leaves Apple Option text, AltGr text, and Meta shortcuts alone", () => {
+    const alternate = { ...slash, altKey: true };
+    expect(terminalDisambiguatedKeySequence(alternate, true)).toBeNull();
+    expect(
+      terminalDisambiguatedKeySequence({
+        ...alternate,
+        getModifierState: (key) => key === "AltGraph",
+      }),
+    ).toBeNull();
+    expect(
+      terminalDisambiguatedKeySequence({ ...alternate, metaKey: true }),
+    ).toBeNull();
+  });
+
+  test("leaves other characters, modifiers, composition and keyup to xterm", () => {
+    for (const changes of [
+      { key: "_" },
+      { key: "-" },
+      { key: "?" },
+      { ctrlKey: false },
+      { metaKey: true },
+      { isComposing: true },
+      { keyCode: 229 },
+      { type: "keyup" },
+      { type: "keypress" },
+    ]) {
+      expect(
+        terminalDisambiguatedKeySequence({ ...slash, ...changes }),
+      ).toBeNull();
+    }
   });
 });

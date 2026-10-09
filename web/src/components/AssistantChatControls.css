@@ -1,0 +1,69 @@
+.assistant-chat-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.assistant-panel .assistant-chat-controls .themed-select-trigger {
+  width: auto;
+  min-height: 30px;
+  border-color: transparent;
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.assistant-chat-controls .themed-select-trigger:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.assistant-chat-model {
+  max-width: 65%;
+}
+
+.assistant-chat-effort {
+  max-width: 100%;
+}
+
+.assistant-chat-next {
+  padding-inline: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.assistant-chat-select {
+  width: min(340px, calc(100vw / var(--ui-scale, 1) - 16px));
+  min-width: 0;
+}
+
+.assistant-chat-select .command-list {
+  max-height: max(
+    0px,
+    min(
+      320px,
+      calc(
+        var(--radix-popover-content-available-height) /
+        var(--ui-scale, 1) -
+        54px
+      )
+    )
+  );
+  overscroll-behavior: contain;
+}
+
+.assistant-chat-select.is-mobile .command-item {
+  min-height: 44px;
+}
+
+.assistant-chat-select.is-mobile .command-input {
+  font-size: 16px;
+}
+
+.assistant-panel.is-mobile .assistant-chat-controls .themed-select-trigger {
+  min-height: 44px;
+}

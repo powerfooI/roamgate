@@ -160,9 +160,9 @@ if (process.env.ROAMGATE_SHORTCUT_PICKER_DOM_TEST !== "1") {
         shift: true,
       });
       expect(savedRows[0][4]?.label).toBe("C-A-S-Y");
-      expect(mobileTerminalShortcutBytes(savedRows[0][4]!.action)).toEqual([
-        0x1b, 0x19,
-      ]);
+      expect(mobileTerminalShortcutBytes(savedRows[0][4]!.action)).toEqual(
+        Array.from(Buffer.from("\x1b[89;8u")),
+      );
       expect(savedSide[0]?.action).toEqual({
         key: "[",
         ctrl: false,

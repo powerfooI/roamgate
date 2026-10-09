@@ -5,6 +5,7 @@ import {
   ASSISTANT_MAX_WORKSPACES,
   type AssistantAction,
   type AssistantSnapshot,
+  type AssistantWorkspaceCatalog,
 } from "../../../shared/assistant";
 import * as assistant from "../assistant";
 import { bridge, type ConnectionSummary } from "../api";
@@ -12,6 +13,8 @@ import * as storeModule from "../store";
 import type { RangerTaskNotificationTarget } from "../taskNotifications";
 import { terminalFocusBlockedByOverlay } from "../terminalFocus";
 import { AssistantPanel, assistantAuthUrl } from "./AssistantPanel";
+import { AssistantChatControls } from "./AssistantChatControls";
+import { AssistantMentionComposer } from "./AssistantMentionComposer";
 import * as taskControls from "./AssistantTasks";
 
 test("assistant sign-in links only open explicit http or https destinations", () => {
@@ -114,6 +117,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       connectionStatus: "connected",
       supported: true,
       draft: "",
+      draftMentions: [],
     };
     const state = spyOn(assistant, "useAssistantState").mockImplementation(
       () => clientState,
@@ -333,9 +337,10 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       connectionStatus: "connected",
       supported: true,
       draft: "",
+      draftMentions: [],
     });
     const unavailable = "Connection sshtx1 is not ready.";
-    let contextResult = {
+    let contextResult: AssistantWorkspaceCatalog = {
       workspaces: [localWorkspace],
       errors: [unavailable],
     };
@@ -434,11 +439,208 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(container.textContent).not.toContain(unavailable);
       expect(checkbox("Latest remote project")?.checked).toBe(false);
       expect(checkbox("Local project")?.checked).toBe(true);
+
+      // A saved permission update preserves the user's unchecked/checked draft.
+      snapshot.config.allowed_workspaces = [remoteWorkspace];
+      await catalog({ ...ssh, state: "ready", generation: 4 });
+      expect(checkbox("Latest remote project")?.checked).toBe(true);
+      expect(checkbox("Local project")?.checked).toBe(true);
+      contextResult = {
+        workspaces: [localWorkspace],
+        errors: [unavailable],
+        connection_ids: [local.id, ssh.id],
+        complete_connection_ids: [local.id],
+      };
+      await catalog({ ...ssh, state: "disconnected", generation: 5 });
+      expect(checkbox("Latest remote project")).toBeUndefined();
+      expect(container.textContent).not.toContain("remote-project");
+      contextResult = {
+        workspaces: [localWorkspace, remoteWorkspace],
+        errors: [],
+        connection_ids: [local.id, ssh.id],
+        complete_connection_ids: [local.id, ssh.id],
+      };
+      await catalog({ ...ssh, state: "ready", generation: 6 });
+      expect(checkbox("Remote project")?.checked).toBe(true);
+
+      // Successful complete inventory removes the deleted saved grant, while
+      // an unrelated unsaved local selection survives the pushed snapshot.
+      snapshot.config.allowed_workspaces = [];
+      contextResult = { ...contextResult, workspaces: [localWorkspace] };
+      await catalog({ ...ssh, state: "ready", generation: 7 });
+      expect(checkbox("Remote project")).toBeUndefined();
+      expect(checkbox("Local project")?.checked).toBe(true);
+      contextResult = {
+        ...contextResult,
+        workspaces: [localWorkspace, remoteWorkspace],
+      };
+      await catalog({ ...ssh, state: "ready", generation: 8 });
+      expect(checkbox("Remote project")?.checked).toBe(false);
+      expect(checkbox("Local project")?.checked).toBe(true);
     } finally {
       await React.act(async () => root.unmount());
       context.mockRestore();
       state.mockRestore();
       storeModule.__storeTesting.replaceState(previousStore);
+      await browser.happyDOM.close();
+      for (const [key, descriptor] of originals) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else Reflect.deleteProperty(globalThis, key);
+      }
+    }
+  });
+
+  test("Ranger ignores stale pruning after local or saved workspace grants change", async () => {
+    const { Window } = await import("happy-dom");
+    const browser = new Window({ url: "http://localhost" });
+    const originals = new Map<string, PropertyDescriptor | undefined>();
+    for (const [key, value] of Object.entries({
+      window: browser,
+      document: browser.document,
+      navigator: browser.navigator,
+      HTMLElement: browser.HTMLElement,
+      Element: browser.Element,
+      Node: browser.Node,
+      Event: browser.Event,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    })) {
+      originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+      Object.defineProperty(globalThis, key, {
+        value,
+        configurable: true,
+        writable: true,
+      });
+    }
+    const { createRoot } = await import("react-dom/client");
+    const workspaceA = {
+      connection_id: "local",
+      workspace_id: "a",
+      connection_label: "Local",
+      label: "Project A",
+      runtime_generation: 1,
+    };
+    const workspaceB = { ...workspaceA, workspace_id: "b", label: "Project B" };
+    const refA = { connection_id: "local", workspace_id: "a" };
+    const refB = { connection_id: "local", workspace_id: "b" };
+    const snapshot: AssistantSnapshot = {
+      instance_id: "bridge",
+      revision: 1,
+      config: {
+        provider: "",
+        model: "",
+        credential_source: "assistant",
+        allowed_workspaces: [refA],
+      },
+      providers: [],
+      models: [],
+      messages: [],
+      running: false,
+      error: null,
+      auth: null,
+    };
+    const clientState: ReturnType<typeof assistant.useAssistantState> = {
+      snapshot,
+      loading: false,
+      error: null,
+      connectionStatus: "connected",
+      supported: true,
+      draft: "",
+      draftMentions: [],
+    };
+    const state = spyOn(assistant, "useAssistantState").mockImplementation(
+      () => clientState,
+    );
+    const readState = spyOn(assistant, "readAssistantState").mockImplementation(
+      () => clientState,
+    );
+    const complete: AssistantWorkspaceCatalog = {
+      workspaces: [workspaceA, workspaceB],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+    };
+    const oldListing = { ...complete, workspaces: [workspaceA] };
+    const context = spyOn(bridge, "call").mockResolvedValue(complete);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const render = async () => {
+      await React.act(async () =>
+        root.render(
+          React.createElement(AssistantPanel, {
+            open: true,
+            floating: true,
+            mobile: false,
+            onClose() {},
+            onToggleFloating() {},
+            onOpenSource() {},
+          }),
+        ),
+      );
+    };
+    const checkboxB = () =>
+      Array.from(
+        container.querySelectorAll<HTMLLabelElement>(
+          ".assistant-workspace-choice",
+        ),
+      )
+        .find((label) => label.textContent?.includes("Project B"))
+        ?.querySelector<HTMLInputElement>("input");
+    const refresh = async () => {
+      await React.act(async () =>
+        container
+          .querySelector<HTMLButtonElement>(
+            '[aria-label="Refresh Ranger workspaces"]',
+          )!
+          .click(),
+      );
+    };
+    const startOldRefresh = async () => {
+      const pending = Promise.withResolvers<AssistantWorkspaceCatalog>();
+      context.mockImplementationOnce(() => pending.promise);
+      await refresh();
+      return pending;
+    };
+    try {
+      await render();
+      expect(checkboxB()?.checked).toBe(false);
+      const localRefresh = await startOldRefresh();
+      await React.act(async () => checkboxB()!.click());
+      expect(checkboxB()?.checked).toBe(true);
+      await React.act(async () => localRefresh.resolve(oldListing));
+      expect(checkboxB()).toBeUndefined();
+      await refresh();
+      expect(checkboxB()?.checked).toBe(true);
+      expect(snapshot.config.allowed_workspaces).toEqual([refA]);
+
+      // The draft already includes B, so this independently checks the saved
+      // grants token rather than relying on a local draft change.
+      const savedRefresh = await startOldRefresh();
+      clientState.snapshot = {
+        ...snapshot,
+        revision: 2,
+        config: { ...snapshot.config, allowed_workspaces: [refA, refB] },
+      };
+      await render();
+      await React.act(async () => savedRefresh.resolve(oldListing));
+      expect(checkboxB()).toBeUndefined();
+      await refresh();
+      expect(checkboxB()?.checked).toBe(true);
+      expect(clientState.snapshot.config.allowed_workspaces).toEqual([
+        refA,
+        refB,
+      ]);
+
+      // A later complete listing may still prune an unchanged draft.
+      context.mockResolvedValueOnce(oldListing);
+      await refresh();
+      await refresh();
+      expect(checkboxB()?.checked).toBe(false);
+    } finally {
+      await React.act(async () => root.unmount());
+      context.mockRestore();
+      readState.mockRestore();
+      state.mockRestore();
       await browser.happyDOM.close();
       for (const [key, descriptor] of originals) {
         if (descriptor) Object.defineProperty(globalThis, key, descriptor);
@@ -544,6 +746,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       connectionStatus: "connected" as const,
       supported: true,
       draft: "",
+      draftMentions: [],
     };
     const state = spyOn(assistant, "useAssistantState").mockImplementation(
       () => clientState,
@@ -960,6 +1163,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       connectionStatus: "connected",
       supported: true,
       draft: "Next question",
+      draftMentions: [],
     };
     let contextWorkspaces = [workspace];
     let acknowledge: (snapshot: AssistantSnapshot) => void = () => {};
@@ -1867,6 +2071,13 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         button("Enable high-permission mode").click(),
       );
       expect(approvalDialog()).not.toBeNull();
+      expect(approvalDialog()!.textContent).toContain(
+        "all current and future workspaces",
+      );
+      expect(approvalDialog()!.textContent).toContain(
+        "sent to your selected model provider",
+      );
+      expect(approvalDialog()!.textContent).toContain("without approval");
       expect(call).toHaveBeenCalledTimes(callsBeforeApproval);
       await React.act(async () => button("Cancel", approvalDialog()!).click());
       expect(approvalDialog()).toBeNull();
@@ -1880,14 +2091,30 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(approvalDialog()).toBeNull();
       expect(call).toHaveBeenLastCalledWith("configure_approval", {
         approval_mode: "auto",
+        workspace_scope: "all",
       });
       expect(call).toHaveBeenCalledTimes(callsBeforeApproval + 1);
       clientState.snapshot = {
         ...clientState.snapshot,
-        config: { ...clientState.snapshot.config, approval_mode: "auto" },
+        config: {
+          ...clientState.snapshot.config,
+          approval_mode: "auto",
+          workspace_scope: "all",
+        },
       };
       await render();
-      expect(workspaceDraft().checked).toBe(false);
+      expect(workspaceDraft().checked).toBe(true);
+      expect(workspaceDraft().disabled).toBe(true);
+      expect(
+        container.querySelector(
+          '[aria-label="Select all available Ranger workspaces"]',
+        ),
+      ).toBeNull();
+      expect(
+        container.querySelector(
+          '[aria-label="Clear allowed Ranger workspaces"]',
+        ),
+      ).toBeNull();
       expect(button("Ranger model").textContent).toBe(modelDraft);
       expect(
         container.querySelector(
@@ -1932,6 +2159,37 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(button("Enable high-permission mode").disabled).toBe(true);
       expect(workspaceDraft().checked).toBe(false);
       expect(container.querySelector(".assistant-panel-access")).toBeNull();
+
+      // Legacy auto mode must not acquire broader workspace access silently.
+      clientState.snapshot.config = {
+        ...clientState.snapshot.config,
+        approval_mode: "auto",
+        workspace_scope: undefined,
+      };
+      clientState.snapshot.messages = [];
+      await render();
+      expect(
+        container.querySelector(".assistant-panel-access")?.textContent,
+      ).toBe("High permission: selected workspaces");
+      expect(workspaceDraft().checked).toBe(false);
+      expect(workspaceDraft().disabled).toBe(false);
+      expect(button("Disable high-permission mode").disabled).toBe(false);
+      expect(button("Select all available Ranger workspaces")).toBeDefined();
+      await React.act(async () =>
+        button("Enable high permission for all workspaces").click(),
+      );
+      expect(approvalDialog()!.textContent).toContain(
+        "all current and future workspaces",
+      );
+      expect(call).toHaveBeenCalledTimes(callsBeforeApproval + 3);
+      await React.act(async () =>
+        button("Enable high-permission mode", approvalDialog()!).click(),
+      );
+      expect(call).toHaveBeenLastCalledWith("configure_approval", {
+        approval_mode: "auto",
+        workspace_scope: "all",
+      });
+      expect(call).toHaveBeenCalledTimes(callsBeforeApproval + 4);
     } finally {
       await React.act(async () => root.unmount());
       for (const spy of [context, state, readState, send, call])
@@ -1997,6 +2255,7 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
     connectionStatus: "connected" as "connected" | "disconnected",
     supported: true,
     draft: "Explain the changes",
+    draftMentions: [],
   };
   const states: unknown[] = [];
   const refs: React.RefObject<unknown>[] = [];
@@ -2060,11 +2319,22 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
       (current) => refs[refIndex++] ?? (refs[refIndex - 1] = { current }),
     ),
     spyOn(React, "useEffect").mockImplementation(() => {}),
+    spyOn(React, "useLayoutEffect").mockImplementation(() => {}),
+    spyOn(React, "useId").mockReturnValue("mention-picker"),
+    spyOn(React, "useMemo").mockImplementation((create) => create()),
   ];
   function visit(node: React.ReactNode) {
     React.Children.forEach(node, (child) => {
       if (!React.isValidElement<Record<string, unknown>>(child)) return;
       elements.push(child);
+      if (child.type === AssistantMentionComposer) {
+        visit(
+          AssistantMentionComposer(
+            child.props as Parameters<typeof AssistantMentionComposer>[0],
+          ),
+        );
+        return;
+      }
       visit(child.props.children as React.ReactNode);
     });
   }
@@ -2096,7 +2366,17 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
     const callback = find(prop, value).props[handler] as (
       event: unknown,
     ) => void;
-    callback(event);
+    callback(
+      handler === "onCompositionEnd"
+        ? {
+            currentTarget: {
+              value: clientState.draft,
+              selectionStart: clientState.draft.length,
+              selectionEnd: clientState.draft.length,
+            },
+          }
+        : event,
+    );
     render();
   }
   const key = (isComposing = false, shiftKey = false) => ({
@@ -2118,6 +2398,63 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
     ).toBeDefined();
     invoke("aria-label", "Message Ranger", "onKeyDown", key());
     expect(send).not.toHaveBeenCalled();
+    snapshot.config.approval_mode = "auto";
+    snapshot.config.workspace_scope = "all";
+    render();
+    expect(find("aria-label", "Send").props.disabled).toBe(false);
+    const taskChoices = () =>
+      elements.find((item) => item.type === taskControls.AssistantTasks)!.props
+        .workspaces;
+    expect(taskChoices()).toEqual(contextWorkspaces);
+    invoke("aria-label", "Message Ranger", "onKeyDown", key());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(send).toHaveBeenLastCalledWith(
+      "Explain the changes",
+      contextWorkspaces.map(({ connection_id, workspace_id }) => ({
+        connection_id,
+        workspace_id,
+      })),
+    );
+    acknowledge();
+    await Promise.resolve();
+    const newWorkspace = { ...workspace, workspace_id: "new-project" };
+    contextWorkspaces = [...contextWorkspaces, newWorkspace];
+    invoke("aria-label", "Message Ranger", "onKeyDown", key());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(send).toHaveBeenLastCalledWith(
+      "Explain the changes",
+      contextWorkspaces.map(({ connection_id, workspace_id }) => ({
+        connection_id,
+        workspace_id,
+      })),
+    );
+    acknowledge();
+    await Promise.resolve();
+    render();
+    expect(taskChoices()).toEqual(contextWorkspaces);
+    expect(snapshot.config.allowed_workspaces).toEqual([]);
+    context.mockResolvedValueOnce({
+      workspaces: contextWorkspaces,
+      truncated: true,
+    });
+    invoke("aria-label", "Message Ranger", "onKeyDown", key());
+    await Promise.resolve();
+    await Promise.resolve();
+    render();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(find("aria-label", "Send").props.disabled).toBe(true);
+    expect(states[6]).toContain("require the full list");
+    snapshot.config.approval_mode = "manual";
+    contextWorkspaces = contextWorkspaces.filter(
+      (item) => item !== newWorkspace,
+    );
+    states[2] = contextWorkspaces;
+    render();
+    expect(find("aria-label", "Send").props.disabled).toBe(true);
+    expect(taskChoices()).toEqual([]);
+    send.mockClear();
     snapshot.config.allowed_workspaces = [
       workspace,
       secondWorkspace,
@@ -2213,6 +2550,25 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
       "The active Ranger chat changed. Select it again before sending.",
     );
     clientState.snapshot = snapshot;
+    snapshot.chat_selection = true;
+    render();
+    context.mockImplementationOnce(async () => {
+      clientState.snapshot = {
+        ...snapshot,
+        config: { ...snapshot.config, thinking_level: "high" },
+      };
+      return { workspaces: [workspace] };
+    });
+    invoke("aria-label", "Message Ranger", "onKeyDown", key());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(states[6]).toBe(
+      "The Ranger model settings changed. Check the selection before sending.",
+    );
+    clientState.snapshot = snapshot;
+    delete snapshot.chat_selection;
+    render();
     snapshot.config.allowed_workspaces = [];
     render();
     expect(find("aria-label", "Send").props.disabled).toBe(true);
@@ -2444,7 +2800,10 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
         .every((item) => !item.props.disabled),
     ).toBe(true);
     expect(choices[ASSISTANT_MAX_WORKSPACES - 1].props.disabled).toBe(true);
-    expect(choices[ASSISTANT_MAX_WORKSPACES].props.disabled).toBeUndefined();
+    expect(choices).toHaveLength(ASSISTANT_MAX_WORKSPACES);
+    expect(
+      elements.some((item) => item.props.children === "Unavailable (offline)"),
+    ).toBe(false);
     (choices[0].props.onChange as () => void)();
     render();
     expect(
@@ -2596,6 +2955,34 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
       "Unconfirmed action previews will be cancelled",
     );
     expect(stop).toHaveBeenCalledTimes(1);
+
+    // Quick changes share admission with Send and do not touch the draft or IME.
+    const controls = () =>
+      elements.find((item) => item.type === AssistantChatControls)!;
+    const change = () =>
+      (controls().props.onChange as (params: Record<string, unknown>) => void)({
+        model: "next",
+        thinking_level: "high",
+      });
+    invoke("aria-label", "Message Ranger", "onCompositionStart");
+    change();
+    expect(stop).toHaveBeenCalledTimes(1);
+    invoke("aria-label", "Message Ranger", "onCompositionEnd");
+    snapshot.running = true;
+    render();
+    expect(controls().props.disabled).toBe(false);
+    change();
+    change();
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(stop).toHaveBeenLastCalledWith("configure_chat", {
+      model: "next",
+      thinking_level: "high",
+    });
+    expect(clientState.draft).toBe("Explain the changes");
+    await Promise.resolve();
+    await Promise.resolve();
+    render();
+    expect(controls().props.disabled).toBe(false);
   } finally {
     for (const spy of spies.reverse()) spy.mockRestore();
   }

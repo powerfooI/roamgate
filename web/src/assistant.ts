@@ -2,12 +2,19 @@ import { useEffect, useSyncExternalStore } from "react";
 import {
   isAssistantSnapshot,
   isAssistantTaskDetail,
+  isAssistantMentionCatalog,
+  isAssistantMentions,
+  type AssistantMention,
+  type AssistantMentionCatalog,
   type AssistantSnapshot,
-  type AssistantWorkspace,
+  type AssistantConfig,
+  type AssistantWorkspaceCatalog,
   type AssistantWorkspaceRef,
   type AssistantTaskDetail,
 } from "../../shared/assistant";
 import { bridge, type ConnectionStatus } from "./api";
+import { assistantChatSelection } from "./assistantModels";
+import { adjustAssistantMentions } from "./assistantMentions";
 
 type AssistantClientState = {
   snapshot: AssistantSnapshot | null;
@@ -16,6 +23,7 @@ type AssistantClientState = {
   connectionStatus: ConnectionStatus;
   supported: boolean;
   draft: string;
+  draftMentions: AssistantMention[];
 };
 
 let state: AssistantClientState = {
@@ -25,6 +33,7 @@ let state: AssistantClientState = {
   connectionStatus: bridge.status,
   supported: false,
   draft: "",
+  draftMentions: [],
 };
 const listeners = new Set<() => void>();
 let users = 0;
@@ -34,7 +43,12 @@ let snapshotVersion = 0;
 const retiredInstances = new Set<string>();
 let submission: { key: string; requestId: string } | null = null;
 let sending = false;
-const drafts = new Map<string, string>();
+type AssistantDraft = { text: string; mentions: AssistantMention[] };
+const drafts = new Map<string, AssistantDraft>();
+const draftHistory = new Map<
+  string,
+  { entries: AssistantDraft[]; index: number }
+>();
 
 function publish(patch: Partial<AssistantClientState>) {
   state = { ...state, ...patch };
@@ -57,11 +71,20 @@ function acceptSnapshot(value: unknown, requestVersion?: number) {
   }
   snapshotVersion++;
   let draft = state.draft;
+  let draftMentions = state.draftMentions;
   if (current?.session_id && current.session_id !== value.session_id) {
-    drafts.set(current.session_id, draft);
-    draft = drafts.get(value.session_id ?? "") ?? "";
+    drafts.set(current.session_id, { text: draft, mentions: draftMentions });
+    const saved = drafts.get(value.session_id ?? "");
+    draft = saved?.text ?? "";
+    draftMentions = saved?.mentions ?? [];
   }
-  publish({ snapshot: value, loading: false, error: null, draft });
+  publish({
+    snapshot: value,
+    loading: false,
+    error: null,
+    draft,
+    draftMentions,
+  });
 }
 
 export function readAssistantState() {
@@ -81,19 +104,88 @@ export function subscribeAssistant(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-export function setAssistantDraft(draft: string) {
-  drafts.set(state.snapshot?.session_id ?? "", draft);
-  publish({ draft });
+export function setAssistantDraft(
+  draft: string,
+  references?: AssistantMention[],
+  inputType?: string,
+  edit?: { start: number; end: number; inputType?: string },
+) {
+  const key = state.snapshot?.session_id ?? "";
+  const previous = { text: state.draft, mentions: state.draftMentions };
+  const history = draftHistory.get(key) ?? { entries: [previous], index: 0 };
+  let mentions = references;
+  if (
+    !mentions &&
+    (inputType === "historyUndo" || inputType === "historyRedo")
+  ) {
+    const direction = inputType === "historyUndo" ? -1 : 1;
+    for (
+      let index = history.index + direction;
+      index >= 0 && index < history.entries.length;
+      index += direction
+    ) {
+      if (history.entries[index]!.text !== draft) continue;
+      mentions = history.entries[index]!.mentions;
+      history.index = index;
+      break;
+    }
+    mentions ??= [];
+  }
+  mentions ??= adjustAssistantMentions(
+    state.draft,
+    draft,
+    state.draftMentions,
+    edit,
+  );
+  if (!isAssistantMentions(mentions, draft))
+    throw new Error("Invalid Ranger draft references.");
+  const next = { text: draft, mentions };
+  if (inputType !== "historyUndo" && inputType !== "historyRedo") {
+    history.entries.splice(history.index + 1);
+    // Picker insertion binds the text input it just emitted; native edits keep their own undo state.
+    if (
+      history.entries[history.index]?.text === draft &&
+      references &&
+      references.length > previous.mentions.length
+    )
+      history.entries[history.index] = next;
+    else history.entries.push(next);
+    // ponytail: undo beyond 100 snapshots unlinks refs; use editor transactions if deeper binding undo is needed.
+    if (history.entries.length > 100) history.entries.shift();
+    history.index = history.entries.length - 1;
+  }
+  draftHistory.set(key, history);
+  drafts.set(key, next);
+  publish({ draft, draftMentions: mentions });
 }
 
-export function parseAssistantContext(value: unknown): {
-  workspaces: AssistantWorkspace[];
-  errors: string[];
-} {
-  const result = value as {
-    workspaces?: AssistantWorkspace[];
-    errors?: string[];
-  } | null;
+export async function getAssistantMentions(
+  scope: AssistantWorkspaceRef[],
+): Promise<AssistantMentionCatalog> {
+  if (state.connectionStatus !== "connected" || !state.supported)
+    throw new Error(
+      "Reconnect to the bridge before mentioning a workspace or agent.",
+    );
+  const epoch = socketEpoch;
+  const value = await bridge.call("bridge.assistant.mentions", { scope });
+  if (epoch !== socketEpoch)
+    throw new Error("The bridge connection changed. Reopen the mention menu.");
+  if (!isAssistantMentionCatalog(value))
+    throw new Error(
+      "This bridge could not load Ranger references. Update or reconnect and try again.",
+    );
+  return value;
+}
+
+export function parseAssistantContext(
+  value: unknown,
+): AssistantWorkspaceCatalog {
+  const result = value as Partial<AssistantWorkspaceCatalog> | null;
+  const connectionIdsValid = (ids: unknown) =>
+    ids === undefined ||
+    (Array.isArray(ids) &&
+      ids.every((id) => typeof id === "string" && !!id) &&
+      new Set(ids).size === ids.length);
   if (
     !Array.isArray(result?.workspaces) ||
     !result.workspaces.every(
@@ -108,12 +200,111 @@ export function parseAssistantContext(value: unknown): {
         Number.isSafeInteger(workspace.runtime_generation) &&
         workspace.runtime_generation >= 0,
     ) ||
+    !connectionIdsValid(result.connection_ids) ||
+    !connectionIdsValid(result.complete_connection_ids) ||
+    (result.truncated !== undefined && typeof result.truncated !== "boolean") ||
+    (result.connection_ids !== undefined &&
+      (result.workspaces.some(
+        (workspace) =>
+          !result.connection_ids!.includes(workspace.connection_id),
+      ) ||
+        result.complete_connection_ids?.some(
+          (id) => !result.connection_ids!.includes(id),
+        ))) ||
     (result.errors !== undefined &&
       (!Array.isArray(result.errors) ||
         !result.errors.every((error) => typeof error === "string")))
   )
     throw new Error("Invalid Ranger workspace list received from the bridge.");
-  return { workspaces: result.workspaces, errors: result.errors ?? [] };
+  return {
+    workspaces: result.workspaces,
+    errors: result.errors ?? [],
+    ...(result.connection_ids ? { connection_ids: result.connection_ids } : {}),
+    ...(result.complete_connection_ids
+      ? { complete_connection_ids: result.complete_connection_ids }
+      : {}),
+    ...(result.truncated !== undefined ? { truncated: result.truncated } : {}),
+  };
+}
+
+function sameWorkspace(
+  left: AssistantWorkspaceRef,
+  right: AssistantWorkspaceRef,
+) {
+  return (
+    left.connection_id === right.connection_id &&
+    left.workspace_id === right.workspace_id
+  );
+}
+
+// An absent workspace is only deleted when its connection was fully listed,
+// or when the authoritative connection inventory no longer contains its host.
+export function pruneAssistantWorkspaceRefs(
+  refs: AssistantWorkspaceRef[],
+  context: AssistantWorkspaceCatalog,
+) {
+  return refs.filter((ref) => {
+    if (
+      context.connection_ids &&
+      !context.connection_ids.includes(ref.connection_id)
+    )
+      return false;
+    return (
+      !context.complete_connection_ids?.includes(ref.connection_id) ||
+      context.workspaces.some((workspace) => sameWorkspace(ref, workspace))
+    );
+  });
+}
+
+export function permittedAssistantWorkspaces<T extends AssistantWorkspaceRef>(
+  config: AssistantConfig | undefined,
+  available: T[],
+): T[] {
+  return available.filter(
+    (workspace) =>
+      (config?.approval_mode === "auto" && config.workspace_scope === "all") ||
+      config?.allowed_workspaces.some((ref) => sameWorkspace(ref, workspace)),
+  );
+}
+
+// Context refreshes may prune saved permissions while settings have local edits.
+// Merge permission-only updates without resetting the model or draft selections.
+export function reconcileAssistantConfig(
+  draft: AssistantConfig | null,
+  previous: AssistantConfig | undefined,
+  saved: AssistantConfig,
+): AssistantConfig {
+  if (
+    !draft ||
+    !previous ||
+    ["provider", "model", "thinking_level", "credential_source"].some(
+      (key) =>
+        previous[key as keyof AssistantConfig] !==
+        saved[key as keyof AssistantConfig],
+    )
+  )
+    return saved;
+  return {
+    ...draft,
+    approval_mode: saved.approval_mode,
+    workspace_scope: saved.workspace_scope,
+    allowed_workspaces: [
+      ...draft.allowed_workspaces.filter(
+        (ref) =>
+          !previous.allowed_workspaces.some((item) =>
+            sameWorkspace(ref, item),
+          ) ||
+          saved.allowed_workspaces.some((item) => sameWorkspace(ref, item)),
+      ),
+      ...saved.allowed_workspaces.filter(
+        (ref) =>
+          !previous.allowed_workspaces.some((item) =>
+            sameWorkspace(ref, item),
+          ) &&
+          !draft.allowed_workspaces.some((item) => sameWorkspace(ref, item)),
+      ),
+    ],
+  };
 }
 
 export async function callAssistant(
@@ -131,6 +322,7 @@ export async function callAssistant(
     action !== "get" &&
     action !== "stop" &&
     action !== "configure_approval" &&
+    action !== "configure_chat" &&
     !action.startsWith("task.")
   ) {
     throw new Error("Wait for the current action to finish.");
@@ -244,6 +436,7 @@ export function useAssistantState() {
 export async function sendAssistant(
   text: string,
   scope: AssistantWorkspaceRef[],
+  mentions: AssistantMention[] = [],
 ) {
   if (
     sending ||
@@ -253,8 +446,15 @@ export async function sendAssistant(
     return;
   if (!text.trim()) return;
   if (!scope.length) throw new Error("Choose a workspace to read first.");
+  if (!isAssistantMentions(mentions, text))
+    throw new Error(
+      "A Ranger reference changed. Select it again before sending.",
+    );
   const sessionId = state.snapshot?.session_id;
-  const key = JSON.stringify([sessionId, text, scope]);
+  const expected = state.snapshot?.chat_selection
+    ? assistantChatSelection(state.snapshot)
+    : undefined;
+  const key = JSON.stringify([sessionId, text, scope, expected, mentions]);
   if (submission?.key !== key)
     submission = { key, requestId: crypto.randomUUID() };
   sending = true;
@@ -262,14 +462,29 @@ export async function sendAssistant(
     await callAssistant("send", {
       text,
       scope,
+      ...(mentions.length ? { mentions } : {}),
       request_id: submission.requestId,
+      ...(expected ? { expected } : {}),
       ...(sessionId ? { session_id: sessionId } : {}),
     });
     submission = null;
-    if (state.snapshot?.session_id === sessionId && state.draft === text)
-      setAssistantDraft("");
-    else if (drafts.get(sessionId ?? "") === text)
-      drafts.set(sessionId ?? "", "");
+    if (
+      state.snapshot?.session_id === sessionId &&
+      state.draft === text &&
+      JSON.stringify(state.draftMentions) === JSON.stringify(mentions)
+    ) {
+      setAssistantDraft("", []);
+      draftHistory.delete(sessionId ?? "");
+    } else {
+      const saved = drafts.get(sessionId ?? "");
+      if (
+        saved?.text === text &&
+        JSON.stringify(saved.mentions) === JSON.stringify(mentions)
+      ) {
+        drafts.set(sessionId ?? "", { text: "", mentions: [] });
+        draftHistory.delete(sessionId ?? "");
+      }
+    }
   } finally {
     sending = false;
   }
@@ -285,6 +500,7 @@ export function __resetAssistantForTests() {
   submission = null;
   sending = false;
   drafts.clear();
+  draftHistory.clear();
   state = {
     snapshot: null,
     loading: false,
@@ -292,6 +508,7 @@ export function __resetAssistantForTests() {
     connectionStatus: bridge.status,
     supported: false,
     draft: "",
+    draftMentions: [],
   };
   for (const listener of listeners) listener();
 }

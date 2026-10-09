@@ -7,7 +7,8 @@ import { BinWriter } from "./bincode";
 // ponytail: covers the common key space — printable text, Enter/Backspace/
 // Tab, arrows, Home/End/Insert/Delete/PageUp/PageDown, F1-F12, Ctrl+letter,
 // Alt+char, modified CSI keys, bracketed paste and SGR cell mouse reports.
-// Kitty keyboard protocol and pixel mouse are not supported.
+// Basic CSI-u disambiguates printable ASCII and common modified keys; full
+// Kitty keyboard protocol extensions and pixel mouse are not supported.
 
 // crossterm KeyModifiers bits used on the wire.
 export const MOD_SHIFT = 0x1;
@@ -390,18 +391,29 @@ export class VtInputClassifier {
           next,
         };
       }
-      // TerminalView emits CSI-u for the modified Enter variants that xterm's
-      // legacy byte stream cannot otherwise distinguish from plain Enter.
-      if (final === "u" && params[0] === 13 && params.length <= 2) {
+      // TerminalView and custom mobile keys use basic CSI-u where legacy
+      // control bytes lose key identity or modifiers. Keep this bounded to
+      // the supported named keys and printable ASCII, not full Kitty events.
+      if (final === "u" && params.length <= 2) {
+        const codepoint = params[0];
         const modifierParam = params[1] ?? 1;
+        const namedKeys: Record<number, number> = {
+          9: KEY.Tab,
+          13: KEY.Enter,
+          27: KEY.Esc,
+          127: KEY.Backspace,
+        };
         if (
+          Number.isSafeInteger(codepoint) &&
+          (codepoint in namedKeys || (codepoint >= 32 && codepoint <= 126)) &&
           Number.isSafeInteger(modifierParam) &&
           modifierParam >= 1 &&
           modifierParam <= 16
         ) {
           return {
             events: [
-              key(KEY.Enter, {
+              key(namedKeys[codepoint] ?? KEY.Char, {
+                ...(codepoint in namedKeys ? {} : { char: codepoint }),
                 modifiers: xtermModifiers(modifierParam),
               }),
             ],

@@ -108,6 +108,7 @@
 }
 
 .assistant-panel-head .assistant-panel-access {
+  white-space: normal;
   color: var(--warning-text);
   background: var(--warning-soft);
 }

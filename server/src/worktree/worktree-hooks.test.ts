@@ -381,6 +381,45 @@ function testRunner(ssh = false) {
 
 for (const ssh of [false, true]) {
   describe(ssh ? "SSH hook shell" : "local hook shell", () => {
+    test.each(["source", "target"])(
+      "runs the %s opened hook when the source workspace has no path metadata",
+      async (configLocation) => {
+        await withTempDir(async (root) => {
+          const checkout = join(root, "target ' quoted");
+          const source = join(root, "source");
+          await mkdir(checkout);
+          await mkdir(source);
+          await writeFile(
+            join(
+              configLocation === "source" ? source : checkout,
+              "roamgate.json",
+            ),
+            JSON.stringify({
+              worktree: {
+                opened:
+                  'printf "%s|%s" "$PWD" "$ROAMGATE_HOOK_SOURCE_CHECKOUT_PATH"',
+              },
+            }),
+          );
+          const { runner } = testRunner(ssh);
+          const result = await runner.runWorktreeOpenedHook(
+            {
+              workspace: {
+                worktree: {
+                  is_linked_worktree: true,
+                  checkout_path: checkout,
+                  repo_root: source,
+                },
+              },
+            },
+            { workspace_id: "plain-workspace" },
+          );
+          expect(result.status).toBe("succeeded");
+          expect(result.stdout).toContain(`${checkout}|${source}`);
+        });
+      },
+    );
+
     test("selects one file in native/legacy target/source order for every combination", async () => {
       await withTempDir(async (root) => {
         const checkout = join(root, "target ' quoted");

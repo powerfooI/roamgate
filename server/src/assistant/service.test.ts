@@ -14,6 +14,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   AssistantSnapshot,
+  AssistantMention,
+  AssistantMentionTarget,
   AssistantTaskNotification,
   AssistantWorkspace,
 } from "../../../shared/assistant";
@@ -50,9 +52,20 @@ const catalog = {
 const configured = {
   provider: "test",
   model: "model",
-  credential_source: "assistant",
+  credential_source: "assistant" as const,
   allowed_workspaces: [{ connection_id: "local", workspace_id: "ws" }],
 };
+const mentionedAgent: AssistantMentionTarget = {
+  ...workspace,
+  workspace_label: workspace.label,
+  kind: "agent",
+  label: "Codex",
+  pane_id: "pane",
+  terminal_id: "terminal",
+  agent: "codex",
+  agent_identity: "c".repeat(64),
+};
+const agentMarker: AssistantMention = { ...mentionedAgent, start: 6, end: 12 };
 const temporary: string[] = [];
 const services: ReturnType<typeof createAssistantService>[] = [];
 function setup(
@@ -2788,6 +2801,8 @@ describe("bridge-global assistant", () => {
     const f = setup();
     Object.assign(f.driver, createPiDriver(f.directory));
     const requests: { path: string; key: string | null }[] = [];
+    const bodies: { thinking?: { type: string; budget_tokens?: number } }[] =
+      [];
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -2796,7 +2811,7 @@ describe("bridge-global assistant", () => {
           path: new URL(request.url).pathname,
           key: request.headers.get("x-api-key"),
         });
-        await request.json();
+        bodies.push(await request.json());
         const events = [
           {
             type: "message_start",
@@ -2935,6 +2950,26 @@ describe("bridge-global assistant", () => {
           input.provider
         ].key,
       ).toBe(key);
+      // Existing v0.8.0 custom models can opt into reasoning without re-adding
+      // the provider or losing the saved key and unrelated model metadata.
+      const enabled = await f.service.handle("configure_model", {
+        ...input,
+        api_key: undefined,
+        reasoning: true,
+      });
+      expect(
+        enabled.models.find((model) => model.id === input.model),
+      ).toMatchObject({
+        thinking_levels: ["off", "minimal", "low", "medium", "high"],
+        custom: { reasoning: true },
+      });
+      expect(
+        JSON.parse(readFileSync(path, "utf8")).providers[input.provider].models,
+      ).toEqual(
+        updated.providers[input.provider].models.map((model: { id: string }) =>
+          model.id === input.model ? { ...model, reasoning: true } : model,
+        ),
+      );
       const before = readFileSync(path, "utf8");
       const authBefore = readFileSync(join(f.directory, "auth.json"), "utf8");
       for (const invalid of [
@@ -2944,6 +2979,9 @@ describe("bridge-global assistant", () => {
         { base_url: "https://secret:password@example.com" },
         { base_url: "https://example.com?api_key=secret-value" },
         { api: "unsupported" },
+        { reasoning: "true" },
+        { reasoning: null },
+        { reasoning: 1 },
         { api_key: "!touch secret-value" },
         { api_key: "$SECRET_VALUE" },
         { credential_source: "pi" },
@@ -2978,6 +3016,7 @@ describe("bridge-global assistant", () => {
         ...configured,
         provider: input.provider,
         model: input.model,
+        thinking_level: "high",
       });
       await f.service.handle("send", {
         request_id: "custom-first",
@@ -2987,6 +3026,27 @@ describe("bridge-global assistant", () => {
       expect(f.service.peek().messages.at(-1)?.text).toBe(
         "Custom model answer.",
       );
+      expect(bodies[0]?.thinking?.type).toBe("enabled");
+      expect(bodies[0]?.thinking?.budget_tokens).toBeGreaterThan(0);
+      const disabled = await f.service.handle("configure_model", {
+        ...input,
+        api_key: undefined,
+        reasoning: false,
+      });
+      expect(
+        disabled.models.find((model) => model.id === input.model),
+      ).toMatchObject({
+        thinking_levels: ["off"],
+        custom: { reasoning: false },
+      });
+      await expect(
+        f.service.handle("configure", {
+          ...configured,
+          provider: input.provider,
+          model: input.model,
+          thinking_level: "high",
+        }),
+      ).rejects.toThrow("could not be saved");
       updated.providers[input.provider].baseUrl = `${server.url.href}refreshed`;
       updated.providers[input.provider].models.push({ id: "external-model" });
       writeFileSync(path, JSON.stringify(updated));
@@ -3359,4 +3419,1769 @@ describe("bridge-global assistant", () => {
       ).toBeUndefined();
     },
   );
+});
+
+const thinkingCatalog = {
+  ...catalog,
+  models: [
+    {
+      provider: "test",
+      id: "model",
+      label: "Model",
+      thinking_levels: ["off", "low", "high"] as const,
+      default_thinking_level: "off" as const,
+    },
+    {
+      provider: "test",
+      id: "fast",
+      label: "Fast",
+      thinking_levels: ["off"] as const,
+      default_thinking_level: "off" as const,
+    },
+  ],
+};
+function chatSelection(snapshot: AssistantSnapshot) {
+  const { provider, model, credential_source, thinking_level } =
+    snapshot.config;
+  return {
+    instance_id: snapshot.instance_id,
+    provider,
+    model,
+    credential_source,
+    thinking_level,
+  };
+}
+function thinkingDriver(): Pick<AssistantDriver, "catalog"> {
+  return {
+    catalog: async () => ({
+      ...catalog,
+      models: thinkingCatalog.models.map((model) => ({
+        ...model,
+        thinking_levels: [...model.thinking_levels],
+      })),
+    }),
+  };
+}
+
+describe("Ranger quick chat selection", () => {
+  test("persists effort across restart without changing scope or approval and clears unsupported effort on an explicit default switch", async () => {
+    const f = setup(thinkingDriver());
+    await f.service.handle("configure", configured);
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    const selected = await f.service.handle("configure_chat", {
+      provider: "test",
+      model: "model",
+      thinking_level: "high",
+      expected: chatSelection(f.service.peek()),
+    });
+    expect(selected.chat_selection).toBe(true);
+    expect(selected.config).toEqual({
+      ...configured,
+      approval_mode: "auto",
+      thinking_level: "high",
+    });
+    expect(
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8")).config,
+    ).toEqual(selected.config);
+    await f.service.dispose();
+    const restarted = createAssistantService({
+      directory: f.directory,
+      context: f.context,
+      driver: f.driver,
+      publish: () => {},
+    });
+    services.push(restarted);
+    expect(restarted.peek().config).toEqual(selected.config);
+    expect(restarted.peek().instance_id).not.toBe(selected.instance_id);
+    await expect(
+      restarted.handle("configure_chat", {
+        provider: "test",
+        model: "fast",
+        thinking_level: null,
+        expected: chatSelection(selected),
+      }),
+    ).rejects.toThrow("changed");
+    const reset = await restarted.handle("configure_chat", {
+      provider: "test",
+      model: "fast",
+      thinking_level: null,
+      expected: chatSelection(restarted.peek()),
+    });
+    expect(reset.config).toEqual({
+      ...configured,
+      model: "fast",
+      approval_mode: "auto",
+    });
+  });
+
+  test("rejects unsupported, malformed, stale and scope-widening selections without altering state", async () => {
+    const f = setup(thinkingDriver());
+    await f.service.handle("configure", configured);
+    const before = f.service.peek();
+    const selection = {
+      provider: "test",
+      model: "model",
+      thinking_level: "high",
+      expected: chatSelection(before),
+    };
+    for (const changes of [
+      { thinking_level: "max" },
+      { thinking_level: "ultra" },
+      { thinking_level: undefined },
+      { model: "fast" },
+      { provider: "missing" },
+      { model: "missing" },
+      { expected: { ...selection.expected, model: "other" } },
+      { expected: null },
+      { expected: { ...selection.expected, thinking_level: "low" } },
+      { expected: { ...selection.expected, credential_source: "pi" } },
+      { allowed_workspaces: [] },
+      { approval_mode: "auto" },
+      { credential_source: "pi" },
+    ]) {
+      await expect(
+        f.service.handle("configure_chat", { ...selection, ...changes }),
+      ).rejects.toThrow();
+      expect(f.service.peek().config).toEqual(before.config);
+    }
+    await expect(
+      f.service.handle("configure", { ...configured, thinking_level: "max" }),
+    ).rejects.toThrow();
+    expect(f.service.peek().config).toEqual(before.config);
+  });
+
+  test("serializes selection saves with sends and preserves a concurrent permission revocation", async () => {
+    const f = setup(thinkingDriver());
+    await f.service.handle("configure", configured);
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    const previous = chatSelection(f.service.peek());
+    const release = Promise.withResolvers<void>();
+    const load = f.driver.catalog;
+    f.driver.catalog = async (source) => {
+      await release.promise;
+      return load(source);
+    };
+    const saving = f.service.handle("configure_chat", {
+      provider: "test",
+      model: "model",
+      thinking_level: "high",
+      expected: previous,
+    });
+    await expect(
+      f.service.handle("send", {
+        text: "Hello",
+        request_id: "racing-send",
+        expected: previous,
+      }),
+    ).rejects.toThrow("busy");
+    await expect(
+      f.service.handle("configure_chat", {
+        provider: "test",
+        model: "fast",
+        thinking_level: null,
+        expected: previous,
+      }),
+    ).rejects.toThrow("busy");
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    release.resolve();
+    await saving;
+    expect(f.service.peek().config.approval_mode).toBe("manual");
+    expect(f.service.peek().config.thinking_level).toBe("high");
+    await expect(
+      f.service.handle("send", {
+        text: "Hello",
+        request_id: "racing-send",
+        expected: previous,
+      }),
+    ).rejects.toThrow("changed");
+    expect(f.service.peek().messages).toHaveLength(0);
+    await f.service.handle("send", {
+      text: "Hello",
+      request_id: "racing-send",
+      expected: chatSelection(f.service.peek()),
+    });
+    await until(() => !f.service.peek().running);
+    expect(f.service.peek().messages).toHaveLength(2);
+  });
+
+  test("reserved and streaming turns retain their model and effort while quick changes apply to the next turn", async () => {
+    const admitted: Parameters<AssistantDriver["run"]>[0]["config"][] = [];
+    const releaseTurn = Promise.withResolvers<void>();
+    const f = setup({
+      ...thinkingDriver(),
+      run: async (input) => {
+        admitted.push(input.config);
+        if (admitted.length === 1) await releaseTurn.promise;
+        input.message("Done");
+        return [];
+      },
+      dispose: async () => {
+        releaseTurn.resolve();
+      },
+    });
+    await f.service.handle("configure", {
+      ...configured,
+      thinking_level: "high",
+    });
+    const releaseScope = Promise.withResolvers<void>();
+    const capture = f.context.captureScope;
+    f.context.captureScope = async (...args) => {
+      await releaseScope.promise;
+      return capture(...args);
+    };
+    const sending = f.service.handle("send", {
+      text: "Hello",
+      request_id: "reserved",
+      expected: chatSelection(f.service.peek()),
+    });
+    const next = await f.service.handle("configure_chat", {
+      provider: "test",
+      model: "fast",
+      thinking_level: null,
+      expected: chatSelection(f.service.peek()),
+    });
+    expect(next.running).toBe(true);
+    releaseScope.resolve();
+    await sending;
+    expect(admitted[0]).toMatchObject({
+      model: "model",
+      thinking_level: "high",
+    });
+    expect(
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8"))
+        .active_run.config,
+    ).toMatchObject({ model: "model", thinking_level: "high" });
+    await f.service.handle("configure_chat", {
+      provider: "test",
+      model: "model",
+      thinking_level: "low",
+      expected: chatSelection(f.service.peek()),
+    });
+    expect(admitted[0]).toMatchObject({
+      model: "model",
+      thinking_level: "high",
+    });
+    releaseTurn.resolve();
+    await until(() => !f.service.peek().running);
+    await f.service.handle("send", {
+      text: "Next",
+      request_id: "next",
+      expected: chatSelection(f.service.peek()),
+    });
+    await until(() => !f.service.peek().running);
+    expect(admitted[1]).toMatchObject({
+      model: "model",
+      thinking_level: "low",
+    });
+  });
+
+  test("failed catalog and persistence writes preserve the old selection and release the save lock", async () => {
+    const f = setup(thinkingDriver());
+    await f.service.handle("configure", configured);
+    const before = f.service.peek().config;
+    const select = () =>
+      f.service.handle("configure_chat", {
+        provider: "test",
+        model: "model",
+        thinking_level: "high",
+        expected: chatSelection(f.service.peek()),
+      });
+    const load = f.driver.catalog;
+    f.driver.catalog = async () => {
+      throw new Error("Catalog unavailable");
+    };
+    await expect(select()).rejects.toThrow("model catalog could not be loaded");
+    expect(f.service.peek().config).toEqual(before);
+    f.driver.catalog = load;
+    const path = join(f.directory, "state.json");
+    rmSync(path);
+    mkdirSync(path);
+    await expect(select()).rejects.toThrow("could not be saved");
+    expect(f.service.peek().config).toEqual(before);
+    rmSync(path, { recursive: true });
+    await select();
+    expect(f.service.peek().config.thinking_level).toBe("high");
+  });
+
+  test("a stored effort becoming unsupported fails admission without running or losing the preference", async () => {
+    let runs = 0;
+    const f = setup({
+      ...thinkingDriver(),
+      run: async () => {
+        runs++;
+        return [];
+      },
+    });
+    await f.service.handle("configure", {
+      ...configured,
+      thinking_level: "high",
+    });
+    f.driver.catalog = async () => structuredClone(catalog);
+    await expect(
+      f.service.handle("send", { text: "Hello", request_id: "unsupported" }),
+    ).rejects.toThrow("unavailable");
+    expect(runs).toBe(0);
+    expect(f.service.peek().running).toBe(false);
+    expect(f.service.peek().config.thinking_level).toBe("high");
+  });
+});
+
+test("a failed quick selection save keeps the active stream attached to its original draft", async () => {
+  const release = Promise.withResolvers<void>();
+  const f = setup({
+    ...thinkingDriver(),
+    run: async (input) => {
+      input.delta("Before");
+      await release.promise;
+      input.delta(" after");
+      input.message("Before after");
+      return [];
+    },
+    dispose: async () => {
+      release.resolve();
+    },
+  });
+  await f.service.handle("configure", configured);
+  await f.service.handle("send", { request_id: "stream-save", text: "Hello" });
+  const path = join(f.directory, "state.json");
+  rmSync(path);
+  mkdirSync(path);
+  await expect(
+    f.service.handle("configure_chat", {
+      provider: "test",
+      model: "model",
+      thinking_level: "high",
+      expected: chatSelection(f.service.peek()),
+    }),
+  ).rejects.toThrow("could not be saved");
+  expect(f.service.peek().config.thinking_level).toBeUndefined();
+  rmSync(path, { recursive: true });
+  release.resolve();
+  await until(() => !f.service.peek().running);
+  expect(f.service.peek().messages.at(-1)?.text).toBe("Before after");
+  expect(JSON.parse(readFileSync(path, "utf8")).messages.at(-1).text).toBe(
+    "Before after",
+  );
+});
+
+test("streaming task proposals keep the admitted model and effort while direct task edits use current defaults", async () => {
+  const release = Promise.withResolvers<void>();
+  const input = {
+    title: "Check later",
+    prompt: "Summarize status",
+    scope: configured.allowed_workspaces,
+    schedule: {
+      type: "once",
+      at: new Date(Date.now() + 3600000).toISOString(),
+    },
+  };
+  let proposalId = "";
+  const f = setup({
+    ...thinkingDriver(),
+    run: async (turn) => {
+      await release.promise;
+      proposalId = JSON.parse((await turn.task!("create", input)).text).id;
+      return [];
+    },
+    dispose: async () => {
+      release.resolve();
+    },
+  });
+  stableTaskIdentity(f.context);
+  await f.service.handle("configure", {
+    ...configured,
+    thinking_level: "high",
+  });
+  await f.service.handle("send", {
+    request_id: "task-old-model",
+    text: "Check later",
+  });
+  await f.service.handle("configure_chat", {
+    provider: "test",
+    model: "fast",
+    thinking_level: null,
+    expected: chatSelection(f.service.peek()),
+  });
+  release.resolve();
+  await until(() => !f.service.peek().running);
+  expect(proposalId).not.toBe("");
+  await f.service.handle("task.confirm_proposal", { proposal_id: proposalId });
+  const taskId = f.service.peek().tasks![0]!.id;
+  expect(f.service.peek().tasks![0]!.model).toEqual({
+    provider: "test",
+    id: "model",
+  });
+  const { Database } = await import("bun:sqlite");
+  const db = new Database(join(f.directory, "tasks.sqlite"), {
+    readonly: true,
+  });
+  const savedConfig = (id: string) =>
+    JSON.parse(
+      (
+        db.query("SELECT config FROM tasks WHERE id = ?").get(id) as {
+          config: string;
+        }
+      ).config,
+    );
+  try {
+    expect(savedConfig(taskId)).toMatchObject({
+      provider: "test",
+      model: "model",
+      thinking_level: "high",
+    });
+    await f.service.handle("task.create", {
+      ...input,
+      title: "Direct task",
+      request_id: randomUUID(),
+    });
+    const directId = f.service
+      .peek()
+      .tasks!.find((task) => task.title === "Direct task")!.id;
+    expect(savedConfig(directId)).toMatchObject({
+      provider: "test",
+      model: "fast",
+    });
+    expect(savedConfig(directId).thinking_level).toBeUndefined();
+    await f.service.handle("task.update", {
+      ...input,
+      title: "Updated task",
+      task_id: taskId,
+    });
+    expect(savedConfig(taskId)).toMatchObject({
+      provider: "test",
+      model: "fast",
+    });
+    expect(savedConfig(taskId).thinking_level).toBeUndefined();
+  } finally {
+    db.close();
+  }
+});
+
+describe("Ranger workspace inventory reconciliation", () => {
+  test.each(["running", "recovering"])(
+    "pruning an unrelated grant while %s preserves the original durable root",
+    async (phase) => {
+      const pointer = [{ type: "ranger-durable", id: randomUUID() }];
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const f = setup({
+        run: async (input) => {
+          input.checkpoint?.(pointer);
+          entered.resolve();
+          await release.promise;
+          return pointer;
+        },
+        dispose: async () => {
+          release.resolve();
+        },
+      });
+      stableTaskIdentity(f.context);
+      const other = { ...workspace, workspace_id: "other" };
+      let listed = [workspace, other];
+      f.context.catalog = async () => ({
+        workspaces: listed,
+        errors: [],
+        connection_ids: ["local"],
+        complete_connection_ids: ["local"],
+      });
+      f.context.captureScope = async (scope) =>
+        scope.map((ref) => ({ ...workspace, ...ref }));
+      await f.service.handle("configure", {
+        ...configured,
+        allowed_workspaces: [workspace, other].map(
+          ({ connection_id, workspace_id }) => ({
+            connection_id,
+            workspace_id,
+          }),
+        ),
+      });
+      await f.service.handle("send", {
+        request_id: "recover-after-pruning",
+        text: "Read only the retained workspace",
+        scope: configured.allowed_workspaces,
+      });
+      await entered.promise;
+      listed = [workspace];
+      if (phase === "running") {
+        await f.service.workspaceCatalog();
+        const saved = JSON.parse(
+          readFileSync(join(f.directory, "state.json"), "utf8"),
+        );
+        expect(saved.entries).toEqual(pointer);
+        expect(saved.active_run.request_id).toBe("recover-after-pruning");
+      }
+      await f.service.dispose();
+      let resumed: Parameters<AssistantDriver["run"]>[0] | undefined;
+      const service = createAssistantService({
+        directory: f.directory,
+        context: f.context,
+        driver: {
+          ...f.driver,
+          run: async (input) => {
+            resumed = input;
+            return input.entries;
+          },
+        },
+        publish: () => {},
+      });
+      services.push(service);
+      await service.resume();
+      await until(() => !service.peek().running);
+      expect(service.peek().config.allowed_workspaces).toEqual(
+        configured.allowed_workspaces,
+      );
+      expect(resumed?.recover).toBe(true);
+      expect(resumed?.requestId).toBe("recover-after-pruning");
+      expect(resumed?.entries).toEqual(pointer);
+    },
+  );
+
+  test("complete inventories prune missing workspaces and removed connections durably", async () => {
+    const f = setup();
+    const extra = { connection_id: "local", workspace_id: "deleted" };
+    const removed = { connection_id: "removed", workspace_id: "ws" };
+    f.context.captureScope = async (scope) =>
+      scope.map((ref) => ({ ...workspace, ...ref }));
+    await f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [...configured.allowed_workspaces, extra, removed],
+    });
+    f.context.catalog = async () => ({
+      workspaces: [workspace],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    });
+    await f.service.workspaceCatalog();
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    expect(
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8")).config
+        .allowed_workspaces,
+    ).toEqual(configured.allowed_workspaces);
+    // A stale browser saving its old checked list must not reintroduce deleted IDs.
+    await f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [...configured.allowed_workspaces, extra, removed],
+    });
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    f.context.catalog = async () => ({
+      workspaces: [],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    });
+    await f.service.workspaceCatalog();
+    expect(f.service.peek().config.allowed_workspaces).toEqual([]);
+  });
+
+  test("legacy, disconnected, truncated and failed catalogs preserve the saved manual selection", async () => {
+    const f = setup();
+    await f.service.handle("configure", configured);
+    for (const inventory of [
+      { workspaces: [], errors: [] },
+      {
+        workspaces: [],
+        errors: ["Offline"],
+        connection_ids: ["local"],
+        complete_connection_ids: [],
+      },
+      {
+        workspaces: [],
+        errors: ["Truncated"],
+        connection_ids: ["local"],
+        complete_connection_ids: [],
+        truncated: true,
+      },
+    ]) {
+      f.context.catalog = async () => inventory;
+      await f.service.workspaceCatalog();
+      expect(f.service.peek().config.allowed_workspaces).toEqual(
+        configured.allowed_workspaces,
+      );
+    }
+    f.context.catalog = async () => {
+      throw new Error("Unavailable");
+    };
+    await expect(f.service.workspaceCatalog()).rejects.toThrow("Unavailable");
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+  });
+
+  test("an older inventory response cannot prune a newer verified selection", async () => {
+    const f = setup();
+    await f.service.handle("configure", configured);
+    const old =
+      Promise.withResolvers<Awaited<ReturnType<AssistantContext["catalog"]>>>();
+    let calls = 0;
+    const latest = {
+      workspaces: [workspace],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    };
+    f.context.catalog = async () => (++calls === 1 ? old.promise : latest);
+    const first = f.service.workspaceCatalog();
+    await f.service.workspaceCatalog();
+    old.resolve({ ...latest, workspaces: [] });
+    expect(await first).toEqual(latest);
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+  });
+
+  test("an inventory already in flight cannot prune a workspace granted after it started", async () => {
+    const f = setup();
+    await f.service.handle("configure", configured);
+    const other = { ...workspace, workspace_id: "new" };
+    const entered = Promise.withResolvers<void>();
+    const provider = Promise.withResolvers<void>();
+    const pending =
+      Promise.withResolvers<Awaited<ReturnType<AssistantContext["catalog"]>>>();
+    const fresh = {
+      workspaces: [workspace, other],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    };
+    f.context.catalog = async () => fresh;
+    f.context.captureScope = async (scope) =>
+      scope.map((ref) => ({ ...workspace, ...ref }));
+    f.driver.catalog = async () => {
+      entered.resolve();
+      await provider.promise;
+      return catalog;
+    };
+    const saving = f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [
+        ...configured.allowed_workspaces,
+        { connection_id: "local", workspace_id: "new" },
+      ],
+    });
+    await entered.promise;
+    let reads = 0;
+    f.context.catalog = async () => (++reads === 1 ? pending.promise : fresh);
+    const listing = f.service.workspaceCatalog();
+    provider.resolve();
+    await saving;
+    pending.resolve({ ...fresh, workspaces: [workspace] });
+    const received = await listing;
+    expect(received).toEqual(fresh);
+    expect(reads).toBe(2);
+    expect(f.service.peek().config.allowed_workspaces).toHaveLength(2);
+    expect(
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8")).config
+        .allowed_workspaces,
+    ).toHaveLength(2);
+    // A subsequent fresh, complete listing may prune the same grant.
+    f.context.catalog = async () => ({ ...fresh, workspaces: [workspace] });
+    await f.service.workspaceCatalog();
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+  });
+
+  test("a capture-verified manual addition can send after a stale catalog lands before its save", async () => {
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const f = setup({
+      run: async (input) => {
+        inputs.push(input);
+        return [];
+      },
+    });
+    await f.service.handle("configure", configured);
+    const other = { ...workspace, workspace_id: "new" };
+    const ref = {
+      connection_id: other.connection_id,
+      workspace_id: other.workspace_id,
+    };
+    const fresh = {
+      workspaces: [workspace, other],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    };
+    const entered = Promise.withResolvers<void>();
+    const provider = Promise.withResolvers<void>();
+    f.context.catalog = async () => fresh;
+    f.context.captureScope = async (scope) =>
+      scope.map((item) => ({ ...workspace, ...item }));
+    f.driver.catalog = async () => {
+      entered.resolve();
+      await provider.promise;
+      return catalog;
+    };
+    const saving = f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [...configured.allowed_workspaces, ref],
+    });
+    await entered.promise;
+    f.context.catalog = async () => ({ ...fresh, workspaces: [workspace] });
+    await f.service.workspaceCatalog();
+    provider.resolve();
+    await saving;
+    expect(f.service.peek().config.allowed_workspaces).toContainEqual(ref);
+    f.context.catalog = async () => fresh;
+    await f.service.handle("send", {
+      request_id: "manual-after-stale-cache",
+      text: "Read new",
+      scope: [ref],
+    });
+    await until(() => !f.service.peek().running);
+    expect(inputs[0]!.config.allowed_workspaces).toEqual([ref]);
+  });
+
+  test("repeated configuration races stop a refresh without discarding newer grants", async () => {
+    const f = setup();
+    await f.service.handle("configure", configured);
+    const second = { ...workspace, workspace_id: "second" };
+    const third = { ...workspace, workspace_id: "third" };
+    const fresh = {
+      workspaces: [workspace, second, third],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    };
+    const first =
+      Promise.withResolvers<Awaited<ReturnType<AssistantContext["catalog"]>>>();
+    const retry =
+      Promise.withResolvers<Awaited<ReturnType<AssistantContext["catalog"]>>>();
+    const retryEntered = Promise.withResolvers<void>();
+    let reads = 0;
+    f.context.catalog = async () => {
+      reads++;
+      if (reads === 1) return first.promise;
+      if (reads === 3) {
+        retryEntered.resolve();
+        return retry.promise;
+      }
+      return fresh;
+    };
+    f.context.captureScope = async (scope) =>
+      scope.map((ref) => ({ ...workspace, ...ref }));
+    const listing = f.service.workspaceCatalog();
+    const ref = (item: AssistantWorkspace) => ({
+      connection_id: item.connection_id,
+      workspace_id: item.workspace_id,
+    });
+    await f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [workspace, second].map(ref),
+    });
+    first.resolve({ ...fresh, workspaces: [workspace] });
+    await retryEntered.promise;
+    await f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: fresh.workspaces.map(ref),
+    });
+    retry.resolve({ ...fresh, workspaces: [workspace, second] });
+    await expect(listing).rejects.toThrow("changed during refresh");
+    expect(reads).toBe(4);
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      fresh.workspaces.map(ref),
+    );
+    expect(await f.service.workspaceCatalog()).toEqual(fresh);
+  });
+
+  test("a failed inventory save preserves the active stream's message references", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const f = setup({
+      run: async (input) => {
+        input.delta("Before ");
+        entered.resolve();
+        await release.promise;
+        input.delta("after");
+        return [];
+      },
+    });
+    await f.service.handle("configure", configured);
+    await f.service.handle("send", {
+      request_id: "inventory-save",
+      text: "Read",
+    });
+    await entered.promise;
+    f.context.catalog = async () => ({
+      workspaces: [],
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+    });
+    const path = join(f.directory, "state.json");
+    renameSync(path, `${path}.backup`);
+    mkdirSync(path);
+    try {
+      await expect(f.service.workspaceCatalog()).rejects.toThrow(
+        "could not be saved",
+      );
+      expect(f.service.peek().config.allowed_workspaces).toEqual(
+        configured.allowed_workspaces,
+      );
+    } finally {
+      rmSync(path, { recursive: true });
+      renameSync(`${path}.backup`, path);
+      release.resolve();
+    }
+    await until(() => !f.service.peek().running);
+    expect(f.service.peek().messages.at(-1)?.text).toBe("Before after");
+    await f.service.workspaceCatalog();
+    expect(f.service.peek().config.allowed_workspaces).toEqual([]);
+  });
+});
+
+describe("High workspace permission", () => {
+  const other = { ...workspace, workspace_id: "other", label: "Other" };
+  const reference = (item: AssistantWorkspace) => ({
+    connection_id: item.connection_id,
+    workspace_id: item.workspace_id,
+  });
+  function inventory(
+    f: ReturnType<typeof setup>,
+    initial = [workspace, other],
+  ) {
+    let listed = initial;
+    f.context.catalog = async () => ({
+      workspaces: structuredClone(listed),
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+      truncated: false,
+    });
+    f.context.captureScope = async (scope) =>
+      scope.map((ref) => {
+        const item = listed.find(
+          (item) =>
+            item.connection_id === ref.connection_id &&
+            item.workspace_id === ref.workspace_id,
+        );
+        if (!item) throw new Error("Unknown workspace");
+        return structuredClone(item);
+      });
+    stableTaskIdentity(f.context);
+    return (next: AssistantWorkspace[]) => {
+      listed = next;
+    };
+  }
+  async function enable(f: ReturnType<typeof setup>) {
+    await f.service.handle("configure_approval", {
+      approval_mode: "auto",
+      workspace_scope: "all",
+    });
+  }
+
+  test("explicit High covers more than 64 current workspaces and future workspaces without altering manual grants", async () => {
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const f = setup({
+      run: async (input) => {
+        inputs.push(input);
+        return [];
+      },
+    });
+    const listed = Array.from({ length: 65 }, (_, i) => ({
+      ...workspace,
+      workspace_id: `ws-${i}`,
+    }));
+    const set = inventory(f, listed);
+    await f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [],
+    });
+    await enable(f);
+    await f.service.handle("send", { request_id: "all-65", text: "Read all" });
+    await until(() => !f.service.peek().running);
+    expect(inputs[0]!.config.allowed_workspaces).toEqual(listed.map(reference));
+    expect(f.service.peek().config.allowed_workspaces).toEqual([]);
+    const future = { ...workspace, workspace_id: "future" };
+    set([...listed, future]);
+    await f.service.handle("send", {
+      request_id: "future-explicit",
+      text: "Read future",
+      scope: [reference(future)],
+    });
+    await until(() => !f.service.peek().running);
+    expect(inputs[1]!.config.allowed_workspaces).toEqual([reference(future)]);
+    await f.service.handle("send", {
+      request_id: "future-all",
+      text: "Read all again",
+    });
+    await until(() => !f.service.peek().running);
+    expect(inputs[2]!.config.allowed_workspaces).toHaveLength(66);
+    expect(
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8")).config,
+    ).toMatchObject({ allowed_workspaces: [], workspace_scope: "all" });
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    expect(f.service.peek().config.allowed_workspaces).toEqual([]);
+    expect(f.service.peek().config.workspace_scope).toBeUndefined();
+    await expect(
+      f.service.handle("send", {
+        request_id: "revoked",
+        text: "Read future",
+        scope: [reference(future)],
+      }),
+    ).rejects.toThrow("authorized");
+  });
+
+  test("legacy auto and generic configuration cannot silently grant all workspaces", async () => {
+    const f = setup();
+    inventory(f);
+    await f.service.handle("configure", configured);
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    expect(f.service.peek().config.workspace_scope).toBeUndefined();
+    await expect(
+      f.service.handle("send", {
+        request_id: "legacy",
+        text: "Read other",
+        scope: [reference(other)],
+      }),
+    ).rejects.toThrow("authorized");
+    await f.service.handle("configure", {
+      ...configured,
+      approval_mode: "auto",
+      workspace_scope: "all",
+    });
+    expect(f.service.peek().config.workspace_scope).toBeUndefined();
+    await expect(
+      f.service.handle("configure_approval", {
+        approval_mode: "auto",
+        workspace_scope: "anything",
+      }),
+    ).rejects.toThrow();
+    await enable(f);
+    await f.service.handle("configure", configured);
+    expect(f.service.peek().config.workspace_scope).toBe("all");
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    await f.service.handle("configure", {
+      ...configured,
+      approval_mode: "auto",
+      workspace_scope: "all",
+    });
+    expect(f.service.peek().config).toMatchObject({
+      approval_mode: "manual",
+      allowed_workspaces: configured.allowed_workspaces,
+    });
+    expect(f.service.peek().config.workspace_scope).toBeUndefined();
+  });
+
+  test("a restarted legacy auto configuration stays restricted until explicit all-workspace consent", async () => {
+    const f = setup();
+    inventory(f);
+    await f.service.handle("configure", configured);
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    await f.service.dispose();
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const restored = createAssistantService({
+      directory: f.directory,
+      context: f.context,
+      driver: {
+        ...f.driver,
+        run: async (input) => {
+          inputs.push(input);
+          return [];
+        },
+      },
+      publish: () => {},
+    });
+    services.push(restored);
+    expect(restored.peek().config.workspace_scope).toBeUndefined();
+    await restored.handle("send", {
+      request_id: "legacy-default",
+      text: "Read",
+    });
+    await until(() => !restored.peek().running);
+    expect(inputs[0]!.config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    await expect(
+      restored.handle("send", {
+        request_id: "legacy-outside",
+        text: "Read other",
+        scope: [reference(other)],
+      }),
+    ).rejects.toThrow("authorized");
+    await restored.handle("configure_approval", {
+      approval_mode: "auto",
+      workspace_scope: "all",
+    });
+    await restored.handle("send", {
+      request_id: "consented",
+      text: "Read all",
+    });
+    await until(() => !restored.peek().running);
+    expect(inputs[1]!.config.allowed_workspaces).toEqual(
+      [workspace, other].map(reference),
+    );
+  });
+
+  test("a default manual send uses the surviving grants after authoritative pruning", async () => {
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const f = setup({
+      run: async (input) => {
+        inputs.push(input);
+        return [];
+      },
+    });
+    const set = inventory(f);
+    await f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [workspace, other].map(reference),
+    });
+    set([workspace]);
+    await f.service.handle("send", {
+      request_id: "surviving-manual",
+      text: "Read",
+    });
+    await until(() => !f.service.peek().running);
+    expect(inputs[0]!.config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+  });
+
+  test.each([false, true])(
+    "truncated High inventory fails closed with explicit scope: %s",
+    async (explicit) => {
+      let runs = 0;
+      const f = setup({
+        run: async () => {
+          runs++;
+          return [];
+        },
+      });
+      inventory(f);
+      await f.service.handle("configure", configured);
+      await enable(f);
+      f.context.catalog = async () => ({
+        workspaces: [workspace],
+        errors: ["Truncated"],
+        connection_ids: ["local"],
+        complete_connection_ids: [],
+        truncated: true,
+      });
+      await expect(
+        f.service.handle("send", {
+          request_id: "truncated",
+          text: "Read all",
+          ...(explicit ? { scope: configured.allowed_workspaces } : {}),
+        }),
+      ).rejects.toThrow("complete workspace list");
+      expect(runs).toBe(0);
+      expect(f.service.peek().config.allowed_workspaces).toEqual(
+        configured.allowed_workspaces,
+      );
+    },
+  );
+
+  test.each(["inventory", "provider", "capture", "recovery"])(
+    "High off during %s admission prevents the broader turn from starting",
+    async (stage) => {
+      let runs = 0;
+      const f = setup({
+        run: async () => {
+          runs++;
+          return [];
+        },
+      });
+      inventory(f);
+      await f.service.handle("configure", configured);
+      await enable(f);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const gate = async () => {
+        entered.resolve();
+        await release.promise;
+      };
+      if (stage === "inventory") {
+        const previous = f.context.catalog;
+        f.context.catalog = async () => {
+          const result = await previous();
+          await gate();
+          return result;
+        };
+      }
+      if (stage === "provider") {
+        const previous = f.driver.catalog;
+        f.driver.catalog = async (source) => {
+          const result = await previous(source);
+          await gate();
+          return result;
+        };
+      }
+      if (stage === "capture") {
+        const previous = f.context.captureScope;
+        f.context.captureScope = async (...args) => {
+          const result = await previous(...args);
+          await gate();
+          return result;
+        };
+      }
+      if (stage === "recovery") {
+        const previous = f.context.recoveryScope!;
+        f.context.recoveryScope = async (...args) => {
+          const result = await previous(...args);
+          await gate();
+          return result;
+        };
+      }
+      const send = f.service.handle("send", {
+        request_id: `race-${stage}`,
+        text: "Read all",
+      });
+      await entered.promise;
+      await f.service.handle("configure_approval", { approval_mode: "manual" });
+      release.resolve();
+      await expect(send).rejects.toThrow("unavailable");
+      expect(runs).toBe(0);
+      expect(f.service.peek().messages).toEqual([]);
+    },
+  );
+
+  test("High off rejects an in-flight read result and new action preparations", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<{ text: string; sources: [] }>();
+    const done = Promise.withResolvers<unknown[]>();
+    let input: Parameters<AssistantDriver["run"]>[0] | undefined;
+    let prepared = 0;
+    const f = setup({
+      run: async (value) => {
+        input = value;
+        return done.promise;
+      },
+      stop: async () => done.resolve([]),
+      dispose: async () => done.resolve([]),
+    });
+    inventory(f);
+    f.context.read = async () => {
+      entered.resolve();
+      return release.promise;
+    };
+    f.context.prepareAction = async () => {
+      prepared++;
+      return permissionAction(async () => ({
+        status: "succeeded",
+        detail: "Created",
+      }));
+    };
+    await f.service.handle("configure", configured);
+    await enable(f);
+    await f.service.handle("send", {
+      request_id: "live-read",
+      text: "Read all",
+    });
+    const reading = input!.read("status", {});
+    await entered.promise;
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    release.resolve({ text: "Private result", sources: [] });
+    await expect(reading).rejects.toThrow("authorized");
+    await expect(
+      input!.propose!("create_tab", reference(other)),
+    ).rejects.toThrow("authorized");
+    expect(prepared).toBe(0);
+    done.resolve([]);
+    await until(() => !f.service.peek().running);
+  });
+
+  test("High off while preparing a broader action prevents storing or executing its preview", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const done = Promise.withResolvers<unknown[]>();
+    let input: Parameters<AssistantDriver["run"]>[0] | undefined;
+    let writes = 0;
+    const f = setup({
+      run: async (value) => {
+        input = value;
+        return done.promise;
+      },
+      stop: async () => done.resolve([]),
+      dispose: async () => done.resolve([]),
+    });
+    inventory(f);
+    f.context.prepareAction = async () => {
+      entered.resolve();
+      await release.promise;
+      return permissionAction(async () => {
+        writes++;
+        return { status: "succeeded", detail: "Created" };
+      });
+    };
+    await f.service.handle("configure", configured);
+    await enable(f);
+    await f.service.handle("send", {
+      request_id: "live-preview",
+      text: "Create in other",
+    });
+    const preparing = input!.propose!("create_tab", reference(other));
+    await entered.promise;
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    release.resolve();
+    await expect(preparing).rejects.toThrow("authorized");
+    expect(writes).toBe(0);
+    expect(f.service.peek().messages.at(-1)?.actions ?? []).toEqual([]);
+    done.resolve([]);
+    await until(() => !f.service.peek().running);
+  });
+
+  test("a High turn and its recovery retain their original concrete scope", async () => {
+    const stopped = Promise.withResolvers<unknown[]>();
+    const f = setup({
+      run: async () => stopped.promise,
+      dispose: async () => stopped.resolve([]),
+    });
+    const set = inventory(f);
+    await f.service.handle("configure", configured);
+    await enable(f);
+    await f.service.handle("send", {
+      request_id: "recover-high",
+      text: "Read all",
+    });
+    const saved = JSON.parse(
+      readFileSync(join(f.directory, "state.json"), "utf8"),
+    );
+    expect(saved.config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    expect(saved.active_run.config.allowed_workspaces).toEqual(
+      [workspace, other].map(reference),
+    );
+    const future = { ...workspace, workspace_id: "future" };
+    set([workspace, other, future]);
+    await f.service.workspaceCatalog();
+    await f.service.dispose();
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const restored = createAssistantService({
+      directory: f.directory,
+      context: f.context,
+      driver: {
+        ...f.driver,
+        run: async (input) => {
+          inputs.push(input);
+          return [];
+        },
+      },
+      publish: () => {},
+    });
+    services.push(restored);
+    await restored.resume();
+    await until(() => !restored.peek().running);
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]!.config.allowed_workspaces).toEqual(
+      [workspace, other].map(reference),
+    );
+    expect(restored.peek().config.workspace_scope).toBe("all");
+    await restored.handle("configure_approval", { approval_mode: "manual" });
+    expect(restored.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+  });
+
+  test("High scheduled tasks keep fixed targets and reject global High off during reads", async () => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    const done = Promise.withResolvers<unknown[]>();
+    let input: Parameters<AssistantDriver["run"]>[0] | undefined;
+    const f = setup({}, () => ({
+      catalog: async () => catalog,
+      login: async () => {},
+      run: async (value) => {
+        input = value;
+        return done.promise;
+      },
+      stop: async () => done.resolve([]),
+      dispose: async () => done.resolve([]),
+    }));
+    const set = inventory(f);
+    await f.service.handle("configure", configured);
+    await enable(f);
+    const taskId = (
+      await f.service.handle("task.create", {
+        request_id: randomUUID(),
+        title: "Other only",
+        prompt: "Read other",
+        scope: [reference(other)],
+        schedule: { type: "interval", minutes: 1 },
+      })
+    ).tasks![0]!.id;
+    set([workspace, other, { ...workspace, workspace_id: "future" }]);
+    await f.service.resume();
+    await f.service.handle("task.run_now", { task_id: taskId });
+    jest.advanceTimersByTime(0);
+    await flushTasks();
+    expect(input!.config.allowed_workspaces).toEqual([reference(other)]);
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    await expect(input!.read("status", {})).rejects.toThrow();
+    expect(f.reads).toHaveLength(0);
+    done.resolve([]);
+    await flushTasks();
+  });
+
+  test("a disconnected High-only scheduled target waits and resumes without adding targets", async () => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const f = setup({}, () => ({
+      catalog: async () => catalog,
+      login: async () => {},
+      run: async (input) => {
+        inputs.push(input);
+        return [];
+      },
+      stop: async () => {},
+      dispose: async () => {},
+    }));
+    inventory(f);
+    await f.service.handle("configure", configured);
+    await enable(f);
+    const taskId = (
+      await f.service.handle("task.create", {
+        request_id: randomUUID(),
+        title: "Wait for other",
+        prompt: "Read other",
+        scope: [reference(other)],
+        schedule: { type: "once", at: "2026-10-04T00:00:01.000Z" },
+      })
+    ).tasks![0]!.id;
+    const readyCatalog = f.context.catalog;
+    const restore = f.context.restoreScope!;
+    f.context.catalog = async () => ({
+      workspaces: [],
+      errors: ["Offline"],
+      connection_ids: ["local"],
+      complete_connection_ids: [],
+      truncated: false,
+    });
+    f.context.restoreScope = async () => {
+      throw new AssistantRecoveryNotReadyError("Offline");
+    };
+    await f.service.resume();
+    jest.advanceTimersByTime(1_000);
+    await flushTasks();
+    expect(inputs).toHaveLength(0);
+    expect(
+      (await f.service.taskDetail({ task_id: taskId })).runs[0]!.status,
+    ).toBe("queued");
+    expect(f.service.peek().config.allowed_workspaces).toEqual(
+      configured.allowed_workspaces,
+    );
+    f.context.catalog = readyCatalog;
+    f.context.restoreScope = restore;
+    jest.advanceTimersByTime(5_000);
+    await flushTasks();
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]!.config.allowed_workspaces).toEqual([reference(other)]);
+    expect(
+      (await f.service.taskDetail({ task_id: taskId })).runs[0]!.status,
+    ).toBe("succeeded");
+  });
+});
+
+describe("Ranger mentions", () => {
+  test("catalog admits only granted workspaces and rechecks permissions after discovery", async () => {
+    const f = setup();
+    let queries = 0;
+    f.context.mentionCatalog = async () => {
+      queries++;
+      return { targets: [mentionedAgent], errors: [] };
+    };
+    await f.service.handle("configure", configured);
+    await expect(
+      f.service.mentionCatalog({
+        scope: [{ connection_id: "local", workspace_id: "private" }],
+      }),
+    ).rejects.toThrow("authorized");
+    expect(queries).toBe(0);
+    expect(
+      (await f.service.mentionCatalog({ scope: configured.allowed_workspaces }))
+        .targets,
+    ).toEqual([mentionedAgent]);
+    f.context.mentionCatalog = async () => {
+      await f.service.handle("configure", {
+        ...configured,
+        allowed_workspaces: [],
+      });
+      return { targets: [mentionedAgent], errors: [] };
+    };
+    await expect(
+      f.service.mentionCatalog({ scope: configured.allowed_workspaces }),
+    ).rejects.toThrow("authorized");
+  });
+
+  test("binds references before model admission and preserves original labels through history and retries", async () => {
+    const inputs: Parameters<AssistantDriver["run"]>[0][] = [];
+    const f = setup({
+      run: async (input) => {
+        inputs.push(input);
+        return [];
+      },
+    });
+    f.context.bindMentions = async (_scope, targets) =>
+      targets.map((target) => ({ ...target, label: "Renamed Agent" }));
+    await f.service.handle("configure", configured);
+    const submission = {
+      text: "Check @Codex",
+      mentions: [agentMarker],
+      request_id: "mention",
+    };
+    await f.service.handle("send", submission);
+    await until(() => !f.service.peek().running);
+    expect(inputs[0]!.text).toContain('"label":"Renamed Agent"');
+    expect(inputs[0]!.text).toContain(
+      mentionedAgent.kind === "agent" ? mentionedAgent.agent_identity : "",
+    );
+    expect(f.service.peek().messages[0]!.mentions).toEqual([agentMarker]);
+    await f.service.handle("send", submission);
+    expect(inputs).toHaveLength(1);
+    await f.service.handle("new_session", {});
+    const original = f.service
+      .peek()
+      .sessions!.find((session) => session.message_count > 0)!;
+    await f.service.handle("select_session", { session_id: original.id });
+    expect(f.service.peek().messages[0]!.mentions).toEqual([agentMarker]);
+  });
+
+  test("invalid spans and changed sessions fail without admitting the model or losing the retry", async () => {
+    let runs = 0;
+    const f = setup({
+      run: async () => {
+        runs++;
+        return [];
+      },
+    });
+    let changed = true;
+    f.context.bindMentions = async (_scope, targets) => {
+      if (changed)
+        throw new Error("Mentioned agent session changed; select it again");
+      return targets;
+    };
+    await f.service.handle("configure", configured);
+    await expect(
+      f.service.handle("send", {
+        text: "Check @Codex",
+        request_id: "retry-mention",
+        mentions: [{ ...agentMarker, end: 11 }],
+      }),
+    ).rejects.toThrow("Invalid Ranger mentions");
+    await expect(
+      f.service.handle("send", {
+        text: "Check @Codex",
+        request_id: "retry-mention",
+        mentions: [agentMarker],
+      }),
+    ).rejects.toThrow("session changed");
+    expect(runs).toBe(0);
+    expect(f.service.peek().messages).toHaveLength(0);
+    changed = false;
+    await f.service.handle("send", {
+      text: "Check @Codex",
+      request_id: "retry-mention",
+      mentions: [agentMarker],
+    });
+    await until(() => !f.service.peek().running);
+    expect(runs).toBe(1);
+  });
+
+  test("follow-up reads revalidate the last explicitly mentioned session", async () => {
+    let changed = false;
+    let runs = 0;
+    const f = setup({
+      run: async (input) => {
+        runs++;
+        if (runs === 2)
+          await input.read("history", {
+            connection_id: "local",
+            workspace_id: "ws",
+            pane_id: "pane",
+          });
+        return [];
+      },
+    });
+    f.context.bindMentions = async (_scope, targets) => {
+      if (changed)
+        throw new Error("Mentioned agent session changed; select it again");
+      return targets;
+    };
+    await f.service.handle("configure", configured);
+    await f.service.handle("send", {
+      text: "Check @Codex",
+      request_id: "first-mention",
+      mentions: [agentMarker],
+    });
+    await until(() => !f.service.peek().running);
+    changed = true;
+    await f.service.handle("send", {
+      text: "Read its history",
+      request_id: "follow-up-mention",
+    });
+    await until(() => !f.service.peek().running);
+    expect(runs).toBe(2);
+    expect(f.reads).toHaveLength(0);
+    expect(f.service.peek().error).toBeTruthy();
+  });
+
+  test("task proposals inherit bound targets rather than only their names", async () => {
+    const f = setup({
+      run: async (input) => {
+        await input.task!("create", {
+          title: "Monitor Agent",
+          prompt: "Notify when the selected Agent finishes",
+          scope: configured.allowed_workspaces,
+          schedule: { type: "interval", minutes: 1 },
+        });
+        return [];
+      },
+    });
+    stableTaskIdentity(f.context);
+    f.context.bindMentions = async (_scope, targets) => targets;
+    await f.service.handle("configure", configured);
+    await f.service.handle("send", {
+      text: "Check @Codex",
+      request_id: "task-mention",
+      mentions: [agentMarker],
+    });
+    await until(() => !f.service.peek().running);
+    expect(
+      f.service.peek().messages.at(-1)!.task_proposals![0]!.mentions,
+    ).toEqual([mentionedAgent]);
+  });
+
+  test("durable recovery rebinds the same agent identity after verified workspace recovery", async () => {
+    const closed = Promise.withResolvers<void>();
+    const f = setup({
+      run: async (input) => {
+        input.checkpoint?.([{ type: "ranger-durable", id: "context" }]);
+        await closed.promise;
+        return input.entries;
+      },
+      dispose: async () => {
+        closed.resolve();
+      },
+    });
+    stableTaskIdentity(f.context);
+    const bindings: AssistantMentionTarget[][] = [];
+    f.context.bindMentions = async (_scope, targets) => {
+      bindings.push(targets);
+      return targets;
+    };
+    await f.service.handle("configure", configured);
+    await f.service.handle("send", {
+      text: "Check @Codex",
+      request_id: "recover-mention",
+      mentions: [agentMarker],
+    });
+    await until(
+      () =>
+        JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8"))
+          .entries.length > 0,
+    );
+    await f.service.dispose();
+    f.context.restoreScope = async () => [
+      { ...workspace, runtime_generation: 8 },
+    ];
+    let recovered = false;
+    const service = createAssistantService({
+      directory: f.directory,
+      context: f.context,
+      driver: {
+        ...f.driver,
+        run: async (input) => {
+          recovered = input.recover === true;
+          return [];
+        },
+      },
+      publish: () => {},
+    });
+    services.push(service);
+    await service.resume();
+    await until(() => !service.peek().running);
+    expect(recovered).toBe(true);
+    expect(bindings.at(-1)).toEqual([
+      { ...mentionedAgent, runtime_generation: 8 },
+    ]);
+  });
+});
+
+test.each(["repeated", "follow-up"])(
+  "monitoring preserves unique references from a %s mention",
+  async (variant) => {
+    let runs = 0;
+    const f = setup({
+      run: async (input) => {
+        runs++;
+        if (variant === "repeated" || runs === 2)
+          await input.task!("create", {
+            title: "Monitor selected Agent",
+            prompt: "Notify when it finishes",
+            scope: configured.allowed_workspaces,
+            schedule: { type: "interval", minutes: 1 },
+          });
+        return [];
+      },
+    });
+    stableTaskIdentity(f.context);
+    f.context.bindMentions = async (_scope, targets) => targets;
+    await f.service.handle("configure", configured);
+    await f.service.handle("send", {
+      text: variant === "repeated" ? "Check @Codex and @Codex" : "Check @Codex",
+      request_id: `monitor-${variant}`,
+      mentions:
+        variant === "repeated"
+          ? [agentMarker, { ...agentMarker, start: 17, end: 23 }]
+          : [agentMarker],
+    });
+    await until(() => !f.service.peek().running);
+    if (variant === "follow-up") {
+      await f.service.handle("send", {
+        text: "Notify when it finishes",
+        request_id: "follow-up-monitor",
+      });
+      await until(() => !f.service.peek().running);
+    }
+    expect(f.service.peek().error).toBeNull();
+    expect(
+      f.service.peek().messages.at(-1)!.task_proposals![0]!.mentions,
+    ).toEqual([mentionedAgent]);
+  },
+);
+
+test("editing a saved reference after reconnect verifies its original workspace before rebinding", async () => {
+  const f = setup();
+  stableTaskIdentity(f.context);
+  let generation = 7;
+  let restored = false;
+  f.context.captureScope = async () => [
+    { ...workspace, runtime_generation: generation },
+  ];
+  f.context.restoreScope = async () => {
+    restored = true;
+    return [{ ...workspace, runtime_generation: generation }];
+  };
+  f.context.bindMentions = async (_scope, targets) => {
+    expect(
+      targets.every((target) => target.runtime_generation === generation),
+    ).toBe(true);
+    if (generation === 8) expect(restored).toBe(true);
+    return targets;
+  };
+  await f.service.handle("configure", configured);
+  const task = {
+    title: "Monitor",
+    prompt: "Watch Agent",
+    scope: configured.allowed_workspaces,
+    schedule: { type: "interval" as const, minutes: 5 },
+    mentions: [mentionedAgent],
+  };
+  await f.service.handle("task.create", { ...task, request_id: randomUUID() });
+  const id = f.service.peek().tasks![0]!.id;
+  generation = 8;
+  restored = false;
+  await f.service.handle("task.update", {
+    ...task,
+    task_id: id,
+    title: "Renamed monitor",
+  });
+  expect(f.service.peek().error).toBeNull();
+  expect(f.service.peek().tasks![0]!.title).toBe("Renamed monitor");
+  expect(f.service.peek().tasks![0]!.mentions).toEqual([
+    { ...mentionedAgent, runtime_generation: 8 },
+  ]);
+});
+
+test("monitoring an earlier Agent retains its identity after a workspace-only mention", async () => {
+  let runs = 0;
+  const f = setup({
+    run: async (input) => {
+      if (++runs === 3) {
+        await input.read("history", {
+          connection_id: "local",
+          workspace_id: "ws",
+          pane_id: "pane",
+        });
+        const saved = JSON.parse(
+          readFileSync(join(f.directory, "state.json"), "utf8"),
+        );
+        expect(
+          saved.active_run.mentions.every(
+            (target: AssistantMentionTarget) => target.workspace_id === "ws",
+          ),
+        ).toBe(true);
+        await input.task!("create", {
+          title: "Monitor earlier Agent",
+          prompt: "Notify when the earlier Agent finishes",
+          scope: configured.allowed_workspaces,
+          schedule: { type: "interval", minutes: 1 },
+        });
+      }
+      return [];
+    },
+  });
+  stableTaskIdentity(f.context);
+  const other = { ...workspace, workspace_id: "other", label: "Other" };
+  f.context.catalog = async () => ({
+    workspaces: [workspace, other],
+    errors: [],
+  });
+  f.context.captureScope = async (scope) =>
+    [workspace, other].filter((target) =>
+      scope.some((ref) => ref.workspace_id === target.workspace_id),
+    );
+  f.context.bindMentions = async (_scope, targets) => targets;
+  await f.service.handle("configure", {
+    ...configured,
+    allowed_workspaces: [
+      ...configured.allowed_workspaces,
+      { connection_id: "local", workspace_id: "other" },
+    ],
+  });
+  await f.service.handle("send", {
+    text: "Check @Codex",
+    request_id: "earlier-agent",
+    mentions: [agentMarker],
+  });
+  await until(() => !f.service.peek().running);
+  const workspaceMention: AssistantMention = {
+    ...workspace,
+    workspace_label: workspace.label,
+    kind: "workspace",
+    start: 6,
+    end: 16,
+  };
+  await f.service.handle("send", {
+    text: "Check @Workspace and @Other",
+    request_id: "intermediate-workspace",
+    mentions: [
+      workspaceMention,
+      {
+        ...workspaceMention,
+        workspace_id: "other",
+        label: "Other",
+        workspace_label: "Other",
+        start: 21,
+        end: 27,
+      },
+    ],
+  });
+  await until(() => !f.service.peek().running);
+  await f.service.handle("send", {
+    text: "Read and monitor the earlier Agent",
+    request_id: "monitor-earlier-agent",
+    scope: configured.allowed_workspaces,
+  });
+  await until(() => !f.service.peek().running);
+  expect(f.service.peek().error).toBeNull();
+  expect(f.reads).toHaveLength(1);
+  expect(
+    f.service.peek().messages.at(-1)!.task_proposals![0]!.mentions,
+  ).toContainEqual(mentionedAgent);
 });

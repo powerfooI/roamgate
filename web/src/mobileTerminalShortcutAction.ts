@@ -17,9 +17,10 @@ export type MobileTerminalShortcutExecution =
 
 export function mobileTerminalShortcutExecution(
   action: MobileTerminalShortcutAction,
+  preserveKeyIdentity = true,
 ): MobileTerminalShortcutExecution | null {
   const scroll = mobileTerminalShortcutScroll(action);
   if (scroll) return { type: "scroll", ...scroll };
-  const bytes = mobileTerminalShortcutBytes(action);
+  const bytes = mobileTerminalShortcutBytes(action, preserveKeyIdentity);
   return bytes.length > 0 ? { type: "input", bytes } : null;
 }

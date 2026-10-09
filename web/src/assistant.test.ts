@@ -1,6 +1,7 @@
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import {
   type AssistantAction,
+  type AssistantMention,
   type AssistantSnapshot,
   type AssistantTaskDetail,
   isAssistantSnapshot,
@@ -11,8 +12,12 @@ import {
   assistantActionExecuting,
   callAssistant,
   getAssistantTask,
+  getAssistantMentions,
   readAssistantState,
   parseAssistantContext,
+  permittedAssistantWorkspaces,
+  pruneAssistantWorkspaceRefs,
+  reconcileAssistantConfig,
   refreshAssistant,
   sendAssistant,
   setAssistantDraft,
@@ -20,6 +25,16 @@ import {
 } from "./assistant";
 
 const scope = [{ connection_id: "local", workspace_id: "workspace" }];
+const mention: AssistantMention = {
+  ...scope[0]!,
+  kind: "workspace",
+  label: "Project",
+  workspace_label: "Project",
+  connection_label: "Local",
+  runtime_generation: 1,
+  start: 0,
+  end: 8,
+};
 function snapshot(revision = 0, instance = "bridge-1"): AssistantSnapshot {
   return {
     instance_id: instance,
@@ -90,6 +105,164 @@ test("workspace context validates scope identities and reports partial connectio
     expect(() => parseAssistantContext(result)).toThrow(
       "Invalid Ranger workspace list",
     );
+});
+
+test("workspace catalog metadata is optional but must be authoritative and consistent", () => {
+  const workspace = {
+    ...scope[0],
+    connection_label: "Local",
+    label: "Project",
+    runtime_generation: 1,
+  };
+  const catalog = {
+    workspaces: [workspace],
+    errors: [],
+    connection_ids: ["local", "offline"],
+    complete_connection_ids: ["local"],
+    truncated: false,
+  };
+  expect(parseAssistantContext(catalog)).toEqual(catalog);
+  expect(
+    parseAssistantContext({
+      workspaces: [],
+      connection_ids: [],
+      complete_connection_ids: [],
+    }),
+  ).toEqual({
+    workspaces: [],
+    errors: [],
+    connection_ids: [],
+    complete_connection_ids: [],
+  });
+  for (const invalid of [
+    { connection_ids: [1] },
+    { connection_ids: [""] },
+    { connection_ids: ["local", "local"] },
+    { complete_connection_ids: "local" },
+    { connection_ids: ["offline"] },
+    { complete_connection_ids: ["removed"] },
+    { truncated: "yes" },
+  ])
+    expect(() => parseAssistantContext({ ...catalog, ...invalid })).toThrow(
+      "Invalid Ranger workspace list",
+    );
+});
+
+test("High permissions include every available and newly discovered workspace without changing manual grants", () => {
+  const config: AssistantSnapshot["config"] = {
+    ...snapshot().config,
+    allowed_workspaces: [],
+  };
+  const available = Array.from({ length: 100 }, (_, index) => ({
+    connection_id: "local",
+    workspace_id: `project-${index}`,
+  }));
+  expect(permittedAssistantWorkspaces(config, available)).toEqual([]);
+  expect(
+    permittedAssistantWorkspaces(
+      { ...config, approval_mode: "auto", workspace_scope: "all" },
+      available,
+    ),
+  ).toEqual(available);
+  expect(
+    permittedAssistantWorkspaces(
+      { ...config, approval_mode: "auto" },
+      available,
+    ),
+  ).toEqual([]);
+  expect(config.allowed_workspaces).toEqual([]);
+  config.allowed_workspaces = [available[0]!];
+  const newlyAvailable = [
+    ...available,
+    { connection_id: "new-host", workspace_id: "new-project" },
+  ];
+  expect(
+    permittedAssistantWorkspaces(
+      { ...config, approval_mode: "auto", workspace_scope: "all" },
+      newlyAvailable,
+    ),
+  ).toEqual(newlyAvailable);
+  expect(
+    permittedAssistantWorkspaces(
+      { ...config, approval_mode: "manual" },
+      newlyAvailable,
+    ),
+  ).toEqual([available[0]!]);
+});
+
+test("workspace selections are pruned only by complete connection listings", () => {
+  const refs = [
+    ...scope,
+    { connection_id: "local", workspace_id: "deleted" },
+    { connection_id: "offline", workspace_id: "project" },
+    { connection_id: "removed-host", workspace_id: "project" },
+  ];
+  const workspaces = [
+    {
+      ...scope[0],
+      connection_label: "Local",
+      label: "Project",
+      runtime_generation: 1,
+    },
+  ];
+  expect(pruneAssistantWorkspaceRefs(refs, { workspaces, errors: [] })).toEqual(
+    refs,
+  );
+  expect(
+    pruneAssistantWorkspaceRefs(refs, {
+      workspaces: [],
+      errors: ["Disconnected"],
+      connection_ids: ["local", "offline", "removed-host"],
+      complete_connection_ids: [],
+    }),
+  ).toEqual(refs);
+  expect(
+    pruneAssistantWorkspaceRefs(refs, {
+      workspaces,
+      errors: ["Offline"],
+      connection_ids: ["local", "offline"],
+      complete_connection_ids: ["local"],
+    }),
+  ).toEqual([scope[0]!, refs[2]!]);
+  expect(
+    pruneAssistantWorkspaceRefs(refs, {
+      workspaces: [],
+      errors: [],
+      connection_ids: ["local", "offline"],
+      complete_connection_ids: ["local"],
+    }),
+  ).toEqual([refs[2]!]);
+  expect(
+    pruneAssistantWorkspaceRefs(refs, {
+      workspaces,
+      errors: [],
+      connection_ids: ["local", "offline", "removed-host"],
+      complete_connection_ids: [],
+      truncated: true,
+    }),
+  ).toEqual(refs);
+});
+
+test("permission-only snapshot updates preserve unsaved model and workspace edits", () => {
+  const deleted = { connection_id: "local", workspace_id: "deleted" };
+  const unchecked = { connection_id: "local", workspace_id: "unchecked" };
+  const added = { connection_id: "local", workspace_id: "added" };
+  const previous = {
+    ...snapshot().config,
+    allowed_workspaces: [...scope, deleted, unchecked],
+  };
+  const draft = {
+    ...previous,
+    model: "unsaved-model",
+    thinking_level: "high" as const,
+    allowed_workspaces: [...scope, deleted, added],
+  };
+  const saved = { ...previous, allowed_workspaces: [...scope, unchecked] };
+  expect(reconcileAssistantConfig(draft, previous, saved)).toEqual({
+    ...draft,
+    allowed_workspaces: [...scope, added],
+  });
+  expect(reconcileAssistantConfig(draft, undefined, saved)).toEqual(saved);
 });
 
 function installBridge(supported = true) {
@@ -316,6 +489,150 @@ test("history switching preserves each draft and stale snapshots cannot switch c
   expect(readAssistantState().draft).toBe("Second chat draft");
 });
 
+test("reference drafts survive native undo and chat switching, while ordinary pasted names stay unbound", async () => {
+  const server = installBridge();
+  startAssistantClient();
+  await refreshAssistant();
+  server.push(sessionSnapshot(1, sessionA));
+  setAssistantDraft("@Project", [mention]);
+  setAssistantDraft("@Project!");
+  expect(readAssistantState().draftMentions).toEqual([mention]);
+  setAssistantDraft("@Projec!");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  setAssistantDraft("@Project!", undefined, "historyUndo");
+  expect(readAssistantState().draftMentions).toEqual([mention]);
+  setAssistantDraft("@Projec!", undefined, "historyRedo");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  setAssistantDraft("@Project!");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  setAssistantDraft("@Project", [mention]);
+  setAssistantDraft("@Project?", undefined, "historyUndo");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  setAssistantDraft("@Project", [mention]);
+  server.push(sessionSnapshot(2, sessionB));
+  setAssistantDraft("@Project");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  server.push(sessionSnapshot(3, sessionA));
+  expect(readAssistantState().draftMentions).toEqual([mention]);
+});
+
+test("identical-text pastes retain distinct binding states through repeated native undo and redo", () => {
+  const text = "@Project";
+  const paste = () =>
+    setAssistantDraft(text, undefined, "insertFromPaste", {
+      start: 0,
+      end: text.length,
+      inputType: "insertFromPaste",
+    });
+  setAssistantDraft(text, [mention]);
+  paste();
+  expect(readAssistantState().draftMentions).toEqual([]);
+  paste();
+  for (const expected of [[], [mention]]) {
+    setAssistantDraft(text, undefined, "historyUndo");
+    expect(readAssistantState().draft).toBe(text);
+    expect(readAssistantState().draftMentions).toEqual(expected);
+  }
+  for (let index = 0; index < 2; index++) {
+    setAssistantDraft(text, undefined, "historyRedo");
+    expect(readAssistantState().draft).toBe(text);
+    expect(readAssistantState().draftMentions).toEqual([]);
+  }
+  for (const expected of [[], [mention]]) {
+    setAssistantDraft(text, undefined, "historyUndo");
+    expect(readAssistantState().draftMentions).toEqual(expected);
+  }
+});
+
+test("picker bindings annotate their native insertion snapshot so redo restores the selected identity", () => {
+  setAssistantDraft("@", undefined, "insertText");
+  setAssistantDraft("@Project ", undefined, "insertText");
+  setAssistantDraft("@Project ", [mention]);
+  setAssistantDraft("@", undefined, "historyUndo");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  setAssistantDraft("@Project ", undefined, "historyRedo");
+  expect(readAssistantState().draftMentions).toEqual([mention]);
+  const remote = {
+    ...mention,
+    connection_id: "remote",
+    connection_label: "Remote",
+  };
+  setAssistantDraft("@Project ", undefined, "insertText", {
+    start: 0,
+    end: mention.end,
+    inputType: "insertText",
+  });
+  setAssistantDraft("@Project ", [remote]);
+  setAssistantDraft("@Project ", undefined, "historyUndo");
+  expect(readAssistantState().draftMentions).toEqual([mention]);
+  setAssistantDraft("@Project ", undefined, "historyRedo");
+  expect(readAssistantState().draftMentions).toEqual([remote]);
+});
+
+test("mention sends bind retry IDs to references and acknowledgements preserve a newly unlinked draft", async () => {
+  const server = installBridge();
+  startAssistantClient();
+  await refreshAssistant();
+  setAssistantDraft("@Project", [mention]);
+  server.call.mockRejectedValueOnce(new Error("Reply lost"));
+  await expect(sendAssistant("@Project", scope, [mention])).rejects.toThrow(
+    "Reply lost",
+  );
+  const first = server.call.mock.calls[server.call.mock.calls.length - 1]?.[1];
+  expect(first?.mentions).toEqual([mention]);
+  const reply = deferred();
+  server.call.mockReturnValueOnce(reply.promise);
+  const retry = sendAssistant("@Project", scope, [mention]);
+  expect(
+    server.call.mock.calls[server.call.mock.calls.length - 1]?.[1]?.request_id,
+  ).toBe(first?.request_id);
+  setAssistantDraft("@Project", []);
+  reply.resolve(snapshot(1));
+  await retry;
+  expect(readAssistantState().draft).toBe("@Project");
+  expect(readAssistantState().draftMentions).toEqual([]);
+  server.call.mockRejectedValueOnce(new Error("Reply lost"));
+  await expect(sendAssistant("@Project", scope)).rejects.toThrow("Reply lost");
+  expect(
+    server.call.mock.calls[server.call.mock.calls.length - 1]?.[1]?.request_id,
+  ).not.toBe(first?.request_id);
+});
+
+test("mention catalogs reject malformed and reconnect-delayed replies without changing chat state", async () => {
+  const server = installBridge();
+  startAssistantClient();
+  await refreshAssistant();
+  const target = {
+    kind: mention.kind,
+    connection_id: mention.connection_id,
+    workspace_id: mention.workspace_id,
+    connection_label: mention.connection_label,
+    workspace_label: mention.workspace_label,
+    runtime_generation: mention.runtime_generation,
+    label: mention.label,
+  };
+  const catalog = { targets: [target], errors: [] };
+  const original = readAssistantState().snapshot;
+  server.call.mockResolvedValueOnce(catalog);
+  expect(await getAssistantMentions(scope)).toEqual(catalog);
+  expect(readAssistantState().snapshot).toBe(original);
+  server.call.mockResolvedValueOnce({ targets: [{}], errors: [] });
+  await expect(getAssistantMentions(scope)).rejects.toThrow(
+    "could not load Ranger references",
+  );
+  let acknowledge!: (value: unknown) => void;
+  server.call.mockReturnValueOnce(
+    new Promise((resolve) => {
+      acknowledge = resolve;
+    }),
+  );
+  const pending = getAssistantMentions(scope);
+  server.status("disconnected");
+  server.status("connected");
+  acknowledge(catalog);
+  await expect(pending).rejects.toThrow("connection changed");
+});
+
 test("sends identify their chat and delayed acknowledgements only clear the originating draft", async () => {
   const server = installBridge();
   startAssistantClient();
@@ -516,4 +833,110 @@ test("task detail validates task and run identity without replacing chat state o
   pending.resolve(detail);
   await expect(old).rejects.toThrow("connection changed");
   expect(readAssistantState().snapshot).toEqual(chat);
+});
+
+test("chat selection changes remain server-authoritative through stale replies, failures and reconnects", async () => {
+  const server = installBridge();
+  const close = startAssistantClient();
+  await refreshAssistant();
+  const configured = (
+    revision: number,
+    model: string,
+    thinking_level: "low" | "high" = "low",
+  ): AssistantSnapshot => ({
+    ...snapshot(revision),
+    chat_selection: true,
+    config: { ...snapshot().config, model, thinking_level },
+    models: ["first", "second"].map((id) => ({
+      provider: "provider",
+      id,
+      label: id,
+      thinking_levels: ["off", "low", "high"],
+      default_thinking_level: "off",
+    })),
+  });
+  try {
+    server.push(configured(1, "first"));
+    setAssistantDraft("Unsent draft");
+    const pending = deferred();
+    server.call.mockReturnValueOnce(pending.promise);
+    const saving = callAssistant("configure_chat", { model: "second" });
+    expect(readAssistantState().snapshot?.config.model).toBe("first");
+    server.push(configured(3, "second", "high"));
+    pending.resolve(configured(2, "second"));
+    await saving;
+    expect(readAssistantState().snapshot?.config.thinking_level).toBe("high");
+    expect(readAssistantState().draft).toBe("Unsent draft");
+    server.call.mockRejectedValueOnce(
+      new Error("Selection changed in another browser"),
+    );
+    await expect(callAssistant("configure_chat")).rejects.toThrow(
+      "another browser",
+    );
+    expect(readAssistantState().snapshot?.config.model).toBe("second");
+    expect(readAssistantState().error).toContain("another browser");
+    const reconnect = deferred();
+    server.call.mockReturnValueOnce(reconnect.promise);
+    const oldSave = callAssistant("configure_chat");
+    server.status("disconnected");
+    server.push(configured(4, "first"));
+    reconnect.resolve(configured(9, "second"));
+    await oldSave;
+    expect(readAssistantState().snapshot?.config.model).toBe("first");
+    expect(readAssistantState().draft).toBe("Unsent draft");
+  } finally {
+    close();
+  }
+});
+
+test("send binds the visible model and effort and a changed selection starts a fresh request", async () => {
+  const server = installBridge();
+  const close = startAssistantClient();
+  await refreshAssistant();
+  try {
+    server.push({
+      ...snapshot(1),
+      chat_selection: true,
+      config: { ...snapshot().config, thinking_level: "high" },
+    });
+    setAssistantDraft("Use this model");
+    server.call.mockRejectedValueOnce(new Error("Model changed"));
+    await expect(sendAssistant("Use this model", scope)).rejects.toThrow(
+      "Model changed",
+    );
+    const first =
+      server.call.mock.calls[server.call.mock.calls.length - 1]?.[1];
+    expect(first?.expected).toEqual({
+      instance_id: "bridge-1",
+      provider: "provider",
+      model: "model",
+      credential_source: "assistant",
+      thinking_level: "high",
+    });
+    expect(readAssistantState().draft).toBe("Use this model");
+    server.push({
+      ...snapshot(2),
+      chat_selection: true,
+      config: { ...snapshot().config, model: "other", thinking_level: "low" },
+    });
+    server.call.mockRejectedValueOnce(new Error("Unavailable"));
+    await expect(sendAssistant("Use this model", scope)).rejects.toThrow(
+      "Unavailable",
+    );
+    const second =
+      server.call.mock.calls[server.call.mock.calls.length - 1]?.[1];
+    expect(second?.request_id).not.toBe(first?.request_id);
+    expect(second?.expected).toMatchObject({
+      model: "other",
+      thinking_level: "low",
+    });
+    server.call.mockRejectedValueOnce(new Error("Retry unavailable"));
+    await expect(sendAssistant("Use this model", scope)).rejects.toThrow();
+    expect(
+      server.call.mock.calls[server.call.mock.calls.length - 1]?.[1]
+        ?.request_id,
+    ).toBe(second?.request_id);
+  } finally {
+    close();
+  }
 });
