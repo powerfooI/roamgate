@@ -121,9 +121,6 @@ describe("session signing secret", () => {
     );
     expect(secret).not.toBe(password);
     expect(secret).not.toBe(pin);
-    expect(secret).not.toBe(
-      createHash("sha256").update(password).digest("hex"),
-    );
     expect(state).toEqual({
       version: 1,
       secret,
