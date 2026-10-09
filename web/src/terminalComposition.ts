@@ -155,6 +155,8 @@ export function installTerminalCompositionRepair(terminal: unknown): {
       if (text && helper._textarea.value.slice(offset).startsWith(text)) {
         sentLength += text.length;
       } else if (text === "\x7f" || text === helper._textarea.value) {
+        // This pinned helper emits one DEL even when multiple characters were
+        // removed; bundled-core tests cover that contract and late replacement.
         // The native fallback also reports deletion or whole-value replacement.
         // Rebase the consumed range after that edit instead of retaining offsets
         // into the old textarea value. The fallback emission itself is unchanged.

@@ -329,6 +329,33 @@ describe("pinned xterm composition repair", () => {
     });
   });
 
+  for (const removed of [2, 4]) {
+    for (const suffix of ["", "TAIL"]) {
+      test(`pinned fallback deletes ${removed} characters with one DEL and preserves late replacement (suffix=${suffix})`, () => {
+        withTerminal((h) => {
+          const committed = "\u4e2d\u6587\u8f93\u5165";
+          const remaining = committed.slice(0, -removed);
+          const replacement = "\u65b0";
+          h.start(suffix, 0);
+          h.update(`${committed}${suffix}`, committed.length);
+          h.flush();
+          h.key(32, " ");
+          h.key(229, "Process");
+          h.textarea.value = `${remaining}${suffix}`;
+          h.flush();
+          // Assert the actual pinned helper's protocol, not an injected DEL.
+          expect(h.output).toEqual([committed, "\x7f"]);
+          // The replacement arrives before compositionend, without a second
+          // key229 fallback, so finalization must emit its unconsumed range.
+          h.update(`${remaining}${replacement}${suffix}`, remaining.length + 1);
+          h.end();
+          h.flush();
+          expect(h.output).toEqual([committed, "\x7f", replacement]);
+        });
+      });
+    }
+  }
+
   test("deletion rebase excludes the pre-existing composition suffix", () => {
     withTerminal((h) => {
       h.start("TAIL", 0);
