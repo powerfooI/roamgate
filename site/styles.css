@@ -1306,6 +1306,26 @@
     line-height: 1.7;
   }
 
+  .ranger-gallery {
+    display: grid;
+    grid-template-columns: minmax(0, 3.5fr) minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+  }
+
+  .ranger-gallery a {
+    display: block;
+    overflow: hidden;
+    border: 1px solid var(--line-strong);
+    border-radius: 18px;
+    background: #0b0d12;
+  }
+
+  .ranger-gallery img {
+    width: 100%;
+    height: auto;
+  }
+
   .workflow-section {
     padding-bottom: 112px;
   }
@@ -1974,6 +1994,15 @@
 
   .workflow-grid {
     grid-template-columns: 1fr;
+  }
+
+  .ranger-gallery {
+    grid-template-columns: 1fr;
+  }
+
+  .ranger-gallery a:last-child {
+    width: min(280px, 100%);
+    justify-self: center;
   }
 
   .workflow-step + .workflow-step {

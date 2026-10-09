@@ -65,6 +65,31 @@ A real Northstar demo workspace with code changes and passing tests.
   </tbody>
 </table>
 
+### Ranger
+
+An experimental workspace management assistant for desktop and mobile.
+Inspect workspace context, manage supported operations, and schedule background
+checks. Requires Herdr and the Roamgate bridge to be running.
+
+<table width="100%">
+  <thead>
+    <tr>
+      <th width="75%" align="center">Desktop</th>
+      <th width="25%" align="center">Mobile</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td width="75%" align="center" valign="top">
+        <a href="./docs/images/roamgate-desktop-ranger.png"><img src="./docs/images/roamgate-desktop-ranger.png" alt="Roamgate's Ranger workspace assistant on desktop" width="100%" /></a>
+      </td>
+      <td width="25%" align="center" valign="top">
+        <a href="./docs/images/roamgate-mobile-ranger.png"><img src="./docs/images/roamgate-mobile-ranger.png" alt="Roamgate's Ranger workspace assistant on mobile" width="100%" /></a>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
 <!-- markdownlint-enable MD033 -->
 
 Click any screenshot to open the full-resolution image.

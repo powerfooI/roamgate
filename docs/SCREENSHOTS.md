@@ -81,10 +81,12 @@ transcripts outside it. Configure only the credentials needed for a real agent,
 without printing them in commands or terminal output. Choose a neutral hostname
 and a fresh browser profile.
 
-For the linked PR card, install GitHub CLI and authenticate it on the checkout
-host. Keep authentication details outside the repository and screenshots. Verify
-that PR #1 is open and its Bun test check succeeded; **Provider not configured**,
-missing CLI, or login-required states are not ready for a PR-status shot.
+The linked PR card is optional. Include it only when GitHub CLI authentication is
+configured on the checkout host; otherwise omit the PR-status scene. Do not copy
+private GitHub credentials solely to add the card. Keep authentication details
+outside the repository and screenshots. If showing the card, verify that PR #1
+is open and its Bun test check succeeded; **Provider not configured**, missing
+CLI, or login-required states are not ready for a PR-status shot.
 When running with a cleaned environment, set an absolute `XDG_STATE_HOME`
 outside every demo checkout so CLI runtime state cannot become a review file.
 
@@ -277,13 +279,25 @@ Pin the review panel and keep the comment as a draft.
 
 | Asset stem | Layout and selection | Ready condition |
 | --- | --- | --- |
-| `roamgate-desktop-changes` | Sidebar visible in Nested mode, genuine Pi TUI in Implementation/Checks split, Inspector right at about 55%; Working tree, `tasks.ts` | Connected; at least three real workspaces and two real Agent rows visible; Pi process registered and running; five review files loaded; real tests finished; PR #1 open with successful CI. |
+| `roamgate-desktop-changes` | Sidebar visible in Nested mode, genuine Pi TUI in Implementation/Checks split, Inspector right at about 55%; Working tree, `tasks.ts` | Connected; at least three real workspaces and two real Agent rows visible; Pi process registered and running; five review files loaded; real tests finished. If showing the optional PR card, PR #1 is open with successful CI. |
 | `roamgate-desktop-files` | Sidebar visible in Nested mode; expand Inspector; Files; open `index.html` Preview; scroll to Release checklist | At least three real workspaces and two real Agent rows visible; local styles loaded; checklist heading, filters, and all six cards visible. |
 | `roamgate-desktop-annotations` | Sidebar visible in Nested mode; `tasks.ts` unified diff and the review draft | At least three real workspaces and two real Agent rows visible; correct line anchor and full comment visible. |
 | `roamgate-desktop-history` | Genuine Northstar Agent History, User/Agent/Tool enabled | The matching real task and completed test tool call are visible. |
+| `roamgate-desktop-ranger` | Sidebar visible; Ranger pinned beside the Northstar workspace | Ranger has answered a real question using only authorized demo workspaces; its response and source references are readable. |
 | `roamgate-mobile-changes` | Mobile; Changes, Working tree, `tasks.ts` | Unified diff loaded; key changed function readable. |
 | `roamgate-mobile-terminal` | Mobile; Checks pane; Composer and terminal shortcuts open | Actual Git status and test summary visible; unrelated menus dismissed. |
-| `roamgate-mobile-files` | Mobile; Files, `index.html` static Preview | Board heading, filters, and first task card readable. |
+| `roamgate-mobile-files` | Mobile; Files, `index.html` static Preview | Checklist heading, filters, and first task card readable. |
+| `roamgate-mobile-ranger` | Mobile; Ranger full chat surface | The same real demo conversation is readable, with input and model controls visible. |
+
+For Ranger shots, connect a model in the isolated capture environment and
+authorize only the public demo workspaces. Ask it to summarize Northstar's
+uncommitted changes and recent test output, then wait for the real answer and
+source references to finish loading. Preserve that conversation for the mobile shot.
+Do not fabricate messages, tool results, task runs, or completion status. If
+showing scheduled tasks, capture a real run while the Roamgate bridge is running.
+Inspect the conversation, expanded tool details, model settings, and visible
+source paths for credentials or personal information before capturing. Keep
+Ranger's experimental status clear in the accompanying publication copy.
 
 Wait for connection, fonts, terminal geometry, and requested content to settle;
 use these conditions rather than fixed sleeps. Start each shot with the same file,
@@ -303,10 +317,13 @@ well as inspecting the image; automated scans cannot prove that an image is safe
 Correct the source scene and recapture when private content appears.
 
 Keep native PNG originals outside the publication assets, such as in a local
-archive. Compress publication copies with TinyPNG without resizing; verify their
-native dimensions and text/icon clarity at 100% and intended display sizes before
-saving the approved PNGs in `docs/images/`. The existing `scripts/build-pages.ts`
-copies the six shared README shots into the website.
+archive. Use local lossless compression for publication copies by default,
+without resizing. Use TinyPNG only when the user explicitly authorizes uploading
+the selected images to that external service; its compression may quantize colors
+and must not be described as lossless. Verify native dimensions and text/icon
+clarity at 100% and intended display sizes before saving the approved PNGs in
+`docs/images/`. The existing `scripts/build-pages.ts`
+copies the shared README shots into the website.
 Generate the hero's 720/1200/2400-pixel AVIF derivatives from the preserved native
 3200 x 2000 desktop PNG, not a compressed publication PNG, preserving text clarity
 with 4:4:4 encoding and checking each result. Set desktop PNG `img` dimensions to

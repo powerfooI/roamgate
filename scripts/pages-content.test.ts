@@ -195,7 +195,7 @@ describe("Pages references", () => {
     );
     const screenshotPattern = /roamgate-(?:desktop|mobile)-[a-z-]+\.png/g;
     const screenshots = [...new Set(readme.match(screenshotPattern))].sort();
-    expect(screenshots).toHaveLength(6);
+    expect(screenshots).toHaveLength(8);
     for (const source of [site, build]) {
       expect([...new Set(source.match(screenshotPattern))].sort()).toEqual(
         screenshots,
