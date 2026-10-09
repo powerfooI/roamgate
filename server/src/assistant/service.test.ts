@@ -1153,6 +1153,25 @@ describe("Ranger scheduled task service", () => {
     done.resolve([]);
     await flushTasks();
   });
+  test("task creation explains when a connection lacks a stable boot identity", async () => {
+    const f = setup();
+    stableTaskIdentity(f.context);
+    f.context.recoveryScope = async () => [];
+    await f.service.handle("configure", { config: configured });
+    await expect(
+      f.service.handle("task.create", {
+        title: "Watch merge requests",
+        prompt: "Check for new merge requests",
+        scope: configured.allowed_workspaces,
+        schedule: { type: "interval", minutes: 30 },
+        request_id: randomUUID(),
+      }),
+    ).rejects.toThrow(
+      "the endpoint handshake did not provide a stable Herdr boot identity",
+    );
+    expect(f.service.peek().tasks ?? []).toEqual([]);
+  });
+
   test("task tools filter the current turn, freeze proposals and require explicit confirmation", async () => {
     let listed = "";
     const pointer = [{ type: "ranger-durable", id: randomUUID() }];

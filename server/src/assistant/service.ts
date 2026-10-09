@@ -47,6 +47,7 @@ import {
 } from "./context";
 import { type AssistantDriver, createPiDriver } from "./pi-driver";
 import type { PreparedAssistantAction } from "./actions";
+import { AssistantUserError } from "./errors";
 import type { NotificationToolSender } from "./tools";
 import {
   createAssistantTasks,
@@ -1806,7 +1807,9 @@ export function createAssistantService(options: {
       !context.restoreScope ||
       prepared.targets.some((target) => !workspaceAllowed(target))
     )
-      throw new Error("The original task permission is unavailable.");
+      throw new AssistantUserError(
+        "The original task permission is unavailable.",
+      );
     const available = await driver.catalog(prepared.config.credential_source);
     const restored = await context.restoreScope(prepared.targets, signal);
     if (prepared.input.mentions?.length) {
@@ -1836,7 +1839,9 @@ export function createAssistantService(options: {
           model.id === prepared.config.model,
       )
     )
-      throw new Error("The original task model or permission is unavailable.");
+      throw new AssistantUserError(
+        "The original task model or permission is unavailable.",
+      );
     checkThinking(prepared.config, available.models);
   }
   async function prepareTask(
@@ -1867,9 +1872,9 @@ export function createAssistantService(options: {
           (turn !== undefined && !turn.has(refKey(ref))),
       )
     )
-      throw new Error("Choose an authorized task scope.");
+      throw new AssistantUserError("Choose an authorized task scope.");
     if (!context.recoveryScope || !context.restoreScope)
-      throw new Error(
+      throw new AssistantUserError(
         "These workspace connections do not support safe scheduled tasks.",
       );
     const selected = new Set(input.scope.map(refKey));
@@ -1888,8 +1893,8 @@ export function createAssistantService(options: {
       (target) => selected.has(refKey(target)),
     );
     if (targets.length !== input.scope.length)
-      throw new Error(
-        "These workspace connections do not support safe scheduled tasks.",
+      throw new AssistantUserError(
+        "These workspace connections do not support safe scheduled tasks: the endpoint handshake did not provide a stable Herdr boot identity. Upgrade the Herdr server and try again.",
       );
     const workspaces = await context.restoreScope(targets, signal);
     const prepared: PreparedTask = {

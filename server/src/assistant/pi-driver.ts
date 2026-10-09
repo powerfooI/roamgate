@@ -32,6 +32,7 @@ import {
   type WorkspaceToolReader,
   workspaceTools,
 } from "./tools";
+import { surfaceAssistantUserError } from "./errors";
 
 type AuthPrompt = {
   type: "text" | "secret" | "select" | "manual_code";
@@ -775,8 +776,9 @@ export function createPiDriver(
                   ],
                   details,
                 };
-              } catch {
-                throw new Error(
+              } catch (error) {
+                surfaceAssistantUserError(
+                  error,
                   "Workspace tool unavailable, stale, or outside the authorized scope.",
                 );
               }

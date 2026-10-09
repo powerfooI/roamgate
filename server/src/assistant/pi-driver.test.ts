@@ -21,6 +21,7 @@ import {
   type AssistantMessage,
 } from "../../../shared/assistant";
 import { type AssistantDriver, createPiDriver } from "./pi-driver";
+import { AssistantUserError } from "./errors";
 import {
   actionTools,
   notificationTools,
@@ -562,6 +563,59 @@ test("task tools use shared credentials with isolated durable storage and never 
         entry.model?.some((message) => message.role === "toolResult"),
       ),
     ).toBe(true);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("task tool failures surface user-facing reasons and mask unexpected errors", async () => {
+  const proposed = {
+    title: "Watch merge requests",
+    prompt: "Check for new merge requests and review them.",
+    scope: [{ connection_id: "local", workspace_id: "workspace" }],
+    schedule: { type: "interval", minutes: 30 },
+  };
+  const f = await durableFixture((index) =>
+    modelReply(
+      index,
+      index === 1
+        ? [
+            ...toolUse("propose_ranger_task", "propose-safe", proposed, 0),
+            ...finish("tool_use"),
+          ]
+        : index === 2
+          ? [
+              ...toolUse("propose_ranger_task", "propose-unsafe", proposed, 0),
+              ...finish("tool_use"),
+            ]
+          : [...text("Both attempts were reported."), ...finish("end_turn")],
+    ),
+  );
+  let attempts = 0;
+  try {
+    const driver = f.createDriver();
+    await driver.run(
+      f.input({
+        task: async () => {
+          attempts++;
+          if (attempts === 1)
+            throw new AssistantUserError(
+              "These workspace connections do not support safe scheduled tasks: the endpoint handshake did not provide a stable Herdr boot identity. Upgrade the Herdr server and try again.",
+            );
+          throw new Error("backend details include synthetic-private-secret");
+        },
+      }),
+    );
+    expect(attempts).toBe(2);
+    expect(JSON.stringify(f.requests[1]?.messages)).toContain(
+      "did not provide a stable Herdr boot identity",
+    );
+    expect(JSON.stringify(f.requests[2]?.messages)).toContain(
+      "Workspace tool unavailable, stale, or outside the authorized scope.",
+    );
+    expect(JSON.stringify(f.requests)).not.toContain(
+      "synthetic-private-secret",
+    );
   } finally {
     await f.cleanup();
   }

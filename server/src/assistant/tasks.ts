@@ -24,6 +24,7 @@ import {
 } from "../../../shared/assistant";
 import { assertSafeDataPath } from "../config/data-paths";
 import { AssistantRecoveryNotReadyError, type RecoveryTarget } from "./context";
+import { AssistantUserError } from "./errors";
 import { nextTaskTime, validateTaskSchedule } from "./task-schedule";
 import {
   MAX_TASK_STATE_BYTES,
@@ -122,7 +123,7 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 function text(value: unknown, limit: number) {
   if (typeof value !== "string" || !value.trim() || value.length > limit)
-    throw new Error("Invalid task input");
+    throw new AssistantUserError("Invalid task input");
   return value;
 }
 export function validateTaskInput(value: unknown): AssistantTaskInput {
@@ -146,7 +147,7 @@ export function validateTaskInput(value: unknown): AssistantTaskInput {
     !value.scope.length ||
     value.scope.length > ASSISTANT_MAX_WORKSPACES
   )
-    throw new Error("Invalid task input");
+    throw new AssistantUserError("Invalid task input");
   const scope = value.scope.map((ref) => {
     if (
       !record(ref) ||
@@ -154,14 +155,14 @@ export function validateTaskInput(value: unknown): AssistantTaskInput {
         (field) => !["connection_id", "workspace_id"].includes(field),
       )
     )
-      throw new Error("Invalid task scope");
+      throw new AssistantUserError("Invalid task scope");
     return {
       connection_id: text(ref.connection_id, 500),
       workspace_id: text(ref.workspace_id, 500),
     };
   });
   if (new Set(scope.map(key)).size !== scope.length)
-    throw new Error("Duplicate task scope");
+    throw new AssistantUserError("Duplicate task scope");
   let mentions: AssistantMentionTarget[] | undefined;
   if (value.mentions !== undefined) {
     if (
@@ -169,11 +170,11 @@ export function validateTaskInput(value: unknown): AssistantTaskInput {
       value.mentions.length > ASSISTANT_MAX_MENTIONS ||
       !value.mentions.every(isAssistantMentionTarget)
     )
-      throw new Error("Invalid task mentions");
+      throw new AssistantUserError("Invalid task mentions");
     mentions = value.mentions;
     const allowed = new Set(scope.map(key));
     if (mentions.some((mention) => !allowed.has(key(mention))))
-      throw new Error("Task mention outside task scope");
+      throw new AssistantUserError("Task mention outside task scope");
     const identities = mentions.map((mention) =>
       JSON.stringify([
         mention.kind,
@@ -185,7 +186,7 @@ export function validateTaskInput(value: unknown): AssistantTaskInput {
       ]),
     );
     if (new Set(identities).size !== identities.length)
-      throw new Error("Duplicate task mention");
+      throw new AssistantUserError("Duplicate task mention");
   }
   return {
     title: text(value.title, 100),
@@ -891,7 +892,7 @@ export function createAssistantTasks(options: {
     const existing = requests.find((request) => request.id === requestId);
     if (existing) return find(existing.task_id);
     if (tasks.length >= MAX_TASKS)
-      throw new Error("Ranger supports up to 50 saved tasks.");
+      throw new AssistantUserError("Ranger supports up to 50 saved tasks.");
     const schedule = prepared.input.schedule;
     const next =
       schedule.type === "once"
@@ -1066,7 +1067,7 @@ export function createAssistantTasks(options: {
         proposals.filter((entry) => entry.proposal.status === "pending")
           .length >= 50
       )
-        throw new Error("Too many pending task proposals.");
+        throw new AssistantUserError("Too many pending task proposals.");
       const proposal: AssistantTaskProposal = {
         ...structuredClone(sealed.input),
         id: randomUUID(),

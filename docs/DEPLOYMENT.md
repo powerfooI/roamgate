@@ -465,7 +465,9 @@ never automatically retried. Durable stores have no automatic retention quota.
 
 The Ranger **Tasks** view manages one-time, daily, and interval schedules.
 Task creation requires an endpoint with a stable Herdr boot identity, the chosen
-model, and an explicitly allowed workspace scope. Tasks keep their original
+model, and an explicitly allowed workspace scope. If creation fails, the
+returned error names the unmet requirement, such as an older Herdr server
+that does not expose a boot identity. Tasks keep their original
 model and target identities; after a Herdr restart or target change, edit the
 task to authorize the current targets. The bridge must be running for schedules
 to fire. After downtime, missed occurrences are combined into one run.

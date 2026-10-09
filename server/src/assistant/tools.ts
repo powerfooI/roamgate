@@ -5,6 +5,7 @@ import {
   type AssistantNotificationInput,
   type AssistantSource,
 } from "../../../shared/assistant";
+import { AssistantUserError, surfaceAssistantUserError } from "./errors";
 
 export const ASSISTANT_DEFAULT_TERMINAL_LINES = 120;
 export const ASSISTANT_MAX_TERMINAL_LINES = 1000;
@@ -253,7 +254,7 @@ export async function callWorkspaceTool(
   const tool = workspaceTools.find((entry) => entry.name === name);
   if (!tool) throw new Error("Unknown workspace tool.");
   if (!Value.Check(tool.parameters, params))
-    throw new Error("Invalid workspace tool parameters.");
+    throw new AssistantUserError("Invalid workspace tool parameters.");
   try {
     signal?.throwIfAborted();
     const result = await read(
@@ -263,8 +264,9 @@ export async function callWorkspaceTool(
     );
     signal?.throwIfAborted();
     return result;
-  } catch {
-    throw new Error(
+  } catch (error) {
+    surfaceAssistantUserError(
+      error,
       "Context unavailable, stale, or outside the authorized scope.",
     );
   }
@@ -280,7 +282,7 @@ export async function callActionTool(
   const tool = actionTools.find((entry) => entry.name === name);
   if (!tool) throw new Error("Unknown action tool.");
   if (!Value.Check(tool.parameters, params))
-    throw new Error("Invalid action tool parameters.");
+    throw new AssistantUserError("Invalid action tool parameters.");
   try {
     signal?.throwIfAborted();
     const result = await propose(
@@ -290,8 +292,9 @@ export async function callActionTool(
     );
     signal?.throwIfAborted();
     return result;
-  } catch {
-    throw new Error(
+  } catch (error) {
+    surfaceAssistantUserError(
+      error,
       "Action proposal unavailable, stale, or outside the authorized scope.",
     );
   }
@@ -307,7 +310,7 @@ export async function callTaskTool(
   const tool = taskTools.find((entry) => entry.name === name);
   if (!tool) throw new Error("Unknown task tool.");
   if (!Value.Check(tool.parameters, params))
-    throw new Error("Invalid task tool parameters.");
+    throw new AssistantUserError("Invalid task tool parameters.");
   try {
     signal?.throwIfAborted();
     const result = await handle(
@@ -317,8 +320,9 @@ export async function callTaskTool(
     );
     signal?.throwIfAborted();
     return result;
-  } catch {
-    throw new Error(
+  } catch (error) {
+    surfaceAssistantUserError(
+      error,
       "Task unavailable, invalid, or outside the authorized scope.",
     );
   }
@@ -334,16 +338,19 @@ export async function callNotificationTool(
   const tool = notificationTools.find((entry) => entry.name === name);
   if (!tool) throw new Error("Unknown notification tool.");
   if (!Value.Check(tool.parameters, params))
-    throw new Error("Invalid notification tool parameters.");
+    throw new AssistantUserError("Invalid notification tool parameters.");
   const input = params as AssistantNotificationInput;
   if (!input.event_key.trim() || !input.title.trim() || !input.body.trim())
-    throw new Error("Invalid notification tool parameters.");
+    throw new AssistantUserError("Invalid notification tool parameters.");
   try {
     signal?.throwIfAborted();
     const result = await send(input, signal);
     signal?.throwIfAborted();
     return result;
-  } catch {
-    throw new Error("Notification unavailable or outside the authorized task.");
+  } catch (error) {
+    surfaceAssistantUserError(
+      error,
+      "Notification unavailable or outside the authorized task.",
+    );
   }
 }

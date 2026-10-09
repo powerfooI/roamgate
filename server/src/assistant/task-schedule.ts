@@ -1,5 +1,6 @@
 import type { AssistantTaskSchedule } from "../../../shared/assistant";
 import { isRecord } from "../agent/session-utils";
+import { AssistantUserError } from "./errors";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -21,7 +22,7 @@ function formatter(timezone: string) {
 }
 
 export function validateTaskSchedule(value: unknown): AssistantTaskSchedule {
-  if (!isRecord(value)) throw new Error("Invalid task schedule");
+  if (!isRecord(value)) throw new AssistantUserError("Invalid task schedule");
   const keys =
     value.type === "once"
       ? ["type", "at"]
@@ -35,7 +36,7 @@ export function validateTaskSchedule(value: unknown): AssistantTaskSchedule {
     Object.keys(value).length !== keys.length ||
     !keys.every((key) => Object.hasOwn(value, key))
   )
-    throw new Error("Invalid task schedule fields");
+    throw new AssistantUserError("Invalid task schedule fields");
   if (value.type === "once") {
     const match =
       typeof value.at === "string" &&
@@ -49,7 +50,7 @@ export function validateTaskSchedule(value: unknown): AssistantTaskSchedule {
       if (Number.isFinite(date.getTime()) && date.toISOString() === canonical)
         return { type: "once", at: canonical };
     }
-    throw new Error("Task time must be a valid UTC ISO timestamp");
+    throw new AssistantUserError("Task time must be a valid UTC ISO timestamp");
   }
   if (value.type === "interval") {
     if (
@@ -58,7 +59,9 @@ export function validateTaskSchedule(value: unknown): AssistantTaskSchedule {
       value.minutes < 1 ||
       value.minutes > 525_600
     )
-      throw new Error("Task interval must be 1 to 525600 whole minutes");
+      throw new AssistantUserError(
+        "Task interval must be 1 to 525600 whole minutes",
+      );
     return { type: "interval", minutes: value.minutes };
   }
   if (
@@ -68,11 +71,13 @@ export function validateTaskSchedule(value: unknown): AssistantTaskSchedule {
     !value.timezone ||
     /^[+-]/.test(value.timezone)
   )
-    throw new Error("Daily tasks require HH:mm and an IANA timezone");
+    throw new AssistantUserError(
+      "Daily tasks require HH:mm and an IANA timezone",
+    );
   try {
     formatter(value.timezone);
   } catch {
-    throw new Error("Invalid task timezone");
+    throw new AssistantUserError("Invalid task timezone");
   }
   return { type: "daily", time: value.time, timezone: value.timezone };
 }
