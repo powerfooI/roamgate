@@ -36,12 +36,13 @@
 }
 
 .assistant-panel.is-floating:not(.is-maximized):not(.is-mobile)
-  .assistant-conversation-map {
+  .assistant-conversation-map:not(.is-horizontal) {
   width: 20px;
   padding: 24px 2px;
 }
 
 .assistant-panel.is-floating:not(.is-maximized):not(.is-mobile)
+  .assistant-conversation-map:not(.is-horizontal)
   .assistant-conversation-wave {
   height: min(100%, calc(var(--message-count) * 6px));
   max-height: 240px;
@@ -49,6 +50,7 @@
 
 .assistant-conversation-mark {
   flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
   display: flex;
   align-items: center;
@@ -64,6 +66,7 @@
   opacity: 0.4;
   transition:
     width 120ms ease,
+    height 120ms ease,
     background 120ms ease,
     opacity 120ms ease;
 }
@@ -79,6 +82,7 @@
 
 .assistant-conversation-preview {
   position: absolute;
+  top: var(--preview-position);
   right: calc(100% + 8px);
   z-index: 1;
   width: 220px;
@@ -94,6 +98,48 @@
   font-size: 11px;
   transform: translateY(-50%);
   pointer-events: none;
+}
+
+.assistant-panel .assistant-conversation-map.is-horizontal {
+  position: relative;
+  inset: auto;
+  flex: 0 0 auto;
+  width: 100%;
+  justify-content: center;
+  padding: 2px 12px;
+}
+
+.assistant-panel
+  .assistant-conversation-map.is-horizontal
+  .assistant-conversation-wave {
+  position: static;
+  flex-direction: row;
+  width: min(100%, max(28px, calc(var(--message-count) * 6px)));
+  height: 28px;
+  max-height: none;
+}
+
+.assistant-conversation-map.is-horizontal
+  .assistant-conversation-wave:focus-visible {
+  outline-offset: 1px;
+}
+
+.assistant-conversation-map.is-horizontal .assistant-conversation-mark {
+  justify-content: center;
+}
+
+.assistant-conversation-map.is-horizontal .assistant-conversation-mark::before {
+  width: 2px;
+  height: var(--mark-width);
+}
+
+.assistant-conversation-map.is-horizontal .assistant-conversation-preview {
+  top: auto;
+  right: auto;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  max-width: calc(100% - 24px);
+  transform: translateX(-50%);
 }
 
 .assistant-conversation-preview strong {

@@ -2235,6 +2235,11 @@ export function AssistantPanel({
                 key={snapshot.session_id ?? snapshot.instance_id}
                 messages={snapshot.messages}
                 listRef={listRef}
+                mobile={mobile}
+                onLayout={() => {
+                  if (followingOutput.current && listRef.current)
+                    listRef.current.scrollTop = listRef.current.scrollHeight;
+                }}
                 onNavigate={() => {
                   followingOutput.current = false;
                 }}

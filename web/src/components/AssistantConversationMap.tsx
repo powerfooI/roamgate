@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -20,17 +21,24 @@ function messagePreview(message: Message) {
 export function AssistantConversationMap({
   messages,
   listRef,
+  mobile,
+  onLayout,
   onNavigate,
 }: {
   messages: Message[];
   listRef: RefObject<HTMLDivElement | null>;
+  mobile: boolean;
+  onLayout: () => void;
   onNavigate: () => void;
 }) {
+  const [horizontal, setHorizontal] = useState(mobile);
   const [visibleIds, setVisibleIds] = useState<string[]>([]);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [keyboardFocus, setKeyboardFocus] = useState(false);
   const waveRef = useRef<HTMLDivElement>(null);
   const messageIds = JSON.stringify(messages.map((message) => message.id));
+
+  useLayoutEffect(onLayout, [horizontal, onLayout]);
 
   useEffect(() => {
     const list = listRef.current;
@@ -41,6 +49,7 @@ export function AssistantConversationMap({
     let frame = 0;
     const measure = () => {
       frame = 0;
+      setHorizontal(mobile || list.parentElement!.clientWidth <= 600);
       const viewport = list.getBoundingClientRect();
       const visible =
         viewport.height > 0 && viewport.width > 0
@@ -73,7 +82,7 @@ export function AssistantConversationMap({
       list.removeEventListener("scroll", schedule);
       window.cancelAnimationFrame(frame);
     };
-  }, [listRef, messageIds]);
+  }, [listRef, messageIds, mobile]);
 
   const currentIndex = Math.max(
     0,
@@ -86,15 +95,15 @@ export function AssistantConversationMap({
     hoveredIndex >= 0 ? hoveredIndex : keyboardFocus ? currentIndex : -1;
   const preview = messages[previewIndex];
 
-  const indexAt = (clientY: number) => {
+  const indexAt = (clientX: number, clientY: number) => {
     const rect = waveRef.current!.getBoundingClientRect();
+    const offset = horizontal ? clientX - rect.left : clientY - rect.top;
+    const length = horizontal ? rect.width : rect.height;
     return Math.max(
       0,
       Math.min(
         messages.length - 1,
-        Math.floor(
-          ((clientY - rect.top) / Math.max(1, rect.height)) * messages.length,
-        ),
+        Math.floor((offset / Math.max(1, length)) * messages.length),
       ),
     );
   };
@@ -120,7 +129,9 @@ export function AssistantConversationMap({
   if (!messages.length) return null;
 
   return (
-    <div className="assistant-conversation-map">
+    <div
+      className={`assistant-conversation-map${horizontal ? " is-horizontal" : ""}`}
+    >
       <div
         ref={waveRef}
         className="assistant-conversation-wave"
@@ -128,7 +139,7 @@ export function AssistantConversationMap({
         role="slider"
         tabIndex={0}
         aria-label="Ranger conversation navigation"
-        aria-orientation="vertical"
+        aria-orientation={horizontal ? "horizontal" : "vertical"}
         aria-valuemin={1}
         aria-valuemax={messages.length}
         aria-valuenow={currentIndex + 1}
@@ -142,20 +153,20 @@ export function AssistantConversationMap({
         }}
         onPointerMove={(event) => {
           if (event.pointerType !== "touch")
-            setHoveredId(messages[indexAt(event.clientY)].id);
+            setHoveredId(messages[indexAt(event.clientX, event.clientY)].id);
         }}
         onPointerLeave={() => setHoveredId(null)}
         onClick={(event) => {
           event.currentTarget.focus({ preventScroll: true });
           setKeyboardFocus(false);
-          navigate(indexAt(event.clientY));
+          navigate(indexAt(event.clientX, event.clientY));
         }}
         onKeyDown={(event) => {
           const start = previewIndex >= 0 ? previewIndex : currentIndex;
           const index =
-            event.key === "ArrowUp"
+            event.key === (horizontal ? "ArrowLeft" : "ArrowUp")
               ? start - 1
-              : event.key === "ArrowDown"
+              : event.key === (horizontal ? "ArrowRight" : "ArrowDown")
                 ? start + 1
                 : event.key === "Home"
                   ? 0
@@ -189,9 +200,11 @@ export function AssistantConversationMap({
           <div
             className="assistant-conversation-preview"
             role="tooltip"
-            style={{
-              top: `${((previewIndex + 0.5) / messages.length) * 100}%`,
-            }}
+            style={
+              {
+                "--preview-position": `${((previewIndex + 0.5) / messages.length) * 100}%`,
+              } as CSSProperties
+            }
           >
             <strong>
               {preview.role === "user" ? "You" : "Ranger"}
