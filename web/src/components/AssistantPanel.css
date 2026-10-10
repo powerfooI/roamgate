@@ -219,12 +219,20 @@
 .assistant-panel
   .assistant-conversation:has(> .assistant-conversation-map.is-horizontal) {
   flex-direction: column;
+  overflow: visible;
 }
 
 .assistant-panel
   .assistant-conversation:has(> .assistant-conversation-map.is-horizontal)
   > .assistant-panel-list {
   padding-inline: 12px;
+}
+
+.assistant-panel:has(.assistant-conversation-map.is-horizontal)
+  > .assistant-panel-footer {
+  /* Keep input above the map when a short viewport exhausts chat space. */
+  position: relative;
+  z-index: 1;
 }
 
 .assistant-panel-empty {

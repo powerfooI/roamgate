@@ -119,6 +119,11 @@
   max-height: none;
 }
 
+.assistant-conversation-map.is-horizontal
+  .assistant-conversation-wave:focus-visible {
+  outline-offset: 1px;
+}
+
 .assistant-conversation-map.is-horizontal .assistant-conversation-mark {
   justify-content: center;
 }

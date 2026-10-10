@@ -2236,6 +2236,10 @@ export function AssistantPanel({
                 messages={snapshot.messages}
                 listRef={listRef}
                 mobile={mobile}
+                onLayout={() => {
+                  if (followingOutput.current && listRef.current)
+                    listRef.current.scrollTop = listRef.current.scrollHeight;
+                }}
                 onNavigate={() => {
                   followingOutput.current = false;
                 }}

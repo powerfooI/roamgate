@@ -261,10 +261,12 @@ The conversation stays available when switching workspaces or connections.
   permissions. **History** lists saved conversations by their first question;
   select one to read its messages and continue chatting. Switching chats retires
   unconfirmed action previews.
-- The wave bar on the right marks messages and highlights the visible portion
-  of the conversation. Hover to preview a message, click to jump, or focus it
-  and use Up/Down, Home, and End. Jumping back pauses automatic following until
-  you return to the bottom or send another message.
+- The wave bar marks messages and highlights the visible portion of the
+  conversation. It sits below the messages on narrow panels and mobile, and on
+  the right in wider desktop panels. Hover to preview a message, click to jump,
+  or focus it and use Left/Right for the bottom bar or Up/Down for the right bar;
+  Home and End jump to the first and last messages. Jumping back pauses automatic
+  following until you return to the bottom or send another message.
 
 The bridge stores saved conversations and one active chat shared by its
 authenticated browsers/devices; messages survive bridge restarts. A reconnect

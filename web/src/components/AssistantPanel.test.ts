@@ -763,16 +763,18 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
     ]);
     let position = 0;
     let panelMobile = false;
-    let conversationWidth = 800;
+    let conversationWidth = 380;
     const scrollHeight = () =>
       Math.max(
-        200,
+        listHeight(),
         ...[...bounds.values()].map((rect) => rect.top + rect.height + 12),
       );
     const list = () =>
       container.querySelector<HTMLDivElement>(".assistant-panel-list")!;
     const wave = () =>
       container.querySelector<HTMLDivElement>(".assistant-conversation-wave")!;
+    const listHeight = () =>
+      wave()?.getAttribute("aria-orientation") === "horizontal" ? 168 : 200;
     const layout = () => {
       const scroller = list();
       if (!scroller) return;
@@ -781,19 +783,22 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         get: () => conversationWidth,
       });
       Object.defineProperties(scroller, {
-        clientHeight: { configurable: true, value: 200 },
-        offsetHeight: { configurable: true, value: 200 },
+        clientHeight: { configurable: true, get: listHeight },
+        offsetHeight: { configurable: true, get: listHeight },
         scrollHeight: { configurable: true, get: scrollHeight },
         scrollTop: {
           configurable: true,
-          get: () => position,
+          get: () => Math.min(position, scrollHeight() - listHeight()),
           set: (next: number) => {
-            position = Math.max(0, Math.min(next, scrollHeight() - 200));
+            position = Math.max(
+              0,
+              Math.min(next, scrollHeight() - listHeight()),
+            );
           },
         },
       });
       scroller.getBoundingClientRect = () =>
-        new browser.DOMRect(100, 200, 300, 200) as DOMRect;
+        new browser.DOMRect(100, 200, 300, listHeight()) as DOMRect;
       scroller
         .querySelectorAll<HTMLElement>(".assistant-message")
         .forEach((section) => {
@@ -892,6 +897,9 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
     };
     try {
       await render();
+      expect(wave().getAttribute("aria-orientation")).toBe("horizontal");
+      expect(position).toBe(scrollHeight() - listHeight());
+      await resize(800);
       expect(wave().getAttribute("aria-orientation")).toBe("vertical");
       await scroll(200);
       expect(visible()).toEqual(["long"]);
@@ -931,7 +939,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       await scroll(scrollHeight());
       bounds.get("last")!.height += 100;
       await stream();
-      expect(position).toBe(scrollHeight() - 200);
+      expect(position).toBe(scrollHeight() - listHeight());
       expect(visible()).toEqual(["last"]);
 
       await resize(600);
@@ -939,7 +947,13 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(
         container.querySelector(".assistant-conversation-map.is-horizontal"),
       ).not.toBeNull();
-      expect(position).toBe(scrollHeight() - 200);
+      expect(position).toBe(scrollHeight() - listHeight());
+      await resize(601);
+      expect(wave().getAttribute("aria-orientation")).toBe("vertical");
+      expect(position).toBe(scrollHeight() - listHeight());
+      await scroll(66);
+      await resize(600);
+      expect(position).toBe(66);
       await React.act(async () =>
         wave().dispatchEvent(
           new browser.PointerEvent("pointermove", {
@@ -1070,6 +1084,13 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(position).toBe(scrollHeight() - 200);
       expect(visible()).toEqual(["new-session"]);
       expect(container.querySelector("[role='tooltip']")).toBeNull();
+      bounds.get("new-session")!.height = 180;
+      await stream();
+      expect(position).toBe(0);
+      await resize(600);
+      expect(position).toBe(24);
+      await resize(601);
+      expect(position).toBe(0);
       clientState.snapshot = { ...clientState.snapshot, messages: [] };
       await render();
       expect(wave()).toBeNull();

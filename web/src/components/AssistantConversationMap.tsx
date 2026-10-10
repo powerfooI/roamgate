@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -21,11 +22,13 @@ export function AssistantConversationMap({
   messages,
   listRef,
   mobile,
+  onLayout,
   onNavigate,
 }: {
   messages: Message[];
   listRef: RefObject<HTMLDivElement | null>;
   mobile: boolean;
+  onLayout: () => void;
   onNavigate: () => void;
 }) {
   const [horizontal, setHorizontal] = useState(mobile);
@@ -34,6 +37,8 @@ export function AssistantConversationMap({
   const [keyboardFocus, setKeyboardFocus] = useState(false);
   const waveRef = useRef<HTMLDivElement>(null);
   const messageIds = JSON.stringify(messages.map((message) => message.id));
+
+  useLayoutEffect(onLayout, [horizontal, onLayout]);
 
   useEffect(() => {
     const list = listRef.current;
