@@ -2235,6 +2235,7 @@ export function AssistantPanel({
                 key={snapshot.session_id ?? snapshot.instance_id}
                 messages={snapshot.messages}
                 listRef={listRef}
+                mobile={mobile}
                 onNavigate={() => {
                   followingOutput.current = false;
                 }}

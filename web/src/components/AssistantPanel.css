@@ -205,7 +205,7 @@
 }
 
 .assistant-panel.is-floating:not(.is-maximized):not(.is-mobile)
-  .assistant-conversation:has(> .assistant-conversation-map)
+  .assistant-conversation:has(> .assistant-conversation-map:not(.is-horizontal))
   > .assistant-panel-list {
   padding-right: 36px;
 }
@@ -214,6 +214,17 @@
   .assistant-conversation:has(> .assistant-conversation-map)
   > .assistant-panel-list {
   padding-inline: max(52px, calc((100% - 960px) / 2));
+}
+
+.assistant-panel
+  .assistant-conversation:has(> .assistant-conversation-map.is-horizontal) {
+  flex-direction: column;
+}
+
+.assistant-panel
+  .assistant-conversation:has(> .assistant-conversation-map.is-horizontal)
+  > .assistant-panel-list {
+  padding-inline: 12px;
 }
 
 .assistant-panel-empty {

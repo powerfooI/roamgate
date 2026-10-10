@@ -762,6 +762,8 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       ["last", { top: 674, height: 220 }],
     ]);
     let position = 0;
+    let panelMobile = false;
+    let conversationWidth = 800;
     const scrollHeight = () =>
       Math.max(
         200,
@@ -774,6 +776,10 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
     const layout = () => {
       const scroller = list();
       if (!scroller) return;
+      Object.defineProperty(scroller.parentElement, "clientWidth", {
+        configurable: true,
+        get: () => conversationWidth,
+      });
       Object.defineProperties(scroller, {
         clientHeight: { configurable: true, value: 200 },
         offsetHeight: { configurable: true, value: 200 },
@@ -803,7 +809,9 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         });
       if (wave())
         wave().getBoundingClientRect = () =>
-          new browser.DOMRect(410, 250, 26, 160) as DOMRect;
+          (wave().getAttribute("aria-orientation") === "horizontal"
+            ? new browser.DOMRect(100, 410, 300, 32)
+            : new browser.DOMRect(410, 250, 26, 160)) as DOMRect;
     };
     const render = async () => {
       await React.act(async () =>
@@ -811,7 +819,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
           React.createElement(AssistantPanel, {
             open: true,
             floating: true,
-            mobile: false,
+            mobile: panelMobile,
             onClose() {},
             onToggleFloating() {},
             onOpenSource() {},
@@ -830,6 +838,15 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
     };
     const pointAt = (index: number) =>
       250 + ((index + 0.5) / clientState.snapshot.messages.length) * 160;
+    const horizontalPointAt = (index: number) =>
+      100 + ((index + 0.5) / clientState.snapshot.messages.length) * 300;
+    const resize = async (width: number) => {
+      conversationWidth = width;
+      await React.act(async () =>
+        observers.forEach((observer) => observer.callback()),
+      );
+      await flushFrames();
+    };
     const key = async (value: string) => {
       const event = new browser.KeyboardEvent("keydown", {
         key: value,
@@ -875,6 +892,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
     };
     try {
       await render();
+      expect(wave().getAttribute("aria-orientation")).toBe("vertical");
       await scroll(200);
       expect(visible()).toEqual(["long"]);
       expect(wave().getAttribute("aria-valuenow")).toBe("2");
@@ -915,6 +933,66 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       await stream();
       expect(position).toBe(scrollHeight() - 200);
       expect(visible()).toEqual(["last"]);
+
+      await resize(600);
+      expect(wave().getAttribute("aria-orientation")).toBe("horizontal");
+      expect(
+        container.querySelector(".assistant-conversation-map.is-horizontal"),
+      ).not.toBeNull();
+      expect(position).toBe(scrollHeight() - 200);
+      await React.act(async () =>
+        wave().dispatchEvent(
+          new browser.PointerEvent("pointermove", {
+            clientX: horizontalPointAt(2),
+            clientY: 425,
+            pointerType: "mouse",
+            bubbles: true,
+          }) as unknown as Event,
+        ),
+      );
+      expect(
+        container.querySelector("[role='tooltip']")?.textContent,
+      ).toContain("third");
+      expect(
+        container
+          .querySelector<HTMLElement>("[role='tooltip']")
+          ?.style.getPropertyValue("--preview-position"),
+      ).toBe("62.5%");
+      await React.act(async () =>
+        wave().dispatchEvent(
+          new browser.MouseEvent("click", {
+            clientX: horizontalPointAt(1),
+            clientY: 420,
+            bubbles: true,
+          }) as unknown as Event,
+        ),
+      );
+      await scroll(position);
+      expect(position).toBe(66);
+      expect(document.activeElement).toBe(wave());
+      await key("Home");
+      expect(position).toBe(0);
+      await key("ArrowRight");
+      expect(position).toBe(66);
+      await key("ArrowRight");
+      expect(position).toBe(564);
+      await key("ArrowLeft");
+      expect(position).toBe(66);
+      await key("End");
+      expect(position).toBe(662);
+      expect(container.scrollTop).toBe(35);
+      expect(document.documentElement.scrollTop).toBe(45);
+
+      await resize(601);
+      expect(wave().getAttribute("aria-orientation")).toBe("vertical");
+      expect(position).toBe(662);
+      panelMobile = true;
+      await render();
+      expect(wave().getAttribute("aria-orientation")).toBe("horizontal");
+      expect(position).toBe(662);
+      panelMobile = false;
+      await render();
+      expect(wave().getAttribute("aria-orientation")).toBe("vertical");
 
       await clickButton("Ranger settings");
       expect(wave()).toBeNull();
