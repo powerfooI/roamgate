@@ -9,7 +9,7 @@ access, use the [tutorial](./TUTORIAL.md#networking).
 - Default Unix sockets: `~/.config/herdr/herdr.sock` and
   `~/.config/herdr/herdr-client.sock`; Windows uses corresponding named pipes
   under `%APPDATA%\herdr\`.
-- [Bun](https://bun.sh) 1.4.1+ for source builds only; standalone needs no Bun/Node.js.
+- [Bun](https://bun.sh) 1.4.3+ for source builds only; standalone needs no Bun/Node.js.
 
 Windows local Git features require [Git for Windows](https://gitforwindows.org/)
 with Git available on PATH. Changes, Commits, and branch auto-sync locate its

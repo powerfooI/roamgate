@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 
 const root = new URL("../", import.meta.url);
@@ -64,6 +64,9 @@ test("CI keeps the complete non-browser validation gate", () => {
   const { scripts } = requireRoot("./package.json");
   expect(scripts.test).toBe("bun test");
   expect(scripts["test:quick"]).toBe("bun test --parallel=4");
+  expect(scripts["typecheck:bun"]).toBe(
+    "bun check -p tsconfig.json && bun check -p web/tsconfig.json && bun check -p server/tsconfig.json",
+  );
   expect(scripts["test:browser"]).toBeUndefined();
   expect(Object.keys(workflow.jobs)).toEqual(["validate"]);
   expect(workflow.jobs.validate.if).toBeUndefined();
@@ -76,6 +79,7 @@ test("CI keeps the complete non-browser validation gate", () => {
     "bun run format:check",
     "bun run lint",
     "bun run typecheck",
+    "bun run typecheck:bun",
     "bun run build:site",
     "bun run test:quick",
   ]);
@@ -102,4 +106,34 @@ test("CI and release jobs install once from the workspace root", () => {
       );
     }
   }
+});
+
+test("all workflows use the pinned Bun runtime and matching types", () => {
+  const manifest = JSON.parse(
+    readFileSync(new URL("package.json", root), "utf8"),
+  );
+  const version = "1.4.3";
+  expect(manifest.packageManager).toBe(`bun@${version}`);
+  expect(manifest.engines.bun).toBe(`>=${version}`);
+  expect(manifest.devDependencies["bun-types"]).toBe(version);
+  let setups = 0;
+  for (const file of readdirSync(new URL(".github/workflows/", root))) {
+    if (!/\.ya?ml$/.test(file)) continue;
+    const workflow = Bun.YAML.parse(
+      readFileSync(new URL(`.github/workflows/${file}`, root), "utf8"),
+    ) as {
+      jobs: Record<
+        string,
+        { steps?: { uses?: string; with?: Record<string, unknown> }[] }
+      >;
+    };
+    for (const job of Object.values(workflow.jobs)) {
+      for (const step of job.steps ?? []) {
+        if (!step.uses?.startsWith("oven-sh/setup-bun@")) continue;
+        setups++;
+        expect(step.with?.["bun-version"]).toBe(version);
+      }
+    }
+  }
+  expect(setups).toBeGreaterThan(0);
 });

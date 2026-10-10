@@ -2,7 +2,7 @@
 
 ## Development Setup
 
-Use Bun 1.4.1+ (CI: 1.4.1), Node ^20.19.0 or >=22.12.0 for Vite 8,
+Use Bun 1.4.3+ (CI: 1.4.3), Node ^20.19.0 or >=22.12.0 for Vite 8,
 and a running local Herdr server:
 
 ```bash
@@ -49,6 +49,12 @@ rather than repeating it manually on the same revision. Without the hook, run
 bypass the gate.
 
 PR CI runs format/lint/types, site build, and the complete `test:quick` suite.
+After the existing TypeScript checks generate web assets, CI also runs
+`bun run typecheck:bun`. This invokes Bun 1.4.3's standalone `bun check` command
+for the root, web, and server tsconfigs. Running only `bun check` at the root
+checks the scripts project, not all three projects. The native check supplements
+the existing TypeScript and lint gates; it does not emit files or rebuild assets.
+On a fresh checkout, run `bun run typecheck` before `bun run typecheck:bun`.
 Automated tests do not launch Chrome or WebKit. Browser-specific focus, layout,
 input, accessibility, and security enforcement require manual validation against
 a real backend for affected changes:

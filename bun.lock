@@ -9,7 +9,7 @@
         "@types/jsdom": "^30.0.0",
         "@types/proper-lockfile": "4.1.4",
         "@types/web-push": "^3.6.4",
-        "bun-types": "^1.4.2",
+        "bun-types": "1.4.3",
         "happy-dom": "^20.14.5",
         "jsdom": "^30.1.1",
         "oxlint": "1.86.0",
@@ -18,7 +18,7 @@
     },
     "server": {
       "name": "roamgate-server",
-      "version": "0.7.15",
+      "version": "0.8.1",
       "dependencies": {
         "@earendil-works/chord": "1.0.2",
         "@earendil-works/pi-ai": "1.0.2",
@@ -32,7 +32,7 @@
     },
     "web": {
       "name": "roamgate-web",
-      "version": "0.7.15",
+      "version": "0.8.1",
       "dependencies": {
         "@codemirror/commands": "^6.11.1",
         "@codemirror/lang-cpp": "^6.0.3",
@@ -621,7 +621,7 @@
 
     "buffer-image-size": ["buffer-image-size@0.6.4", "", { "dependencies": { "@types/node": "*" } }, "sha512-nEh+kZOPY1w+gcCMobZ6ETUp9WfibndnosbpwB1iJk/8Gt5ZF2bhS6+B6bPYz424KtwsR6Rflc3tCz1/ghX2dQ=="],
 
-    "bun-types": ["bun-types@1.4.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w=="],
+    "bun-types": ["bun-types@1.4.3", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-tinRJNGOmUN+tEAsn2y2e942n9JHRHR42iUYzDH75NmhJqVBokGSQkkfSFdNWwsANIdrK6ACH9t01M452YyTwg=="],
 
     "ccount": ["ccount@2.0.1", "", {}, "sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg=="],
 

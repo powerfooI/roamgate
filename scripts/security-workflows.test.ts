@@ -100,7 +100,7 @@ test("dependency audit checks the lockfile without installing or suppressing fin
   expect(manifest.scripts.audit).toBe(command);
   expect(job.steps[1].uses).toStartWith("oven-sh/setup-bun@");
   expect(job.steps[1].with).toEqual({
-    "bun-version": "1.4.1",
+    "bun-version": "1.4.3",
     "no-cache": true,
   });
 });

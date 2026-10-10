@@ -17,7 +17,7 @@ are ignored and should not be committed.
 ## Build, Test, and Development Commands
 
 Install all Bun workspace dependencies from the repository root with
-`bun install --frozen-lockfile` (Bun 1.4.1 or newer). The root `bun.lock` is the
+`bun install --frozen-lockfile` (Bun 1.4.3 or newer). The root `bun.lock` is the
 only lockfile; shared TypeScript, Bun types, and lint/format tooling belong in
 the root manifest. Keep runtime dependencies in their owning workspace.
 
@@ -38,6 +38,8 @@ the root manifest. Keep runtime dependencies in their owning workspace.
 - `bun run test`: run all unit and server integration tests serially.
 - `bun run test:quick`: run the same complete suite with four workers.
 - `bun run typecheck`: build/embed web assets and run all TypeScript checks.
+- `bun run typecheck:bun`: run Bun's native `bun check` against all three
+  TypeScript projects without rebuilding web assets (CI).
 - `bun run typecheck:quick`: check types without rebuilding existing web assets.
   See [local validation](CONTRIBUTING.md#validation) for prerequisites and caching.
 - `bun run precommit`: run formatting, lint, full type checks, and `test:quick`.
