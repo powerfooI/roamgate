@@ -799,9 +799,18 @@ describe("EndpointClient (endpoint generation 1)", () => {
       server.listen(socketPath, resolve);
     });
     const client = new EndpointClient(socketPath);
-    await expect(client.connect(100, 30)).rejects.toThrow(
-      "unsupported_generation",
-    );
+    const errors: Error[] = [];
+    client.once("error", (error: Error) => errors.push(error));
+    try {
+      await expect(client.connect(100, 30)).rejects.toThrow(
+        "unsupported_generation",
+      );
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toContain("unsupported_generation");
+      expect(client.isClosed).toBe(true);
+    } finally {
+      client.close();
+    }
   });
 });
 
