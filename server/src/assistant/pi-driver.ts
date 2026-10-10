@@ -2,6 +2,7 @@ import {
   ASSISTANT_MAX_TOOL_ARGUMENTS,
   ASSISTANT_MAX_TOOL_OUTPUT,
   ASSISTANT_MAX_TOOL_DETAILS,
+  ASSISTANT_THINKING_LEVELS,
   type AssistantConfig,
   type AssistantMessage,
   type AssistantModelConnection,
@@ -546,6 +547,38 @@ export function createPiDriver(
       )
         throw new Error("Select a chat model");
       const existing = new Set(selected.map((model) => model.id));
+      const levels = input.thinking_levels;
+      const capabilities = (model: Record<string, unknown>) => {
+        if (!levels)
+          return input.reasoning === undefined
+            ? {}
+            : { reasoning: input.reasoning };
+        const override = isRecord(previous?.modelOverrides)
+          ? previous.modelOverrides[String(model.id)]
+          : undefined;
+        const imported = {
+          ...(isRecord(model.thinkingLevelMap) ? model.thinkingLevelMap : {}),
+          ...(isRecord(override) && isRecord(override.thinkingLevelMap)
+            ? override.thinkingLevelMap
+            : {}),
+        };
+        return {
+          reasoning: levels.some((level) => level !== "off"),
+          // Missing lower-level mappings retain Pi's API-specific wire defaults.
+          thinkingLevelMap: Object.fromEntries(
+            ASSISTANT_THINKING_LEVELS.map((level) => [
+              level,
+              !levels.includes(level)
+                ? null
+                : typeof imported[level] === "string"
+                  ? imported[level]
+                  : level === "xhigh" || level === "max"
+                    ? level
+                    : undefined,
+            ]),
+          ),
+        };
+      };
       save(path, {
         ...saved,
         providers: {
@@ -555,7 +588,7 @@ export function createPiDriver(
             ...(!previous ? { baseUrl: input.base_url, api: input.api } : {}),
             // Pi applies modelOverrides after declarations. An explicit choice
             // must update that layer too, without replacing imported metadata.
-            ...(input.reasoning !== undefined &&
+            ...((input.reasoning !== undefined || input.thinking_levels) &&
             isRecord(previous?.modelOverrides)
               ? {
                   modelOverrides: Object.fromEntries(
@@ -563,7 +596,14 @@ export function createPiDriver(
                       ([id, value]) => [
                         id,
                         ids.has(id) && isRecord(value)
-                          ? { ...value, reasoning: input.reasoning }
+                          ? {
+                              ...value,
+                              ...capabilities(
+                                selected.find((model) => model.id === id) ?? {
+                                  id,
+                                },
+                              ),
+                            }
                           : value,
                       ],
                     ),
@@ -577,9 +617,7 @@ export function createPiDriver(
                       ...model,
                       baseUrl: input.base_url,
                       api: input.api,
-                      ...(input.reasoning !== undefined
-                        ? { reasoning: input.reasoning }
-                        : {}),
+                      ...capabilities(model),
                     }
                   : model,
               ),
@@ -587,9 +625,7 @@ export function createPiDriver(
                 .filter((id) => !existing.has(id))
                 .map((id) => ({
                   id,
-                  ...(input.reasoning !== undefined
-                    ? { reasoning: input.reasoning }
-                    : {}),
+                  ...capabilities({ id }),
                   ...(previous
                     ? { baseUrl: input.base_url, api: input.api }
                     : {}),

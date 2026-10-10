@@ -1866,14 +1866,14 @@ export function createAssistantService(options: {
           message: "Provider connected. Select a model to continue.",
         };
       } catch {
-        state.auth = {
-          id,
-          provider,
-          status: "failed",
-          message: controller.signal.aborted
-            ? "Login cancelled."
-            : "Provider login failed. Try again.",
-        };
+        state.auth = controller.signal.aborted
+          ? null
+          : {
+              id,
+              provider,
+              status: "failed",
+              message: "Provider login failed. Try again.",
+            };
       } finally {
         answer = undefined;
         authController = undefined;
@@ -2370,6 +2370,7 @@ export function createAssistantService(options: {
                     "model",
                     "models",
                     "reasoning",
+                    "thinking_levels",
                     "base_url",
                     "api",
                     "api_key",
@@ -2397,6 +2398,7 @@ export function createAssistantService(options: {
                     ),
                   ];
             const base_url = string(params.base_url, "base URL", 2000).trim();
+            const thinking_levels = params.thinking_levels;
             if (
               !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/.test(provider) ||
               /[\u0000-\u001f\u007f]/.test(model) ||
@@ -2406,7 +2408,15 @@ export function createAssistantService(options: {
               !isAssistantModelEndpoint(base_url) ||
               !isAssistantModelApi(params.api) ||
               (params.reasoning !== undefined &&
-                typeof params.reasoning !== "boolean")
+                typeof params.reasoning !== "boolean") ||
+              (thinking_levels !== undefined &&
+                (!Array.isArray(thinking_levels) ||
+                  !thinking_levels.length ||
+                  !thinking_levels.every(isAssistantThinkingLevel) ||
+                  new Set(thinking_levels).size !== thinking_levels.length ||
+                  (params.reasoning !== undefined &&
+                    params.reasoning !==
+                      thinking_levels.some((level) => level !== "off"))))
             )
               throw new Error("Invalid model connection");
             const api_key =
@@ -2426,6 +2436,7 @@ export function createAssistantService(options: {
                 ...(params.reasoning !== undefined
                   ? { reasoning: params.reasoning }
                   : {}),
+                ...(thinking_levels !== undefined ? { thinking_levels } : {}),
                 base_url,
                 api: params.api,
                 api_key,

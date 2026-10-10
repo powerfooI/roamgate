@@ -33,6 +33,7 @@ export function ThemedSelect({
   placeholder,
   disabled = false,
   searchPlaceholder,
+  emptyText = "No models found",
   side,
   contentClassName,
   onSelectedClose,
@@ -48,6 +49,7 @@ export function ThemedSelect({
   placeholder?: string;
   disabled?: boolean;
   searchPlaceholder?: string;
+  emptyText?: string;
   side?: "top" | "bottom";
   contentClassName?: string;
   onSelectedClose?: () => void;
@@ -130,7 +132,7 @@ export function ThemedSelect({
           ) : null}
           <CommandList ref={listRef} label={ariaLabel}>
             {searchPlaceholder ? (
-              <CommandEmpty>No models found</CommandEmpty>
+              <CommandEmpty>{emptyText}</CommandEmpty>
             ) : null}
             {options.map((option) => (
               <CommandItem
