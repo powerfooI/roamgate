@@ -5,6 +5,7 @@ import {
   ASSISTANT_MAX_TOOL_ARGUMENTS,
   ASSISTANT_MAX_TOOL_OUTPUT,
   isAssistantMessage,
+  isAssistantSnapshot,
   isAssistantMentionTarget,
   isAssistantMentionCatalog,
   isAssistantMentions,
@@ -156,6 +157,161 @@ test("task details bind run records to the selected task and validate stored out
       task_proposals: [{ ...message.task_proposals[0], status: "executing" }],
     }),
   ).toBe(false);
+});
+
+test("task management previews validate exact operations and targets while retaining legacy creation previews", () => {
+  const proposal = {
+    id: "proposal",
+    title: "Status",
+    prompt: "Summarize status",
+    scope: [{ connection_id: "local", workspace_id: "workspace" }],
+    schedule: { type: "interval", minutes: 10 },
+    status: "pending",
+    created_at: "2026-10-04T00:00:00Z",
+  };
+  const message = {
+    id: "message",
+    role: "assistant",
+    text: "Preview",
+    sent_at: "2026-10-04T00:00:00Z",
+    tools: [],
+    sources: [],
+    task_proposals: [proposal],
+  };
+  const snapshot = {
+    instance_id: "bridge",
+    revision: 0,
+    config: {
+      provider: "test",
+      model: "model",
+      credential_source: "assistant",
+      allowed_workspaces: [],
+    },
+    providers: [],
+    models: [],
+    messages: [message],
+    running: false,
+    error: null,
+    auth: null,
+  };
+  const accepts = (candidate: unknown) => {
+    const candidateMessage = { ...message, task_proposals: [candidate] };
+    const result = isAssistantMessage(candidateMessage);
+    expect(
+      isAssistantSnapshot({ ...snapshot, messages: [candidateMessage] }),
+    ).toBe(result);
+    return result;
+  };
+  expect(accepts(proposal)).toBe(true);
+  expect(accepts({ ...proposal, operation: "create" })).toBe(true);
+  expect(
+    accepts({
+      ...proposal,
+      operation: "create",
+      status: "confirmed",
+      task_id: "created-task",
+    }),
+  ).toBe(true);
+  for (const operation of ["update", "pause", "resume", "cancel", "delete"]) {
+    const management = { ...proposal, operation, task_id: "task" };
+    expect(
+      accepts({
+        ...management,
+        status: "confirmed",
+        detail: "The task was cancelled, but its run still needs attention.",
+      }),
+    ).toBe(true);
+    for (const status of ["pending", "confirmed", "cancelled"])
+      expect(accepts({ ...management, status })).toBe(true);
+    for (const task_id of [undefined, "", null, 123, ["task"]])
+      expect(accepts({ ...management, task_id })).toBe(false);
+    for (const invalid of [
+      { id: "" },
+      { id: 123 },
+      { status: "executing" },
+      { status: ["pending"] },
+      { created_at: "invalid" },
+      { created_at: null },
+      { title: " " },
+      { prompt: "" },
+      { scope: [] },
+      { schedule: { type: "interval", minutes: 0 } },
+      { notification_mode: "always" },
+      { detail: null },
+      { detail: ["cleanup failed"] },
+      { detail: "x".repeat(2001) },
+    ])
+      expect(accepts({ ...management, ...invalid })).toBe(false);
+  }
+  for (const operation of [
+    "stop",
+    "run_now",
+    "unknown",
+    "",
+    null,
+    123,
+    ["update"],
+    { toString: () => "delete" },
+  ])
+    expect(accepts({ ...proposal, operation, task_id: "task" })).toBe(false);
+});
+
+test("close action snapshots accept exact close kinds and reject malformed action metadata", () => {
+  const action = {
+    id: "proposal",
+    connection_id: "local",
+    workspace_id: "workspace",
+    runtime_generation: 1,
+    connection_label: "Local",
+    workspace_label: "Workspace",
+    kind: "close_workspace",
+    status: "pending",
+    created_at: "2026-10-04T00:00:00Z",
+    summary: "Close workspace",
+    detail: "Terminate its panes and processes",
+    params: {},
+  };
+  const message = {
+    id: "message",
+    role: "assistant",
+    text: "Preview",
+    sent_at: "2026-10-04T00:00:00Z",
+    tools: [],
+    sources: [],
+    actions: [action],
+  };
+  for (const kind of ["close_workspace", "close_pane", "close_agent"])
+    for (const status of [
+      "pending",
+      "executing",
+      "succeeded",
+      "failed",
+      "uncertain",
+      "cancelled",
+    ])
+      expect(
+        isAssistantMessage({
+          ...message,
+          actions: [{ ...action, kind, status }],
+        }),
+      ).toBe(true);
+  for (const invalid of [
+    { kind: "close_group" },
+    { kind: "delete_agent_history" },
+    { kind: ["close_pane"] },
+    { kind: null },
+    { status: ["pending"] },
+    { status: "confirmed" },
+    { runtime_generation: -1 },
+    { connection_label: null },
+    { workspace_label: 123 },
+    { params: { pane_id: ["pane"] } },
+    { params: { force: true } },
+    { params: null },
+  ])
+    expect(
+      isAssistantMessage({ ...message, actions: [{ ...action, ...invalid }] }),
+    ).toBe(false);
 });
 
 test("thinking metadata validates exact SDK levels and remains optional for old snapshots", async () => {

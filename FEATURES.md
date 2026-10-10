@@ -229,7 +229,12 @@ The conversation stays available when switching workspaces or connections.
   with the newest 32,000 characters retained if the output exceeds its budget.
 - Ask Ranger to create a workspace, worktree, or terminal tab, split a pane to
   the right or below, start an agent in a pane, or send a prompt and supporting
-  context to an agent. Each operation
+  context to an agent. Ranger can also close an agent, pane, or workspace.
+  Closing an agent closes its terminal pane and stops its running processes;
+  closing a workspace closes its panes. These operations do not delete Agent
+  history, checkout files, or Git worktrees. Individual pane/Agent closes in a
+  multi-pane worktree-root workspace are unavailable because Herdr cannot safely
+  prevent an implicit linked-workspace group close. Each operation
   appears as a preview with its host, workspace, parameters, and full text to be
   sent. **Confirm action** executes that exact proposal; **Cancel** dismisses it.
   Tab and split previews show the working directory and source pane when needed;
@@ -242,14 +247,14 @@ The conversation stays available when switching workspaces or connections.
   Ranger can use them.
 - **High-permission mode** in Settings is off by default. Enable it explicitly
   to authorize all current and newly discovered workspaces and let Ranger
-  execute supported management operations and create scheduled
+  execute supported management operations and manage scheduled
   tasks without individual confirmations. Results remain visible in the chat.
   Each question and task keeps its concrete captured scope. Disable the
   mode to restore normal-mode selections and require confirmation for subsequent
   operations. Older saved High-mode settings keep their selected-workspace scope
   until the broader permission is explicitly confirmed. Existing
-  tasks keep their saved permission mode; edit a task while this mode is enabled
-  to allow automatic operations in its future runs.
+  tasks keep their saved permission mode; edit a task through the Tasks form
+  while this mode is enabled to allow automatic operations in its future runs.
 - Closing the window hides it while work continues; the topbar indicator shows
   activity. **Stop** cancels the current turn. **New chat** saves the current
   conversation and starts an empty one, keeping the model connection and workspace
@@ -299,6 +304,14 @@ attention alerts. Click **Open Ranger task** or a system notification to view
 the associated run. Web Push delivers alerts with the page closed while the
 bridge is running. Stopped or cancelled runs and already recorded results stay
 silent.
+
+Ask Ranger to edit a task's title, prompt, schedule, or notification mode, or
+pause, resume, cancel, or delete a task. Chat edits preserve the saved workspace
+scope, model, and Agent references. In manual mode, review and confirm the
+exact task change; a manually confirmed edit makes its future runs manual too.
+High-permission mode applies supported changes directly without escalating a
+task previously saved in manual mode. A changed or expired preview requires a
+fresh proposal.
 
 **Pause** prevents future runs without interrupting the current run.
 **Stop run** ends only the current run. **Cancel task** ends current work and

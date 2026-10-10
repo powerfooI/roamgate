@@ -52,6 +52,36 @@ export function TaskProposalCard({
   busy: boolean;
   run: (action: string, params?: Record<string, unknown>) => Promise<boolean>;
 }) {
+  const operation = proposal.operation ?? "create";
+  const operationLabel = {
+    create: "Create task",
+    update: "Edit task",
+    pause: "Pause task",
+    resume: "Resume task",
+    cancel: "Cancel task",
+    delete: "Delete task",
+  }[operation];
+  const confirmedLabel = {
+    create: "Enabled",
+    update: "Updated",
+    pause: "Paused",
+    resume: "Resumed",
+    cancel: "Task cancelled",
+    delete: "Deleted",
+  }[operation];
+  const explanation = {
+    create:
+      "Confirm to enable this task. Workspace actions still need your confirmation.",
+    update:
+      "Confirm to update this task. Its scope, model and Agent references stay the same. Existing runs keep their instructions; future workspace actions require confirmation. A paused task stays paused.",
+    pause:
+      "Confirm to pause future scheduled runs. An already-started run will continue.",
+    resume: "Confirm to resume scheduled runs of this task.",
+    cancel:
+      "Confirm to permanently cancel this task and stop its active run. Its history will be kept.",
+    delete:
+      "Confirm to permanently delete this cancelled task and its private run history. This cannot be undone.",
+  }[operation];
   return (
     <div
       className="assistant-task-proposal assistant-action-card"
@@ -65,10 +95,16 @@ export function TaskProposalCard({
           {proposal.status === "pending"
             ? "Needs confirmation"
             : proposal.status === "confirmed"
-              ? "Enabled"
-              : "Cancelled"}
+              ? confirmedLabel
+              : "Preview cancelled"}
         </span>
       </div>
+      {operation !== "create" ? (
+        <>
+          <p>{operationLabel}</p>
+          <span className="assistant-hint">Task ID: {proposal.task_id}</span>
+        </>
+      ) : null}
       <p>{taskScheduleLabel(proposal.schedule)}</p>
       <span className="assistant-hint">
         {proposal.scope.length} authorized workspace
@@ -83,12 +119,12 @@ export function TaskProposalCard({
           ? "Ranger decides when to notify"
           : "Notify when each run finishes"}
       </span>
+      {proposal.detail ? (
+        <p className="assistant-hint">{proposal.detail}</p>
+      ) : null}
       {proposal.status === "pending" ? (
         <>
-          <p className="assistant-hint">
-            Confirm to enable this task. Workspace actions still need your
-            confirmation.
-          </p>
+          <p className="assistant-hint">{explanation}</p>
           <div className="assistant-action-buttons">
             <button
               type="button"
@@ -100,7 +136,7 @@ export function TaskProposalCard({
                 void run("task.confirm_proposal", { proposal_id: proposal.id });
               }}
             >
-              Confirm task
+              {operation === "create" ? "Confirm task" : `Confirm ${operation}`}
             </button>
             <button
               type="button"

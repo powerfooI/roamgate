@@ -9,6 +9,8 @@ import {
   callTaskTool,
   callWorkspaceTool,
   notificationTools,
+  type TaskToolHandler,
+  taskTools,
   type WorkspaceToolReader,
   type WorkspaceToolResult,
   workspaceTools,
@@ -80,6 +82,228 @@ test("task tool surfaces user-facing errors and masks unexpected failures", asyn
     expect((error as Error).message).toBe(masked);
     expect((error as Error).cause).toBeUndefined();
     expect(String(error)).not.toContain("synthetic-private-secret");
+  }
+});
+
+const taskManagementCalls = [
+  {
+    name: "propose_ranger_task_update",
+    kind: "update",
+    params: { task_id: "task", title: "Updated status" },
+  },
+  {
+    name: "propose_ranger_task_pause",
+    kind: "pause",
+    params: { task_id: "task" },
+  },
+  {
+    name: "propose_ranger_task_resume",
+    kind: "resume",
+    params: { task_id: "task" },
+  },
+  {
+    name: "propose_ranger_task_cancel",
+    kind: "cancel",
+    params: { task_id: "task" },
+  },
+  {
+    name: "propose_ranger_task_delete",
+    kind: "delete",
+    params: { task_id: "task" },
+  },
+] as const;
+
+test("task management tools expose explicit proposals and preserve callback results and signals", async () => {
+  expect(taskTools.map((tool) => tool.name)).toEqual([
+    "list_ranger_tasks",
+    "propose_ranger_task",
+    ...taskManagementCalls.map((call) => call.name),
+  ]);
+  const result = {
+    text: '{"status":"pending","requires_user_confirmation":true}',
+  };
+  const signal = new AbortController().signal;
+  for (const call of taskManagementCalls) {
+    const schema = taskTools.find(
+      (tool) => tool.name === call.name,
+    )!.parameters;
+    expect(JSON.parse(JSON.stringify(schema))).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      properties: { task_id: { type: "string", minLength: 1 } },
+      required: ["task_id"],
+    });
+    let handled = 0;
+    const handle: TaskToolHandler = async (kind, params, actualSignal) => {
+      handled++;
+      expect(kind).toBe(call.kind);
+      expect(params).toBe(call.params);
+      expect(actualSignal).toBe(signal);
+      return result;
+    };
+    expect(await callTaskTool(call.name, call.params, handle, signal)).toBe(
+      result,
+    );
+    expect(handled).toBe(1);
+  }
+});
+
+test("task management schemas reject missing targets, authority changes, and direct execution", async () => {
+  let handled = 0;
+  const handle: TaskToolHandler = async () => {
+    handled++;
+    return { text: "must not propose" };
+  };
+  for (const call of taskManagementCalls) {
+    for (const params of [
+      null,
+      [],
+      {},
+      { ...call.params, task_id: "" },
+      { ...call.params, task_id: 123 },
+      { ...call.params, task_id: null },
+      {
+        ...call.params,
+        scope: [{ connection_id: "other", workspace_id: "outside" }],
+      },
+      { ...call.params, model: "other-model" },
+      { ...call.params, mentions: [] },
+      { ...call.params, approval_mode: "auto" },
+      { ...call.params, execute: true },
+      { ...call.params, confirmed: true },
+      { ...call.params, expected_revision: "invented" },
+      { ...call.params, enabled: true },
+      { ...call.params, command: "synthetic-command" },
+    ]) {
+      await expect(callTaskTool(call.name, params, handle)).rejects.toThrow(
+        "Invalid task tool parameters.",
+      );
+    }
+    if (call.kind !== "update") {
+      for (const extra of [
+        { title: "Changed" },
+        { prompt: "Changed" },
+        { schedule: { type: "interval", minutes: 10 } },
+        { notification_mode: "agent" },
+        { force: true },
+      ])
+        await expect(
+          callTaskTool(call.name, { ...call.params, ...extra }, handle),
+        ).rejects.toThrow("Invalid task tool parameters.");
+    }
+  }
+  for (const name of [
+    "update_ranger_task",
+    "pause_ranger_task",
+    "delete_ranger_task",
+    "propose_ranger_task_stop",
+  ])
+    await expect(
+      callTaskTool(name, { task_id: "task" }, handle),
+    ).rejects.toThrow("Unknown task tool.");
+  expect(handled).toBe(0);
+});
+
+test("task update accepts only bounded editable fields and requires an actual edit", async () => {
+  const target = { task_id: "task" };
+  const edits = [
+    { title: "Updated status" },
+    { prompt: "Summarize only important changes" },
+    { notification_mode: "status" },
+    { notification_mode: "agent" },
+    { schedule: { type: "once", at: "2027-10-04T00:00:00Z" } },
+    { schedule: { type: "interval", minutes: 1 } },
+    { schedule: { type: "daily", time: "23:59", timezone: "UTC" } },
+    {
+      title: "Updated status",
+      prompt: "Watch for needed input",
+      notification_mode: "agent",
+      schedule: { type: "interval", minutes: 525600 },
+    },
+  ];
+  let handled = 0;
+  const handle: TaskToolHandler = async (kind, params) => {
+    handled++;
+    expect(kind).toBe("update");
+    expect(params.task_id).toBe("task");
+    return { text: "Pending preview" };
+  };
+  for (const edit of edits)
+    await expect(
+      callTaskTool(
+        "propose_ranger_task_update",
+        { ...target, ...edit },
+        handle,
+      ),
+    ).resolves.toEqual({ text: "Pending preview" });
+  for (const edit of [
+    {},
+    { title: "" },
+    { title: "a".repeat(101) },
+    { title: null },
+    { prompt: "" },
+    { prompt: "a".repeat(32001) },
+    { prompt: false },
+    { notification_mode: "always" },
+    { notification_mode: null },
+    { schedule: { type: "interval", minutes: 0 } },
+    { schedule: { type: "interval", minutes: 1.5 } },
+    { schedule: { type: "interval", minutes: 525601 } },
+    { schedule: { type: "daily", time: "24:00", timezone: "UTC" } },
+    { schedule: { type: "daily", time: "09:00", timezone: "" } },
+    {
+      schedule: {
+        type: "daily",
+        time: "09:00",
+        timezone: "UTC",
+        cron: "* * * * *",
+      },
+    },
+    { schedule: null },
+  ])
+    await expect(
+      callTaskTool(
+        "propose_ranger_task_update",
+        { ...target, ...edit },
+        handle,
+      ),
+    ).rejects.toThrow("Invalid task tool parameters.");
+  expect(handled).toBe(edits.length);
+});
+
+test("task management cancellations suppress callbacks and late receipts while failures stay private", async () => {
+  const message = "Task unavailable, invalid, or outside the authorized scope.";
+  for (const call of taskManagementCalls) {
+    const controller = new AbortController();
+    let handled = 0;
+    const handle: TaskToolHandler = async (_kind, _params, signal) => {
+      handled++;
+      expect(signal).toBe(controller.signal);
+      controller.abort(new Error("synthetic-private-secret"));
+      return { text: "late management receipt" };
+    };
+    await expect(
+      callTaskTool(call.name, call.params, handle, controller.signal),
+    ).rejects.toThrow(message);
+    await expect(
+      callTaskTool(call.name, call.params, handle, controller.signal),
+    ).rejects.toThrow(message);
+    expect(handled).toBe(1);
+    await expect(
+      callTaskTool(call.name, call.params, async () => {
+        throw new AssistantUserError("Task changed; review a fresh proposal.");
+      }),
+    ).rejects.toThrow("Task changed; review a fresh proposal.");
+    try {
+      await callTaskTool(call.name, call.params, async () => {
+        throw new Error("synthetic-private-secret");
+      });
+      throw new Error("expected failure");
+    } catch (error) {
+      expect((error as Error).message).toBe(message);
+      expect((error as Error).cause).toBeUndefined();
+      expect(String(error)).not.toContain("synthetic-private-secret");
+    }
   }
 });
 
@@ -367,6 +591,9 @@ test("action tools only return proposals through the supplied callback", async (
     { name: "propose_pane_split", parameters: { type: "object" } },
     { name: "propose_agent_start", parameters: { type: "object" } },
     { name: "propose_agent_prompt", parameters: { type: "object" } },
+    { name: "propose_workspace_close", parameters: { type: "object" } },
+    { name: "propose_pane_close", parameters: { type: "object" } },
+    { name: "propose_agent_close", parameters: { type: "object" } },
   ]);
   const result = { text: "Proposal pending user confirmation." };
   const signal = new AbortController().signal;
@@ -383,6 +610,9 @@ test("action tools only return proposals through the supplied callback", async (
     ],
     ["propose_agent_start", "start_agent", { pane_id: "pane", agent: "pi" }],
     ["propose_tab_create", "create_tab", {}],
+    ["propose_workspace_close", "close_workspace", {}],
+    ["propose_pane_close", "close_pane", { pane_id: "pane" }],
+    ["propose_agent_close", "close_agent", { pane_id: "pane" }],
     [
       "propose_pane_split",
       "split_pane",
@@ -437,6 +667,9 @@ test("action schemas require explicit targets and reject commands, environment a
     ["propose_workspace_create", { label: "Workspace" }],
     ["propose_worktree_create", { branch: "feature" }],
     ["propose_tab_create", {}],
+    ["propose_workspace_close", {}],
+    ["propose_pane_close", { pane_id: "pane" }],
+    ["propose_agent_close", { pane_id: "pane" }],
     ["propose_pane_split", { pane_id: "pane", direction: "right" }],
     ["propose_agent_start", { pane_id: "pane", agent: "pi" }],
     ["propose_agent_prompt", { pane_id: "pane", prompt: "Review." }],
@@ -469,7 +702,7 @@ test("action schemas require explicit targets and reject commands, environment a
         ),
       ).rejects.toThrow("Invalid action tool parameters.");
     }
-    if (name !== "propose_tab_create")
+    if (name !== "propose_tab_create" && name !== "propose_workspace_close")
       await expect(
         callActionTool(
           name,
@@ -493,6 +726,53 @@ test("action schemas require explicit targets and reject commands, environment a
       callActionTool("propose_workspace_create", params, propose),
     ).rejects.toThrow("Invalid action tool parameters.");
   }
+  expect(proposals).toBe(0);
+});
+
+test("close proposals reject caller-selected occupant identities, forced effects, and unrelated targets", async () => {
+  const target = { connection_id: "local", workspace_id: "workspace" };
+  let proposals = 0;
+  const propose: ActionToolProposer = async () => {
+    proposals++;
+    return { text: "must not propose" };
+  };
+  for (const name of [
+    "propose_workspace_close",
+    "propose_pane_close",
+    "propose_agent_close",
+  ]) {
+    const params =
+      name === "propose_workspace_close"
+        ? target
+        : { ...target, pane_id: "pane" };
+    for (const extra of [
+      { force: true },
+      { close_group: true },
+      { terminal_id: "terminal" },
+      { agent_identity: "invented-session" },
+      { runtime_generation: 123 },
+      { expected_panes: ["pane"] },
+      { tab_id: "tab" },
+      { delete_history: true },
+      { confirm: true },
+      { execute: true },
+    ])
+      await expect(
+        callActionTool(name, { ...params, ...extra }, propose),
+      ).rejects.toThrow("Invalid action tool parameters.");
+  }
+  await expect(
+    callActionTool(
+      "propose_workspace_close",
+      { ...target, pane_id: "pane" },
+      propose,
+    ),
+  ).rejects.toThrow("Invalid action tool parameters.");
+  for (const name of ["propose_pane_close", "propose_agent_close"])
+    for (const pane_id of [null, 123, ["pane"]])
+      await expect(
+        callActionTool(name, { ...target, pane_id }, propose),
+      ).rejects.toThrow("Invalid action tool parameters.");
   expect(proposals).toBe(0);
 });
 
