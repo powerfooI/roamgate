@@ -2,7 +2,10 @@ import { expect, test } from "bun:test";
 import { Window } from "happy-dom";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { AssistantAction } from "../../../shared/assistant";
+import {
+  type AssistantAction,
+  isAssistantMessage,
+} from "../../../shared/assistant";
 import { ActionCard } from "./AssistantPanel";
 
 test("agent proposals keep exact targets reviewable and delivery outcomes distinct", async () => {
@@ -155,3 +158,69 @@ test("agent proposals keep exact targets reviewable and delivery outcomes distin
     await browser.happyDOM.close();
   }
 });
+
+test.each(["close_workspace", "close_pane", "close_agent"] as const)(
+  "%s cards retain exact close targets, consequences and approval controls",
+  async (kind) => {
+    const browser = new Window({ url: "http://localhost" });
+    const action: AssistantAction = {
+      id: `review-${kind}`,
+      kind,
+      status: "pending",
+      connection_id: "local",
+      connection_label: "Local",
+      workspace_id: "w1",
+      workspace_label: "Project",
+      runtime_generation: 7,
+      created_at: "2026-10-10T10:00:00Z",
+      params:
+        kind === "close_workspace"
+          ? { pane_count: "1", panes: "w1:p1 (pi; terminal term1)" }
+          : {
+              pane_id: "w1:p1",
+              terminal_id: "term1",
+              agent: "pi",
+              closes_workspace: "true",
+            },
+      summary:
+        "Close the displayed target and terminate its running processes. Unsaved terminal work may be lost. Saved agent history and worktree files will not be deleted.",
+      detail: "",
+    };
+    try {
+      expect(
+        isAssistantMessage({
+          id: "message",
+          role: "assistant",
+          text: "Review the close action",
+          sent_at: action.created_at,
+          tools: [],
+          sources: [],
+          actions: [action],
+        }),
+      ).toBe(true);
+      browser.document.body.innerHTML = renderToStaticMarkup(
+        createElement(ActionCard, {
+          action,
+          busy: false,
+          running: false,
+          run: async () => true,
+        }),
+      );
+      const body = browser.document.body;
+      expect(body.textContent).toContain(action.summary);
+      expect(body.textContent).toContain("Needs confirmation");
+      expect(body.textContent).toContain("Confirm action");
+      expect(body.textContent).toContain("Cancel");
+      expect(body.textContent).toContain("Project");
+      expect(body.textContent).toContain("w1:p1");
+      expect(body.textContent).toContain("term1");
+      expect(body.textContent).not.toContain("Start this agent");
+      if (kind !== "close_workspace") {
+        expect(body.textContent).toContain("Target terminalterm1");
+        expect(body.textContent).toContain("Also closes workspaceYes");
+      }
+    } finally {
+      await browser.happyDOM.close();
+    }
+  },
+);

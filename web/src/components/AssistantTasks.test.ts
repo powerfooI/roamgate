@@ -978,4 +978,71 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
       await ui.close();
     }
   });
+
+  test.each([
+    ["update", "Edit task", "Updated", "Existing runs keep their instructions"],
+    ["pause", "Pause task", "Paused", "already-started run will continue"],
+    ["resume", "Resume task", "Resumed", "resume scheduled runs"],
+    ["cancel", "Cancel task", "Task cancelled", "stop its active run"],
+    [
+      "delete",
+      "Delete task",
+      "Deleted",
+      "private run history. This cannot be undone",
+    ],
+  ] as const)(
+    "%s task proposals identify their target and accurately describe confirmation",
+    async (operation, label, status, warning) => {
+      const ui = await install();
+      try {
+        const proposal: AssistantTaskProposal = {
+          ...task("original-task"),
+          id: "preview",
+          task_id: "original-task",
+          operation,
+          status: "pending",
+        };
+        const confirm = mock(async () => true);
+        await React.act(async () =>
+          ui.root.render(
+            React.createElement(TaskProposalCard, {
+              proposal,
+              busy: false,
+              run: confirm,
+            }),
+          ),
+        );
+        expect(confirm).not.toHaveBeenCalled();
+        expect(ui.container.textContent).toContain(label);
+        expect(ui.container.textContent).toContain("Task ID: original-task");
+        expect(ui.container.textContent).toContain(warning);
+        expect(ui.container.textContent).not.toContain("Enabled");
+        await ui.click(`Confirm ${operation}`);
+        expect(confirm).toHaveBeenCalledWith("task.confirm_proposal", {
+          proposal_id: "preview",
+        });
+        await React.act(async () =>
+          ui.root.render(
+            React.createElement(TaskProposalCard, {
+              proposal: {
+                ...proposal,
+                status: "confirmed",
+                detail: "Operation completed with a cleanup warning",
+              },
+              busy: false,
+              run: confirm,
+            }),
+          ),
+        );
+        expect(ui.container.textContent).toContain(status);
+        expect(ui.container.textContent).toContain(
+          "Operation completed with a cleanup warning",
+        );
+        expect(ui.container.textContent).not.toContain("Enabled");
+        expect(ui.container.querySelectorAll("button")).toHaveLength(0);
+      } finally {
+        await ui.close();
+      }
+    },
+  );
 }

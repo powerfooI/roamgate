@@ -462,8 +462,9 @@ the scope on the server before binding a reader. Runtime leases remain private
 to the context layer.
 
 The model receives `workspace_status`, `workspace_history`, `workspace_diff`,
-and `workspace_terminal`, plus six proposal tools for workspace creation,
-worktree creation, tab creation, pane splitting, agent startup, and agent prompts.
+and `workspace_terminal`, plus proposal tools for workspace creation,
+worktree creation, tab creation, pane splitting, agent startup, agent prompts,
+and closing agents, panes, and workspaces.
 By default, proposal tools prepare previews for user confirmation. In explicitly
 enabled high-permission mode, the service executes the same validated operations
 and returns their actual receipts to the model. Built-in tools and discovered extensions, skills,
@@ -505,6 +506,15 @@ Herdr's default terminal tab in the workspace's verified directory. Pane splitti
 pins the source tab, pane, terminal, working directory, and right/down direction;
 confirmation rechecks these identities before changing the layout. Result reads
 verify the created tab or pane and include its identifiers in the receipt.
+Close previews pin the affected panes and their occupants. Closing an Agent
+uses the same pane-closing semantics as the UI; it does not delete Agent history.
+Workspace closure does not remove checkout files or Git worktrees. Last-pane
+closure uses `workspace.close` without group consent. Individual pane/Agent
+closes are rejected for multi-pane worktree-root workspaces: the native
+`pane.close` protocol cannot atomically prevent an implicit group close when
+another pane disappears. Other close operations revalidate layout and occupant
+identities before dispatch; the native API does not provide compare-and-close
+identity preconditions.
 Models can read `workspace_status` after confirmation before proposing an agent
 start in a newly created pane. Authenticated bridge
 browsers can confirm or cancel the shared preview through `action.confirm` and
@@ -602,8 +612,20 @@ original identities and current global workspace permissions before reading or
 proposing operations. Automatic management execution additionally requires the
 task's saved `approval_mode` and the live global mode to both be `auto`. Existing
 manual tasks are not escalated when the global mode changes; editing a task
-captures the currently selected mode for future runs. Disabling the global mode
-also revokes automatic execution in existing task children.
+through the Tasks form captures the currently selected mode for future runs.
+Chat task-edit tools preserve the saved model, scope, and Agent references;
+they edit title, prompt, schedule, and notification mode. A manually confirmed
+edit downgrades future runs to manual approval. An automatically executed edit
+retains the existing task mode and does not elevate a previously manual task.
+Task management proposals use the same manual/high-permission policy as creation
+and reject stale task revisions before applying a change. Update and resume
+revalidate original workspace/Agent identities and the saved model. Local-only
+pause, cancel, and delete still recheck the captured and current workspace
+grants, but do not require a retired model or monitored Agent to remain live.
+Management previews expire after ten minutes or bridge restart. Deletion
+requires prior cancellation and removes the saved task and its private run
+history. Disabling the global mode also revokes automatic execution in existing
+task children.
 
 One scheduled model run is admitted at a time; interactive chat has a separate
 service. Interrupted runs waiting for their original connections return to the
@@ -618,8 +640,10 @@ Interval schedules preserve their cadence, daily schedules use explicit IANA
 timezones (skip gaps, first overlap occurrence), and one-time schedules admit
 their scheduled occurrence only once. Manual runs do not resume a paused task
 or change its schedule. Pause leaves current work running; Stop ends only the
-current run; Cancel stops it and disables future admissions. Editing preserves
-paused status.
+current run; Cancel stops it and disables future admissions. Pause also cancels
+a non-manual occurrence still in asynchronous admission or child preparation
+before model dispatch. Editing preserves paused status and any queued/admitted
+run's original instruction snapshot; later occurrences use the edited template.
 Cancelled tasks can be deleted. Up to 50 tasks and the latest 20 runs per task are
 retained. List snapshots contain task and run summaries; full run transcripts are
 fetched separately through `bridge.assistant.task.get`.

@@ -5204,3 +5204,450 @@ test("monitoring an earlier Agent retains its identity after a workspace-only me
     f.service.peek().messages.at(-1)!.task_proposals![0]!.mentions,
   ).toContainEqual(mentionedAgent);
 });
+
+describe("Ranger task management tools", () => {
+  test.each(["manual", "auto"] as const)(
+    "%s mode applies task edits and controls with accurate receipts",
+    async (mode) => {
+      let kind: "update" | "pause" | "resume" | "cancel" | "delete" = "update";
+      let taskId = "";
+      let receipt: Record<string, unknown> | undefined;
+      const f = setup({
+        run: async (input) => {
+          receipt = JSON.parse(
+            (
+              await input.task!(kind, {
+                task_id: taskId,
+                ...(kind === "update"
+                  ? {
+                      title: "Edited from chat",
+                      prompt: "Changed instructions",
+                    }
+                  : {}),
+              })
+            ).text,
+          );
+          return [];
+        },
+      });
+      stableTaskIdentity(f.context);
+      await f.service.handle("configure", configured);
+      if (mode === "auto")
+        await f.service.handle("configure_approval", { approval_mode: "auto" });
+      await f.service.handle("task.create", {
+        request_id: randomUUID(),
+        title: "Original",
+        prompt: "Original instructions",
+        scope: configured.allowed_workspaces,
+        schedule: { type: "interval", minutes: 60 },
+      });
+      taskId = f.service.peek().tasks![0]!.id;
+      for (const operation of [
+        "update",
+        "pause",
+        "resume",
+        "cancel",
+        "delete",
+      ] as const) {
+        kind = operation;
+        receipt = undefined;
+        await f.service.handle("send", {
+          request_id: randomUUID(),
+          text: `${operation} the task`,
+        });
+        await until(() => !f.service.peek().running);
+        expect(receipt).toMatchObject({
+          task_id: taskId,
+          operation,
+          status: mode === "auto" ? "confirmed" : "pending",
+        });
+        expect(isAssistantSnapshot(f.service.peek())).toBe(true);
+        if (mode === "manual") {
+          if (operation === "update")
+            expect(f.service.peek().tasks![0]!.title).toBe("Original");
+          if (operation === "delete")
+            expect(f.service.peek().tasks).toHaveLength(1);
+          await f.service.handle("task.confirm_proposal", {
+            proposal_id: receipt!.id,
+          });
+        }
+        expect(
+          f.service.peek().messages.at(-1)?.task_proposals?.[0]?.status,
+        ).toBe("confirmed");
+        if (operation === "delete")
+          expect(f.service.peek().tasks).toHaveLength(0);
+        else
+          expect(f.service.peek().tasks![0]).toMatchObject({
+            id: taskId,
+            title: "Edited from chat",
+            status:
+              operation === "pause"
+                ? "paused"
+                : operation === "cancel"
+                  ? "cancelled"
+                  : "active",
+          });
+      }
+    },
+  );
+
+  test("a manual edit downgrades an old High permission task without changing model or bound references", async () => {
+    let id = "";
+    let receipt: Record<string, unknown> | undefined;
+    const f = setup({
+      run: async (input) => {
+        receipt = JSON.parse(
+          (
+            await input.task!("update", {
+              task_id: id,
+              prompt: "Newly approved instructions",
+            })
+          ).text,
+        );
+        return [];
+      },
+    });
+    stableTaskIdentity(f.context);
+    f.context.bindMentions = async (_captured, mentions) =>
+      structuredClone(mentions);
+    await f.service.handle("configure", configured);
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    await f.service.handle("task.create", {
+      request_id: randomUUID(),
+      title: "Monitor",
+      prompt: "Original prompt",
+      mentions: [mentionedAgent],
+      scope: configured.allowed_workspaces,
+      schedule: { type: "interval", minutes: 60 },
+    });
+    id = f.service.peek().tasks![0]!.id;
+    expect(f.service.peek().tasks![0]?.approval_mode).toBe("auto");
+    await f.service.handle("configure_approval", { approval_mode: "manual" });
+    await f.service.handle("send", {
+      request_id: randomUUID(),
+      text: "Edit the task",
+    });
+    await until(() => !f.service.peek().running);
+    await f.service.handle("task.confirm_proposal", {
+      proposal_id: receipt!.id,
+    });
+    await f.service.handle("configure_approval", { approval_mode: "auto" });
+    expect(f.service.peek().tasks![0]).toMatchObject({
+      approval_mode: "manual",
+      model: { provider: "test", id: "model" },
+      mentions: [mentionedAgent],
+      prompt: "Newly approved instructions",
+    });
+  });
+
+  test("cleanup remains available after its original model and monitored Agent disappear", async () => {
+    let id = "";
+    let operation: "pause" | "cancel" | "delete" = "pause";
+    let receipt: Record<string, unknown> | undefined;
+    const f = setup({
+      run: async (input) => {
+        receipt = JSON.parse(
+          (await input.task!(operation, { task_id: id })).text,
+        );
+        return [];
+      },
+    });
+    stableTaskIdentity(f.context);
+    f.context.bindMentions = async (_captured, mentions) =>
+      structuredClone(mentions);
+    await f.service.handle("configure", configured);
+    await f.service.handle("task.create", {
+      request_id: randomUUID(),
+      title: "Old monitor",
+      prompt: "Original prompt",
+      mentions: [mentionedAgent],
+      scope: configured.allowed_workspaces,
+      schedule: { type: "interval", minutes: 60 },
+    });
+    id = f.service.peek().tasks![0]!.id;
+    f.context.bindMentions = async () => {
+      throw new Error("Monitored session ended");
+    };
+    f.driver.catalog = async () => ({
+      ...structuredClone(catalog),
+      models: [{ provider: "test", id: "replacement", label: "Replacement" }],
+    });
+    await f.service.handle("configure_chat", {
+      provider: "test",
+      model: "replacement",
+      thinking_level: null,
+      expected: chatSelection(f.service.peek()),
+    });
+    for (operation of ["pause", "cancel", "delete"] as const) {
+      await f.service.handle("send", {
+        request_id: randomUUID(),
+        text: `${operation} old task`,
+      });
+      await until(() => !f.service.peek().running);
+      expect(receipt).toMatchObject({ operation, status: "pending" });
+      await f.service.handle("task.confirm_proposal", {
+        proposal_id: receipt!.id,
+      });
+    }
+    expect(f.service.peek().tasks).toHaveLength(0);
+  });
+
+  test("a tool cannot propose management of a task outside the captured turn", async () => {
+    let taskId = "";
+    let failure = "";
+    const other = { ...workspace, workspace_id: "other" };
+    const f = setup({
+      run: async (input) => {
+        try {
+          await input.task!("pause", { task_id: taskId });
+        } catch (error) {
+          failure = String(error);
+        }
+        return [];
+      },
+    });
+    stableTaskIdentity(f.context);
+    f.context.catalog = async () => ({
+      workspaces: [workspace, other],
+      errors: [],
+    });
+    f.context.captureScope = async (refs) =>
+      refs.map((ref) => (ref.workspace_id === "other" ? other : workspace));
+    await f.service.handle("configure", {
+      ...configured,
+      allowed_workspaces: [workspace, other].map(
+        ({ connection_id, workspace_id }) => ({ connection_id, workspace_id }),
+      ),
+    });
+    await f.service.handle("task.create", {
+      request_id: randomUUID(),
+      title: "Other task",
+      prompt: "Original",
+      scope: [{ connection_id: "local", workspace_id: "other" }],
+      schedule: { type: "interval", minutes: 60 },
+    });
+    taskId = f.service.peek().tasks![0]!.id;
+    await f.service.handle("send", {
+      request_id: randomUUID(),
+      text: "Pause task",
+      scope: configured.allowed_workspaces,
+    });
+    await until(() => !f.service.peek().running);
+    expect(failure).toContain("authorized scope");
+    expect(f.service.peek().messages.at(-1)?.task_proposals).toBeUndefined();
+    expect(f.service.peek().tasks![0]!.status).toBe("active");
+  });
+
+  test("pausing during child preparation prevents model dispatch and preserves one-shot resume", async () => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    let blocked = true;
+    let entered = false;
+    let dispatches = 0;
+    const gate = Promise.withResolvers<void>();
+    const f = setup({}, () => ({
+      catalog: async () => {
+        if (blocked) {
+          entered = true;
+          await gate.promise;
+        }
+        return structuredClone(catalog);
+      },
+      login: async () => {},
+      run: async () => {
+        dispatches++;
+        return [];
+      },
+      stop: async () => {},
+      dispose: async () => {},
+    }));
+    stableTaskIdentity(f.context);
+    await f.service.handle("configure", configured);
+    await f.service.handle("task.create", {
+      request_id: randomUUID(),
+      title: "Once",
+      prompt: "Check",
+      scope: configured.allowed_workspaces,
+      schedule: { type: "once", at: "2026-10-04T00:01:00.000Z" },
+    });
+    const taskId = f.service.peek().tasks![0]!.id;
+    await f.service.resume();
+    jest.advanceTimersByTime(60_000);
+    for (let index = 0; index < 100; index++) await Promise.resolve();
+    expect(entered).toBe(true);
+    await f.service.handle("task.pause", { task_id: taskId });
+    blocked = false;
+    gate.resolve();
+    for (let index = 0; index < 200; index++) await Promise.resolve();
+    expect(dispatches).toBe(0);
+    expect(f.service.peek().tasks![0]!.current_run?.status).toBe("queued");
+    await f.service.handle("task.resume", { task_id: taskId });
+    jest.advanceTimersByTime(0);
+    for (let index = 0; index < 200; index++) await Promise.resolve();
+    expect(dispatches).toBe(1);
+    expect(f.service.peek().tasks![0]!.last_run?.status).toBe("succeeded");
+  });
+});
+
+test("direct task edits capture the original revision before asynchronous preparation", async () => {
+  const f = setup();
+  stableTaskIdentity(f.context);
+  await f.service.handle("configure", configured);
+  const input = {
+    title: "Original",
+    prompt: "Original prompt",
+    scope: configured.allowed_workspaces,
+    schedule: { type: "interval", minutes: 60 },
+  };
+  await f.service.handle("task.create", { ...input, request_id: randomUUID() });
+  const taskId = f.service.peek().tasks![0]!.id;
+  const originalRecovery = f.context.recoveryScope!;
+  let block = true;
+  const entered = Promise.withResolvers<void>();
+  const gate = Promise.withResolvers<void>();
+  f.context.recoveryScope = async (...args) => {
+    if (block) {
+      entered.resolve();
+      await gate.promise;
+    }
+    return originalRecovery(...args);
+  };
+  const older = f.service
+    .handle("task.update", { ...input, task_id: taskId, title: "Older edit" })
+    .catch((error) => error);
+  await entered.promise;
+  block = false;
+  await f.service.handle("task.update", {
+    ...input,
+    task_id: taskId,
+    title: "Newer edit",
+  });
+  gate.resolve();
+  expect(await older).toBeInstanceOf(Error);
+  expect(f.service.peek().tasks![0]!.title).toBe("Newer edit");
+});
+
+test.each([
+  { cleanupFailure: false, switchSession: false },
+  { cleanupFailure: true, switchSession: false },
+  { cleanupFailure: true, switchSession: true },
+])(
+  "committed cancellation survives concurrent proposals and session changes: %j",
+  async ({ cleanupFailure, switchSession }) => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    let taskId = "";
+    let next = false;
+    let childStarted = false;
+    const childGate = Promise.withResolvers<void>();
+    const input = {
+      title: "Monitor",
+      prompt: "Observe",
+      scope: configured.allowed_workspaces,
+      schedule: { type: "interval", minutes: 60 },
+    };
+    const f = setup(
+      {
+        run: async (run) => {
+          if (!next) await run.task!("cancel", { task_id: taskId });
+          else await run.task!("create", input);
+          return [];
+        },
+      },
+      () => ({
+        catalog: async () => catalog,
+        login: async () => {},
+        stop: async () => {
+          if (cleanupFailure) throw new Error("Child stop failed");
+        },
+        dispose: async () => {},
+        run: async () => {
+          childStarted = true;
+          await childGate.promise;
+          return [];
+        },
+      }),
+    );
+    let confirming: Promise<unknown> | undefined;
+    try {
+      stableTaskIdentity(f.context);
+      await f.service.handle("configure", configured);
+      await f.service.handle("task.create", {
+        ...input,
+        request_id: randomUUID(),
+      });
+      taskId = f.service.peek().tasks![0]!.id;
+      await f.service.resume();
+      await f.service.handle("task.run_now", { task_id: taskId });
+      jest.advanceTimersByTime(0);
+      await flushTasks();
+      expect(childStarted).toBe(true);
+      await f.service.handle("send", {
+        request_id: randomUUID(),
+        text: "Cancel monitor",
+      });
+      await flushTasks();
+      const proposalId = f.service.peek().messages.at(-1)!
+        .task_proposals![0]!.id;
+      confirming = f.service
+        .handle("task.confirm_proposal", { proposal_id: proposalId })
+        .catch((error) => error);
+      await flushTasks();
+      const receipt = () =>
+        f.service
+          .peek()
+          .messages.flatMap((message) => message.task_proposals ?? [])
+          .find((proposal) => proposal.id === proposalId);
+      expect(f.service.peek().tasks![0]!.status).toBe("cancelled");
+      expect(receipt()?.status).toBe("confirmed");
+      const saved = JSON.parse(
+        readFileSync(join(f.directory, "state.json"), "utf8"),
+      ) as AssistantSnapshot;
+      expect(
+        saved.messages
+          .flatMap((message) => message.task_proposals ?? [])
+          .find((proposal) => proposal.id === proposalId)?.status,
+      ).toBe("confirmed");
+      const originalSession = f.service.peek().session_id;
+      if (switchSession) await f.service.handle("new_session", {});
+      next = true;
+      await f.service.handle("send", {
+        request_id: randomUUID(),
+        text: "Create another monitor",
+      });
+      await flushTasks();
+      expect(receipt()?.status).toBe(switchSession ? undefined : "confirmed");
+      expect(f.service.peek().messages.at(-1)!.task_proposals![0]!.status).toBe(
+        "pending",
+      );
+      childGate.resolve();
+      const result = await confirming;
+      // Prune the manager's completed receipt before reopening its archive.
+      await f.service.handle("send", {
+        request_id: randomUUID(),
+        text: "Create one more monitor",
+      });
+      await flushTasks();
+      if (switchSession) {
+        expect(receipt()).toBeUndefined();
+        await f.service.handle("select_session", {
+          session_id: originalSession,
+        });
+      }
+      expect(receipt()?.status).toBe("confirmed");
+      if (cleanupFailure) {
+        expect(result).toBeInstanceOf(Error);
+        expect(receipt()?.detail).toContain("could not be fully stopped");
+        const updated = JSON.parse(
+          readFileSync(join(f.directory, "state.json"), "utf8"),
+        ) as AssistantSnapshot;
+        expect(
+          updated.messages
+            .flatMap((message) => message.task_proposals ?? [])
+            .find((proposal) => proposal.id === proposalId)?.detail,
+        ).toBe(receipt()?.detail);
+      }
+    } finally {
+      childGate.resolve();
+      await confirming;
+    }
+  },
+);

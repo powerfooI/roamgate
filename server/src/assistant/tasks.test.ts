@@ -5,7 +5,9 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,6 +24,7 @@ import type {
   AssistantTaskNotification,
 } from "../../../shared/assistant";
 import { AssistantRecoveryNotReadyError } from "./context";
+import { AssistantUserError } from "./errors";
 import { openTaskStorage } from "./task-storage";
 import {
   createAssistantTasks,
@@ -678,6 +681,7 @@ function fixture(
     stopped: boolean;
     disposing: boolean;
     disposed: boolean;
+    disposeCalls: number;
     stopGate?: ReturnType<typeof Promise.withResolvers<void>>;
     disposeGate?: ReturnType<typeof Promise.withResolvers<void>>;
     complete(pending?: boolean, error?: string | null): void;
@@ -716,6 +720,7 @@ function fixture(
         stopped: false,
         disposing: false,
         disposed: false,
+        disposeCalls: 0,
         stopGate: undefined as
           | ReturnType<typeof Promise.withResolvers<void>>
           | undefined,
@@ -792,6 +797,7 @@ function fixture(
         },
         snapshot: () => structuredClone(snapshot),
         dispose: async () => {
+          observed.disposeCalls++;
           observed.disposing = true;
           await observed.disposeGate?.promise;
           observed.disposed = true;
@@ -1987,4 +1993,703 @@ test("task input accepts the shared inventory bound and rejects overflow", () =>
       ],
     }),
   ).toThrow("Invalid task input");
+});
+
+test("management previews preserve task identity and require confirmation for each edit and control", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const input = prepared();
+  input.input.mentions = [agentMention()];
+  input.config.approval_mode = "auto";
+  const task = await f.manager.create(input, randomUUID());
+  const original = f.manager.prepared(task.id);
+  const edit = await f.manager.proposeManagement(
+    "update",
+    task.id,
+    {
+      title: "New title",
+      prompt: "New instructions",
+      notification_mode: "agent",
+    },
+    () => {},
+  );
+  expect(edit).toMatchObject({
+    operation: "update",
+    task_id: task.id,
+    status: "pending",
+    prompt: "New instructions",
+  });
+  expect(f.manager.detail(task.id).task.prompt).toBe(original.input.prompt);
+  await f.manager.confirmProposal(edit.id);
+  await f.manager.confirmProposal(edit.id);
+  expect(f.manager.prepared(task.id)).toMatchObject({
+    input: {
+      title: "New title",
+      prompt: "New instructions",
+      mentions: original.input.mentions,
+      scope: original.input.scope,
+    },
+    config: { ...original.config, approval_mode: "manual" },
+    targets: original.targets,
+  });
+  const pause = await f.manager.proposeManagement(
+    "pause",
+    task.id,
+    {},
+    () => {},
+  );
+  expect(f.manager.detail(task.id).task.status).toBe("active");
+  await f.manager.confirmProposal(pause.id);
+  expect(f.manager.detail(task.id).task.status).toBe("paused");
+  const resume = await f.manager.proposeManagement(
+    "resume",
+    task.id,
+    {},
+    () => {},
+  );
+  await f.manager.confirmProposal(resume.id);
+  expect(f.manager.detail(task.id).task.status).toBe("active");
+  await expect(
+    f.manager.proposeManagement("delete", task.id, {}, () => {}),
+  ).rejects.toThrow("Cancel this task");
+  const cancel = await f.manager.proposeManagement(
+    "cancel",
+    task.id,
+    {},
+    () => {},
+  );
+  await f.manager.confirmProposal(cancel.id);
+  expect(f.manager.detail(task.id).task.status).toBe("cancelled");
+  const remove = await f.manager.proposeManagement(
+    "delete",
+    task.id,
+    {},
+    () => {},
+  );
+  expect(f.manager.summaries()).toHaveLength(1);
+  await f.manager.confirmProposal(remove.id);
+  await f.manager.confirmProposal(remove.id);
+  expect(f.manager.summaries()).toHaveLength(0);
+  expect(f.manager.proposal(remove.id)?.status).toBe("confirmed");
+  expect(fixture(f.directory).manager.proposal(remove.id)?.operation).toBe(
+    "delete",
+  );
+});
+
+test("task management validates edit fields and original scope before permission checks", async () => {
+  let validations = 0;
+  const f = fixture(undefined, async () => {
+    validations++;
+  });
+  const task = await f.manager.create(prepared(), randomUUID());
+  validations = 0;
+  await expect(
+    f.manager.proposeManagement("pause", task.id, {}, () => {
+      throw new Error("Outside turn scope");
+    }),
+  ).rejects.toThrow("Outside turn scope");
+  for (const changes of [
+    {},
+    { scope: [] },
+    { model: "other" },
+    { mentions: [] },
+    { approval_mode: "auto" },
+    { title: "" },
+    { schedule: { type: "interval", minutes: 0 } },
+  ])
+    await expect(
+      f.manager.proposeManagement("update", task.id, changes, () => {}),
+    ).rejects.toThrow();
+  await expect(
+    f.manager.proposeManagement(
+      "pause",
+      task.id,
+      { title: "ignored" },
+      () => {},
+    ),
+  ).rejects.toThrow();
+  expect(validations).toBe(0);
+});
+
+test.each(["update", "pause", "resume", "cancel", "delete"] as const)(
+  "%s management revalidates identity and scope when confirmed",
+  async (operation) => {
+    const f = fixture();
+    const task = await f.manager.create(prepared(), randomUUID());
+    if (operation === "delete") await f.manager.control("cancel", task.id);
+    let allowed = true;
+    const preview = await f.manager.proposeManagement(
+      operation,
+      task.id,
+      operation === "update" ? { title: "Edited" } : {},
+      () => {
+        if (!allowed) throw new Error("Scope revoked");
+      },
+    );
+    const before = f.manager.detail(task.id);
+    f.deny(true);
+    await expect(f.manager.confirmProposal(preview.id)).rejects.toThrow(
+      "identity",
+    );
+    f.deny(false);
+    allowed = false;
+    await expect(f.manager.confirmProposal(preview.id)).rejects.toThrow(
+      "Scope revoked",
+    );
+    expect(f.manager.detail(task.id)).toEqual(before);
+    expect(f.manager.proposal(preview.id)?.status).toBe("pending");
+  },
+);
+
+test("management rejects concurrent edits before and after proposal admission", async () => {
+  let block = false;
+  const gate = Promise.withResolvers<void>();
+  const f = fixture(undefined, async () => {
+    if (block) await gate.promise;
+  });
+  const task = await f.manager.create(prepared(), randomUUID());
+  block = true;
+  const latePreview = f.manager
+    .proposeManagement("update", task.id, { title: "Stale edit" }, () => {})
+    .catch((error) => error);
+  await flush();
+  block = false;
+  const newer = prepared();
+  newer.input.title = "Newer edit";
+  await f.manager.update(task.id, newer);
+  gate.resolve();
+  expect(await latePreview).toBeInstanceOf(Error);
+  const pause = await f.manager.proposeManagement(
+    "pause",
+    task.id,
+    {},
+    () => {},
+  );
+  newer.input.prompt = "Newer prompt";
+  await f.manager.update(task.id, newer);
+  await expect(f.manager.confirmProposal(pause.id)).rejects.toThrow("changed");
+  expect(f.manager.detail(task.id).task).toMatchObject({
+    title: "Newer edit",
+    prompt: "Newer prompt",
+    status: "active",
+  });
+});
+
+test.each(["revoke", "edit", "cancel_preview", "abort"] as const)(
+  "management confirmation does not race %s during permission validation",
+  async (change) => {
+    let block = false;
+    let allowed = true;
+    const gate = Promise.withResolvers<void>();
+    const f = fixture(undefined, async () => {
+      if (block) await gate.promise;
+    });
+    const task = await f.manager.create(prepared(), randomUUID());
+    const preview = await f.manager.proposeManagement(
+      "pause",
+      task.id,
+      {},
+      () => {
+        if (!allowed) throw new Error("Scope revoked");
+      },
+    );
+    block = true;
+    const confirming = f.manager
+      .confirmProposal(preview.id, () => allowed)
+      .catch((error) => error);
+    await flush();
+    if (change === "revoke" || change === "abort") allowed = false;
+    if (change === "cancel_preview") f.manager.cancelProposal(preview.id);
+    if (change === "edit") {
+      block = false;
+      const update = prepared();
+      update.input.title = "Newer";
+      await f.manager.update(task.id, update);
+    }
+    gate.resolve();
+    await confirming;
+    expect(f.manager.detail(task.id).task.status).toBe("active");
+    expect(f.manager.proposal(preview.id)?.status).not.toBe("confirmed");
+  },
+);
+
+test("management preview expiry and bridge restart cannot recreate a management operation as a task", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const task = await f.manager.create(prepared(), randomUUID());
+  const stale = await f.manager.proposeManagement(
+    "pause",
+    task.id,
+    {},
+    () => {},
+  );
+  jest.advanceTimersByTime(10 * 60_000);
+  await expect(f.manager.confirmProposal(stale.id)).rejects.toThrow("expired");
+  const restartPreview = await f.manager.proposeManagement(
+    "cancel",
+    task.id,
+    {},
+    () => {},
+  );
+  await f.manager.dispose();
+  const restored = fixture(f.directory);
+  expect(restored.manager.proposal(restartPreview.id)?.status).toBe(
+    "cancelled",
+  );
+  await restored.manager.confirmProposal(restartPreview.id);
+  expect(restored.manager.summaries()).toHaveLength(1);
+  expect(restored.manager.detail(task.id).task.status).toBe("active");
+});
+
+test("failed management saves preserve the original task and pending preview for a safe retry", async () => {
+  const f = fixture();
+  const task = await f.manager.create(prepared(), randomUUID());
+  const preview = await f.manager.proposeManagement(
+    "pause",
+    task.id,
+    {},
+    () => {},
+  );
+  const before = f.manager.detail(task.id);
+  f.fail(true);
+  await expect(f.manager.confirmProposal(preview.id)).rejects.toThrow(
+    "could not be saved",
+  );
+  expect(f.manager.detail(task.id)).toEqual(before);
+  expect(f.manager.proposal(preview.id)?.status).toBe("pending");
+  f.fail(false);
+  await f.manager.confirmProposal(preview.id);
+  expect(f.manager.detail(task.id).task.status).toBe("paused");
+});
+
+test("pause cancels unadmitted scheduled dispatch even if validation ignores abort, and resume retains the once occurrence", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  let block = false;
+  const gate = Promise.withResolvers<void>();
+  const f = fixture(undefined, async () => {
+    if (block) await gate.promise;
+  });
+  const task = await f.manager.create(
+    prepared({ type: "once", at: "2026-10-04T00:01:00.000Z" }),
+    randomUUID(),
+  );
+  await f.manager.resume();
+  block = true;
+  jest.advanceTimersByTime(60_000);
+  await flush();
+  await f.manager.control("pause", task.id);
+  gate.resolve();
+  block = false;
+  await flush();
+  expect(f.runs).toHaveLength(0);
+  expect(f.manager.detail(task.id).task).toMatchObject({
+    status: "paused",
+    next_run_at: null,
+    current_run: { status: "queued" },
+  });
+  expect(
+    f.manager.detail(task.id).task.current_run?.started_at,
+  ).toBeUndefined();
+  await f.manager.control("resume", task.id);
+  jest.advanceTimersByTime(0);
+  await flush();
+  expect(f.runs).toHaveLength(1);
+  expect(f.runs[0]!.run.scheduled_at).toBe("2026-10-04T00:01:00.000Z");
+});
+
+test("task deletion saves a non-replayable warning when private history cleanup cannot finish", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "roamgate-task-delete-"));
+  directories.push(directory);
+  let armed = false;
+  let planted = false;
+  let taskDirectory = "";
+  const outside = join(directory, "protected-fixture");
+  mkdirSync(outside);
+  writeFileSync(join(outside, "sentinel"), "must stay");
+  const manager = createAssistantTasks({
+    directory,
+    validate: async () => {},
+    child: () => {
+      throw new Error("No task should run");
+    },
+    publish: () => {
+      if (armed && !planted && !manager.summaries().length) {
+        planted = true;
+        renameSync(taskDirectory, join(directory, "retained-history"));
+        symlinkSync(outside, taskDirectory);
+      }
+    },
+  });
+  managers.push(manager);
+  const task = await manager.create(prepared(), randomUUID());
+  taskDirectory = join(directory, "tasks", task.id);
+  mkdirSync(taskDirectory, { recursive: true });
+  writeFileSync(join(taskDirectory, "private-history"), "fixture only");
+  await manager.control("cancel", task.id);
+  const proposal = await manager.proposeManagement(
+    "delete",
+    task.id,
+    {},
+    () => {},
+  );
+  armed = true;
+  const result = await manager
+    .confirmProposal(proposal.id)
+    .catch((error) => error);
+  expect(result).toBeInstanceOf(AssistantUserError);
+  expect(result.message).toContain(
+    "deleted, but its private history could not be removed",
+  );
+  expect(manager.summaries()).toHaveLength(0);
+  expect(manager.proposal(proposal.id)).toMatchObject({
+    status: "confirmed",
+    detail: result.message,
+  });
+  await manager.confirmProposal(proposal.id);
+  expect(existsSync(join(outside, "sentinel"))).toBe(true);
+  await manager.dispose();
+  const restored = fixture(directory);
+  expect(restored.manager.proposal(proposal.id)).toMatchObject({
+    operation: "delete",
+    status: "confirmed",
+    detail: result.message,
+  });
+  expect(restored.manager.invalid()).toBe(false);
+});
+
+test("a cancelled management receipt cannot be replayed or deleted while its child drains", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const task = await f.manager.create(prepared(), randomUUID());
+  await f.manager.resume();
+  const active = await startRun(f, task.id);
+  active.stopGate = Promise.withResolvers<void>();
+  const proposal = await f.manager.proposeManagement(
+    "cancel",
+    task.id,
+    {},
+    () => {},
+  );
+  const confirming = f.manager.confirmProposal(proposal.id);
+  await flush();
+  expect(f.manager.proposal(proposal.id)?.status).toBe("confirmed");
+  await f.manager.confirmProposal(proposal.id);
+  await expect(
+    f.manager.proposeManagement("delete", task.id, {}, () => {}),
+  ).rejects.toThrow("Cancel this task");
+  active.stopGate.resolve();
+  await confirming;
+  const remove = await f.manager.proposeManagement(
+    "delete",
+    task.id,
+    {},
+    () => {},
+  );
+  await f.manager.confirmProposal(remove.id);
+  expect(f.manager.summaries()).toHaveLength(0);
+});
+
+test("a management edit cannot rearm a completed one-shot and seals mutable tool arguments before awaiting", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  let block = false;
+  const gate = Promise.withResolvers<void>();
+  const f = fixture(undefined, async () => {
+    if (block) await gate.promise;
+  });
+  const task = await f.manager.create(
+    prepared({ type: "once", at: "2026-10-04T00:01:00.000Z" }),
+    randomUUID(),
+  );
+  await f.manager.resume();
+  jest.advanceTimersByTime(60_000);
+  await flush();
+  f.runs[0]!.complete();
+  const changes = { title: "Approved title" };
+  block = true;
+  const proposing = f.manager.proposeManagement(
+    "update",
+    task.id,
+    changes,
+    () => {},
+  );
+  await flush();
+  changes.title = "Changed while awaiting";
+  block = false;
+  gate.resolve();
+  const proposal = await proposing;
+  expect(proposal.title).toBe("Approved title");
+  await f.manager.confirmProposal(proposal.id);
+  expect(f.manager.detail(task.id).task).toMatchObject({
+    title: "Approved title",
+    next_run_at: null,
+  });
+  jest.advanceTimersByTime(600_000);
+  await flush();
+  expect(f.runs).toHaveLength(1);
+});
+
+test.each(["pause", "cancel"] as const)(
+  "a failed %s save preserves an in-flight admission and its authoritative run",
+  async (operation) => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    let block = false;
+    const gate = Promise.withResolvers<void>();
+    const f = fixture(undefined, async () => {
+      if (block) await gate.promise;
+    });
+    const task = await f.manager.create(
+      prepared({ type: "once", at: "2026-10-04T00:01:00.000Z" }),
+      randomUUID(),
+    );
+    try {
+      await f.manager.resume();
+      block = true;
+      jest.advanceTimersByTime(60_000);
+      await flush();
+      const before = f.manager.detail(task.id);
+      expect(before.task.current_run?.status).toBe("running");
+      f.fail(true);
+      await expect(f.manager.control(operation, task.id)).rejects.toThrow(
+        "could not be saved",
+      );
+      expect(f.manager.detail(task.id)).toEqual(before);
+      f.fail(false);
+      block = false;
+      gate.resolve();
+      await flush();
+      expect(f.runs).toHaveLength(1);
+      expect(f.runs[0]!.run.id).toBe(before.task.current_run!.id);
+      f.runs[0]!.complete();
+      expect(f.manager.detail(task.id).runs[0]!.status).toBe("succeeded");
+      await f.manager.resume();
+      jest.advanceTimersByTime(120_000);
+      await flush();
+      expect(f.runs).toHaveLength(1);
+    } finally {
+      gate.resolve();
+    }
+  },
+);
+
+test("a finalizing receipt and run survive proposal pruning and an unrelated failed save", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const task = await f.manager.create(prepared(), randomUUID());
+  await f.manager.resume();
+  const active = await startRun(f, task.id);
+  active.stopGate = Promise.withResolvers<void>();
+  const proposal = await f.manager.proposeManagement(
+    "cancel",
+    task.id,
+    {},
+    () => {},
+  );
+  const confirming = f.manager
+    .confirmProposal(proposal.id)
+    .catch((error) => error);
+  try {
+    await flush();
+    expect(f.manager.proposal(proposal.id)?.status).toBe("confirmed");
+    f.fail(true);
+    await expect(f.manager.propose(prepared())).rejects.toThrow(
+      "could not be saved",
+    );
+    f.fail(false);
+    await f.manager.propose(prepared());
+    active.stopGate.reject(new Error("Stop failed"));
+    const failure = await confirming;
+    expect(failure).toBeInstanceOf(AssistantUserError);
+    expect(f.manager.proposal(proposal.id)).toMatchObject({
+      status: "confirmed",
+      detail: expect.stringContaining("could not be fully stopped"),
+    });
+    const storage = openTaskStorage(f.directory, validateSavedTasks);
+    try {
+      const saved = storage.load();
+      expect(
+        saved.proposals.find((entry) => entry.proposal.id === proposal.id)
+          ?.proposal,
+      ).toEqual(f.manager.proposal(proposal.id));
+      expect(saved.tasks[0]!.runs[0]!.input).toBeUndefined();
+    } finally {
+      storage.close();
+    }
+    await f.manager.confirmProposal(proposal.id);
+    expect(active.disposeCalls).toBe(1);
+  } finally {
+    active.stopGate.resolve();
+    await confirming;
+  }
+});
+
+test("finalizing receipts count toward the proposal bound and cannot be displaced", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const task = await f.manager.create(prepared(), randomUUID());
+  await f.manager.resume();
+  const active = await startRun(f, task.id);
+  active.stopGate = Promise.withResolvers<void>();
+  const proposal = await f.manager.proposeManagement(
+    "cancel",
+    task.id,
+    {},
+    () => {},
+  );
+  const confirming = f.manager.confirmProposal(proposal.id);
+  try {
+    await flush();
+    for (let index = 0; index < 49; index++)
+      await f.manager.propose(prepared());
+    await expect(f.manager.propose(prepared())).rejects.toThrow("Too many");
+    await expect(
+      f.manager.proposeManagement("cancel", task.id, {}, () => {}),
+    ).rejects.toThrow("Too many");
+    expect(f.manager.proposal(proposal.id)?.status).toBe("confirmed");
+    const storage = openTaskStorage(f.directory, validateSavedTasks);
+    try {
+      expect(storage.load().proposals).toHaveLength(50);
+    } finally {
+      storage.close();
+    }
+    active.stopGate.resolve();
+    await confirming;
+    await f.manager.propose(prepared());
+    expect(f.manager.proposal(proposal.id)).toBeUndefined();
+    expect(f.manager.invalid()).toBe(false);
+  } finally {
+    active.stopGate.resolve();
+    await confirming;
+  }
+});
+
+test.each(["resolve", "reject"] as const)(
+  "completed child disposal protects history until it succeeds after %s",
+  async (outcome) => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+    const f = fixture();
+    const task = await f.manager.create(prepared(), randomUUID());
+    await f.manager.resume();
+    const active = await startRun(f, task.id);
+    active.disposeGate = Promise.withResolvers<void>();
+    try {
+      active.complete();
+      expect(active.disposing).toBe(true);
+      await f.manager.control("cancel", task.id);
+      expect(() => f.manager.delete(task.id)).toThrow("before deleting");
+      await expect(
+        f.manager.proposeManagement("delete", task.id, {}, () => {}),
+      ).rejects.toThrow("before deleting");
+      if (outcome === "reject") {
+        active.disposeGate.reject(new Error("Disposal failed"));
+        await flush();
+        expect(() => f.manager.delete(task.id)).toThrow("before deleting");
+        active.disposeGate = Promise.withResolvers<void>();
+        const retrying = f.manager.control("cancel", task.id);
+        await flush();
+        expect(active.disposeCalls).toBe(2);
+        await f.manager.control("cancel", task.id);
+        expect(active.disposeCalls).toBe(2);
+        active.disposeGate.resolve();
+        await retrying;
+      } else {
+        active.disposeGate.resolve();
+        await flush();
+        expect(active.disposeCalls).toBe(1);
+      }
+      const proposal = await f.manager.proposeManagement(
+        "delete",
+        task.id,
+        {},
+        () => {},
+      );
+      await f.manager.confirmProposal(proposal.id);
+      expect(f.manager.summaries()).toHaveLength(0);
+    } finally {
+      active.disposeGate.resolve();
+    }
+  },
+);
+
+test("run retention defers private history removal while an older child drains", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const task = await f.manager.create(prepared(), randomUUID());
+  await f.manager.resume();
+  const active = await startRun(f, task.id);
+  active.disposeGate = Promise.withResolvers<void>();
+  mkdirSync(active.directory, { recursive: true });
+  const history = join(active.directory, "private-history");
+  writeFileSync(history, "Still owned by the child");
+  try {
+    active.complete();
+    for (let index = 0; index < 20; index++) {
+      const next = await startRun(f, task.id);
+      next.complete();
+      await flush();
+    }
+    expect(f.manager.detail(task.id).runs).toHaveLength(20);
+    expect(
+      f.manager.detail(task.id).runs.some((run) => run.id === active.run.id),
+    ).toBe(false);
+    expect(existsSync(history)).toBe(true);
+    await f.manager.control("cancel", task.id);
+    expect(() => f.manager.delete(task.id)).toThrow("before deleting");
+    active.disposeGate.resolve();
+    await flush();
+    expect(existsSync(history)).toBe(false);
+    f.manager.delete(task.id);
+    expect(f.manager.summaries()).toHaveLength(0);
+  } finally {
+    active.disposeGate.resolve();
+  }
+});
+
+test("retrying failed cancellation disposal releases the model slot without replaying its receipt", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const first = await f.manager.create(prepared(), randomUUID());
+  const second = await f.manager.create(prepared(), randomUUID());
+  await f.manager.resume();
+  const active = await startRun(f, first.id);
+  await f.manager.control("run_now", second.id);
+  active.disposeGate = Promise.withResolvers<void>();
+  const proposal = await f.manager.proposeManagement(
+    "cancel",
+    first.id,
+    {},
+    () => {},
+  );
+  const confirming = f.manager
+    .confirmProposal(proposal.id)
+    .catch((error) => error);
+  let retrying: Promise<void> | undefined;
+  try {
+    await flush();
+    expect(active.disposing).toBe(true);
+    active.disposeGate.reject(new Error("Disposal failed"));
+    expect(await confirming).toBeInstanceOf(AssistantUserError);
+    expect(() => f.manager.delete(first.id)).toThrow("retry cleanup");
+    await f.manager.confirmProposal(proposal.id);
+    expect(active.disposeCalls).toBe(1);
+    active.disposeGate = Promise.withResolvers<void>();
+    retrying = f.manager.control("cancel", first.id);
+    await flush();
+    jest.advanceTimersByTime(5_000);
+    await flush();
+    expect(f.runs).toHaveLength(1);
+    expect(active.disposeCalls).toBe(2);
+    active.disposeGate.resolve();
+    await retrying;
+    jest.advanceTimersByTime(0);
+    await flush();
+    expect(f.runs).toHaveLength(2);
+    expect(f.runs[1]!.run.task_id).toBe(second.id);
+    expect(f.manager.detail(second.id).runs[0]!.status).toBe("running");
+    f.manager.delete(first.id);
+    expect(f.manager.proposal(proposal.id)?.status).toBe("confirmed");
+  } finally {
+    active.disposeGate.resolve();
+    await confirming;
+    await retrying;
+  }
 });

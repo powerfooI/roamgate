@@ -466,6 +466,9 @@ const actionNames: Record<AssistantAction["kind"], string> = {
   split_pane: "Split pane",
   start_agent: "Start agent",
   send_prompt: "Send prompt",
+  close_workspace: "Close workspace",
+  close_pane: "Close pane",
+  close_agent: "Close agent",
 };
 
 const actionStatuses: Record<AssistantAction["status"], string> = {
@@ -485,6 +488,9 @@ const actionFields = new Map([
   ["tab_id", "Source tab"],
   ["terminal_id", "Source terminal"],
   ["direction", "Split direction"],
+  ["pane_count", "Number of panes"],
+  ["panes", "Panes to close"],
+  ["closes_workspace", "Also closes workspace"],
   ["agent", "Agent"],
   ["name", "Agent name"],
   ["prompt", "Prompt"],
@@ -506,6 +512,8 @@ export function ActionCard({
 }) {
   const name = actionNames[action.kind];
   const isPrompt = action.kind === "send_prompt";
+  const isPaneClose =
+    action.kind === "close_pane" || action.kind === "close_agent";
   const isAgentAction = isPrompt || action.kind === "start_agent";
   const acceptedPrompt =
     isPrompt &&
@@ -544,7 +552,8 @@ export function ActionCard({
             !(isPrompt && key === "prompt") &&
             (key !== "terminal_id" ||
               action.kind === "create_tab" ||
-              action.kind === "split_pane"),
+              action.kind === "split_pane" ||
+              isPaneClose),
         )
         .map(([key, value]) => (
           <Fragment key={key}>
@@ -555,7 +564,9 @@ export function ActionCard({
                     (action.kind === "create_tab" ||
                       action.kind === "split_pane")
                   ? "Source pane"
-                  : (actionFields.get(key) ?? key)}
+                  : key === "terminal_id" && isPaneClose
+                    ? "Target terminal"
+                    : (actionFields.get(key) ?? key)}
             </dt>
             <dd>
               <pre>
@@ -564,13 +575,17 @@ export function ActionCard({
                   ? value === "true"
                     ? "Enabled"
                     : "Disabled"
-                  : key === "direction" && action.kind === "split_pane"
-                    ? value === "right"
-                      ? "Right"
-                      : value === "down"
-                        ? "Down"
-                        : value
-                    : value}
+                  : key === "closes_workspace"
+                    ? value === "true"
+                      ? "Yes"
+                      : "No"
+                    : key === "direction" && action.kind === "split_pane"
+                      ? value === "right"
+                        ? "Right"
+                        : value === "down"
+                          ? "Down"
+                          : value
+                      : value}
               </pre>
             </dd>
           </Fragment>

@@ -26,7 +26,7 @@ export type ActionToolProposer = (
   params: Record<string, unknown>,
   signal?: AbortSignal,
 ) => Promise<WorkspaceToolResult>;
-export type TaskToolKind = "list" | "create";
+export type TaskToolKind = (typeof taskTools)[number]["kind"];
 export type TaskToolHandler = (
   kind: TaskToolKind,
   params: Record<string, unknown>,
@@ -92,6 +92,28 @@ const actionTarget = {
   workspace_id: Type.String(),
 };
 
+const taskSchedule = Type.Union([
+  Type.Object(
+    { type: Type.Literal("once"), at: Type.String() },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      type: Type.Literal("interval"),
+      minutes: Type.Integer({ minimum: 1, maximum: 525600 }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      type: Type.Literal("daily"),
+      time: Type.String({ pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }),
+      timezone: Type.String({ minLength: 1, maxLength: 100 }),
+    },
+    { additionalProperties: false },
+  ),
+]);
+
 export const taskTools = [
   {
     name: "list_ranger_tasks",
@@ -118,31 +140,48 @@ export const taskTools = [
           Type.Object(actionTarget, { additionalProperties: false }),
           { minItems: 1, maxItems: ASSISTANT_MAX_WORKSPACES },
         ),
-        schedule: Type.Union([
-          Type.Object(
-            { type: Type.Literal("once"), at: Type.String() },
-            { additionalProperties: false },
-          ),
-          Type.Object(
-            {
-              type: Type.Literal("interval"),
-              minutes: Type.Integer({ minimum: 1, maximum: 525600 }),
-            },
-            { additionalProperties: false },
-          ),
-          Type.Object(
-            {
-              type: Type.Literal("daily"),
-              time: Type.String({ pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }),
-              timezone: Type.String({ minLength: 1, maxLength: 100 }),
-            },
-            { additionalProperties: false },
-          ),
-        ]),
+        schedule: taskSchedule,
       },
       { additionalProperties: false },
     ),
   },
+  {
+    name: "propose_ranger_task_update",
+    kind: "update",
+    label: "Propose a task edit",
+    description:
+      "Propose edits to a scheduled Ranger task from list_ranger_tasks. Supply only fields to change. Preserves its workspace scope, model and bound Agent identities; changing those settings is unavailable through this tool. Never increases its approval mode; manual confirmation requires future workspace actions to be confirmed. Editing a paused task does not resume it. Returns a pending preview: the operation is applied only when the user clicks Confirm.",
+    parameters: Type.Object(
+      {
+        task_id: Type.String({ minLength: 1 }),
+        title: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+        prompt: Type.Optional(Type.String({ minLength: 1, maxLength: 32_000 })),
+        schedule: Type.Optional(taskSchedule),
+        notification_mode: Type.Optional(
+          Type.Union([Type.Literal("status"), Type.Literal("agent")]),
+        ),
+      },
+      { additionalProperties: false, minProperties: 2 },
+    ),
+  },
+  ...(["pause", "resume", "cancel", "delete"] as const).map((kind) => ({
+    name: `propose_ranger_task_${kind}` as const,
+    kind,
+    label: `Propose task ${kind}`,
+    description: `${
+      kind === "pause"
+        ? "Pause future scheduled dispatch of a Ranger task while allowing its already-started run to finish."
+        : kind === "resume"
+          ? "Resume a paused Ranger task. Cancelled tasks cannot resume."
+          : kind === "cancel"
+            ? "Cancel a Ranger task permanently, stopping its active run and all future scheduled dispatch. Keeps its history."
+            : "Delete an already cancelled Ranger task and its private run history. The task must have no remaining active or draining run. This cannot be undone."
+    } Use task_id from list_ranger_tasks. Returns a pending preview: the operation is applied only when the user clicks Confirm.`,
+    parameters: Type.Object(
+      { task_id: Type.String({ minLength: 1 }) },
+      { additionalProperties: false },
+    ),
+  })),
 ] as const;
 
 export const notificationTools = [
@@ -239,6 +278,36 @@ export const actionTools = [
       "Propose sending a prompt to an agent pane in an authorized workspace. Returns a pending proposal for the user to confirm; does not send it.",
     parameters: Type.Object(
       { ...actionTarget, pane_id: Type.String(), prompt: Type.String() },
+      { additionalProperties: false },
+    ),
+  },
+  {
+    name: "propose_workspace_close",
+    kind: "close_workspace",
+    label: "Propose closing a workspace",
+    description:
+      "Propose closing an authorized workspace and terminating its current panes and processes. Unsaved terminal work may be lost. Uses normal workspace close, never closes linked workspaces as a group, removes a Git worktree, deletes files, or deletes saved agent history. Returns a proposal handled by the current approval mode.",
+    parameters: Type.Object(actionTarget, { additionalProperties: false }),
+  },
+  {
+    name: "propose_pane_close",
+    kind: "close_pane",
+    label: "Propose closing a pane",
+    description:
+      "Propose closing an exact pane in an authorized workspace and terminating its processes. Closing the last pane also closes its tab/workspace; unsaved terminal work may be lost. Does not remove a Git worktree or delete saved agent history. Individual closes in multi-pane worktree-root workspaces are unavailable because Herdr cannot guarantee no group closure. Use identifiers from workspace_status. Returns a proposal handled by the current approval mode.",
+    parameters: Type.Object(
+      { ...actionTarget, pane_id: Type.String() },
+      { additionalProperties: false },
+    ),
+  },
+  {
+    name: "propose_agent_close",
+    kind: "close_agent",
+    label: "Propose closing an agent",
+    description:
+      "Propose closing an exact running agent by closing its pane and terminating its processes, as in the normal Close Agent Pane action. This is not prompt interruption or saved-history deletion. The last pane also closes its tab/workspace; unsaved terminal work may be lost. Does not remove worktree files. Individual closes in multi-pane worktree-root workspaces are unavailable because Herdr cannot guarantee no group closure. Use identifiers from workspace_status. Returns a proposal handled by the current approval mode.",
+    parameters: Type.Object(
+      { ...actionTarget, pane_id: Type.String() },
       { additionalProperties: false },
     ),
   },

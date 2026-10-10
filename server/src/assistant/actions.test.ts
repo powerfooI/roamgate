@@ -127,6 +127,8 @@ function fixture(paneId = "w1:p1") {
           "pane.split",
           "agent.start",
           "agent.prompt",
+          "pane.close",
+          "workspace.close",
         ].includes(method)
       )
         mutations.push(method);
@@ -147,7 +149,41 @@ function fixture(paneId = "w1:p1") {
         return { agent };
       }
       if (method === "pane.process_info")
-        return { type: "pane_process_info", process_info: process };
+        return {
+          type: "pane_process_info",
+          process_info:
+            params.pane_id === paneId
+              ? process
+              : {
+                  pane_id: params.pane_id,
+                  shell_pid: 303,
+                  foreground_process_group_id: 303,
+                  foreground_processes: [{ pid: 303, name: "shell" }],
+                },
+        };
+      if (method === "pane.close" || method === "workspace.close") {
+        for (let index = panes.length - 1; index >= 0; index--) {
+          if (
+            method === "workspace.close"
+              ? panes[index]!.workspace_id === params.workspace_id
+              : panes[index]!.pane_id === params.pane_id
+          )
+            panes.splice(index, 1);
+        }
+        for (let index = tabs.length - 1; index >= 0; index--) {
+          if (!panes.some((pane) => pane.tab_id === tabs[index]!.tab_id))
+            tabs.splice(index, 1);
+        }
+        for (let index = workspaces.length - 1; index >= 0; index--) {
+          if (
+            !panes.some(
+              (pane) => pane.workspace_id === workspaces[index]!.workspace_id,
+            )
+          )
+            workspaces.splice(index, 1);
+        }
+        return { type: "ok" };
+      }
       if (method === "server.agent_manifests")
         return { manifests: [{ agent: "pi" }] };
       if (method === "worktree.list") return { worktrees };
@@ -245,6 +281,7 @@ function fixture(paneId = "w1:p1") {
     worktrees,
     tabs,
     createWorkspace,
+    createPane,
     startAgent,
     createWorktree,
     resolveWorkspaceGitRoot,
@@ -1215,4 +1252,382 @@ describe("confirmed Ranger action targets", () => {
       expect(f.lease).toHaveBeenCalledTimes(1);
     }
   });
+});
+
+describe("confirmed Ranger close actions", () => {
+  const closeKinds = ["close_workspace", "close_pane", "close_agent"] as const;
+  const closeParams = (kind: (typeof closeKinds)[number]) =>
+    kind === "close_workspace" ? {} : { pane_id: "w1:p1" };
+  const addSibling = (f: ReturnType<typeof fixture>) =>
+    f.createPane({ cwd: "/ranger-actions-fixture" }, "w1:t1");
+
+  test.each(["close_pane", "close_agent"] as const)(
+    "%s verifies a successful close after the native automatic label changes",
+    async (kind) => {
+      const f = fixture();
+      if (kind === "close_agent") f.useAgent();
+      f.tabs.push({ workspace_id: "w1", tab_id: "w1:t2", label: "Second" });
+      f.createPane({ cwd: "/second-directory" }, "w1:t2");
+      const original = f.call.getMockImplementation()!;
+      f.call.mockImplementation(async (method, ...rest) => {
+        const result = await original(method, ...rest);
+        if (method === "pane.close")
+          f.workspaces[0]!.label = "second-directory";
+        return result;
+      });
+      const prepared = await f.prepare(kind, closeParams(kind));
+      const result = await prepared.execute();
+      expect(result.status).toBe("succeeded");
+      expect(await prepared.execute()).toBe(result);
+      expect(f.panes.map((pane) => pane.pane_id)).toEqual(["w1:p2"]);
+      expect(f.mutations).toEqual(["pane.close"]);
+    },
+  );
+
+  test.each(["cwd", "worktree"] as const)(
+    "post-close verification still rejects changed workspace %s identity",
+    async (identity) => {
+      const f = fixture();
+      addSibling(f);
+      const prepared = await f.prepare("close_pane", closeParams("close_pane"));
+      const original = f.call.getMockImplementation()!;
+      f.call.mockImplementation(async (method, ...rest) => {
+        const result = await original(method, ...rest);
+        if (method === "pane.close") {
+          f.workspaces[0]!.label = "different-label";
+          if (identity === "cwd") f.workspaces[0]!.cwd = "/replacement";
+          else
+            f.workspaces[0]!.worktree = {
+              repo_key: "replacement",
+              repo_root: "/replacement",
+              checkout_path: "/replacement",
+              is_linked_worktree: true,
+            };
+        }
+        return result;
+      });
+      const result = await prepared.execute();
+      expect(result.status).toBe("uncertain");
+      expect(await prepared.execute()).toBe(result);
+      expect(f.mutations).toEqual(["pane.close"]);
+    },
+  );
+
+  test.each(closeKinds)(
+    "%s is preview-only and executes once",
+    async (kind) => {
+      const f = fixture();
+      f.useAgent();
+      addSibling(f);
+      f.worktrees.push({ branch: "feature", path: "/ranger-actions-fixture" });
+      const prepared = await f.prepare(kind, closeParams(kind));
+      expect(prepared.preview.kind).toBe(kind);
+      expect(prepared.preview.summary).toContain(
+        "Unsaved terminal work may be lost",
+      );
+      expect(prepared.preview.summary).toContain("history will not be deleted");
+      expect(f.mutations).toEqual([]);
+      const [first, repeated] = await Promise.all([
+        prepared.execute(),
+        prepared.execute(),
+      ]);
+      expect(first).toBe(repeated);
+      expect(first.status).toBe("succeeded");
+      const method =
+        kind === "close_workspace" ? "workspace.close" : "pane.close";
+      expect(f.mutations).toEqual([method]);
+      expect(f.call).toHaveBeenCalledWith(
+        method,
+        kind === "close_workspace"
+          ? { workspace_id: "w1" }
+          : { pane_id: "w1:p1" },
+        30_000,
+        expect.any(Function),
+      );
+      expect(f.worktrees).toHaveLength(1);
+      expect(f.panes).toHaveLength(kind === "close_workspace" ? 0 : 1);
+    },
+  );
+
+  test.each(["close_pane", "close_agent"] as const)(
+    "%s previews last-pane workspace closure and uses the explicit no-group endpoint",
+    async (kind) => {
+      const f = fixture();
+      f.useAgent();
+      const prepared = await f.prepare(kind, closeParams(kind));
+      expect(prepared.preview.params.closes_workspace).toBe("true");
+      expect(prepared.preview.summary).toContain("workspace will also close");
+      expect((await prepared.execute()).status).toBe("succeeded");
+      expect(f.mutations).toEqual(["workspace.close"]);
+      expect(f.call).toHaveBeenCalledWith(
+        "workspace.close",
+        { workspace_id: "w1" },
+        30_000,
+        expect.any(Function),
+      );
+    },
+  );
+
+  test.each(["close_pane", "close_agent"] as const)(
+    "%s blocks multi-pane worktree roots but allows linked workspaces",
+    async (kind) => {
+      for (const linked of [false, undefined, true]) {
+        const f = fixture();
+        f.useAgent();
+        addSibling(f);
+        f.workspaces[0]!.worktree = {
+          repo_key: "repo",
+          repo_root: "/ranger-actions-fixture",
+          checkout_path: "/ranger-actions-fixture",
+          is_linked_worktree: linked,
+        };
+        if (linked === true) {
+          const prepared = await f.prepare(kind, closeParams(kind));
+          expect((await prepared.execute()).status).toBe("succeeded");
+          expect(f.mutations).toEqual(["pane.close"]);
+        } else {
+          await expect(f.prepare(kind, closeParams(kind))).rejects.toThrow();
+          expect(f.mutations).toEqual([]);
+        }
+      }
+    },
+  );
+
+  test.each(closeKinds)("%s rechecks worktree root identity", async (kind) => {
+    const f = fixture();
+    f.useAgent();
+    addSibling(f);
+    f.workspaces[0]!.worktree = {
+      repo_key: "repo",
+      repo_root: "/ranger-actions-fixture",
+      checkout_path: "/ranger-actions-fixture",
+      is_linked_worktree: true,
+    };
+    const prepared = await f.prepare(kind, closeParams(kind));
+    f.workspaces[0]!.worktree.is_linked_worktree = false;
+    expect((await prepared.execute()).status).toBe("failed");
+    expect(f.mutations).toEqual([]);
+  });
+
+  test("agent close rejects an empty shell and all close tools reject extra parameters", async () => {
+    const f = fixture();
+    await expect(
+      f.prepare("close_agent", { pane_id: "w1:p1" }),
+    ).rejects.toThrow();
+    for (const kind of closeKinds) {
+      for (const extra of [
+        { force: "true" },
+        { close_group: "true" },
+        { remove_worktree: "true" },
+        { delete_history: "true" },
+        { cwd: "/other" },
+      ]) {
+        await expect(
+          f.prepare(kind, { ...closeParams(kind), ...extra }),
+        ).rejects.toThrow();
+      }
+    }
+    expect(f.mutations).toEqual([]);
+  });
+
+  test.each(closeKinds)(
+    "%s rejects stale workspace membership and occupants",
+    async (kind) => {
+      for (const change of [
+        "add",
+        "remove",
+        "terminal",
+        "session",
+        "process",
+        "directory",
+        "label",
+        "lease",
+      ]) {
+        const f = fixture();
+        f.useAgent();
+        addSibling(f);
+        const prepared = await f.prepare(kind, closeParams(kind));
+        if (change === "add") addSibling(f);
+        if (change === "remove") f.panes.pop();
+        if (change === "terminal") f.panes[0]!.terminal_id = "replacement";
+        if (change === "session") f.agent.agent_session.value = "replacement";
+        if (change === "process")
+          f.process.foreground_processes = [{ pid: 404, name: "replacement" }];
+        if (change === "directory") f.workspaces[0]!.cwd = "/other";
+        if (change === "label") f.workspaces[0]!.label = "Renamed";
+        if (change === "lease") f.retire();
+        expect((await prepared.execute()).status).toBe("failed");
+        expect(f.mutations).toEqual([]);
+      }
+    },
+  );
+
+  test("workspace close rechecks every occupant and refuses a new process in a sibling", async () => {
+    const f = fixture();
+    addSibling(f);
+    const prepared = await f.prepare("close_workspace", {});
+    const original = f.call.getMockImplementation()!;
+    f.call.mockImplementation(async (method, params, ...rest) => {
+      const result = await original(method, params, ...rest);
+      if (method === "pane.process_info" && params?.pane_id === "w1:p2")
+        result.process_info.foreground_processes = [
+          { pid: 505, name: "new-job" },
+        ];
+      return result;
+    });
+    expect((await prepared.execute()).status).toBe("failed");
+    expect(f.mutations).toEqual([]);
+  });
+
+  test.each(closeKinds)(
+    "%s refuses cross-workspace and missing targets",
+    async (kind) => {
+      const f = fixture();
+      f.useAgent();
+      await expect(
+        f.prepare(kind, { ...closeParams(kind), workspace_id: "other" }),
+      ).rejects.toThrow();
+      if (kind !== "close_workspace") {
+        await expect(f.prepare(kind, { pane_id: "w2:p1" })).rejects.toThrow();
+        await expect(f.prepare(kind, { pane_id: "missing" })).rejects.toThrow();
+      }
+      const prepared = await f.prepare(kind, closeParams(kind));
+      f.workspaces.splice(0);
+      expect((await prepared.execute()).status).toBe("failed");
+      expect(f.mutations).toEqual([]);
+    },
+  );
+
+  test.each(closeKinds)(
+    "%s checks permission again at native dispatch",
+    async (kind) => {
+      for (const invalidate of ["permission", "lease"] as const) {
+        const f = fixture();
+        f.useAgent();
+        addSibling(f);
+        const prepared = await f.prepare(kind, closeParams(kind));
+        const reached = deferred<void>();
+        const release = deferred<void>();
+        const original = f.call.getMockImplementation()!;
+        let allowed = true;
+        f.call.mockImplementation(async (method, ...rest) => {
+          if (method === "workspace.close" || method === "pane.close") {
+            reached.resolve();
+            await release.promise;
+          }
+          return original(method, ...rest);
+        });
+        const pending = prepared.execute(() => allowed);
+        await reached.promise;
+        if (invalidate === "permission") allowed = false;
+        else f.retire();
+        release.resolve();
+        expect((await pending).status).toBe("failed");
+        expect(f.mutations).toEqual([]);
+      }
+    },
+  );
+
+  test.each(closeKinds)(
+    "%s fails without readback when native dispatch never sends",
+    async (kind) => {
+      const f = fixture();
+      f.useAgent();
+      addSibling(f);
+      const prepared = await f.prepare(kind, closeParams(kind));
+      const listCount = f.call.mock.calls.filter(
+        ([method]) => method === "workspace.list",
+      ).length;
+      const original = f.call.getMockImplementation()!;
+      f.call.mockImplementation(async (method, ...rest) => {
+        if (method === "workspace.close" || method === "pane.close")
+          throw new Error("Synthetic connection refused");
+        return original(method, ...rest);
+      });
+      const result = await prepared.execute();
+      expect(result.status).toBe("failed");
+      expect(result.detail).toContain("Nothing was sent");
+      expect(f.mutations).toEqual([]);
+      expect(
+        f.call.mock.calls.filter(([method]) => method === "workspace.list"),
+      ).toHaveLength(listCount);
+    },
+  );
+
+  test.each(closeKinds)(
+    "%s verifies lost replies without repeating the close",
+    async (kind) => {
+      const f = fixture();
+      f.useAgent();
+      addSibling(f);
+      const prepared = await f.prepare(kind, closeParams(kind));
+      const original = f.call.getMockImplementation()!;
+      f.call.mockImplementation(async (method, ...rest) => {
+        const result = await original(method, ...rest);
+        if (method === "workspace.close" || method === "pane.close")
+          throw new Error("Lost reply");
+        return result;
+      });
+      const result = await prepared.execute();
+      expect(result.status).toBe("succeeded");
+      expect(await prepared.execute()).toBe(result);
+      expect(f.mutations).toHaveLength(1);
+    },
+  );
+
+  test.each(closeKinds)(
+    "%s reports unverified completion conservatively",
+    async (kind) => {
+      for (const outcome of ["unchanged", "bad-list", "lost-lease"] as const) {
+        const f = fixture();
+        f.useAgent();
+        addSibling(f);
+        const prepared = await f.prepare(kind, closeParams(kind));
+        const original = f.call.getMockImplementation()!;
+        let sent = false;
+        f.call.mockImplementation(
+          async (method, params, timeout, beforeSend) => {
+            if (method === "workspace.close" || method === "pane.close") {
+              beforeSend?.();
+              sent = true;
+              f.mutations.push(method);
+              if (outcome === "lost-lease") f.retire();
+              return { type: "ok" };
+            }
+            if (sent && outcome === "bad-list" && method === "workspace.list")
+              return { workspaces: [{}] };
+            return original(method, params, timeout, beforeSend);
+          },
+        );
+        const result = await prepared.execute();
+        expect(result.status).toBe("uncertain");
+        expect(await prepared.execute()).toBe(result);
+        expect(f.mutations).toHaveLength(1);
+      }
+    },
+  );
+
+  test.each(["close_workspace", "close_agent"] as const)(
+    "%s never retries a refused group close",
+    async (kind) => {
+      const f = fixture();
+      f.useAgent();
+      const prepared = await f.prepare(kind, closeParams(kind));
+      const original = f.call.getMockImplementation()!;
+      f.call.mockImplementation(async (method, params, timeout, beforeSend) => {
+        if (method === "workspace.close") {
+          beforeSend?.();
+          f.mutations.push(method);
+          throw new Error("workspace_group_close_required: use --group");
+        }
+        return original(method, params, timeout, beforeSend);
+      });
+      const result = await prepared.execute();
+      expect(result.status).toBe("failed");
+      expect(result.detail).toContain("No group close was requested");
+      expect(await prepared.execute()).toBe(result);
+      expect(f.panes).toHaveLength(1);
+      expect(f.mutations).toEqual(["workspace.close"]);
+    },
+  );
 });

@@ -181,6 +181,9 @@ export async function prepareAssistantAction(args: {
     split_pane: ["connection_id", "workspace_id", "pane_id", "direction"],
     start_agent: ["connection_id", "workspace_id", "pane_id", "agent"],
     send_prompt: ["connection_id", "workspace_id", "pane_id", "prompt"],
+    close_workspace: ["connection_id", "workspace_id"],
+    close_pane: ["connection_id", "workspace_id", "pane_id"],
+    close_agent: ["connection_id", "workspace_id", "pane_id"],
   };
   if (
     !Object.hasOwn(keys, kind) ||
@@ -333,6 +336,7 @@ export async function prepareAssistantAction(args: {
               repo_key: item.worktree.repo_key,
               repo_root: item.worktree.repo_root,
               checkout_path: item.worktree.checkout_path,
+              is_linked_worktree: item.worktree.is_linked_worktree,
             }
           : null,
       });
@@ -431,6 +435,161 @@ export async function prepareAssistantAction(args: {
           status: "succeeded",
           detail: "The new workspace and its directory were verified.",
         };
+      };
+    } else if (
+      kind === "close_workspace" ||
+      kind === "close_pane" ||
+      kind === "close_agent"
+    ) {
+      // Freeze the entire layout: removing a last pane also removes its tab/workspace.
+      // An added pane must never become part of an already approved workspace close.
+      const workspaceLabel = current.label;
+      const closeLayout = async (beforeDispatch = true) => {
+        const items = await panes();
+        const layout = items
+          .map((item) => ({
+            pane_id: validateConnectionId(item.pane_id),
+            tab_id: validateConnectionId(item.tab_id),
+            terminal_id: validateConnectionId(item.terminal_id),
+          }))
+          .sort((left, right) => left.pane_id.localeCompare(right.pane_id));
+        if (
+          !layout.length ||
+          new Set(layout.map((item) => item.pane_id)).size !== layout.length ||
+          new Set(layout.map((item) => item.terminal_id)).size !== layout.length
+        )
+          throw new Error("Cannot verify the workspace panes");
+        const live = await workspace();
+        if (
+          workspaceIdentity(live) !== frozenWorkspace ||
+          (beforeDispatch && live.label !== workspaceLabel) ||
+          (live.pane_count !== undefined && live.pane_count !== layout.length)
+        )
+          throw new Error("Workspace panes changed");
+        return layout;
+      };
+      const layout = await closeLayout();
+      const paneId =
+        kind === "close_workspace"
+          ? undefined
+          : validateConnectionId(params.pane_id);
+      if (paneId && !layout.some((item) => item.pane_id === paneId))
+        throw new Error("Pane is outside the workspace");
+      const affected = paneId
+        ? layout.filter((item) => item.pane_id === paneId)
+        : layout;
+      const frozenOccupants: (Awaited<ReturnType<typeof occupant>> & {
+        paneId: string;
+      })[] = [];
+      for (const item of affected) {
+        const frozen = await occupant(item.pane_id);
+        if (
+          frozen.pane.tab_id !== item.tab_id ||
+          frozen.pane.terminal_id !== item.terminal_id ||
+          (kind === "close_agent" && !frozen.agent.agent)
+        )
+          throw new Error("Close target changed");
+        frozenOccupants.push({ paneId: item.pane_id, ...frozen });
+      }
+      if (JSON.stringify(await closeLayout()) !== JSON.stringify(layout))
+        throw new Error("Workspace panes changed");
+      const closesWorkspace = kind === "close_workspace" || layout.length === 1;
+      if (
+        !closesWorkspace &&
+        isRecord(current.worktree) &&
+        current.worktree.is_linked_worktree !== true
+      )
+        // Herdr has no atomic no-group option on pane.close. Another pane
+        // disappearing after our reads could make this close the entire group.
+        throw new Error("Safe pane close is unavailable in a worktree root");
+      previewParams = paneId
+        ? {
+            pane_id: paneId,
+            terminal_id: affected[0]!.terminal_id,
+            ...(frozenOccupants[0]!.agent.agent
+              ? { agent: text(frozenOccupants[0]!.agent.agent) }
+              : {}),
+            closes_workspace: String(closesWorkspace),
+          }
+        : {
+            pane_count: String(layout.length),
+            panes: text(
+              frozenOccupants
+                .map(
+                  (item) =>
+                    `${item.paneId} (${item.agent.agent ?? "shell"}; terminal ${item.pane.terminal_id})`,
+                )
+                .join("\n"),
+              20_000,
+            ),
+          };
+      summary =
+        kind === "close_workspace"
+          ? "Close this workspace and terminate the displayed panes and their running processes. Unsaved terminal work may be lost. Worktree files and saved agent history will not be deleted. Linked workspaces will not be closed."
+          : `Close this exact ${kind === "close_agent" ? "agent's " : ""}pane and terminate its running processes. Unsaved terminal work may be lost.${closesWorkspace ? " This is the last pane, so its workspace will also close." : " Its tab will also close if this is the tab's last pane."} Worktree files and saved agent history will not be deleted.`;
+      perform = async (dispatch) => {
+        for (const item of frozenOccupants) {
+          if ((await occupant(item.paneId)).identity !== item.identity)
+            throw new Error("Pane occupant changed");
+        }
+        if (JSON.stringify(await closeLayout()) !== JSON.stringify(layout))
+          throw new Error("Workspace panes changed");
+        // pane.close can implicitly close a worktree group when native close
+        // confirmation is disabled. workspace.close always requires explicit
+        // close_group intent, so use it for last-pane closes without that flag.
+        const method = closesWorkspace ? "workspace.close" : "pane.close";
+        const query = closesWorkspace
+          ? { workspace_id: target.workspace_id }
+          : { pane_id: paneId! };
+        try {
+          await dispatch((beforeSend) =>
+            runtime.herdr.call(method, query, 30_000, beforeSend),
+          );
+        } catch (error) {
+          if (error instanceof DispatchNotSentError) throw error;
+          if (
+            error instanceof Error &&
+            /^(workspace_group_close_required|confirmation_required):/.test(
+              error.message,
+            )
+          )
+            return {
+              status: "failed",
+              detail:
+                "Herdr refused the close because it would require closing a worktree group. No group close was requested. Inspect the workspace before preparing another action.",
+            };
+          // A lost reply can follow a successful close. Read back once, never retry.
+        }
+        const remainingWorkspaces = await workspaces();
+        const remainingIds = remainingWorkspaces.map((item) =>
+          validateConnectionId(item.workspace_id),
+        );
+        if (new Set(remainingIds).size !== remainingIds.length)
+          throw new Error("Cannot verify remaining workspaces");
+        const workspaceRemains = remainingWorkspaces.some(
+          (item) => item.workspace_id === target.workspace_id,
+        );
+        // Herdr can derive the workspace label from its first tab's root pane.
+        // Closing that pane legitimately changes the label, so readback checks
+        // the stable workspace identity and layout rather than its old label.
+        const remainingPanes =
+          !closesWorkspace && workspaceRemains ? await closeLayout(false) : [];
+        const closed = closesWorkspace
+          ? !workspaceRemains
+          : workspaceRemains &&
+            !remainingPanes.some((item) => item.pane_id === paneId);
+        return closed
+          ? {
+              status: "succeeded",
+              detail: closesWorkspace
+                ? "The workspace is no longer open. No worktree removal or agent-history deletion was requested."
+                : "The pane is no longer open in the original workspace. No worktree removal or agent-history deletion was requested.",
+            }
+          : {
+              status: "uncertain",
+              detail:
+                "The close was sent, but the expected final state could not be verified. Inspect the target before retrying; the close will not be sent again automatically.",
+            };
       };
     } else if (kind === "create_worktree") {
       if (!args.createWorktree)

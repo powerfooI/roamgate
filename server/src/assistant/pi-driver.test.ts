@@ -25,6 +25,7 @@ import { AssistantUserError } from "./errors";
 import {
   actionTools,
   notificationTools,
+  taskTools,
   type WorkspaceToolResult,
   workspaceTools,
 } from "./tools";
@@ -392,7 +393,7 @@ async function durableFixture(
   );
   const requests: {
     messages: unknown[];
-    tools: { name: string }[];
+    tools: { name: string; description: string }[];
     system: unknown;
     thinking?: { type: string; budget_tokens?: number };
     output_config?: { effort?: string };
@@ -554,8 +555,7 @@ test("task tools use shared credentials with isolated durable storage and never 
     expect(f.requests).toHaveLength(3);
     expect(f.requests[0]!.tools.map((tool) => tool.name)).toEqual([
       ...workspaceTools.map((tool) => tool.name),
-      "list_ranger_tasks",
-      "propose_ranger_task",
+      ...taskTools.map((tool) => tool.name),
     ]);
     expect(existsSync(join(dataDirectory, "auth.json"))).toBe(false);
     expect(
@@ -563,6 +563,255 @@ test("task tools use shared credentials with isolated durable storage and never 
         entry.model?.some((message) => message.role === "toolResult"),
       ),
     ).toBe(true);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("management tools register only with their handlers, record pending receipts and never replay proposals", async () => {
+  const target = { connection_id: "local", workspace_id: "workspace" };
+  const taskCalls = [
+    {
+      name: "propose_ranger_task_update",
+      kind: "update",
+      params: { task_id: "task", title: "Changed title" },
+    },
+    {
+      name: "propose_ranger_task_pause",
+      kind: "pause",
+      params: { task_id: "task" },
+    },
+    {
+      name: "propose_ranger_task_resume",
+      kind: "resume",
+      params: { task_id: "task" },
+    },
+    {
+      name: "propose_ranger_task_cancel",
+      kind: "cancel",
+      params: { task_id: "task" },
+    },
+    {
+      name: "propose_ranger_task_delete",
+      kind: "delete",
+      params: { task_id: "task" },
+    },
+  ] as const;
+  const closeCalls = [
+    {
+      name: "propose_workspace_close",
+      kind: "close_workspace",
+      params: target,
+    },
+    {
+      name: "propose_pane_close",
+      kind: "close_pane",
+      params: { ...target, pane_id: "pane" },
+    },
+    {
+      name: "propose_agent_close",
+      kind: "close_agent",
+      params: { ...target, pane_id: "pane" },
+    },
+  ] as const;
+  const calls = [...taskCalls, ...closeCalls];
+  const f = await durableFixture((index) =>
+    modelReply(
+      index,
+      index === 1
+        ? [
+            ...calls.flatMap((call, position) =>
+              toolUse(
+                call.name,
+                `management-${position}`,
+                call.params,
+                position,
+              ),
+            ),
+            ...finish("tool_use"),
+          ]
+        : [
+            ...text("Management previews await confirmation."),
+            ...finish("end_turn"),
+          ],
+    ),
+  );
+  const proposed: string[] = [];
+  const activities: { name: string; status: string }[] = [];
+  const record = async (
+    kind: string,
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+  ) => {
+    const call = calls.find((entry) => entry.kind === kind)!;
+    expect(params).toEqual(call.params);
+    expect(signal).toBeInstanceOf(AbortSignal);
+    proposed.push(kind);
+    return {
+      text: JSON.stringify({ id: `pending-${kind}`, status: "pending" }),
+    };
+  };
+  try {
+    const first = f.createDriver();
+    const input = f.input({
+      task: record,
+      propose: record,
+      read: async () => {
+        throw new Error("Must not read or execute management effects");
+      },
+      tool: (_id, name, status) => activities.push({ name, status }),
+    });
+    const entries = await first.run(input);
+    expect(proposed.slice().sort()).toEqual(
+      calls.map((call) => call.kind).sort(),
+    );
+    expect(f.requests).toHaveLength(2);
+    expect(f.requests[0]!.tools.map((tool) => tool.name)).toEqual(
+      [...workspaceTools, ...actionTools, ...taskTools].map(
+        (tool) => tool.name,
+      ),
+    );
+    expect(
+      activities
+        .filter((event) => event.status === "completed")
+        .map((event) => event.name)
+        .sort(),
+    ).toEqual(calls.map((call) => call.name).sort());
+    const prompt = JSON.stringify(f.requests[0]);
+    expect(prompt).toContain(
+      "Closing the last pane also closes its tab/workspace",
+    );
+    expect(prompt).toContain("cancelled tasks cannot be edited or resumed");
+    expect(prompt).toContain(
+      "never claim a task was created, changed, paused, resumed, cancelled or deleted before the user confirms it",
+    );
+    for (const call of calls)
+      expect(JSON.stringify(f.requests[1]!.messages)).toContain(
+        `pending-${call.kind}`,
+      );
+    await first.dispose();
+    await f.createDriver().run({ ...input, entries, recover: true });
+    expect(proposed).toHaveLength(calls.length);
+    expect(f.requests).toHaveLength(2);
+    const results = durableEntries(f.directory, entries).flatMap(
+      (entry) =>
+        entry.model?.filter((message) => message.role === "toolResult") ?? [],
+    );
+    expect(results).toHaveLength(calls.length);
+    for (const result of results)
+      if (result.role === "toolResult") expect(result.isError).toBe(false);
+    await f.createDriver(join(f.directory, "read-only")).run(f.input());
+    expect(f.requests.at(-1)!.tools.map((tool) => tool.name)).toEqual(
+      workspaceTools.map((tool) => tool.name),
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("management tool failures expose safe reasons and never persist backend details", async () => {
+  const calls = [
+    { name: "propose_ranger_task_delete", params: { task_id: "task" } },
+    {
+      name: "propose_agent_close",
+      params: {
+        connection_id: "local",
+        workspace_id: "workspace",
+        pane_id: "pane",
+      },
+    },
+  ];
+  const f = await durableFixture((index) =>
+    modelReply(
+      index,
+      index <= calls.length
+        ? [
+            ...toolUse(
+              calls[index - 1]!.name,
+              `failure-${index}`,
+              calls[index - 1]!.params,
+              0,
+            ),
+            ...finish("tool_use"),
+          ]
+        : [
+            ...text("Management attempts could not proceed."),
+            ...finish("end_turn"),
+          ],
+    ),
+  );
+  const activities: { status: string; output?: string }[] = [];
+  try {
+    const entries = await f.createDriver().run(
+      f.input({
+        task: async () => {
+          throw new AssistantUserError("Cancel this task before deleting it.");
+        },
+        propose: async () => {
+          throw new Error("synthetic-private-management-secret");
+        },
+        tool: (_id, _name, status, details) =>
+          activities.push({ status, output: details?.output }),
+      }),
+    );
+    expect(JSON.stringify(f.requests[1]!.messages)).toContain(
+      "Cancel this task before deleting it.",
+    );
+    expect(JSON.stringify(f.requests[2]!.messages)).toContain(
+      "Workspace tool unavailable, stale, or outside the authorized scope.",
+    );
+    expect(
+      activities.filter((event) => event.status === "failed"),
+    ).toHaveLength(2);
+    for (const value of [
+      f.requests,
+      activities,
+      durableEntries(f.directory, entries),
+    ])
+      expect(JSON.stringify(value)).not.toContain(
+        "synthetic-private-management-secret",
+      );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("automatic task management descriptions explain operation receipts without claiming every task was enabled", async () => {
+  const f = await durableFixture((index) =>
+    modelReply(index, [
+      ...text("Ready to manage the task."),
+      ...finish("end_turn"),
+    ]),
+  );
+  try {
+    await f.createDriver().run(
+      f.input({
+        config: { ...f.input().config, approval_mode: "auto" },
+        task: async () => ({ text: "No management call expected" }),
+        propose: async () => ({ text: "No management call expected" }),
+      }),
+    );
+    const prompt = JSON.stringify(f.requests[0]);
+    expect(prompt).toContain(
+      "A confirmed tool receipt verifies the requested task operation",
+    );
+    expect(prompt).not.toContain(
+      "A confirmed tool receipt means the schedule was enabled",
+    );
+    for (const tool of taskTools.filter((tool) => tool.kind !== "list")) {
+      const description = f.requests[0]!.tools.find(
+        (entry) => entry.name === tool.name,
+      )!.description;
+      expect(description).toContain(
+        "Applies the requested task operation directly",
+      );
+      expect(description).toContain(
+        "A pending receipt requires manual confirmation",
+      );
+      expect(description).not.toContain("Returns a pending preview:");
+      expect(description).not.toContain("only when the user clicks Confirm");
+      expect(description).not.toContain("Returns a preview for confirmation");
+    }
   } finally {
     await f.cleanup();
   }
@@ -1066,31 +1315,49 @@ test("SQLite pauses a committed partial without aborting the durable submission 
   }
 }, 3000);
 
-test.each(["read", "proposal", "automatic", "notification"] as const)(
+test.each([
+  "read",
+  "proposal",
+  "automatic",
+  "notification",
+  "task management",
+  "automatic task management",
+  "close",
+] as const)(
   "interrupted %s tools follow their declared replay policy",
   async (kind) => {
+    const taskManagement =
+      kind === "task management" || kind === "automatic task management";
+    const automatic =
+      kind === "automatic" || kind === "automatic task management";
     const name =
       kind === "read"
         ? "workspace_status"
-        : kind === "proposal" || kind === "automatic"
-          ? "propose_agent_prompt"
-          : "send_user_notification";
+        : taskManagement
+          ? "propose_ranger_task_delete"
+          : kind === "close"
+            ? "propose_agent_close"
+            : kind === "notification"
+              ? "send_user_notification"
+              : "propose_agent_prompt";
     const params =
       kind === "read"
         ? {}
-        : kind === "proposal" || kind === "automatic"
-          ? {
-              connection_id: "local",
-              workspace_id: "workspace",
-              pane_id: "pane",
-              prompt: "Review",
-            }
-          : {
-              event_key: "agent-session-1:completed",
-              kind: "completed",
-              title: "Agent finished",
-              body: "Workspace history confirms completion.",
-            };
+        : taskManagement
+          ? { task_id: "task" }
+          : kind === "notification"
+            ? {
+                event_key: "agent-session-1:completed",
+                kind: "completed",
+                title: "Agent finished",
+                body: "Workspace history confirms completion.",
+              }
+            : {
+                connection_id: "local",
+                workspace_id: "workspace",
+                pane_id: "pane",
+                ...(kind === "close" ? {} : { prompt: "Review" }),
+              };
     const f = await durableFixture((index) =>
       modelReply(
         index,
@@ -1122,7 +1389,7 @@ test.each(["read", "proposal", "automatic", "notification"] as const)(
       const first = f.createDriver();
       const pending = first.run(
         f.input({
-          ...(kind === "automatic"
+          ...(automatic
             ? {
                 config: { ...f.input().config, approval_mode: "auto" as const },
               }
@@ -1132,6 +1399,7 @@ test.each(["read", "proposal", "automatic", "notification"] as const)(
           },
           read: callback,
           propose: callback,
+          task: callback,
           notify: (input, signal) => callback(undefined, input, signal),
         }),
       );
@@ -1142,7 +1410,7 @@ test.each(["read", "proposal", "automatic", "notification"] as const)(
       const states: string[] = [];
       await second.run(
         f.input({
-          ...(kind === "automatic"
+          ...(automatic
             ? {
                 config: { ...f.input().config, approval_mode: "auto" as const },
               }
@@ -1151,6 +1419,7 @@ test.each(["read", "proposal", "automatic", "notification"] as const)(
           recover: true,
           read: callback,
           propose: callback,
+          task: callback,
           notify: (input, signal) => callback(undefined, input, signal),
           tool: (_id, _name, status) => states.push(status),
         }),

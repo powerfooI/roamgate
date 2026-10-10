@@ -160,7 +160,10 @@ export type AssistantActionKind =
   | "create_tab"
   | "split_pane"
   | "start_agent"
-  | "send_prompt";
+  | "send_prompt"
+  | "close_workspace"
+  | "close_pane"
+  | "close_agent";
 
 export type AssistantAction = Omit<AssistantWorkspace, "label"> & {
   workspace_label: string;
@@ -280,7 +283,17 @@ export type AssistantTaskDetail = {
   run?: AssistantTaskRunDetail;
 };
 
+export type AssistantTaskOperation =
+  | "create"
+  | "update"
+  | "pause"
+  | "resume"
+  | "cancel"
+  | "delete";
+
 export type AssistantTaskProposal = AssistantTaskInput & {
+  operation?: AssistantTaskOperation;
+  detail?: string;
   id: string;
   status: "pending" | "confirmed" | "cancelled";
   created_at: string;
@@ -579,9 +592,19 @@ function taskProposal(value: unknown): value is AssistantTaskProposal {
   return (
     text(data.id) &&
     !!data.id &&
-    ["pending", "confirmed", "cancelled"].includes(String(data.status)) &&
+    text(data.status) &&
+    ["pending", "confirmed", "cancelled"].includes(data.status) &&
     timestamp(data.created_at) &&
-    (data.task_id === undefined || text(data.task_id))
+    (data.task_id === undefined || text(data.task_id)) &&
+    (data.detail === undefined ||
+      (text(data.detail) && data.detail.length <= 2000)) &&
+    (data.operation === undefined ||
+      (text(data.operation) &&
+        ["create", "update", "pause", "resume", "cancel", "delete"].includes(
+          String(data.operation),
+        ) &&
+        (data.operation === "create" ||
+          (text(data.task_id) && !!data.task_id))))
   );
 }
 
@@ -621,6 +644,7 @@ function action(value: unknown): value is AssistantAction {
     }) &&
     text(value.id) &&
     !!value.id &&
+    text(value.kind) &&
     [
       "create_workspace",
       "create_worktree",
@@ -628,7 +652,11 @@ function action(value: unknown): value is AssistantAction {
       "split_pane",
       "start_agent",
       "send_prompt",
+      "close_workspace",
+      "close_pane",
+      "close_agent",
     ].includes(String(value.kind)) &&
+    text(value.status) &&
     [
       "pending",
       "executing",

@@ -11,6 +11,7 @@ import type {
   AssistantTaskDetail,
   AssistantTaskInput,
   AssistantTaskNotification,
+  AssistantTaskOperation,
   AssistantTaskProposal,
   AssistantTaskRun,
   AssistantWorkspace,
@@ -36,7 +37,9 @@ import type { WorkspaceToolResult } from "./tools";
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
 const MAX_TASKS = 50;
 const MAX_RUNS = 20;
+const MAX_PROPOSALS = 50;
 const MAX_NOTIFICATIONS = 100;
+const MANAGEMENT_PREVIEW_MS = 10 * 60_000;
 const key = (ref: { connection_id: string; workspace_id: string }) =>
   `${ref.connection_id}\0${ref.workspace_id}`;
 const notificationScopeKey = (
@@ -87,6 +90,13 @@ export type PreparedTask = {
   targets: RecoveryTarget[];
   workspaces: AssistantWorkspace[];
 };
+export type TaskSnapshot = {
+  task_id: string;
+  revision: number;
+  prepared: PreparedTask;
+};
+type TaskManagementOperation = Exclude<AssistantTaskOperation, "create">;
+type TaskControl = "pause" | "resume" | "cancel" | "run_now" | "stop";
 export type SavedTaskRun = AssistantTaskRun &
   PreparedTask & { manual: boolean };
 type StoredTaskRun = AssistantTaskRun &
@@ -300,6 +310,19 @@ function validPrepared(value: unknown): value is PreparedTask {
 function validSavedProposal(entry: SavedProposal) {
   try {
     const proposal = entry.proposal;
+    if (
+      proposal.detail !== undefined &&
+      (typeof proposal.detail !== "string" || proposal.detail.length > 2000)
+    )
+      return false;
+    if (
+      proposal.operation !== undefined &&
+      (!["create", "update", "pause", "resume", "cancel", "delete"].includes(
+        proposal.operation,
+      ) ||
+        (proposal.operation !== "create" && !UUID.test(proposal.task_id ?? "")))
+    )
+      return false;
     const input = validateTaskInput({
       title: proposal.title,
       prompt: proposal.prompt,
@@ -403,7 +426,7 @@ export function validateSavedTasks(saved: unknown): SavedTaskState {
     new Set(saved.tasks.map((entry: SavedTask) => entry.task.id)).size !==
       saved.tasks.length ||
     !Array.isArray(saved.proposals) ||
-    saved.proposals.length > 50 ||
+    saved.proposals.length > MAX_PROPOSALS ||
     !saved.proposals.every(
       (entry: SavedProposal) =>
         validPrepared(entry.prepared) &&
@@ -441,10 +464,12 @@ export function createAssistantTasks(options: {
   publish(): void;
   notify?(notification: AssistantTaskNotification): void;
   validate(prepared: PreparedTask, signal?: AbortSignal): Promise<void>;
+  validateCleanup?(prepared: PreparedTask, signal?: AbortSignal): Promise<void>;
   child(
     run: SavedTaskRun,
     directory: string,
     publish: (snapshot: AssistantSnapshot) => void,
+    beforeDispatch: () => void,
   ): ScheduledChild;
 }) {
   let tasks: SavedTask[] = [];
@@ -458,14 +483,33 @@ export function createAssistantTasks(options: {
   let fault: string | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const children = new Map<string, ScheduledChild>();
+  // Ownership outlives both run compaction and history pruning. A child may
+  // still write private history until its disposal has successfully settled.
+  const runOwners = new Map<string, string>();
+  const childDisposals = new WeakMap<ScheduledChild, Promise<void>>();
+  const failedDisposals = new Set<string>();
+  const finalizingProposals = new Set<string>();
   const controller = new AbortController();
   const admissions = new Map<string, AbortController>();
   const retryAt = new Map<string, number>();
+  const unstartedAdmissions = new Set<string>();
+  const managementGuards = new Map<
+    string,
+    {
+      snapshot: TaskSnapshot;
+      assertScope(prepared: PreparedTask): void;
+      expires: number;
+    }
+  >();
   const revisions = new Map<string, number>();
   const checks = new Map<string, Set<AbortController>>();
   const jobs = new Set<Promise<void>>();
   const now = () => new Date().toISOString();
-  async function validate(prepared: PreparedTask, signal?: AbortSignal) {
+  async function validate(
+    prepared: PreparedTask,
+    signal?: AbortSignal,
+    cleanup = false,
+  ) {
     const combined = signal
       ? AbortSignal.any([signal, controller.signal])
       : controller.signal;
@@ -478,7 +522,9 @@ export function createAssistantTasks(options: {
       void Promise.resolve()
         .then(() => {
           combined.throwIfAborted();
-          return options.validate(prepared, combined);
+          return cleanup && options.validateCleanup
+            ? options.validateCleanup(prepared, combined)
+            : options.validate(prepared, combined);
         })
         .then(resolve, reject)
         .finally(() => combined.removeEventListener("abort", abort));
@@ -501,6 +547,7 @@ export function createAssistantTasks(options: {
     id: string,
     prepared: PreparedTask,
     signal?: AbortSignal,
+    cleanup = false,
   ) {
     const operation = new AbortController();
     const pending = checks.get(id) ?? new Set<AbortController>();
@@ -510,6 +557,7 @@ export function createAssistantTasks(options: {
       await validate(
         prepared,
         signal ? AbortSignal.any([signal, operation.signal]) : operation.signal,
+        cleanup,
       );
     } finally {
       pending.delete(operation);
@@ -529,6 +577,13 @@ export function createAssistantTasks(options: {
   try {
     storage = openTaskStorage(options.directory, validateSavedTasks);
     ({ tasks, proposals, requests } = storage.load());
+    for (const entry of proposals)
+      if (
+        entry.proposal.operation &&
+        entry.proposal.operation !== "create" &&
+        entry.proposal.status === "pending"
+      )
+        entry.proposal.status = "cancelled";
     for (const entry of tasks)
       for (const run of entry.runs)
         if (!["queued", "running", "waiting"].includes(run.status))
@@ -546,19 +601,57 @@ export function createAssistantTasks(options: {
       throw new Error("The saved Ranger tasks could not be loaded.");
     storage.save({ tasks, proposals, requests: requests.slice(-1000) });
   }
+  function restore<T extends object>(target: T, saved: T): T {
+    for (const field of Object.keys(target))
+      delete (target as Record<string, unknown>)[field];
+    return Object.assign(target, saved);
+  }
   function change(update: () => void) {
     const previous = structuredClone({ tasks, proposals, requests });
+    const taskRefs = new Map(tasks.map((entry) => [entry.task.id, entry]));
+    const runRefs = new Map(
+      tasks.flatMap((entry) => entry.runs.map((run) => [run.id, run] as const)),
+    );
+    const proposalRefs = new Map(
+      proposals.map((entry) => [entry.proposal.id, entry]),
+    );
     try {
       update();
       save();
     } catch {
-      ({ tasks, proposals, requests } = previous);
+      // Async admission, validation and cleanup hold these records by reference.
+      // Restore their identities as well as their durable values on rollback.
+      tasks = previous.tasks.map((saved) => {
+        const entry = taskRefs.get(saved.task.id)!;
+        const task = restore(entry.task, saved.task);
+        const runs = saved.runs.map((run) =>
+          restore(runRefs.get(run.id)!, run),
+        );
+        return restore(entry, { ...saved, task, runs });
+      });
+      proposals = previous.proposals.map((saved) => {
+        const entry = proposalRefs.get(saved.proposal.id)!;
+        const proposal = restore(entry.proposal, saved.proposal);
+        return restore(entry, { ...saved, proposal });
+      });
+      requests = previous.requests;
       fault =
         "The Ranger tasks could not be saved. Scheduling is paused until recovery succeeds.";
       enabled = false;
       options.publish();
       throw new Error("The Ranger task changes could not be saved.");
     }
+    // Revisions describe durable state only. A failed save restores the prior
+    // records without invalidating a still-valid preview or advancing its token.
+    const previousTasks = new Map(
+      previous.tasks.map((entry) => [entry.task.id, JSON.stringify(entry)]),
+    );
+    for (const entry of tasks)
+      if (previousTasks.get(entry.task.id) !== JSON.stringify(entry))
+        bump(entry.task.id);
+    for (const entry of previous.tasks)
+      if (!tasks.some((task) => task.task.id === entry.task.id))
+        bump(entry.task.id);
     if (options.notify) {
       const previousRuns = new Map(
         previous.tasks.flatMap((entry) =>
@@ -619,6 +712,7 @@ export function createAssistantTasks(options: {
       for (const run of entry.runs)
         if (
           !retained.has(run.id) &&
+          !runOwners.has(run.id) &&
           tasks.some((item) => item.task.id === entry.task.id)
         ) {
           try {
@@ -635,6 +729,157 @@ export function createAssistantTasks(options: {
     const found = tasks.find((entry) => entry.task.id === id);
     if (!found) throw new Error("This task is no longer available.");
     return found;
+  }
+  function snapshot(id: unknown): TaskSnapshot {
+    const entry = find(id);
+    return {
+      task_id: entry.task.id,
+      revision: revision(entry.task.id),
+      prepared: seal(entry),
+    };
+  }
+  function unchanged(original: TaskSnapshot) {
+    const entry = find(original.task_id);
+    if (
+      revision(entry.task.id) !== original.revision ||
+      JSON.stringify(seal(entry)) !== JSON.stringify(original.prepared)
+    )
+      throw new AssistantUserError(
+        "The task changed. Ask for a fresh preview.",
+      );
+    return entry;
+  }
+  function assertManagement(
+    operation: TaskManagementOperation,
+    entry: SavedTask,
+  ) {
+    if (operation === "delete") {
+      if (entry.task.status !== "cancelled" || current(entry))
+        throw new AssistantUserError(
+          "Cancel this task before deleting its history.",
+        );
+      if ([...runOwners.values()].includes(entry.task.id))
+        throw new AssistantUserError(
+          "Cancel this task again to retry cleanup, or wait for its run to finish stopping before deleting its history.",
+        );
+    } else if (entry.task.status === "cancelled" && operation !== "cancel") {
+      throw new AssistantUserError("This task was cancelled.");
+    }
+  }
+  function updateEntry(entry: SavedTask, prepared: PreparedTask) {
+    const scheduleChanged =
+      scheduleKey(entry.input.schedule) !==
+      scheduleKey(prepared.input.schedule);
+    const next = scheduleChanged
+      ? prepared.input.schedule.type === "once"
+        ? prepared.input.schedule.at
+        : new Date(
+            nextTaskTime(prepared.input.schedule, Date.now())!,
+          ).toISOString()
+      : entry.task.next_run_at;
+    Object.assign(entry, seal(prepared));
+    entry.task.updated_at = now();
+    if (scheduleChanged) {
+      entry.task.next_run_at = next;
+      delete entry.due_at;
+    }
+  }
+  function controlEntry(
+    method: TaskControl,
+    entry: SavedTask,
+    active: StoredTaskRun | undefined,
+  ) {
+    entry.task.updated_at = now();
+    if (method === "pause") {
+      entry.task.status = "paused";
+      delete entry.due_at;
+      if (active && unstartedAdmissions.has(active.id)) {
+        active.status = "queued";
+        delete active.started_at;
+      }
+    }
+    if (method === "resume") {
+      entry.task.status = "active";
+      if (
+        entry.task.next_run_at === null &&
+        entry.input.schedule.type !== "once"
+      )
+        entry.task.next_run_at = new Date(
+          nextTaskTime(entry.input.schedule, Date.now())!,
+        ).toISOString();
+    }
+    if (method === "run_now" && !active) queue(entry, now(), true);
+    if (method === "cancel") {
+      entry.task.status = "cancelled";
+      entry.task.next_run_at = null;
+      delete entry.due_at;
+    }
+    if ((method === "cancel" || method === "stop") && active) {
+      active.status = "stopped";
+      active.finished_at = now();
+      active.error = null;
+      delete entry.due_at;
+    }
+  }
+  async function finishControl(
+    method: TaskControl,
+    entry: SavedTask,
+    active: StoredTaskRun | undefined,
+  ) {
+    if (method === "cancel" || method === "stop" || method === "pause")
+      cancelChecks(entry.task.id);
+    if (method === "pause" && active && unstartedAdmissions.has(active.id))
+      admissions
+        .get(active.id)
+        ?.abort(new Error("Scheduled task paused before dispatch"));
+    if ((method === "cancel" || method === "stop") && active) {
+      admissions.get(active.id)?.abort(new Error("Scheduled task stopped"));
+      const child = children.get(active.id);
+      try {
+        await child?.stop();
+      } finally {
+        if (child) await disposeChild(active.id, child);
+        if (busy === active.id) busy = undefined;
+        change(() => {
+          compact(active);
+        });
+        arm();
+      }
+    }
+    // A previous disposal failure keeps history protected, but Cancel/Stop
+    // provide an explicit retry without replaying a finalized proposal.
+    if (method === "cancel" || method === "stop")
+      for (const runId of [...failedDisposals]) {
+        const child = children.get(runId);
+        if (runOwners.get(runId) === entry.task.id && child) {
+          await disposeChild(runId, child);
+          if (busy === runId) busy = undefined;
+          const run = entry.runs.find((item) => item.id === runId);
+          if (run?.status === "stopped") change(() => compact(run));
+        }
+      }
+    if (method === "resume" && started && !disposed) {
+      enabled = true;
+      fault = null;
+      for (const [runId, child] of children) finish(runId, child.snapshot());
+      options.publish();
+    }
+    arm();
+  }
+  function deleteEntry(entry: SavedTask) {
+    tasks = tasks.filter((item) => item !== entry);
+    requests = requests.filter((request) => request.task_id !== entry.task.id);
+  }
+  function removeHistory(taskId: string) {
+    try {
+      rmSync(runDirectory(taskId), { recursive: true, force: true });
+    } catch {
+      throw new AssistantUserError(
+        "The task was deleted, but its private history could not be removed.",
+      );
+    } finally {
+      arm();
+    }
   }
   function current(entry: SavedTask) {
     return entry.runs.find((run) =>
@@ -719,6 +964,46 @@ export function createAssistantTasks(options: {
     jobs.add(work);
     void work.catch(() => {}).finally(() => jobs.delete(work));
   }
+  function releaseRun(runId: string) {
+    if (children.has(runId) || admissions.has(runId)) return;
+    const taskId = runOwners.get(runId);
+    runOwners.delete(runId);
+    const entry = tasks.find((item) => item.task.id === taskId);
+    if (entry && !entry.runs.some((run) => run.id === runId)) {
+      try {
+        rmSync(runDirectory(entry.task.id, runId), {
+          recursive: true,
+          force: true,
+        });
+      } catch {}
+    }
+  }
+  function disposeChild(runId: string, child: ScheduledChild) {
+    const existing = childDisposals.get(child);
+    if (existing) return existing;
+    const pending = Promise.withResolvers<void>();
+    const work = pending.promise.then(
+      () => {
+        if (children.get(runId) === child) children.delete(runId);
+        failedDisposals.delete(runId);
+        releaseRun(runId);
+      },
+      (error: unknown) => {
+        failedDisposals.add(runId);
+        childDisposals.delete(child);
+        throw error;
+      },
+    );
+    failedDisposals.delete(runId);
+    childDisposals.set(child, work);
+    track(work);
+    try {
+      pending.resolve(child.dispose());
+    } catch (error) {
+      pending.reject(error);
+    }
+    return work;
+  }
   function finish(runId: string, snapshot: AssistantSnapshot) {
     if (disposed || admissions.has(runId)) return;
     const entry = tasks.find((item) =>
@@ -755,8 +1040,7 @@ export function createAssistantTasks(options: {
     if (busy === runId) busy = undefined;
     if (!pending) {
       const child = children.get(runId);
-      children.delete(runId);
-      if (child) track(child.dispose());
+      if (child) void disposeChild(runId, child);
     }
     arm();
   }
@@ -766,8 +1050,10 @@ export function createAssistantTasks(options: {
     recover: boolean,
   ) {
     busy = run.id;
+    runOwners.set(run.id, entry.task.id);
     const admission = new AbortController();
     admissions.set(run.id, admission);
+    if (!recover && !run.manual) unstartedAdmissions.add(run.id);
     let child: ScheduledChild | undefined;
     try {
       change(() => {
@@ -790,16 +1076,21 @@ export function createAssistantTasks(options: {
             finish(run.id, snapshot);
           } catch {}
         },
+        () => {
+          admission.signal.throwIfAborted();
+          if (unstartedAdmissions.has(run.id) && entry.task.status !== "active")
+            throw new Error("Scheduled task paused before dispatch");
+          unstartedAdmissions.delete(run.id);
+        },
       );
       children.set(run.id, child);
       await child.start(recover);
       admissions.delete(run.id);
       if (!disposed) finish(run.id, child.snapshot());
     } catch (error) {
-      if (!disposed && run.status !== "stopped") {
+      if (!disposed && ["running", "waiting"].includes(run.status)) {
         if (error instanceof AssistantRecoveryNotReadyError) {
-          await child?.dispose();
-          children.delete(run.id);
+          if (child) await disposeChild(run.id, child);
           if (disposed || !["running", "waiting"].includes(run.status)) return;
           change(() => {
             run.status = "queued";
@@ -819,13 +1110,20 @@ export function createAssistantTasks(options: {
           compact(run);
         });
         if (busy === run.id) busy = undefined;
-        children.delete(run.id);
-        await child?.dispose();
+        if (child) await disposeChild(run.id, child);
       }
     } finally {
-      admissions.delete(run.id);
-      if (!children.has(run.id) && busy === run.id) busy = undefined;
-      arm();
+      try {
+        if (child && run.status === "queued" && admission.signal.aborted) {
+          await disposeChild(run.id, child);
+        }
+      } finally {
+        unstartedAdmissions.delete(run.id);
+        admissions.delete(run.id);
+        releaseRun(run.id);
+        if (!children.has(run.id) && busy === run.id) busy = undefined;
+        arm();
+      }
     }
   }
   async function tick() {
@@ -914,11 +1212,19 @@ export function createAssistantTasks(options: {
     requests = requests.slice(-1000);
     return entry;
   }
+  function retainedProposals() {
+    return proposals.filter(
+      (entry) =>
+        entry.proposal.status === "pending" ||
+        finalizingProposals.has(entry.proposal.id),
+    );
+  }
   return {
     invalid: () => invalid,
     error: () => fault,
     summaries: () => tasks.map(summary),
     prepared: (taskId: unknown): PreparedTask => seal(find(taskId)),
+    snapshot,
     notificationHistory: (
       taskId: unknown,
       runId?: unknown,
@@ -1021,41 +1327,86 @@ export function createAssistantTasks(options: {
       arm();
       return summary(entry);
     },
-    async update(id: unknown, prepared: PreparedTask) {
-      let entry = find(id);
-      if (entry.task.status === "cancelled")
-        throw new Error("A cancelled task cannot be updated.");
-      const version = revision(entry.task.id);
+    async update(id: unknown, prepared: PreparedTask, original = snapshot(id)) {
+      if (original.task_id !== id) throw new Error("Invalid task snapshot");
+      let entry = unchanged(original);
+      assertManagement("update", entry);
       const sealed = seal(prepared);
       await check(entry.task.id, sealed);
-      entry = find(id);
-      if (
-        entry.task.status === "cancelled" ||
-        revision(entry.task.id) !== version
-      )
-        throw new Error(
-          "The task changed during permission checks. Review it and try again.",
-        );
-      change(() => {
-        bump(entry.task.id);
-        const scheduleChanged =
-          scheduleKey(entry.input.schedule) !==
-          scheduleKey(sealed.input.schedule);
-        Object.assign(entry, sealed);
-        entry.task.updated_at = now();
-        // Editing metadata must not rearm a consumed one-shot, shift a
-        // recurring cadence, or discard an occurrence already due.
-        if (scheduleChanged) {
-          entry.task.next_run_at =
-            sealed.input.schedule.type === "once"
-              ? sealed.input.schedule.at
-              : new Date(
-                  nextTaskTime(sealed.input.schedule, Date.now())!,
-                ).toISOString();
-          delete entry.due_at;
-        }
-      });
+      entry = unchanged(original);
+      assertManagement("update", entry);
+      change(() => updateEntry(entry, sealed));
       arm();
+    },
+    async proposeManagement(
+      operation: TaskManagementOperation,
+      id: unknown,
+      changes: Record<string, unknown>,
+      assertScope: (prepared: PreparedTask) => void,
+      signal?: AbortSignal,
+    ): Promise<AssistantTaskProposal> {
+      signal?.throwIfAborted();
+      const original = snapshot(id);
+      assertScope(original.prepared);
+      assertManagement(operation, unchanged(original));
+      const fields = Object.keys(changes);
+      if (
+        operation === "update"
+          ? !fields.length ||
+            fields.some(
+              (field) =>
+                !["title", "prompt", "schedule", "notification_mode"].includes(
+                  field,
+                ),
+            )
+          : fields.length > 0
+      )
+        throw new AssistantUserError("Invalid task edit fields.");
+      const prepared = seal(original.prepared);
+      if (operation === "update")
+        prepared.input = validateTaskInput({
+          ...prepared.input,
+          ...structuredClone(changes),
+        });
+      await check(
+        original.task_id,
+        seal(original.prepared),
+        signal,
+        ["pause", "cancel", "delete"].includes(operation),
+      );
+      if (operation === "update")
+        await check(original.task_id, seal(prepared), signal);
+      signal?.throwIfAborted();
+      assertScope(original.prepared);
+      assertManagement(operation, unchanged(original));
+      if (retainedProposals().length >= MAX_PROPOSALS)
+        throw new AssistantUserError("Too many pending task proposals.");
+      const proposal: AssistantTaskProposal = {
+        ...structuredClone(prepared.input),
+        id: randomUUID(),
+        operation,
+        task_id: original.task_id,
+        status: "pending",
+        created_at: now(),
+      };
+      change(() => {
+        proposals = retainedProposals();
+        proposals.push({ prepared, proposal });
+      });
+      managementGuards.set(proposal.id, {
+        snapshot: original,
+        assertScope,
+        expires: Date.now() + MANAGEMENT_PREVIEW_MS,
+      });
+      for (const id of managementGuards.keys())
+        if (
+          !proposals.some(
+            (entry) =>
+              entry.proposal.id === id && entry.proposal.status === "pending",
+          )
+        )
+          managementGuards.delete(id);
+      return structuredClone(proposal);
     },
     async propose(
       prepared: PreparedTask,
@@ -1063,10 +1414,7 @@ export function createAssistantTasks(options: {
     ): Promise<AssistantTaskProposal> {
       const sealed = seal(prepared);
       await validate(sealed, signal);
-      if (
-        proposals.filter((entry) => entry.proposal.status === "pending")
-          .length >= 50
-      )
+      if (retainedProposals().length >= MAX_PROPOSALS)
         throw new AssistantUserError("Too many pending task proposals.");
       const proposal: AssistantTaskProposal = {
         ...structuredClone(sealed.input),
@@ -1075,9 +1423,7 @@ export function createAssistantTasks(options: {
         created_at: now(),
       };
       change(() => {
-        proposals = proposals
-          .filter((entry) => entry.proposal.status === "pending")
-          .slice(-49);
+        proposals = retainedProposals();
         proposals.push({ prepared: sealed, proposal });
       });
       return structuredClone(proposal);
@@ -1086,6 +1432,71 @@ export function createAssistantTasks(options: {
       let entry = proposals.find((value) => value.proposal.id === id);
       if (!entry) throw new Error("This task proposal is no longer available.");
       if (entry.proposal.status !== "pending") return;
+      const operation = entry.proposal.operation ?? "create";
+      if (operation !== "create") {
+        const guard = managementGuards.get(id);
+        const assertFresh = () => {
+          if (disposed || !guard || Date.now() >= guard.expires)
+            throw new AssistantUserError(
+              "This task preview expired. Ask for a fresh preview.",
+            );
+          guard.assertScope(guard.snapshot.prepared);
+          const task = unchanged(guard.snapshot);
+          assertManagement(operation, task);
+          return task;
+        };
+        assertFresh();
+        const sealed = seal(entry.prepared);
+        await check(
+          `proposal:${id}`,
+          seal(guard!.snapshot.prepared),
+          undefined,
+          ["pause", "cancel", "delete"].includes(operation),
+        );
+        if (operation === "update") await check(`proposal:${id}`, sealed);
+        if (authorized && !authorized()) return;
+        entry = proposals.find((value) => value.proposal.id === id);
+        if (!entry || entry.proposal.status !== "pending") return;
+        if (JSON.stringify(entry.prepared) !== JSON.stringify(sealed))
+          throw new Error(
+            "The task proposal changed. Ask for a fresh preview.",
+          );
+        // A manual edit authorizes this new prompt, not future automatic effects.
+        if (operation === "update" && !authorized)
+          sealed.config.approval_mode = "manual";
+        const task = assertFresh();
+        const active = current(task);
+        // Validate every precondition before changing either the task or receipt.
+        if (operation === "delete") runDirectory(task.task.id);
+        finalizingProposals.add(id);
+        try {
+          change(() => {
+            if (operation === "update") updateEntry(task, sealed);
+            else if (operation === "delete") deleteEntry(task);
+            else controlEntry(operation, task, active);
+            entry!.proposal.status = "confirmed";
+          });
+          managementGuards.delete(id);
+          try {
+            if (operation === "delete") removeHistory(task.task.id);
+            else if (operation !== "update")
+              await finishControl(operation, task, active);
+          } catch {
+            const detail =
+              operation === "delete"
+                ? "The task was deleted, but its private history could not be removed."
+                : "The task was cancelled, but its active run could not be fully stopped. Review it before deleting its history.";
+            change(() => {
+              entry!.proposal.detail = detail;
+            });
+            throw new AssistantUserError(detail);
+          }
+          arm();
+          return;
+        } finally {
+          finalizingProposals.delete(id);
+        }
+      }
       const sealed = seal(entry.prepared);
       await check(`proposal:${id}`, sealed);
       if (authorized && !authorized()) return;
@@ -1108,6 +1519,7 @@ export function createAssistantTasks(options: {
       change(() => {
         entry.proposal.status = "cancelled";
       });
+      managementGuards.delete(id);
       cancelChecks(`proposal:${id}`);
     },
     async control(
@@ -1140,61 +1552,8 @@ export function createAssistantTasks(options: {
         }
       }
       const active = current(entry);
-      change(() => {
-        bump(entry.task.id);
-        entry.task.updated_at = now();
-        if (method === "pause") {
-          entry.task.status = "paused";
-          delete entry.due_at;
-        }
-        if (method === "resume") {
-          entry.task.status = "active";
-          if (
-            entry.task.next_run_at === null &&
-            entry.input.schedule.type !== "once"
-          )
-            entry.task.next_run_at = new Date(
-              nextTaskTime(entry.input.schedule, Date.now())!,
-            ).toISOString();
-        }
-        if (method === "run_now" && !active) queue(entry, now(), true);
-        if (method === "cancel") {
-          entry.task.status = "cancelled";
-          entry.task.next_run_at = null;
-          delete entry.due_at;
-        }
-        if ((method === "cancel" || method === "stop") && active) {
-          active.status = "stopped";
-          active.finished_at = now();
-          active.error = null;
-          delete entry.due_at;
-        }
-      });
-      if (method === "cancel" || method === "stop" || method === "pause")
-        cancelChecks(entry.task.id);
-      if ((method === "cancel" || method === "stop") && active) {
-        admissions.get(active.id)?.abort(new Error("Scheduled task stopped"));
-        const child = children.get(active.id);
-        try {
-          await child?.stop();
-        } finally {
-          // Stop can fail while saving cancellation; still drain the child.
-          await child?.dispose();
-          children.delete(active.id);
-          if (busy === active.id) busy = undefined;
-          change(() => {
-            compact(active);
-          });
-          arm();
-        }
-      }
-      if (method === "resume" && started && !disposed) {
-        enabled = true;
-        fault = null;
-        for (const [runId, child] of children) finish(runId, child.snapshot());
-        options.publish();
-      }
-      arm();
+      change(() => controlEntry(method, entry, active));
+      await finishControl(method, entry, active);
     },
     async revalidate() {
       for (const entry of tasks) {
@@ -1214,27 +1573,10 @@ export function createAssistantTasks(options: {
     },
     delete(id: unknown) {
       const entry = find(id);
-      if (
-        entry.task.status !== "cancelled" ||
-        current(entry) ||
-        entry.runs.some((run) => children.has(run.id) || admissions.has(run.id))
-      )
-        throw new Error("Cancel this task before deleting its history.");
-      change(() => {
-        bump(entry.task.id);
-        tasks = tasks.filter((item) => item !== entry);
-        requests = requests.filter(
-          (request) => request.task_id !== entry.task.id,
-        );
-      });
-      try {
-        rmSync(runDirectory(entry.task.id), { recursive: true, force: true });
-      } catch {
-        throw new Error(
-          "The task was deleted, but its private history could not be removed.",
-        );
-      }
-      arm();
+      assertManagement("delete", entry);
+      runDirectory(entry.task.id);
+      change(() => deleteEntry(entry));
+      removeHistory(entry.task.id);
     },
     async action(
       method: "confirm" | "cancel",
@@ -1348,7 +1690,7 @@ export function createAssistantTasks(options: {
       controller.abort(new Error("Ranger tasks paused"));
       if (timer) clearTimeout(timer);
       await Promise.allSettled(
-        [...children.values()].map((child) => child.dispose()),
+        [...children].map(([runId, child]) => disposeChild(runId, child)),
       );
       await Promise.allSettled(jobs);
       children.clear();
