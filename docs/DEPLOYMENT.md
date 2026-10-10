@@ -387,16 +387,18 @@ roamgate --host 0.0.0.0 --port 8443 \
 ## Ranger model connection
 
 Open the global **Ranger** window and its **Settings** button. Choose
-**Ranger connection** or **Shared Pi credentials**, select a provider, and use the available **Sign in**
-or **Enter API key** action. Complete the provider's web/device-code or manual
-authorization prompt in the window, choose a default model, select allowed
-workspaces, and **Save connection**. Each question automatically uses saved
+**Ranger connection** or **Shared Pi credentials**, select a provider in the
+**Provider** picker, and use the available **Sign in** or **Enter API key**
+action. Complete the provider's web/device-code or manual authorization prompt
+in the window, choose a default model, select allowed workspaces under
+**Workspace access**, and **Save settings**. Each question automatically uses saved
 authorized workspaces that are currently available; no workspaces are authorized
 by default.
 
-**High-permission mode** is a separate Settings control, off by default. Enabling
-it requires an explicit confirmation and authorizes all currently discoverable
-workspaces, including new workspaces that appear while the mode is enabled,
+**High-permission mode** is a separate switch under **Workspace access**, off by
+default. Enabling it requires an explicit confirmation and authorizes all
+currently discoverable workspaces, including new workspaces that appear while
+the mode is enabled,
 without individual selection. Workspace content may be sent to the selected
 model provider. Ranger can then execute its supported workspace,
 worktree, tab, pane, agent and prompt operations, and create schedules, without
@@ -422,42 +424,47 @@ concrete scopes are bounded to 512 workspaces. If an inventory is truncated,
 Ranger will not silently treat the partial result as all workspaces. Large scopes
 can take longer to validate and send more workspace context to the model.
 
-For a compatible endpoint, expand **Configure custom models** and enter a unique
-provider ID, API format, API base URL, model IDs, and API key. Enter one model ID
-per line or separate IDs with commas, up to 100 IDs of 500 characters each.
+For a compatible endpoint, select **Add** under **Custom models**. The editor
+shows **Models** (model IDs and supported efforts) and **Endpoint** (provider
+ID, API format, API base URL, and API key) together. When a custom provider is
+selected, **Add** keeps its endpoint and starts with no model IDs, so new IDs
+join that provider; enter a different provider ID for a new endpoint. Enter one
+model ID per line or separate IDs with commas, up to 100 IDs of 500 characters
+each.
 Duplicate IDs are saved once. Supported formats are OpenAI Chat Completions,
-OpenAI Responses, and Anthropic Messages. Use a
-dummy key for an unauthenticated local server. **Save custom models** saves the
-whole batch and selects the first ID; then select allowed workspaces and
-**Save connection**. Select a custom provider and model to **Edit custom models**;
-a blank key keeps its existing key. Stop running tasks before changing a model
-connection. Existing models outside the batch keep their settings.
+OpenAI Responses, and Anthropic Messages. Use a dummy key for an unauthenticated
+local server. **Save custom models** saves the whole batch and selects the first
+ID; then select allowed workspaces and
+**Save settings**. Select a custom provider and model and choose **Edit** to
+change that model.
+**Save custom models** returns to Settings after saving; **Back** or **Cancel**
+abandons unsaved editor changes. A blank key keeps its existing key.
+Stop running tasks before changing a model connection. Existing models outside
+the batch keep their settings.
 Use a separate provider ID for a different endpoint so existing providers keep
 their connection settings.
 
-Custom model IDs do not declare reasoning support automatically. For a model
-whose endpoint supports thinking, choose **Enable reasoning for all IDs** under
-**Reasoning capability** and save the custom models. Existing models can be
-edited in place; no new provider or API key is needed. The default **Keep
-existing / model defaults** preserves each model's declaration, while new IDs
-remain non-reasoning. An explicit enable or disable applies to every entered
-ID, so use separate batches for models with different capabilities. Existing
-Pi thinking-level maps and compatibility settings are preserved. Select the
-desired **Thinking effort** and save the connection, or use the chat selector.
-Pi determines the available levels and translates the selected effort into the
-chosen API format; declaring support does not verify a third-party endpoint's
-capabilities. Without a custom thinking-level map, reasoning models expose
-Off, Minimal, Low, Medium, and High; imported maps can restrict or extend these.
+Under **Supported thinking efforts**, select the levels your endpoint supports:
+Off, Minimal, Low, Medium, High, Extra high, and Maximum. New models start with
+Off selected. Existing models show their saved supported levels; leaving the
+checklist unchanged preserves each model's capabilities and Pi thinking-level
+maps. Changing the checklist applies the selected levels to every entered ID,
+so save separate batches for models with different capabilities. At least one
+level is required. Existing Pi compatibility settings are preserved.
 
-**Provider** lists OAuth logins and API keys from the selected credential
-source. Click a saved provider to select it, or expand **Connect another provider**
-to choose one without saved credentials and log in from the window. **Refresh**
-reads changes made outside the window. These labels report stored
-credentials, not a successful live connection test; credentials are checked or
-refreshed when used.
-**Search providers** filters saved and other providers by name or ID, ignoring
-case. Matching providers without saved credentials expand automatically;
-filtering does not change the selected provider.
+You determine which levels a third-party endpoint supports; saving a selection
+does not verify those capabilities. Pi translates the selected effort into the
+chosen API format. Select the desired **Thinking effort** and **Save settings**,
+or use the chat selector. Existing reasoning models without an explicit level
+list or Pi thinking-level map expose Off, Minimal, Low, Medium, and High.
+
+The **Provider** picker lists providers with saved OAuth logins and API keys
+from the selected credential source first, each with its credential status,
+followed by providers without saved credentials. Type to search by name or ID.
+Select a provider to choose it or log in from the window. The refresh button
+next to **Provider** reads changes made outside the window. These labels report
+stored credentials, not a successful live connection test; credentials are
+checked or refreshed when used.
 
 Ranger runs as the Roamgate bridge's OS account, including when the browser
 is on a phone or a workspace uses SSH. Provider credentials therefore belong on
@@ -520,7 +527,7 @@ The catalog uses credentials saved in Pi's `auth.json` and compatible endpoints
 in Pi's `models.json`. Custom model changes in shared mode update that file.
 **Refresh** rereads both files. Environment-only credentials for built-in
 providers are not imported. Model-file keys may use Pi's environment or command
-syntax; entering a key in **Configure custom model** accepts literal keys only.
+syntax; entering a key in the custom model editor accepts literal keys only.
 Pi's extensions, skills, project instructions, and
 built-in write/command tools are not loaded into Ranger.
 

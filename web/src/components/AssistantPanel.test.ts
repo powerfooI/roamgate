@@ -195,13 +195,19 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       await click("Chat");
       await click("Ranger chat history");
       expect(container.querySelector(".assistant-chat-history")).not.toBeNull();
+      expect(container.querySelector(".assistant-chat-toolbar")).toBeNull();
+      expect(container.querySelector(".assistant-setup-notice")).toBeNull();
+      expect(container.querySelector(".assistant-conversation")).toBeNull();
+      expect(container.querySelector(".assistant-panel-footer")).toBeNull();
+      expect(document.activeElement).toBe(
+        container.querySelector(".assistant-history-heading h3"),
+      );
       await render({ ...target });
       expect(container.querySelector(".assistant-chat-history")).toBeNull();
       expect(button("Tasks").getAttribute("aria-pressed")).toBe("true");
       await click("Chat");
-      expect(button("Ranger chat history").getAttribute("aria-expanded")).toBe(
-        "false",
-      );
+      expect(container.querySelector(".assistant-chat-history")).toBeNull();
+      expect(button("Ranger chat history").disabled).toBe(false);
       await click("Ranger settings");
       await render({ ...target, taskId: "task-two", runId: "new-run" });
       expect(container.querySelector(".assistant-panel-settings")).toBeNull();
@@ -1665,11 +1671,47 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(
         container.querySelectorAll(".assistant-chat-toolbar button"),
       ).toHaveLength(2);
+      const conversation = () =>
+        container.querySelector<HTMLElement>(".assistant-panel-list")!;
+      Object.defineProperties(conversation(), {
+        scrollHeight: { value: 800, configurable: true },
+        clientHeight: { value: 200, configurable: true },
+      });
+      await React.act(async () => {
+        conversation().scrollTop = 120;
+        conversation().dispatchEvent(new Event("scroll"));
+      });
       await React.act(async () => button("History").click());
       expect(
         container.querySelector('[aria-label="Saved Ranger chats"]'),
       ).not.toBeNull();
+      expect(container.querySelector(".assistant-chat-toolbar")).toBeNull();
+      expect(
+        container.querySelector('[aria-label="Message Ranger"]'),
+      ).toBeNull();
       await React.act(async () => button("Close Ranger chat history").click());
+      expect(conversation().scrollTop).toBe(120);
+      expect(
+        container.querySelector('[aria-label="Message Ranger"]')?.textContent,
+      ).toBe("Next question");
+      expect(document.activeElement?.getAttribute("aria-label")).toBe(
+        "Message Ranger",
+      );
+      await React.act(async () => button("History").click());
+      await React.act(async () =>
+        document.activeElement!.dispatchEvent(
+          new window.KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      );
+      expect(container.querySelector(".assistant-chat-history")).toBeNull();
+      expect(close).toHaveBeenCalledTimes(1);
+      await React.act(async () => button("History").click());
+      await React.act(async () => button("Chat").click());
+      expect(container.querySelector(".assistant-chat-history")).toBeNull();
       await React.act(async () => button("Tasks").click());
       expect(
         container.querySelector('[aria-label="Ranger tasks"]'),
@@ -1860,8 +1902,8 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       );
       expect(send).not.toHaveBeenCalled();
       await React.act(async () => button("Ranger settings").click());
-      expect(button("Save connection").disabled).toBe(true);
-      expect(container.querySelectorAll("fieldset:disabled")).toHaveLength(2);
+      expect(button("Save settings").disabled).toBe(true);
+      expect(container.querySelector("fieldset:disabled")).not.toBeNull();
       button("Refresh Ranger workspaces").focus();
       terminalFrame();
       expect(document.activeElement).toBe(button("Refresh Ranger workspaces"));
@@ -2012,6 +2054,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       await React.act(async () => button("Ranger settings").click());
       expect(container.querySelector(".assistant-panel-settings")).toBeNull();
       await React.act(async () => button("Ranger settings").click());
+      await React.act(async () => button("Add custom models").click());
       const customForm = () =>
         container.querySelector<HTMLFormElement>(
           '[aria-label="Custom model connection"]',
@@ -2106,13 +2149,18 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         api_key: "synthetic-key",
         credential_source: "assistant",
       });
+      expect(customForm()).toBeNull();
+      expect(button("Save settings").disabled).toBe(false);
+      await React.act(async () => button("Edit custom models").click());
       expect(customInput("Custom API key").value).toBe("");
       expect(customInput("Custom API key").required).toBe(false);
       expect(customInput("Custom API base URL").value).toBe(
         "https://example.com/v1",
       );
       expect(customInput("Custom model IDs").value).toBe("my-model");
-      expect(button("Save connection").disabled).toBe(false);
+      expect(
+        container.querySelector('[aria-label="Save settings"]'),
+      ).toBeNull();
       clientState.snapshot.providers[
         clientState.snapshot.providers.length - 1
       ]!.custom = {
@@ -2144,7 +2192,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         base_url: "https://model-override.example.com/v1",
         api: "anthropic-messages",
       });
-      await React.act(async () => button("Save connection").click());
+      await React.act(async () => button("Save settings").click());
       expect(call).toHaveBeenLastCalledWith("configure", {
         config: {
           ...clientState.snapshot.config,
@@ -2153,11 +2201,11 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         },
       });
       await React.act(async () => button("Ranger settings").click());
+      const modelDraft = button("Ranger model").textContent;
       const workspaceDraft = () =>
         container.querySelector<HTMLInputElement>(
           ".assistant-workspaces input",
         )!;
-      const modelDraft = button("Ranger model").textContent;
       expect(workspaceDraft().checked).toBe(true);
       await React.act(async () => workspaceDraft().click());
       expect(workspaceDraft().checked).toBe(false);
@@ -2166,9 +2214,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
           '[role="dialog"][aria-label="Enable high-permission mode?"]',
         );
       const callsBeforeApproval = call.mock.calls.length;
-      await React.act(async () =>
-        button("Enable high-permission mode").click(),
-      );
+      await React.act(async () => button("High-permission mode").click());
       expect(approvalDialog()).not.toBeNull();
       expect(approvalDialog()!.textContent).toContain(
         "all current and future workspaces",
@@ -2181,9 +2227,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       await React.act(async () => button("Cancel", approvalDialog()!).click());
       expect(approvalDialog()).toBeNull();
       expect(call).toHaveBeenCalledTimes(callsBeforeApproval);
-      await React.act(async () =>
-        button("Enable high-permission mode").click(),
-      );
+      await React.act(async () => button("High-permission mode").click());
       await React.act(async () =>
         button("Enable high-permission mode", approvalDialog()!).click(),
       );
@@ -2220,15 +2264,13 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
           ".assistant-panel-title .assistant-panel-access",
         )?.textContent,
       ).toBe("Full access");
-      expect(
-        button("Disable high-permission mode").getAttribute("aria-pressed"),
-      ).toBe("true");
+      expect(button("High-permission mode").getAttribute("aria-checked")).toBe(
+        "true",
+      );
       clientState.snapshot.running = true;
       await render();
-      expect(button("Disable high-permission mode").disabled).toBe(false);
-      await React.act(async () =>
-        button("Disable high-permission mode").click(),
-      );
+      expect(button("High-permission mode").disabled).toBe(false);
+      await React.act(async () => button("High-permission mode").click());
       expect(call).toHaveBeenLastCalledWith("configure_approval", {
         approval_mode: "manual",
       });
@@ -2242,10 +2284,8 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         })),
       };
       await render();
-      expect(button("Disable high-permission mode").disabled).toBe(false);
-      await React.act(async () =>
-        button("Disable high-permission mode").click(),
-      );
+      expect(button("High-permission mode").disabled).toBe(false);
+      await React.act(async () => button("High-permission mode").click());
       expect(call).toHaveBeenLastCalledWith("configure_approval", {
         approval_mode: "manual",
       });
@@ -2255,7 +2295,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         approval_mode: "manual",
       };
       await render();
-      expect(button("Enable high-permission mode").disabled).toBe(true);
+      expect(button("High-permission mode").disabled).toBe(true);
       expect(workspaceDraft().checked).toBe(false);
       expect(container.querySelector(".assistant-panel-access")).toBeNull();
 
@@ -2272,7 +2312,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       ).toBe("High permission: selected workspaces");
       expect(workspaceDraft().checked).toBe(false);
       expect(workspaceDraft().disabled).toBe(false);
-      expect(button("Disable high-permission mode").disabled).toBe(false);
+      expect(button("High-permission mode").disabled).toBe(false);
       expect(button("Select all available Ranger workspaces")).toBeDefined();
       await React.act(async () =>
         button("Enable high permission for all workspaces").click(),
@@ -2705,16 +2745,9 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
       credential_method: "api_key",
     });
     states[0] = true;
+    states[15] = null;
     states[1] = { ...snapshot.config, model: "unsaved-model" };
     render();
-    expect(
-      elements.filter(
-        (item) => item.props.className === "assistant-provider-choice",
-      ),
-    ).toHaveLength(3);
-    expect(find("children", "Saved login (OAuth)")).toBeDefined();
-    expect(find("children", "API key saved")).toBeDefined();
-    expect(find("aria-label", "Model provider").props.role).toBe("group");
     expect(find("aria-label", "Credential source").props.role).toBe("group");
     expect(
       find("aria-label", "Credential source").props.options,
@@ -2725,71 +2758,52 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
     expect(
       find("aria-label", "Shared Pi credentials").props["aria-pressed"],
     ).toBe(false);
-    expect(find("aria-label", "Model provider").props.options).toBeUndefined();
     expect(find("aria-label", "Ranger model").props.disabled).toBe(false);
-    expect(find("className", "assistant-other-providers").props.open).toBe(
-      false,
-    );
-    invoke("aria-label", "Search providers", "onChange", {
-      currentTarget: { value: "  NOT-sa  " },
-    });
-    expect(
-      elements.filter(
-        (item) => item.props.className === "assistant-provider-choice",
-      ),
-    ).toHaveLength(1);
-    expect(find("aria-label", "Select provider Not saved")).toBeDefined();
-    expect(find("className", "assistant-other-providers").props.open).toBe(
-      true,
-    );
+    expect(elements.some((item) => item.type === "details")).toBe(false);
+    // One searchable picker lists saved credentials first with their status.
+    const providerPicker = () => find("aria-label", "Model provider");
+    expect(providerPicker().props.searchPlaceholder).toBe("Search providers");
+    expect(providerPicker().props.emptyText).toBe("No providers found");
+    expect(providerPicker().props.options).toEqual([
+      {
+        value: "provider",
+        label: "Provider",
+        detail: "Saved login (OAuth)",
+        keywords: ["provider"],
+      },
+      {
+        value: "other",
+        label: "Other provider",
+        detail: "API key saved",
+        keywords: ["other"],
+      },
+      {
+        value: "not-saved",
+        label: "Not saved",
+        detail: "No saved credentials",
+        keywords: ["not-saved"],
+      },
+    ]);
+    const chooseProvider = (value: string) => {
+      (providerPicker().props.onChange as (value: string) => void)(value);
+      render();
+    };
+    chooseProvider("provider");
     expect(states[1]).toMatchObject({
       provider: "provider",
       model: "unsaved-model",
     });
-    invoke("aria-label", "Search providers", "onChange", {
-      currentTarget: { value: " OTHER PROVIDER " },
-    });
-    expect(find("aria-label", "Select provider Other provider")).toBeDefined();
-    invoke("aria-label", "Search providers", "onChange", {
-      currentTarget: { value: "no such provider" },
-    });
-    expect(find("children", "No providers match your search.").props.role).toBe(
-      "status",
-    );
-    expect(states[1]).toMatchObject({
-      provider: "provider",
-      model: "unsaved-model",
-    });
-    invoke("aria-label", "Search providers", "onChange", {
-      currentTarget: { value: "  " },
-    });
-    expect(
-      elements.filter(
-        (item) => item.props.className === "assistant-provider-choice",
-      ),
-    ).toHaveLength(3);
-    expect(find("className", "assistant-other-providers").props.open).toBe(
-      false,
-    );
-    invoke("aria-label", "Search providers", "onChange", {
-      currentTarget: { value: "" },
-    });
-    invoke("aria-label", "Select provider Provider", "onClick");
-    expect(states[1]).toMatchObject({
-      provider: "provider",
-      model: "unsaved-model",
-    });
-    invoke("aria-label", "Select provider Other provider", "onClick");
+    chooseProvider("other");
     expect(states[1]).toMatchObject({ provider: "other", model: "" });
-    expect(find("aria-label", "Ranger model").props.disabled).toBe(true);
-    expect(find("aria-label", "Ranger model").props.placeholder).toBe(
-      "No models available",
-    );
     expect(snapshot.config.provider).toBe("provider");
     expect(stop).not.toHaveBeenCalled();
     invoke("aria-label", "Refresh Ranger credentials", "onClick");
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(stop).not.toHaveBeenCalled();
+    expect(find("aria-label", "Ranger model").props.disabled).toBe(true);
+    expect(find("aria-label", "Ranger model").props.placeholder).toBe(
+      "No models available",
+    );
     await (
       find("aria-label", "Ranger connection").props
         .onClick as () => Promise<void>
@@ -2818,11 +2832,8 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
     for (const source of ["assistant", "pi"] as const) {
       states[1] = { ...snapshot.config, credential_source: source };
       render();
-      invoke("aria-label", "Select provider Not saved", "onClick");
-      expect(find("aria-label", "Ranger model").props.disabled).toBe(true);
-      expect(find("className", "assistant-other-providers").props.open).toBe(
-        true,
-      );
+      chooseProvider("not-saved");
+      expect(states[1]).toMatchObject({ provider: "not-saved", model: "" });
       invoke("aria-label", "Sign in to Not saved", "onClick");
       await Promise.resolve();
       await Promise.resolve();
@@ -2841,10 +2852,20 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
     stop.mockClear();
     snapshot.running = true;
     render();
+    const containsRefresh = (node: React.ReactNode): boolean =>
+      React.Children.toArray(node).some(
+        (child) =>
+          React.isValidElement<Record<string, unknown>>(child) &&
+          (child.props["aria-label"] === "Refresh Ranger credentials" ||
+            containsRefresh(child.props.children as React.ReactNode)),
+      );
     expect(
-      find("aria-label", "Refresh Ranger credentials").props.disabled,
+      elements.find(
+        (item) =>
+          item.type === "fieldset" &&
+          containsRefresh(item.props.children as React.ReactNode),
+      )?.props.disabled,
     ).toBe(true);
-
     snapshot.running = false;
     const offlineWorkspace = {
       connection_id: "offline",
@@ -3013,9 +3034,6 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
           : null;
       states[5] = blocked === "busy";
       render();
-      expect(find("aria-label", "Ranger chat history").props.disabled).toBe(
-        true,
-      );
       expect(find("title", "Older investigation").props.disabled).toBe(true);
       invoke("title", "Older investigation", "onClick");
       expect(stop).not.toHaveBeenCalled();
@@ -3036,8 +3054,11 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
     await Promise.resolve();
     render();
     expect(
-      find("aria-label", "Ranger chat history").props["aria-expanded"],
+      elements.some(
+        (item) => item.props["aria-label"] === "Saved Ranger chats",
+      ),
     ).toBe(false);
+    expect(find("aria-label", "Ranger chat history")).toBeDefined();
     const newChat = elements.find(
       (item) =>
         item.type === "button" &&

@@ -18,6 +18,7 @@ import {
   ASSISTANT_MAX_TOOL_ARGUMENTS,
   ASSISTANT_MAX_TOOL_OUTPUT,
   ASSISTANT_MAX_TOOL_DETAILS,
+  ASSISTANT_THINKING_LEVELS,
   type AssistantMessage,
 } from "../../../shared/assistant";
 import { type AssistantDriver, createPiDriver } from "./pi-driver";
@@ -1315,6 +1316,93 @@ test("SQLite pauses a committed partial without aborting the durable submission 
   }
 }, 3000);
 
+test("explicit custom thinking efforts override imported restrictions and preserve provider translations", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "roamgate-custom-efforts-"));
+  const path = join(directory, "models.json");
+  const saved = {
+    providers: {
+      custom: {
+        api: "openai-responses",
+        baseUrl: "http://127.0.0.1:1234/v1",
+        apiKey: "synthetic-test-key",
+        models: [
+          {
+            id: "reasoner",
+            reasoning: true,
+            thinkingLevelMap: { off: null, minimal: "low", high: "default" },
+            contextWindow: 8192,
+          },
+          { id: "untouched", reasoning: false },
+        ],
+        modelOverrides: {
+          reasoner: {
+            reasoning: false,
+            thinkingLevelMap: { high: "provider-high", max: null },
+            maxTokens: 2048,
+          },
+        },
+      },
+    },
+  };
+  writeFileSync(path, JSON.stringify(saved));
+  const driver = createPiDriver(directory);
+  const save = (path: string, value: unknown) =>
+    writeFileSync(path, JSON.stringify(value));
+  const connection = {
+    credential_source: "assistant" as const,
+    provider: "custom",
+    model: "reasoner",
+    base_url: saved.providers.custom.baseUrl,
+    api: "openai-responses" as const,
+  };
+  try {
+    await driver.configureModel!(
+      {
+        ...connection,
+        models: ["reasoner", "new-reasoner"],
+        thinking_levels: ["minimal", "high", "max"],
+      },
+      save,
+    );
+    const updated = JSON.parse(readFileSync(path, "utf8"));
+    const expectedMap = {
+      off: null,
+      minimal: "low",
+      low: null,
+      medium: null,
+      high: "provider-high",
+      xhigh: null,
+      max: "max",
+    };
+    expect(updated.providers.custom.models[0]).toMatchObject({
+      contextWindow: 8192,
+      reasoning: true,
+      thinkingLevelMap: expectedMap,
+    });
+    expect(updated.providers.custom.modelOverrides.reasoner).toEqual({
+      reasoning: true,
+      thinkingLevelMap: expectedMap,
+      maxTokens: 2048,
+    });
+    expect(updated.providers.custom.models[1]).toEqual(
+      saved.providers.custom.models[1],
+    );
+    const catalog = await driver.catalog("assistant");
+    for (const id of ["reasoner", "new-reasoner"])
+      expect(catalog.models.find((model) => model.id === id)).toMatchObject({
+        thinking_levels: ["minimal", "high", "max"],
+        default_thinking_level: "minimal",
+        custom: { reasoning: true },
+      });
+    const before = readFileSync(path, "utf8");
+    await driver.configureModel!(connection, save);
+    expect(readFileSync(path, "utf8")).toBe(before);
+  } finally {
+    await driver.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test.each([
   "read",
   "proposal",
@@ -2505,7 +2593,7 @@ test.each([
   "openai-responses",
   "anthropic-messages",
 ] as const)(
-  "configured custom reasoning reaches the %s request",
+  "configured custom thinking efforts reach the %s request",
   async (api) => {
     const directory = mkdtempSync(join(tmpdir(), "roamgate-reasoning-wire-"));
     const requests: {
@@ -2620,7 +2708,13 @@ test.each([
       expect(
         (await driver.catalog("assistant")).models[0]?.thinking_levels,
       ).toEqual(["off"]);
-      await driver.configureModel!({ ...connection, reasoning: true }, save);
+      await driver.configureModel!(
+        { ...connection, thinking_levels: [...ASSISTANT_THINKING_LEVELS] },
+        save,
+      );
+      expect(
+        (await driver.catalog("assistant")).models[0]?.thinking_levels,
+      ).toEqual([...ASSISTANT_THINKING_LEVELS]);
       const entries = await driver.run({
         ...input,
         config: { ...input.config, thinking_level: "high" },
@@ -2644,7 +2738,25 @@ test.each([
       else if (api === "openai-responses")
         expect(requests[1]!.reasoning?.effort).toBe("none");
       else expect(requests[1]!.thinking).toEqual({ type: "disabled" });
-      await driver.configureModel!({ ...connection, reasoning: false }, save);
+      if (api !== "anthropic-messages")
+        for (const thinking_level of ["xhigh", "max"] as const) {
+          await driver.run({
+            ...input,
+            entries,
+            requestId: `${thinking_level}-effort`,
+            config: { ...input.config, thinking_level },
+          });
+          expect(
+            api === "openai-completions"
+              ? requests.at(-1)!.reasoning_effort
+              : requests.at(-1)!.reasoning?.effort,
+          ).toBe(thinking_level);
+        }
+      const requestCount = requests.length;
+      await driver.configureModel!(
+        { ...connection, thinking_levels: ["off"] },
+        save,
+      );
       await expect(
         driver.run({
           ...input,
@@ -2652,7 +2764,7 @@ test.each([
           config: { ...input.config, thinking_level: "high" },
         }),
       ).rejects.toThrow("not supported");
-      expect(requests).toHaveLength(2);
+      expect(requests).toHaveLength(requestCount);
     } finally {
       await driver.dispose();
       server.stop(true);

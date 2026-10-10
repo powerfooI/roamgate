@@ -102,6 +102,8 @@ export type AssistantModelConnection = {
   models?: string[];
   /** Explicit capability for every submitted model; omitted preserves declarations. */
   reasoning?: boolean;
+  /** Explicit supported efforts for every submitted model; omitted preserves maps. */
+  thinking_levels?: AssistantThinkingLevel[];
   base_url: string;
   api: AssistantModelApi;
   api_key?: string;

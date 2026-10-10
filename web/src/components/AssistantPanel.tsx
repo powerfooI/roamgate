@@ -10,7 +10,6 @@ import {
   PinOff,
   Plus,
   RefreshCw,
-  Search,
   Send,
   Settings,
   Square,
@@ -26,6 +25,7 @@ import {
 import {
   ASSISTANT_MAX_CUSTOM_MODELS,
   ASSISTANT_MAX_WORKSPACES,
+  ASSISTANT_THINKING_LEVELS,
   type AssistantAction,
   type AssistantAuthState,
   type AssistantConfig,
@@ -34,6 +34,7 @@ import {
   type AssistantModelConnection,
   type AssistantSnapshot,
   type AssistantSource,
+  type AssistantThinkingLevel,
   type AssistantWorkspace,
   type AssistantWorkspaceRef,
 } from "../../../shared/assistant";
@@ -62,6 +63,7 @@ import { AssistantChatControls } from "./AssistantChatControls";
 import {
   sameAssistantSelection,
   thinkingForModel,
+  thinkingLabels,
   thinkingOptions,
 } from "../assistantModels";
 import { AssistantConversationMap } from "./AssistantConversationMap";
@@ -155,6 +157,14 @@ function credentialStatus(provider: AssistantSnapshot["providers"][number]) {
     : provider.credential_method === "api_key"
       ? "API key saved"
       : "Credentials saved";
+}
+
+function endpointHost(url: string) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 const activityLabels = new Map([
@@ -261,25 +271,34 @@ function AssistantModelForm({
   provider,
   providers,
   selectedModel,
+  adding,
   tasksRunning,
+  disabled,
+  onCancel,
   onSave,
 }: {
   config: AssistantConfig;
   provider: AssistantSnapshot["providers"][number] | undefined;
   providers: AssistantSnapshot["providers"];
   selectedModel: AssistantSnapshot["models"][number] | undefined;
+  /** Adding starts with no IDs but keeps the selected custom endpoint. */
+  adding: boolean;
   tasksRunning: boolean;
+  disabled: boolean;
+  onCancel(): void;
   onSave(input: AssistantModelConnection): Promise<boolean>;
 }) {
   const custom = selectedModel?.custom ?? provider?.custom;
   const [providerId, setProviderId] = useState(
     custom ? (provider?.id ?? "") : "",
   );
-  const [model, setModel] = useState(custom ? config.model : "");
+  const [model, setModel] = useState(custom && !adding ? config.model : "");
   const [baseUrl, setBaseUrl] = useState(custom?.base_url ?? "");
   const [api, setApi] = useState(custom?.api ?? "openai-completions");
   const [apiKey, setApiKey] = useState("");
-  const [reasoning, setReasoning] = useState("preserve");
+  const [thinkingLevels, setThinkingLevels] = useState<
+    AssistantThinkingLevel[] | undefined
+  >();
   const models = [
     ...new Set(
       model
@@ -291,171 +310,233 @@ function AssistantModelForm({
   const keySaved = providers.some(
     (item) => item.id === providerId.trim() && item.configured,
   );
-  const savedReasoning =
+  const savedModel =
     providerId.trim() === selectedModel?.provider &&
     models.length === 1 &&
     models[0] === selectedModel.id
-      ? selectedModel.custom?.reasoning
+      ? selectedModel
       : undefined;
+  const supportedLevels =
+    thinkingLevels ??
+    savedModel?.thinking_levels ??
+    (savedModel?.custom?.reasoning
+      ? ASSISTANT_THINKING_LEVELS.slice(0, 5)
+      : ["off"]);
   return (
-    <details className="assistant-custom-model">
-      <summary>
-        {custom ? "Edit custom models" : "Configure custom models"}
-      </summary>
-      <form
-        aria-label="Custom model connection"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          if (
-            tasksRunning ||
-            !models.length ||
-            models.length > ASSISTANT_MAX_CUSTOM_MODELS
-          )
-            return;
-          if (
-            await onSave({
-              provider: providerId.trim(),
-              model: models[0]!,
-              ...(models.length > 1 ? { models } : {}),
-              base_url: baseUrl.trim(),
-              api,
-              ...(apiKey ? { api_key: apiKey } : {}),
-              ...(reasoning !== "preserve"
-                ? { reasoning: reasoning === "enabled" }
-                : {}),
-              credential_source: config.credential_source,
-            })
-          ) {
-            setApiKey("");
-            setReasoning("preserve");
-          }
-        }}
-      >
-        <label className="form-field">
-          <span>Provider ID</span>
-          <input
-            aria-label="Custom provider ID"
-            required
-            maxLength={64}
-            pattern="[a-zA-Z0-9][a-zA-Z0-9_.:-]*"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="my-provider"
-            value={providerId}
-            onChange={(event) => setProviderId(event.currentTarget.value)}
-          />
-        </label>
-        <label className="form-field">
-          <span>API format</span>
-          <ThemedSelect
-            aria-label="Custom API format"
-            value={api}
-            options={[
-              { value: "openai-completions", label: "OpenAI Chat Completions" },
-              { value: "openai-responses", label: "OpenAI Responses" },
-              { value: "anthropic-messages", label: "Anthropic Messages" },
-            ]}
-            onChange={(value) => setApi(value as typeof api)}
-          />
-        </label>
-        <label className="form-field">
-          <span>API base URL</span>
-          <input
-            type="url"
-            aria-label="Custom API base URL"
-            required
-            maxLength={2000}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="https://api.example.com/v1"
-            value={baseUrl}
-            onChange={(event) => setBaseUrl(event.currentTarget.value)}
-          />
-        </label>
-        <label className="form-field">
-          <span>Model IDs</span>
-          <textarea
-            aria-label="Custom model IDs"
-            aria-describedby="assistant-custom-model-ids-hint"
-            required
-            rows={3}
-            maxLength={ASSISTANT_MAX_CUSTOM_MODELS * 501}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="your-model-id"
-            value={model}
-            onChange={(event) => setModel(event.currentTarget.value)}
-          />
-        </label>
-        <p className="assistant-hint" id="assistant-custom-model-ids-hint">
-          One ID per line, or separated by commas. Up to{" "}
-          {ASSISTANT_MAX_CUSTOM_MODELS} IDs, 500 characters each. The first ID
-          will be selected.
-        </p>
-        <label className="form-field">
-          <span>Reasoning capability</span>
-          <ThemedSelect
-            aria-label="Custom reasoning capability"
-            value={reasoning}
-            options={[
-              {
-                value: "preserve",
-                label:
-                  savedReasoning === undefined
-                    ? "Keep existing / model defaults"
-                    : `Keep current (reasoning ${savedReasoning ? "enabled" : "disabled"})`,
-              },
-              { value: "enabled", label: "Enable reasoning for all IDs" },
-              { value: "disabled", label: "Disable reasoning for all IDs" },
-            ]}
-            onChange={setReasoning}
-          />
-        </label>
-        <p className="assistant-hint">
-          Keep existing / model defaults preserves each model's settings. New
-          unknown models default to no reasoning. Enable only if your endpoint
-          supports reasoning for every ID above; this makes the Effort control
-          available.
-        </p>
-        <label className="form-field">
-          <span>API key</span>
-          <input
-            type="password"
-            aria-label="Custom API key"
-            required={!keySaved}
-            maxLength={10000}
-            autoComplete="new-password"
-            spellCheck={false}
-            placeholder={
-              keySaved ? "Leave blank to keep the saved key" : "API key"
-            }
-            value={apiKey}
-            onChange={(event) => setApiKey(event.currentTarget.value)}
-          />
-        </label>
-        <p className="assistant-hint">
-          {config.credential_source === "pi"
-            ? "Saved to Pi on the bridge host and shared with Pi."
-            : "Saved for Ranger on the bridge host."}{" "}
-          For a local server without authentication, enter a dummy key.
-        </p>
-        {tasksRunning ? (
-          <p className="assistant-hint">
-            Stop running tasks before changing a model connection.
-          </p>
-        ) : null}
+    <form
+      className="assistant-custom-model"
+      aria-label="Custom model connection"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (
+          disabled ||
+          tasksRunning ||
+          !models.length ||
+          models.length > ASSISTANT_MAX_CUSTOM_MODELS ||
+          !supportedLevels.length
+        )
+          return;
+        if (
+          await onSave({
+            provider: providerId.trim(),
+            model: models[0]!,
+            ...(models.length > 1 ? { models } : {}),
+            base_url: baseUrl.trim(),
+            api,
+            ...(apiKey ? { api_key: apiKey } : {}),
+            ...(thinkingLevels ? { thinking_levels: thinkingLevels } : {}),
+            credential_source: config.credential_source,
+          })
+        ) {
+          setApiKey("");
+          setThinkingLevels(undefined);
+        }
+      }}
+    >
+      <div className="assistant-settings-body">
+        <fieldset disabled={disabled || tasksRunning}>
+          <section
+            className="assistant-settings-section"
+            aria-label="Custom models"
+          >
+            <h4>Models</h4>
+            <label className="form-field">
+              <span className="assistant-field-heading">
+                <span>Model IDs</span>
+                <small
+                  className={
+                    models.length > ASSISTANT_MAX_CUSTOM_MODELS
+                      ? "is-invalid"
+                      : undefined
+                  }
+                >
+                  {models.length} / {ASSISTANT_MAX_CUSTOM_MODELS}
+                </small>
+              </span>
+              <textarea
+                aria-label="Custom model IDs"
+                aria-describedby="assistant-custom-model-ids-hint"
+                aria-invalid={models.length > ASSISTANT_MAX_CUSTOM_MODELS}
+                required
+                rows={3}
+                autoFocus
+                maxLength={ASSISTANT_MAX_CUSTOM_MODELS * 501}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="your-model-id"
+                value={model}
+                onChange={(event) => setModel(event.currentTarget.value)}
+              />
+            </label>
+            <p className="assistant-hint" id="assistant-custom-model-ids-hint">
+              One per line or comma-separated, up to{" "}
+              {ASSISTANT_MAX_CUSTOM_MODELS} IDs of 500 characters. Saving adds
+              or updates these IDs and selects the first; other models keep
+              their settings.
+            </p>
+            <fieldset
+              className="assistant-thinking-levels"
+              aria-label="Supported thinking efforts"
+              aria-describedby="assistant-custom-thinking-hint"
+            >
+              <legend>Supported thinking efforts</legend>
+              <div>
+                {ASSISTANT_THINKING_LEVELS.map((level) => (
+                  <label key={level}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Support ${thinkingLabels[level]} thinking`}
+                      checked={supportedLevels.includes(level)}
+                      onChange={(event) =>
+                        setThinkingLevels(
+                          ASSISTANT_THINKING_LEVELS.filter((item) =>
+                            item === level
+                              ? event.currentTarget.checked
+                              : supportedLevels.includes(item),
+                          ),
+                        )
+                      }
+                    />
+                    <span>{thinkingLabels[level]}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <p className="assistant-hint" id="assistant-custom-thinking-hint">
+              Check every level your endpoint accepts; Off alone means no
+              thinking. Applies to all IDs above. If left unchanged, existing
+              models keep their saved levels.
+            </p>
+            {!supportedLevels.length ? (
+              <p className="assistant-hint is-error" role="alert">
+                Select at least one effort.
+              </p>
+            ) : null}
+          </section>
+          <section
+            className="assistant-settings-section"
+            aria-label="Custom endpoint"
+          >
+            <h4>Endpoint</h4>
+            <label className="form-field">
+              <span>Provider ID</span>
+              <input
+                aria-label="Custom provider ID"
+                required
+                maxLength={64}
+                pattern="[a-zA-Z0-9][a-zA-Z0-9_.:-]*"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="my-provider"
+                value={providerId}
+                onChange={(event) => setProviderId(event.currentTarget.value)}
+              />
+            </label>
+            <label className="form-field">
+              <span>API format</span>
+              <ThemedSelect
+                aria-label="Custom API format"
+                value={api}
+                options={[
+                  {
+                    value: "openai-completions",
+                    label: "OpenAI Chat Completions",
+                  },
+                  { value: "openai-responses", label: "OpenAI Responses" },
+                  { value: "anthropic-messages", label: "Anthropic Messages" },
+                ]}
+                onChange={(value) => setApi(value as typeof api)}
+              />
+            </label>
+            <label className="form-field">
+              <span>API base URL</span>
+              <input
+                type="url"
+                aria-label="Custom API base URL"
+                required
+                maxLength={2000}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="https://api.example.com/v1"
+                value={baseUrl}
+                onChange={(event) => setBaseUrl(event.currentTarget.value)}
+              />
+            </label>
+            <label className="form-field">
+              <span>API key</span>
+              <input
+                type="password"
+                aria-label="Custom API key"
+                required={!keySaved}
+                maxLength={10000}
+                autoComplete="new-password"
+                spellCheck={false}
+                placeholder={
+                  keySaved ? "Leave blank to keep the saved key" : "API key"
+                }
+                value={apiKey}
+                onChange={(event) => setApiKey(event.currentTarget.value)}
+              />
+            </label>
+            <p className="assistant-hint">
+              {config.credential_source === "pi"
+                ? "Saved to Pi on the bridge host and shared with Pi."
+                : "Saved for Ranger on the bridge host."}{" "}
+              For a local server without authentication, enter a dummy key.
+            </p>
+          </section>
+          {tasksRunning ? (
+            <p className="assistant-hint">
+              Stop running tasks before changing a model connection.
+            </p>
+          ) : null}
+        </fieldset>
+      </div>
+      <div className="assistant-settings-save assistant-settings-actions">
         <button
+          type="button"
+          className="ghost"
+          aria-label="Cancel custom model changes"
+          disabled={disabled}
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+        <button
+          className="assistant-settings-primary"
           type="submit"
           disabled={
+            disabled ||
             tasksRunning ||
             !models.length ||
-            models.length > ASSISTANT_MAX_CUSTOM_MODELS
+            models.length > ASSISTANT_MAX_CUSTOM_MODELS ||
+            !supportedLevels.length
           }
         >
           Save custom models
         </button>
-      </form>
-    </details>
+      </div>
+    </form>
   );
 }
 
@@ -872,12 +953,13 @@ export function AssistantPanel({
   const [confirmNew, setConfirmNew] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [providerSearch, setProviderSearch] = useState("");
   const [view, setView] = useState<"chat" | "tasks">("chat");
   const [confirmApproval, setConfirmApproval] = useState(false);
   const [panelWidth, setPanelWidth] = useState(380);
   const [maximumWidth, setMaximumWidth] = useState(380);
   const [contextTruncated, setContextTruncated] = useState(false);
+  // Settings is one page; only the custom model editor replaces it.
+  const [modelEditor, setModelEditor] = useState<"add" | "edit" | null>(null);
   useEffect(() => {
     if (!requestedTask) return;
     setSettingsOpen(false);
@@ -907,6 +989,11 @@ export function AssistantPanel({
     width: number;
     scale: number;
   } | null>(null);
+  const settingsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const settingsReturnTarget = useRef<"add" | "edit" | null>(null);
+  const historyHeadingRef = useRef<HTMLHeadingElement>(null);
+  const chatScrollTop = useRef(0);
+  const closeModelEditor = () => setModelEditor(null);
   const width = Math.min(panelWidth, maximumWidth);
   const resizePanel = (next: number) =>
     setPanelWidth(Math.min(maximumWidth, Math.max(300, next)));
@@ -952,6 +1039,30 @@ export function AssistantPanel({
   const connected = state.connectionStatus === "connected";
   const ready = !!snapshot && connectionReady(snapshot);
   const showSettings = settingsOpen ?? (!!snapshot && !ready);
+  useEffect(() => {
+    if (!open || !showSettings) return;
+    if (modelEditor) {
+      // The ID field autofocuses; disabled editors focus their heading instead.
+      if (
+        panelRef.current
+          ?.querySelector<HTMLTextAreaElement>(
+            '[aria-label="Custom model IDs"]',
+          )
+          ?.closest("fieldset:disabled")
+      )
+        settingsHeadingRef.current?.focus({ preventScroll: true });
+    } else if (settingsReturnTarget.current) {
+      (
+        panelRef.current?.querySelector<HTMLButtonElement>(
+          `[data-settings-return="${settingsReturnTarget.current}"]`,
+        ) ??
+        panelRef.current?.querySelector<HTMLButtonElement>(
+          '[data-settings-return="add"]',
+        )
+      )?.focus();
+      settingsReturnTarget.current = null;
+    }
+  }, [open, showSettings, modelEditor]);
   const authPending =
     snapshot?.auth?.status === "waiting" ||
     snapshot?.auth?.status === "working";
@@ -1092,14 +1203,16 @@ export function AssistantPanel({
   }, [snapshot?.session_id]);
 
   useEffect(() => {
-    if (!open) return;
-    if (followingOutput.current && listRef.current)
-      listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [open, snapshot?.messages, showSettings]);
+    if (!open || !listRef.current) return;
+    listRef.current.scrollTop = followingOutput.current
+      ? listRef.current.scrollHeight
+      : chatScrollTop.current;
+  }, [open, snapshot?.messages, showSettings, view, historyOpen]);
 
   useEffect(() => {
-    if (open && !showSettings && view === "chat" && !historyOpen)
-      inputRef.current?.focus({ preventScroll: true });
+    if (!open || showSettings || view !== "chat") return;
+    if (historyOpen) historyHeadingRef.current?.focus({ preventScroll: true });
+    else inputRef.current?.focus({ preventScroll: true });
   }, [open, showSettings, view, historyOpen]);
 
   const run = async (action: string, params: Record<string, unknown> = {}) => {
@@ -1235,38 +1348,18 @@ export function AssistantPanel({
   const provider = snapshot?.providers.find(
     (item) => item.id === config?.provider,
   );
-  const providerQuery = providerSearch.trim().toLowerCase();
-  const matchingProviders = (snapshot?.providers ?? []).filter((item) =>
-    `${item.label} ${item.id}`.toLowerCase().includes(providerQuery),
-  );
-  const savedProviderCount = (snapshot?.providers ?? []).filter(
-    (item) => item.configured,
-  ).length;
-  const savedProviders = matchingProviders.filter((item) => item.configured);
-  const otherProviders = matchingProviders
-    .filter((item) => !item.configured)
-    .sort((a, b) => a.label.localeCompare(b.label));
-  const providerChoice = (item: AssistantSnapshot["providers"][number]) => (
-    <button
-      type="button"
-      key={item.id}
-      className="assistant-provider-choice"
-      aria-label={`Select provider ${item.label}`}
-      aria-pressed={config?.provider === item.id}
-      onClick={() => {
-        if (config && item.id !== config.provider)
-          setConfig({
-            ...config,
-            provider: item.id,
-            model: "",
-            thinking_level: undefined,
-          });
-      }}
-    >
-      <strong>{item.label}</strong>
-      <span>{credentialStatus(item)}</span>
-    </button>
-  );
+  // Saved credentials first, then the long tail of providers to sign in to.
+  const providerOptions = [
+    ...(snapshot?.providers ?? []).filter((item) => item.configured),
+    ...(snapshot?.providers ?? [])
+      .filter((item) => !item.configured)
+      .sort((a, b) => a.label.localeCompare(b.label)),
+  ].map((item) => ({
+    value: item.id,
+    label: item.label,
+    detail: credentialStatus(item),
+    keywords: [item.id],
+  }));
   const modelOptions = (snapshot?.models ?? [])
     .filter((model) => model.provider === config?.provider)
     .map((model) => ({ value: model.id, label: model.label }));
@@ -1274,6 +1367,19 @@ export function AssistantPanel({
     (model) =>
       model.provider === config?.provider && model.id === config?.model,
   );
+  const customEndpoint = selectedModel?.custom ?? provider?.custom;
+  const workspaceSet = (refs: AssistantWorkspaceRef[]) =>
+    refs.map(workspaceKey).sort().join("\n");
+  const settingsChanged =
+    !!snapshot &&
+    !!config &&
+    (config.provider !== snapshot.config.provider ||
+      config.model !== snapshot.config.model ||
+      config.thinking_level !== snapshot.config.thinking_level ||
+      workspaceSet(config.allowed_workspaces) !==
+        workspaceSet(snapshot.config.allowed_workspaces));
+  const modelLocked =
+    operationBusy || !!snapshot?.running || !connected || !!authPending;
   const permittedWorkspaces = permittedAssistantWorkspaces(
     snapshot?.config,
     workspaces,
@@ -1309,7 +1415,11 @@ export function AssistantPanel({
           !confirmApproval
         ) {
           event.preventDefault();
-          if (maximized && !mobile) setMaximized(false);
+          if (showSettings && modelEditor) {
+            if (!operationBusy) closeModelEditor();
+          } else if (!showSettings && view === "chat" && historyOpen) {
+            setHistoryOpen(false);
+          } else if (maximized && !mobile) setMaximized(false);
           else onClose();
         }
       }}
@@ -1416,6 +1526,7 @@ export function AssistantPanel({
                   onClick={() => {
                     setView(item);
                     setSettingsOpen(false);
+                    setHistoryOpen(false);
                   }}
                 >
                   {item === "chat" ? "Chat" : "Tasks"}
@@ -1460,7 +1571,10 @@ export function AssistantPanel({
           aria-label="Ranger settings"
           title="Model connection and workspace permissions"
           aria-pressed={showSettings}
-          onClick={() => setSettingsOpen(!showSettings)}
+          onClick={() => {
+            setSettingsOpen(!showSettings);
+            setModelEditor(null);
+          }}
         >
           <Settings size={16} />
         </button>
@@ -1514,99 +1628,65 @@ export function AssistantPanel({
         </div>
       ) : showSettings && config ? (
         <div className="assistant-panel-settings">
-          <div className="assistant-section-heading">
-            <h3>Model connection</h3>
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => {
-                setView("chat");
-                setSettingsOpen(false);
-              }}
-            >
-              <ChevronLeft size={14} /> Chat
-            </button>
+          <div className="assistant-settings-heading">
+            {modelEditor ? (
+              <>
+                <button
+                  type="button"
+                  className="assistant-icon-button"
+                  aria-label="Back to Ranger settings"
+                  title="Back to settings"
+                  disabled={operationBusy}
+                  onClick={closeModelEditor}
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <h3 ref={settingsHeadingRef} tabIndex={-1}>
+                  {modelEditor === "edit"
+                    ? "Edit custom models"
+                    : "Add custom models"}
+                </h3>
+              </>
+            ) : (
+              <>
+                <h3>Settings</h3>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    setView("chat");
+                    setSettingsOpen(false);
+                    setHistoryOpen(false);
+                  }}
+                >
+                  <ChevronLeft size={14} /> Chat
+                </button>
+              </>
+            )}
           </div>
-          <p className="assistant-hint">
-            Credentials belong to the bridge account. They are shared across
-            workspaces.
-          </p>
-          <fieldset
-            disabled={
-              operationBusy || snapshot.running || !connected || !!authPending
-            }
-          >
-            <div className="form-field">
-              <span>Credentials</span>
-              <div
-                className="assistant-credential-source"
-                role="group"
-                aria-label="Credential source"
-              >
-                {(
-                  [
-                    {
-                      value: "assistant",
-                      label: "Ranger connection",
-                      description:
-                        "Save Ranger logins, API keys and custom models separately from Pi.",
-                    },
-                    {
-                      value: "pi",
-                      label: "Shared Pi credentials",
-                      description:
-                        "Use Pi's saved logins, API keys and custom models. Changes are also saved to Pi.",
-                    },
-                  ] as const
-                ).map((item) => (
-                  <button
-                    type="button"
-                    key={item.value}
-                    aria-label={item.label}
-                    aria-describedby={`ranger-credential-${item.value}-description`}
-                    aria-pressed={config.credential_source === item.value}
-                    onClick={async () => {
-                      if (
-                        item.value === config.credential_source ||
-                        pendingAction.current
-                      )
-                        return;
-                      await run("configure", {
-                        config: {
-                          ...config,
-                          credential_source: item.value,
-                          provider: "",
-                          model: "",
-                          thinking_level: undefined,
-                        },
-                      });
-                    }}
-                  >
-                    <span>{item.label}</span>
-                    <small id={`ranger-credential-${item.value}-description`}>
-                      {item.description}
-                    </small>
-                  </button>
-                ))}
-              </div>
-            </div>
+          {modelEditor ? (
             <AssistantModelForm
               key={JSON.stringify([
+                modelEditor,
                 config.credential_source,
                 provider?.id,
                 config.model,
                 provider?.custom,
                 selectedModel?.custom,
+                selectedModel?.thinking_levels,
               ])}
               config={config}
               provider={provider}
               providers={snapshot.providers}
               selectedModel={selectedModel}
+              adding={modelEditor === "add"}
               tasksRunning={
                 snapshot.tasks?.some(
                   (task) => task.current_run?.status === "running",
                 ) ?? false
               }
+              disabled={modelLocked}
+              onCancel={closeModelEditor}
               onSave={async (input) => {
                 if (!(await run("configure_model", input))) return false;
                 setConfig({
@@ -1615,375 +1695,564 @@ export function AssistantPanel({
                   model: input.model,
                   thinking_level: undefined,
                 });
-                setProviderSearch("");
+                closeModelEditor();
                 return true;
               }}
             />
-            <div
-              className="assistant-providers"
-              role="group"
-              aria-label="Model provider"
-            >
-              <div className="assistant-section-heading">
-                <strong>Provider</strong>
-                <label className="assistant-provider-search">
-                  <Search size={13} aria-hidden="true" />
-                  <input
-                    type="search"
-                    aria-label="Search providers"
-                    placeholder="Search providers..."
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={providerSearch}
-                    onChange={(event) =>
-                      setProviderSearch(event.currentTarget.value)
-                    }
-                  />
-                </label>
+          ) : (
+            <>
+              <div className="assistant-settings-body">
+                <section
+                  className="assistant-settings-section"
+                  aria-label="Model settings"
+                >
+                  <h4>Model</h4>
+                  <fieldset disabled={modelLocked}>
+                    <div className="form-field">
+                      <span>Credentials</span>
+                      <div
+                        className="assistant-credential-source"
+                        role="group"
+                        aria-label="Credential source"
+                      >
+                        {(
+                          [
+                            { value: "assistant", label: "Ranger connection" },
+                            { value: "pi", label: "Shared Pi credentials" },
+                          ] as const
+                        ).map((item) => (
+                          <button
+                            type="button"
+                            key={item.value}
+                            aria-label={item.label}
+                            aria-pressed={
+                              config.credential_source === item.value
+                            }
+                            onClick={async () => {
+                              if (
+                                item.value === config.credential_source ||
+                                pendingAction.current
+                              )
+                                return;
+                              await run("configure", {
+                                config: {
+                                  ...config,
+                                  credential_source: item.value,
+                                  provider: "",
+                                  model: "",
+                                  thinking_level: undefined,
+                                },
+                              });
+                            }}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="assistant-hint">
+                        {config.credential_source === "pi"
+                          ? "Use Pi's saved logins and custom models. Changes are saved to Pi on the bridge host."
+                          : "Logins, API keys and custom models are saved for Ranger on the bridge host."}
+                      </p>
+                    </div>
+                    <div className="form-field">
+                      <span className="assistant-field-heading">
+                        <span>Provider</span>
+                        <button
+                          type="button"
+                          className="assistant-icon-button"
+                          aria-label="Refresh Ranger credentials"
+                          title="Reread saved logins, API keys and custom models"
+                          disabled={state.loading}
+                          onClick={() => {
+                            setError(null);
+                            void refreshAssistant().catch(() => {});
+                          }}
+                        >
+                          <RefreshCw size={12} />
+                        </button>
+                      </span>
+                      <ThemedSelect
+                        value={config.provider}
+                        options={providerOptions}
+                        aria-label="Model provider"
+                        placeholder="Choose a provider"
+                        searchPlaceholder="Search providers"
+                        emptyText="No providers found"
+                        contentClassName={`assistant-settings-select${mobile ? " is-mobile" : ""}`}
+                        disabled={modelLocked}
+                        onChange={(value) => {
+                          if (value !== config.provider)
+                            setConfig({
+                              ...config,
+                              provider: value,
+                              model: "",
+                              thinking_level: undefined,
+                            });
+                        }}
+                      />
+                      {provider ? (
+                        <div className="assistant-provider-status">
+                          <span>{credentialStatus(provider)}</span>
+                          {provider.methods.map((method) => (
+                            <button
+                              type="button"
+                              key={method}
+                              className={provider.configured ? "ghost" : ""}
+                              aria-label={
+                                method === "oauth"
+                                  ? `${provider.configured ? "Sign in again to" : "Sign in to"} ${provider.label}`
+                                  : `${provider.configured ? "Update API key for" : "Enter API key for"} ${provider.label}`
+                              }
+                              onClick={() =>
+                                void run("auth.start", {
+                                  provider: provider.id,
+                                  method,
+                                })
+                              }
+                            >
+                              {method === "oauth"
+                                ? provider.configured
+                                  ? "Sign in again"
+                                  : "Sign in"
+                                : `${provider.configured ? "Update" : "Enter"} API key`}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </fieldset>
+                  {snapshot.auth &&
+                  (authPending ||
+                    snapshot.auth.provider === config.provider) ? (
+                    <AuthCard
+                      key={`${snapshot.auth.id}:${snapshot.auth.prompt?.id ?? ""}`}
+                      auth={snapshot.auth}
+                      label={
+                        snapshot.providers.find(
+                          (item) => item.id === snapshot.auth?.provider,
+                        )?.label ?? snapshot.auth.provider
+                      }
+                      busy={operationBusy || !connected}
+                      run={run}
+                    />
+                  ) : null}
+                  <fieldset
+                    className="assistant-model-selection"
+                    disabled={modelLocked}
+                  >
+                    <label className="form-field">
+                      <span>Default model</span>
+                      <ThemedSelect
+                        value={config.model}
+                        options={modelOptions}
+                        aria-label="Ranger model"
+                        disabled={!provider?.configured || !modelOptions.length}
+                        searchPlaceholder={
+                          modelOptions.length > 8 ? "Search models" : undefined
+                        }
+                        contentClassName={`assistant-settings-select${mobile ? " is-mobile" : ""}`}
+                        placeholder={
+                          !provider
+                            ? "Choose a provider first"
+                            : !provider.configured
+                              ? "Connect a provider first"
+                              : !modelOptions.length
+                                ? "No models available"
+                                : "Choose a model"
+                        }
+                        onChange={(value) =>
+                          setConfig({
+                            ...config,
+                            model: value,
+                            thinking_level: thinkingForModel(
+                              config,
+                              snapshot.models.find(
+                                (model) =>
+                                  model.provider === config.provider &&
+                                  model.id === value,
+                              ),
+                            ),
+                          })
+                        }
+                      />
+                    </label>
+                    {snapshot.chat_selection ? (
+                      <label className="form-field">
+                        <span>Thinking effort</span>
+                        <ThemedSelect
+                          value={config.thinking_level ?? "default"}
+                          options={thinkingOptions(selectedModel, config)}
+                          aria-label="Default thinking effort"
+                          disabled={
+                            !thinkingOptions(selectedModel, config).length
+                          }
+                          placeholder={
+                            selectedModel?.default_thinking_level
+                              ? `Default (${thinkingLabels[selectedModel.default_thinking_level]})`
+                              : "No adjustable thinking effort"
+                          }
+                          onChange={(value) =>
+                            setConfig({
+                              ...config,
+                              thinking_level:
+                                value === "default"
+                                  ? undefined
+                                  : (value as AssistantConfig["thinking_level"]),
+                            })
+                          }
+                        />
+                      </label>
+                    ) : null}
+                  </fieldset>
+                  <div className="assistant-custom-models">
+                    <div>
+                      <strong>Custom models</strong>
+                      <span>
+                        {customEndpoint
+                          ? `${provider?.label ?? config.provider} · ${endpointHost(customEndpoint.base_url)}`
+                          : "Your own OpenAI- or Anthropic-compatible endpoint"}
+                      </span>
+                    </div>
+                    {customEndpoint && config.model ? (
+                      <button
+                        type="button"
+                        className="ghost"
+                        aria-label="Edit custom models"
+                        title={`Edit ${config.model} and its supported efforts`}
+                        data-settings-return="edit"
+                        disabled={modelLocked}
+                        onClick={() => {
+                          settingsReturnTarget.current = "edit";
+                          setModelEditor("edit");
+                        }}
+                      >
+                        Edit
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      aria-label="Add custom models"
+                      title={
+                        customEndpoint
+                          ? "Add model IDs to this endpoint or a new one"
+                          : "Connect a compatible endpoint"
+                      }
+                      data-settings-return="add"
+                      disabled={modelLocked}
+                      onClick={() => {
+                        settingsReturnTarget.current = "add";
+                        setModelEditor("add");
+                      }}
+                    >
+                      <Plus size={13} /> Add
+                    </button>
+                  </div>
+                </section>
+                <section
+                  className="assistant-settings-section"
+                  aria-label="Workspace access"
+                >
+                  <h4>Workspace access</h4>
+                  <div className="assistant-settings-toggle">
+                    <div>
+                      <strong>High-permission mode</strong>
+                      <p
+                        className="assistant-hint"
+                        id="ranger-high-permission-description"
+                      >
+                        {highPermission && !allWorkspacesAllowed
+                          ? "High permission currently applies only to your selected workspaces. Enable all-workspace access below to include every current and future workspace."
+                          : "Automatically allow every current and future workspace and skip action and schedule confirmations."}{" "}
+                        New or edited tasks keep this mode; started operations
+                        may finish.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-label="High-permission mode"
+                      aria-describedby="ranger-high-permission-description"
+                      aria-checked={highPermission}
+                      className={`settings-switch${highPermission ? " is-on" : ""}`}
+                      disabled={
+                        busy ||
+                        !connected ||
+                        !!authPending ||
+                        (!highPermission && (executing || snapshot.running))
+                      }
+                      onClick={() => {
+                        if (highPermission)
+                          void run("configure_approval", {
+                            approval_mode: "manual",
+                          });
+                        else setConfirmApproval(true);
+                      }}
+                    >
+                      <span />
+                    </button>
+                  </div>
+                  {highPermission && !allWorkspacesAllowed ? (
+                    <button
+                      type="button"
+                      className="assistant-settings-inline-action"
+                      disabled={
+                        busy ||
+                        !connected ||
+                        !!authPending ||
+                        executing ||
+                        snapshot.running
+                      }
+                      onClick={() => setConfirmApproval(true)}
+                    >
+                      Enable high permission for all workspaces
+                    </button>
+                  ) : null}
+                  <div className="assistant-workspaces-heading">
+                    <span>
+                      Allowed workspaces
+                      <small>
+                        {allWorkspacesAllowed
+                          ? "All"
+                          : `${workspaces.filter((workspace) => includesWorkspace(config.allowed_workspaces, workspace)).length} of ${workspaces.length}`}
+                      </small>
+                    </span>
+                    {!allWorkspacesAllowed ? (
+                      <>
+                        <button
+                          type="button"
+                          className="ghost"
+                          aria-label="Select all available Ranger workspaces"
+                          disabled={
+                            contextLoading ||
+                            operationBusy ||
+                            snapshot.running ||
+                            !connected ||
+                            !workspaces.length ||
+                            allAllowedWorkspaces.length >
+                              ASSISTANT_MAX_WORKSPACES ||
+                            workspaces.every((workspace) =>
+                              includesWorkspace(
+                                config.allowed_workspaces,
+                                workspace,
+                              ),
+                            )
+                          }
+                          onClick={() =>
+                            setConfig({
+                              ...config,
+                              allowed_workspaces: allAllowedWorkspaces,
+                            })
+                          }
+                        >
+                          Select all
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          aria-label="Clear allowed Ranger workspaces"
+                          disabled={
+                            contextLoading ||
+                            operationBusy ||
+                            snapshot.running ||
+                            !connected ||
+                            !config.allowed_workspaces.length
+                          }
+                          onClick={() =>
+                            setConfig({ ...config, allowed_workspaces: [] })
+                          }
+                        >
+                          Clear
+                        </button>
+                      </>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="assistant-icon-button"
+                      aria-label="Refresh Ranger workspaces"
+                      title="Refresh workspaces"
+                      disabled={contextLoading || !connected}
+                      onClick={() => void loadContext()}
+                    >
+                      <RefreshCw size={12} />
+                    </button>
+                  </div>
+                  <p className="assistant-hint">
+                    {allWorkspacesAllowed
+                      ? "All current and future workspaces are allowed automatically. Turn off high-permission mode to restore your manual workspace selection."
+                      : highPermission
+                        ? "Select workspaces Ranger may read and manage. Each question uses saved authorized workspaces that are currently available. Supported actions execute automatically in these selected workspaces."
+                        : "Select workspaces Ranger may read and manage. Each question uses saved authorized workspaces that are currently available. Actions require confirmation."}{" "}
+                    Workspace status, conversations, terminal output, and diffs
+                    may be sent to your model provider.
+                  </p>
+                  {!allWorkspacesAllowed &&
+                  allAllowedWorkspaces.length > ASSISTANT_MAX_WORKSPACES ? (
+                    <p className="assistant-hint">
+                      {`Select up to ${ASSISTANT_MAX_WORKSPACES} workspaces individually; Select all exceeds this limit.`}
+                    </p>
+                  ) : null}
+                  <fieldset
+                    className="assistant-workspaces"
+                    disabled={operationBusy || snapshot.running || !connected}
+                  >
+                    {workspaces.map((workspace) => (
+                      <label
+                        key={workspaceKey(workspace)}
+                        className="assistant-workspace-choice"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={
+                            allWorkspacesAllowed ||
+                            includesWorkspace(
+                              config.allowed_workspaces,
+                              workspace,
+                            )
+                          }
+                          disabled={
+                            allWorkspacesAllowed ||
+                            (config.allowed_workspaces.length >=
+                              ASSISTANT_MAX_WORKSPACES &&
+                              !includesWorkspace(
+                                config.allowed_workspaces,
+                                workspace,
+                              ))
+                          }
+                          onChange={() =>
+                            setConfig({
+                              ...config,
+                              allowed_workspaces: toggleWorkspace(
+                                config.allowed_workspaces,
+                                workspace,
+                              ),
+                            })
+                          }
+                        />
+                        <span>
+                          {workspace.label}
+                          <small>{workspace.connection_label}</small>
+                        </span>
+                      </label>
+                    ))}
+                    {!workspaces.length ? (
+                      <span className="assistant-hint">
+                        {contextLoading
+                          ? "Loading workspaces"
+                          : "No connected workspaces available"}
+                      </span>
+                    ) : null}
+                  </fieldset>
+                  {contextTruncated ? (
+                    <p className="assistant-hint" role="alert">
+                      {allWorkspacesAllowed
+                        ? truncatedScopeMessage
+                        : "Only part of the workspace list is available. Refresh after reducing the number of workspaces."}
+                    </p>
+                  ) : null}
+                  {contextErrors.map((message) => (
+                    <p key={message} className="assistant-hint">
+                      {message}
+                    </p>
+                  ))}
+                </section>
+              </div>
+              <div className="assistant-settings-save">
+                <span role="status">
+                  {settingsChanged ? "Unsaved changes" : ""}
+                </span>
                 <button
                   type="button"
-                  className="ghost"
-                  aria-label="Refresh Ranger credentials"
-                  disabled={
-                    state.loading ||
-                    operationBusy ||
-                    snapshot.running ||
-                    !connected ||
-                    !!authPending
-                  }
-                  onClick={() => {
-                    setError(null);
-                    void refreshAssistant().catch(() => {});
+                  className="assistant-settings-primary"
+                  disabled={modelLocked || !config.provider || !config.model}
+                  onClick={async () => {
+                    if (await run("configure", { config }))
+                      setSettingsOpen(false);
                   }}
                 >
-                  <RefreshCw size={12} /> Refresh
+                  Save settings
                 </button>
               </div>
-              <p className="assistant-hint">
-                {savedProviderCount} saved. Select a provider below. Credentials
-                are checked when used.
-              </p>
-              {!matchingProviders.length ? (
-                <p className="assistant-hint" role="status">
-                  No providers match your search.
-                </p>
-              ) : null}
-              {savedProviders.length ? (
-                <div className="assistant-provider-list">
-                  {savedProviders.map(providerChoice)}
-                </div>
-              ) : null}
-              {otherProviders.length ? (
-                <details
-                  className="assistant-other-providers"
-                  open={
-                    !!providerQuery ||
-                    !savedProviders.length ||
-                    (!!provider && !provider.configured)
-                  }
-                >
-                  <summary>Connect another provider</summary>
-                  <div className="assistant-provider-list">
-                    {otherProviders.map(providerChoice)}
-                  </div>
-                </details>
-              ) : null}
-              {provider && !matchingProviders.includes(provider) ? (
-                <p className="assistant-hint">
-                  Selected provider: {provider.label}
-                </p>
-              ) : null}
-            </div>
-            {provider ? (
-              <div className="assistant-connection-actions">
-                {provider.methods.map((method) => (
-                  <button
-                    type="button"
-                    key={method}
-                    onClick={() =>
-                      void run("auth.start", { provider: provider.id, method })
-                    }
-                    aria-label={`${method === "oauth" ? "Sign in to" : "Enter API key for"} ${provider.label}`}
-                  >
-                    {method === "oauth"
-                      ? `${provider.configured ? "Sign in again to" : "Sign in to"} ${provider.label}`
-                      : `${provider.configured ? "Update" : "Enter"} API key`}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {provider?.methods.length ? (
-              <p className="assistant-hint">
-                {config.credential_source === "pi"
-                  ? "Login is saved to Pi on the bridge host and shared with Pi."
-                  : "Login is saved for Ranger on the bridge host."}
-              </p>
-            ) : null}
-            <label className="form-field">
-              <span>Default model</span>
-              <ThemedSelect
-                value={config.model}
-                options={modelOptions}
-                aria-label="Ranger model"
-                disabled={!provider?.configured || !modelOptions.length}
-                placeholder={
-                  !provider
-                    ? "Choose a provider first"
-                    : !provider.configured
-                      ? "Connect a provider first"
-                      : !modelOptions.length
-                        ? "No models available"
-                        : "Choose a model"
-                }
-                onChange={(value) =>
-                  setConfig({
-                    ...config,
-                    model: value,
-                    thinking_level: thinkingForModel(
-                      config,
-                      snapshot.models.find(
-                        (model) =>
-                          model.provider === config.provider &&
-                          model.id === value,
-                      ),
-                    ),
-                  })
-                }
-              />
-            </label>
-            {snapshot.chat_selection ? (
-              <label className="form-field">
-                <span>Thinking effort</span>
-                <ThemedSelect
-                  value={config.thinking_level ?? "default"}
-                  options={thinkingOptions(selectedModel, config)}
-                  aria-label="Default thinking effort"
-                  disabled={!thinkingOptions(selectedModel, config).length}
-                  placeholder="No adjustable thinking effort"
-                  onChange={(value) =>
-                    setConfig({
-                      ...config,
-                      thinking_level:
-                        value === "default"
-                          ? undefined
-                          : (value as AssistantConfig["thinking_level"]),
-                    })
-                  }
-                />
-              </label>
-            ) : null}
-          </fieldset>
-          {snapshot.auth &&
-          (authPending || snapshot.auth.provider === config.provider) ? (
-            <AuthCard
-              key={`${snapshot.auth.id}:${snapshot.auth.prompt?.id ?? ""}`}
-              auth={snapshot.auth}
-              label={
-                snapshot.providers.find(
-                  (item) => item.id === snapshot.auth?.provider,
-                )?.label ?? snapshot.auth.provider
-              }
-              busy={operationBusy || !connected}
-              run={run}
-            />
-          ) : null}
-          <div className="assistant-section-heading">
-            <h3>High-permission mode</h3>
-            <span className="assistant-hint">
-              {allWorkspacesAllowed
-                ? "All workspaces"
-                : highPermission
-                  ? "Selected workspaces"
-                  : "Off"}
-            </span>
-          </div>
-          <p className="assistant-hint">
-            {highPermission && !allWorkspacesAllowed
-              ? "High permission currently applies only to your selected workspaces. Enable all-workspace access below to include every current and future workspace."
-              : "Automatically allow every current and future workspace and skip action and schedule confirmations."}{" "}
-            New or edited tasks keep this mode; started operations may finish.
-          </p>
-          <button
-            type="button"
-            aria-pressed={snapshot.config.approval_mode === "auto"}
-            disabled={
-              busy ||
-              !connected ||
-              !!authPending ||
-              (snapshot.config.approval_mode !== "auto" &&
-                (executing || snapshot.running))
-            }
-            onClick={() => {
-              if (snapshot.config.approval_mode === "auto")
-                void run("configure_approval", { approval_mode: "manual" });
-              else setConfirmApproval(true);
-            }}
-          >
-            {snapshot.config.approval_mode === "auto"
-              ? "Disable high-permission mode"
-              : "Enable high-permission mode"}
-          </button>
-          {highPermission && !allWorkspacesAllowed ? (
-            <button
-              type="button"
-              disabled={
-                busy ||
-                !connected ||
-                !!authPending ||
-                executing ||
-                snapshot.running
-              }
-              onClick={() => setConfirmApproval(true)}
-            >
-              Enable high permission for all workspaces
-            </button>
-          ) : null}
-          <div className="assistant-section-heading">
-            <h3>Allowed workspaces</h3>
-            <button
-              type="button"
-              className="assistant-icon-button"
-              aria-label="Refresh Ranger workspaces"
-              disabled={contextLoading || !connected}
-              onClick={() => void loadContext()}
-            >
-              <RefreshCw size={14} />
-            </button>
-          </div>
-          <p className="assistant-hint">
-            {allWorkspacesAllowed
-              ? "All current and future workspaces are allowed automatically. Turn off high-permission mode to restore your manual workspace selection."
-              : highPermission
-                ? "Select workspaces Ranger may read and manage. Each question uses saved authorized workspaces that are currently available. Supported actions execute automatically in these selected workspaces."
-                : "Select workspaces Ranger may read and manage. Each question uses saved authorized workspaces that are currently available. Actions require confirmation."}{" "}
-            Workspace status, conversations, terminal output, and diffs may be
-            sent to your model provider.
-          </p>
-          {!allWorkspacesAllowed ? (
-            <div className="assistant-workspace-actions">
-              <button
-                type="button"
-                aria-label="Select all available Ranger workspaces"
-                disabled={
-                  contextLoading ||
-                  operationBusy ||
-                  snapshot.running ||
-                  !connected ||
-                  !workspaces.length ||
-                  allAllowedWorkspaces.length > ASSISTANT_MAX_WORKSPACES ||
-                  workspaces.every((workspace) =>
-                    includesWorkspace(config.allowed_workspaces, workspace),
-                  )
-                }
-                onClick={() =>
-                  setConfig({
-                    ...config,
-                    allowed_workspaces: allAllowedWorkspaces,
-                  })
-                }
-              >
-                Select all
-              </button>
-              <button
-                type="button"
-                className="ghost"
-                aria-label="Clear allowed Ranger workspaces"
-                disabled={
-                  contextLoading ||
-                  operationBusy ||
-                  snapshot.running ||
-                  !connected ||
-                  !config.allowed_workspaces.length
-                }
-                onClick={() => setConfig({ ...config, allowed_workspaces: [] })}
-              >
-                Clear
-              </button>
-            </div>
-          ) : null}
-          {!allWorkspacesAllowed &&
-          allAllowedWorkspaces.length > ASSISTANT_MAX_WORKSPACES ? (
-            <p className="assistant-hint">
-              {`Select up to ${ASSISTANT_MAX_WORKSPACES} workspaces individually; Select all exceeds this limit.`}
-            </p>
-          ) : null}
-          <fieldset
-            className="assistant-workspaces"
-            disabled={operationBusy || snapshot.running || !connected}
-          >
-            {workspaces.map((workspace) => (
-              <label
-                key={workspaceKey(workspace)}
-                className="assistant-workspace-choice"
-              >
-                <input
-                  type="checkbox"
-                  checked={
-                    allWorkspacesAllowed ||
-                    includesWorkspace(config.allowed_workspaces, workspace)
-                  }
-                  disabled={
-                    allWorkspacesAllowed ||
-                    (config.allowed_workspaces.length >=
-                      ASSISTANT_MAX_WORKSPACES &&
-                      !includesWorkspace(config.allowed_workspaces, workspace))
-                  }
-                  onChange={() =>
-                    setConfig({
-                      ...config,
-                      allowed_workspaces: toggleWorkspace(
-                        config.allowed_workspaces,
-                        workspace,
-                      ),
-                    })
-                  }
-                />
-                <span>
-                  {workspace.label}
-                  <small>{workspace.connection_label}</small>
-                </span>
-              </label>
-            ))}
-            {!workspaces.length ? (
-              <span className="assistant-hint">
-                {contextLoading
-                  ? "Loading workspaces"
-                  : "No connected workspaces available"}
-              </span>
-            ) : null}
-          </fieldset>
-          {contextTruncated ? (
-            <p className="assistant-hint" role="alert">
-              {allWorkspacesAllowed
-                ? truncatedScopeMessage
-                : "Only part of the workspace list is available. Refresh after reducing the number of workspaces."}
-            </p>
-          ) : null}
-          {contextErrors.map((message) => (
-            <p key={message} className="assistant-hint">
-              {message}
-            </p>
-          ))}
-          <button
-            type="button"
-            disabled={
-              operationBusy ||
-              snapshot.running ||
-              !connected ||
-              !!authPending ||
-              !config.provider ||
-              !config.model
-            }
-            onClick={async () => {
-              if (await run("configure", { config })) {
-                setSettingsOpen(false);
-              }
-            }}
-          >
-            Save connection
-          </button>
+            </>
+          )}
         </div>
-      ) : view === "tasks" ? null : (
+      ) : view === "tasks" ? null : historySupported && historyOpen ? (
+        <section
+          className="assistant-chat-history"
+          aria-label="Saved Ranger chats"
+        >
+          <div className="assistant-history-heading">
+            <h3 ref={historyHeadingRef} tabIndex={-1}>
+              History
+            </h3>
+            <button
+              type="button"
+              className="ghost"
+              aria-label="Close Ranger chat history"
+              onClick={() => setHistoryOpen(false)}
+            >
+              <ChevronLeft size={14} /> Chat
+            </button>
+          </div>
+          <div className="assistant-history-body">
+            {snapshot.messages.some((message) =>
+              message.actions?.some((action) => action.status === "pending"),
+            ) ? (
+              <p>
+                Opening a chat cancels this chat's unconfirmed action previews.
+              </p>
+            ) : null}
+            {sessions.length ? (
+              <ul>
+                {sessions.map((session) => (
+                  <li key={session.id}>
+                    <button
+                      type="button"
+                      className="ghost"
+                      title={session.title}
+                      aria-pressed={session.id === snapshot.session_id}
+                      disabled={
+                        historyBlocked || session.id === snapshot.session_id
+                      }
+                      onClick={async () => {
+                        if (
+                          historyBlocked ||
+                          session.id === snapshot.session_id
+                        )
+                          return;
+                        if (
+                          await run("select_session", {
+                            session_id: session.id,
+                          })
+                        )
+                          setHistoryOpen(false);
+                      }}
+                    >
+                      <strong>{session.title}</strong>
+                      <span>
+                        <time dateTime={session.updated_at}>
+                          {formatUiDateTime(session.updated_at)}
+                        </time>
+                        <span>
+                          {session.id === snapshot.session_id
+                            ? "Current"
+                            : `${session.message_count} messages`}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="assistant-panel-empty">
+                <History size={24} aria-hidden="true" />
+                <strong>No saved chats yet</strong>
+                <span>Your conversations are saved automatically.</span>
+              </div>
+            )}
+          </div>
+        </section>
+      ) : (
         <>
           <div className="assistant-chat-toolbar">
             {historySupported ? (
@@ -2007,11 +2276,9 @@ export function AssistantPanel({
                 type="button"
                 className="ghost"
                 aria-label="Ranger chat history"
-                aria-expanded={historyOpen}
-                aria-controls="ranger-chat-history"
                 disabled={historyBlocked}
                 onClick={() => {
-                  if (!historyBlocked) setHistoryOpen((current) => !current);
+                  if (!historyBlocked) setHistoryOpen(true);
                 }}
               >
                 <History size={13} /> History
@@ -2046,86 +2313,14 @@ export function AssistantPanel({
               <button
                 type="button"
                 className="ghost"
-                onClick={() => setSettingsOpen(true)}
+                onClick={() => {
+                  setSettingsOpen(true);
+                  setModelEditor(null);
+                }}
               >
                 <Settings size={13} />{" "}
                 {ready && !authPending ? "Ranger settings" : "Model settings"}
               </button>
-            </div>
-          ) : null}
-          {historySupported && historyOpen ? (
-            <div
-              id="ranger-chat-history"
-              className="assistant-chat-history"
-              role="region"
-              aria-label="Saved Ranger chats"
-            >
-              <div className="assistant-section-heading">
-                <strong>History</strong>
-                <button
-                  type="button"
-                  className="ghost"
-                  aria-label="Close Ranger chat history"
-                  onClick={() => setHistoryOpen(false)}
-                >
-                  <ChevronLeft size={13} /> Chat
-                </button>
-              </div>
-              {snapshot.messages.some((message) =>
-                message.actions?.some((action) => action.status === "pending"),
-              ) ? (
-                <p>
-                  Opening a chat cancels this chat's unconfirmed action
-                  previews.
-                </p>
-              ) : null}
-              {sessions.length ? (
-                <ul>
-                  {sessions.map((session) => (
-                    <li key={session.id}>
-                      <button
-                        type="button"
-                        className="ghost"
-                        title={session.title}
-                        aria-pressed={session.id === snapshot.session_id}
-                        disabled={
-                          historyBlocked || session.id === snapshot.session_id
-                        }
-                        onClick={async () => {
-                          if (
-                            historyBlocked ||
-                            session.id === snapshot.session_id
-                          )
-                            return;
-                          if (
-                            await run("select_session", {
-                              session_id: session.id,
-                            })
-                          )
-                            setHistoryOpen(false);
-                        }}
-                      >
-                        <strong>{session.title}</strong>
-                        <span>
-                          <time dateTime={session.updated_at}>
-                            {formatUiDateTime(session.updated_at)}
-                          </time>
-                          <span>
-                            {session.id === snapshot.session_id
-                              ? "Current"
-                              : `${session.message_count} messages`}
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p>
-                  No saved chats yet. Your conversations are saved
-                  automatically.
-                </p>
-              )}
             </div>
           ) : null}
           <div className="assistant-conversation">
@@ -2136,6 +2331,7 @@ export function AssistantPanel({
               aria-busy={snapshot.running || executing}
               onScroll={(event) => {
                 const list = event.currentTarget;
+                chatScrollTop.current = list.scrollTop;
                 followingOutput.current =
                   list.scrollHeight - list.scrollTop - list.clientHeight < 48;
               }}
@@ -2325,7 +2521,7 @@ export function AssistantPanel({
               key={`${snapshot.instance_id}:${snapshot.session_id ?? ""}`}
               snapshot={snapshot}
               mobile={mobile}
-              disabled={busy || !connected || !!authPending || historyOpen}
+              disabled={busy || !connected || !!authPending}
               onChange={(params) => {
                 if (!composing.current) void run("configure_chat", params);
               }}
@@ -2344,7 +2540,10 @@ export function AssistantPanel({
           snapshot={snapshot}
           connected={connected}
           workspaces={permittedWorkspaces}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => {
+            setSettingsOpen(true);
+            setModelEditor(null);
+          }}
           onOpenSource={onOpenSource}
         />
       ) : null}

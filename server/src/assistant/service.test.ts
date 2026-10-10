@@ -2681,8 +2681,48 @@ describe("bridge-global assistant", () => {
       value: secret,
     });
     await until(() => snapshots.at(-1)?.auth?.status === "failed");
+    expect(snapshots.at(-1)?.auth?.message).toBe(
+      "Provider login failed. Try again.",
+    );
     expect(JSON.stringify(snapshots)).not.toContain(secret);
     expect((await service.snapshot()).messages).toEqual([]);
+  });
+
+  test("cancelling an API key update clears login state and preserves saved credentials for retry", async () => {
+    let savedKey = "existing-key";
+    const { service, snapshots } = setup({
+      login: async (_provider, _method, interaction) => {
+        savedKey = await interaction.prompt({
+          type: "secret",
+          message: "API key",
+        });
+      },
+    });
+    await service.handle("configure", configured);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const started = await service.handle("auth.start", {
+        provider: "test",
+        method: "api_key",
+      });
+      expect(started.auth?.status).toBe("waiting");
+      const cancelled = await service.handle("auth.cancel", {
+        auth_id: started.auth?.id,
+      });
+      expect(cancelled.auth).toBeNull();
+      expect(snapshots.at(-1)?.auth).toBeNull();
+      expect(cancelled.providers[0]?.configured).toBe(true);
+      expect(savedKey).toBe("existing-key");
+      await expect(
+        service.handle("auth.respond", {
+          auth_id: started.auth?.id,
+          prompt_id: started.auth?.prompt?.id,
+          value: "late-response",
+        }),
+      ).rejects.toThrow("no longer active");
+    }
+    expect(
+      snapshots.some((snapshot) => snapshot.auth?.status === "failed"),
+    ).toBe(false);
   });
 
   test("cancels OAuth and reads Pi credentials only after explicitly switching source", async () => {
@@ -2728,8 +2768,8 @@ describe("bridge-global assistant", () => {
     const cancelled = await service.handle("auth.cancel", {
       auth_id: start.auth?.id,
     });
-    expect(cancelled.auth?.status).toBe("failed");
-    expect(snapshots.at(-1)?.auth?.url).toBeUndefined();
+    expect(cancelled.auth).toBeNull();
+    expect(snapshots.at(-1)?.auth).toBeNull();
     await service.handle("configure", {
       ...configured,
       credential_source: "pi",
@@ -3001,6 +3041,13 @@ describe("bridge-global assistant", () => {
         { reasoning: "true" },
         { reasoning: null },
         { reasoning: 1 },
+        { thinking_levels: "high" },
+        { thinking_levels: null },
+        { thinking_levels: [] },
+        { thinking_levels: ["ultra"] },
+        { thinking_levels: ["high", "high"] },
+        { thinking_levels: ["high"], reasoning: false },
+        { thinking_levels: ["off"], reasoning: true },
         { api_key: "!touch secret-value" },
         { api_key: "$SECRET_VALUE" },
         { credential_source: "pi" },
@@ -3047,10 +3094,30 @@ describe("bridge-global assistant", () => {
       );
       expect(bodies[0]?.thinking?.type).toBe("enabled");
       expect(bodies[0]?.thinking?.budget_tokens).toBeGreaterThan(0);
+      const restricted = await f.service.handle("configure_model", {
+        ...input,
+        api_key: undefined,
+        thinking_levels: ["high", "xhigh", "max"],
+      });
+      expect(
+        restricted.models.find((model) => model.id === input.model),
+      ).toMatchObject({
+        thinking_levels: ["high", "xhigh", "max"],
+        default_thinking_level: "high",
+        custom: { reasoning: true },
+      });
+      await expect(
+        f.service.handle("configure", {
+          ...configured,
+          provider: input.provider,
+          model: input.model,
+          thinking_level: "low",
+        }),
+      ).rejects.toThrow("could not be saved");
       const disabled = await f.service.handle("configure_model", {
         ...input,
         api_key: undefined,
-        reasoning: false,
+        thinking_levels: ["off"],
       });
       expect(
         disabled.models.find((model) => model.id === input.model),

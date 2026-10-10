@@ -183,22 +183,28 @@ The conversation stays available when switching workspaces or connections.
 
 - Connect a provider and choose a model through the window's **Settings** button.
   Use a separate Ranger connection or explicitly reuse the bridge account's
-  saved Pi credentials with **Shared Pi credentials**. Select a saved provider or
-  expand **Connect another provider**; both credential sources support sign-in
-  and API-key entry in the window. **Configure custom models** connects compatible
-  endpoints by API address, format, key, and model IDs separated by commas or
-  newlines. Shared mode also reads
-  Pi's custom models. See [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
+  saved Pi credentials with **Shared Pi credentials**. Settings is one page with
+  **Model** and **Workspace access** sections and a single **Save settings**
+  button, which notes unsaved changes. The searchable **Provider** picker lists
+  saved credentials first; the selected provider's status and its sign-in or
+  API-key action appear below it. Under **Custom models**, **Add** opens an
+  editor for new model IDs (keeping the selected custom endpoint) and **Edit**
+  opens the selected custom model. Enter IDs separated by commas or newlines and
+  check the supported efforts from Off, Minimal, Low, Medium, High, Extra high,
+  and Maximum. Leaving the efforts unchanged preserves existing capabilities.
+  **Save custom models** returns to Settings; **Back** or **Cancel** abandons
+  unsaved editor changes. Shared mode also reads Pi's custom models.
+  See [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
 - Change the model and **Thinking effort** with the compact selectors below the
   chat input. Search models across connected providers. Effort choices come from
   the selected model; **Default** shows its effective level, and models without
   adjustable thinking show a disabled control. Changes are saved on the bridge
   and apply to the next message, including when a reply is still streaming.
   They preserve your draft, conversation, and workspace permissions.
-- Allow workspaces in Settings. Each question automatically uses saved
-  authorized workspaces that are currently available. **Select all** adds the
-  currently available workspaces; **Clear** removes every selection. Use
-  **Save connection** to apply permission changes.
+- Allow workspaces under **Workspace access** in Settings. Each question
+  automatically uses saved authorized workspaces that are currently available.
+  **Select all** adds the currently available workspaces; **Clear** removes every
+  selection. Use **Save settings** to apply permission changes.
   Workspace choices use a compact grid that scrolls when the list is long.
   No workspaces are authorized by default. In normal mode, new workspaces need
   to be selected separately. Confirmed deleted workspaces are removed from the
@@ -258,8 +264,8 @@ The conversation stays available when switching workspaces or connections.
 - Closing the window hides it while work continues; the topbar indicator shows
   activity. **Stop** cancels the current turn. **New chat** saves the current
   conversation and starts an empty one, keeping the model connection and workspace
-  permissions. **History** lists saved conversations by their first question;
-  select one to read its messages and continue chatting. Switching chats retires
+  permissions. **History** opens a full-panel list of saved conversations by their
+  first question; select one to read its messages and continue chatting. Switching chats retires
   unconfirmed action previews.
 - The wave bar marks messages and highlights the visible portion of the
   conversation. It sits below the messages on narrow panels and mobile, and on
