@@ -50,7 +50,9 @@ export function createSshProfileRuntimeConfig(
       socketPath,
       clientSocketPath,
       sshHost: profile.ssh_destination,
-      session: undefined,
+      remotePlatform: profile.remote_platform,
+      remoteHerdrPath: profile.remote_herdr_path?.replaceAll("/", "\\"),
+      session: profile.remote_session,
       // Empty profile socket paths mean "infer": the tunnel resolves the
       // default Herdr sockets under the remote home directory over SSH.
       hasExplicitSocketPath: remoteControlSocketPath !== undefined,

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ConnectionSummary } from "./api";
+import { parseConnectionSummary } from "./api";
 import {
   connectionErrorDetail,
   connectionLifecycleLabel,
@@ -30,6 +31,47 @@ function connection(patch: Partial<ConnectionSummary> = {}): ConnectionSummary {
 }
 
 describe("local connection profile presentation", () => {
+  test("round trips Windows SSH options through payloads and the catalog", () => {
+    const payload = sshConnectionProfilePayload({
+      id: "windows",
+      label: "Windows",
+      sshDestination: "pc",
+      remoteControlSocketPath: "",
+      remoteClientSocketPath: "",
+      autoConnect: false,
+      remotePlatform: "windows",
+      remoteHerdrPath: String.raw`C:\Herdr O'Brien\herdr.exe`,
+      remoteSession: "isolated-session",
+    });
+    expect(payload).toMatchObject({
+      remote_platform: "windows",
+      remote_session: "isolated-session",
+    });
+    expect(
+      parseConnectionSummary({
+        ...connection(),
+        ...payload,
+        source: "ssh-profile",
+        control_socket_path: undefined,
+        client_socket_path: undefined,
+      }),
+    ).toMatchObject(payload);
+    expect(() =>
+      sshConnectionProfilePayload({
+        id: "windows",
+        label: "Windows",
+        sshDestination: "pc",
+        remoteControlSocketPath: "",
+        remoteClientSocketPath: "",
+        autoConnect: false,
+        remotePlatform: "windows",
+        remoteSession: "default --update",
+      }),
+    ).toThrow("Session");
+    expect(
+      parseConnectionSummary(connection({ remote_platform: "windows" })),
+    ).toBeNull();
+  });
   test("labels every runtime lifecycle distinctly", () => {
     expect(connectionLifecycleLabel("ready")).toBe("Connected");
     expect(connectionLifecycleLabel("connecting")).toBe("Connecting");

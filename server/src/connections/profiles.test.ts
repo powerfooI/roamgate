@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ConnectionProfileStore,
+  connectionRecoveryFingerprint,
   type PersistedConnectionRegistry,
   publicConnectionProfile,
   validateConnectionRegistry,
@@ -70,6 +71,43 @@ function registry(): PersistedConnectionRegistry {
     profiles: [local("alpha")],
   };
 }
+
+describe("connection recovery fingerprints", () => {
+  test("preserves persisted local and Unix SSH fingerprints", () => {
+    expect(
+      connectionRecoveryFingerprint({
+        ...local(),
+        control_socket_path: "/tmp/alpha.sock",
+        client_socket_path: "/tmp/alpha-client.sock",
+      }),
+    ).toBe("1a7c9e2537a3a96fd4a80d280dc566f68b8c92e3a0dc8508dee2146f86b1551b");
+    expect(connectionRecoveryFingerprint(ssh())).toBe(
+      "f332d70be95c37f234e1fa0d8876a1be4128960d06e7a83660532da13acd691c",
+    );
+  });
+
+  test("invalidates Windows recovery when its endpoint changes", () => {
+    const profile = {
+      ...ssh(),
+      remote_control_socket_path: "",
+      remote_client_socket_path: "",
+      remote_platform: "windows" as const,
+      remote_herdr_path: String.raw`C:\Herdr\herdr.exe`,
+      remote_session: "default",
+    };
+    const fingerprint = connectionRecoveryFingerprint(profile);
+    for (const changed of [
+      { ssh_destination: "other-host" },
+      { remote_platform: undefined },
+      { remote_herdr_path: String.raw`C:\Other\herdr.exe` },
+      { remote_session: "other-session" },
+    ]) {
+      expect(
+        connectionRecoveryFingerprint({ ...profile, ...changed }),
+      ).not.toBe(fingerprint);
+    }
+  });
+});
 
 describe("connection profile validation", () => {
   test("accepts the bounded versioned local schema", () => {
@@ -190,6 +228,37 @@ describe("connection profile validation", () => {
     expect(validateSshConnectionProfile(inferred)).toEqual(inferred);
     const mixed = { ...ssh(), remote_client_socket_path: "" };
     expect(validateSshConnectionProfile(mixed)).toEqual(mixed);
+  });
+
+  test("persists Windows bridge options and rejects ambiguous or unsafe targets", () => {
+    const windows = {
+      ...ssh(),
+      remote_control_socket_path: "",
+      remote_client_socket_path: "",
+      remote_platform: "windows" as const,
+      remote_herdr_path: String.raw`C:\Herdr O'Brien\herdr.exe`,
+      remote_session: "isolated-session",
+    };
+    expect(validateSshConnectionProfile(windows)).toEqual(windows);
+    expect(
+      publicConnectionProfile(validateSshConnectionProfile(windows)),
+    ).toEqual({ ...windows, read_only: false });
+    for (const patch of [
+      { remote_platform: "linux" },
+      { remote_platform: undefined },
+      { remote_control_socket_path: "/tmp/herdr.sock" },
+      { remote_herdr_path: "herdr.exe --update" },
+      { remote_herdr_path: String.raw`\\server\share\herdr.exe` },
+      { remote_herdr_path: String.raw`C:\..\herdr.exe` },
+      { remote_herdr_path: "C:\\herdr\n.exe" },
+      { remote_herdr_path: "C:\\herdr\u0085.exe" },
+      { remote_herdr_path: `C:\\${"a".repeat(1024)}.exe` },
+      { remote_session: "default --update" },
+      { remote_session: "../default" },
+    ])
+      expect(() =>
+        validateSshConnectionProfile({ ...windows, ...patch }),
+      ).toThrow();
   });
 
   test("rejects reserved IDs, control characters, relative/traversal paths, and unknown fields", () => {

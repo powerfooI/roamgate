@@ -687,8 +687,27 @@ SSH requires an already-running remote Herdr and accepts an OpenSSH alias or
 `user@host`. Leave socket paths empty to resolve remote home defaults. Put ports,
 jump hosts, keys, and other options in `~/.ssh/config`; Roamgate stores no SSH
 passwords/keys/passphrases/options. Verify host keys and noninteractive service-user
-authentication first. SSH forwarding requires a Linux/macOS bridge; Windows only
-supports native local profiles because forwarded Unix sockets are not named pipes.
+authentication first. The Roamgate bridge must run on Linux/macOS; a Windows
+bridge supports native local profiles only.
+
+For a **Windows SSH host**, select **Windows** as the remote host OS. Install
+Herdr 0.9.1 or a later compatible release on that host, including the `conpty/`
+directory from its Windows archive, and start the desired Herdr session first.
+The remote SSH shell must be able to launch `powershell.exe`. Roamgate finds
+`herdr.exe` on the SSH user's PATH, then tries
+`%LOCALAPPDATA%\Programs\Herdr\bin\herdr.exe`; set an absolute executable path
+for another installation. Paths with spaces and Unicode are supported. An empty
+session selects `default`; set the session name to attach to a named server.
+Remote socket fields are unavailable for Windows. Roamgate checks bridge support
+before connecting and never installs or updates remote software on reconnect.
+The Roamgate-managed local Herdr version does not determine the remote version.
+
+Windows SSH supports Herdr API operations and interactive terminals, including
+PowerShell, resize and reconnect. Remote file, Git, worktree and agent-history
+helpers that require a POSIX shell remain Unix-only. Failed remote operations
+never fall back to Local. macOS ARM64 to Windows 11 ARM64 with Herdr's x64 package
+is exercised by the opt-in end-to-end test; Linux to Windows and native Windows
+x64 are not yet covered by that live test. See [validation](../CONTRIBUTING.md#validation).
 
 Profiles live atomically in `~/.config/roamgate/connections.json` or Windows
 `%APPDATA%\roamgate\connections.json` (`ROAMGATE_CONNECTIONS_PATH` overrides).

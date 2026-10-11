@@ -710,12 +710,27 @@ pages suppress duplicate local notifications. See [delivery limits](./DEPLOYMENT
 
 ## SSH transport
 
-Each runtime supervises one OpenSSH process forwarding both sockets into a private
+Unix SSH runtimes supervise one OpenSSH process forwarding both sockets into a private
 temporary directory. Readiness requires control `ping` and render handshake.
 Transient failures retry six times with cancellable backoff capped at 30 seconds,
 reset after 30 seconds stable-ready. Authentication, host-key, and permanent
 protocol failures do not retry. Post-ready exit retires the generation first.
 CLI SSH uses the same probes without persistence or automatic retry.
+
+Windows-host profiles (`remote_platform: "windows"`) instead expose two local
+Unix-socket listeners in the same private runtime directory. Each accepted
+connection owns an OpenSSH stdio process running Herdr's `remote-api-bridge`
+or `remote-client-bridge`. Windows PowerShell launches the native executable with
+inherited handles; its text pipeline must not process binary terminal frames.
+`remote_herdr_path` optionally selects a concrete executable and `remote_session`
+selects the named session (default `default`). A capability and server-status
+probe rejects missing/old binaries and stopped sessions before readiness.
+The control ping and render handshake remain the readiness contract. Closing a
+local connection terminates its SSH process; runtime disposal closes all
+listeners/connections and confirms child exit before removing owned paths.
+Unexpected bridge failures use the existing connection retry and generation
+isolation rules. Profile edits and Ranger recovery fingerprints include the
+Windows executable and session. No transport installs or updates remote software.
 
 Only OpenSSH aliases or `user@host` are accepted, after `--` with fixed options.
 Host-key checks remain enabled; service authentication is noninteractive. OpenSSH

@@ -54,6 +54,9 @@ type SshDraft = {
   remoteControlSocketPath: string;
   remoteClientSocketPath: string;
   autoConnect: boolean;
+  remotePlatform?: "windows";
+  remoteHerdrPath: string;
+  remoteSession: string;
 };
 
 type Feedback = { kind: "success" | "error"; message: string } | null;
@@ -75,6 +78,9 @@ function sshDraftFor(connection?: ConnectionSummary): SshDraft {
     sshDestination: connection?.ssh_destination ?? "",
     remoteControlSocketPath: connection?.remote_control_socket_path ?? "",
     remoteClientSocketPath: connection?.remote_client_socket_path ?? "",
+    remotePlatform: connection?.remote_platform,
+    remoteHerdrPath: connection?.remote_herdr_path ?? "",
+    remoteSession: connection?.remote_session ?? "",
     autoConnect: connection?.auto_connect ?? true,
   };
 }
@@ -488,29 +494,80 @@ function SshProfileForm({
         />
       </label>
       <label className="form-field">
-        <span>Remote control socket path (optional)</span>
-        <input
-          value={draft.remoteControlSocketPath}
+        <span>Remote host OS</span>
+        <select
+          value={draft.remotePlatform ?? "unix"}
           onChange={(event) =>
-            update("remoteControlSocketPath", event.target.value)
+            setDraft((current) => ({
+              ...current,
+              remotePlatform:
+                event.target.value === "windows" ? "windows" : undefined,
+              remoteControlSocketPath: "",
+              remoteClientSocketPath: "",
+              remoteHerdrPath: "",
+              remoteSession: "",
+            }))
           }
-          placeholder="Auto: ~/.config/herdr/herdr.sock"
-          autoCapitalize="none"
-          spellCheck={false}
-        />
+        >
+          <option value="unix">Linux / macOS</option>
+          <option value="windows">Windows</option>
+        </select>
       </label>
-      <label className="form-field">
-        <span>Remote render socket path (optional)</span>
-        <input
-          value={draft.remoteClientSocketPath}
-          onChange={(event) =>
-            update("remoteClientSocketPath", event.target.value)
-          }
-          placeholder="Auto: ~/.config/herdr/herdr-client.sock"
-          autoCapitalize="none"
-          spellCheck={false}
-        />
-      </label>
+      {draft.remotePlatform === "windows" ? (
+        <>
+          <label className="form-field">
+            <span>Herdr executable path (optional)</span>
+            <input
+              value={draft.remoteHerdrPath}
+              maxLength={1024}
+              onChange={(event) =>
+                update("remoteHerdrPath", event.target.value)
+              }
+              placeholder="Auto: herdr.exe in PATH"
+              autoCapitalize="none"
+              spellCheck={false}
+            />
+          </label>
+          <label className="form-field">
+            <span>Herdr session (optional)</span>
+            <input
+              value={draft.remoteSession}
+              onChange={(event) => update("remoteSession", event.target.value)}
+              placeholder="default"
+              maxLength={64}
+              autoCapitalize="none"
+              spellCheck={false}
+            />
+          </label>
+        </>
+      ) : (
+        <>
+          <label className="form-field">
+            <span>Remote control socket path (optional)</span>
+            <input
+              value={draft.remoteControlSocketPath}
+              onChange={(event) =>
+                update("remoteControlSocketPath", event.target.value)
+              }
+              placeholder="Auto: ~/.config/herdr/herdr.sock"
+              autoCapitalize="none"
+              spellCheck={false}
+            />
+          </label>
+          <label className="form-field">
+            <span>Remote render socket path (optional)</span>
+            <input
+              value={draft.remoteClientSocketPath}
+              onChange={(event) =>
+                update("remoteClientSocketPath", event.target.value)
+              }
+              placeholder="Auto: ~/.config/herdr/herdr-client.sock"
+              autoCapitalize="none"
+              spellCheck={false}
+            />
+          </label>
+        </>
+      )}
       <label className="connection-profile-checkbox">
         <input
           type="checkbox"
@@ -520,11 +577,13 @@ function SshProfileForm({
         Connect automatically when Roamgate starts
       </label>
       <p className="connection-profile-security-note">
-        Leave the socket paths empty and Roamgate infers the default Herdr
-        sockets under the remote home directory at connect time. Authentication
-        comes from the bridge service user&apos;s OpenSSH config, ssh-agent, or
-        system Keychain. Establish host trust outside Roamgate. Passwords, keys,
-        passphrases, commands, ports, and SSH options are never stored here.
+        {draft.remotePlatform === "windows"
+          ? "Windows requires a running Herdr 0.9.1+ session and Windows PowerShell. The default session is used unless specified. Terminal and Herdr workspace actions are supported; remote file and Git tools require a Unix host. "
+          : "Leave the socket paths empty to use the default Herdr sockets under the remote home directory. "}
+        Authentication comes from the bridge service user&apos;s OpenSSH config,
+        ssh-agent, or system Keychain. Establish host trust outside Roamgate.
+        Passwords, keys, passphrases, commands, ports, and SSH options are never
+        stored here.
       </p>
       {feedback ? (
         <div
@@ -845,26 +904,41 @@ function ConnectionManagerDialog({ onClose }: { onClose: () => void }) {
                       <code title={connection.ssh_destination}>
                         Destination: {connection.ssh_destination}
                       </code>
-                      <code
-                        title={
-                          connection.remote_control_socket_path ||
-                          "Inferred under the remote home directory"
-                        }
-                      >
-                        Remote control:{" "}
-                        {connection.remote_control_socket_path ||
-                          "auto (~/.config/herdr/herdr.sock)"}
-                      </code>
-                      <code
-                        title={
-                          connection.remote_client_socket_path ||
-                          "Inferred under the remote home directory"
-                        }
-                      >
-                        Remote render:{" "}
-                        {connection.remote_client_socket_path ||
-                          "auto (~/.config/herdr/herdr-client.sock)"}
-                      </code>
+                      {connection.remote_platform === "windows" ? (
+                        <>
+                          <code>
+                            Herdr:{" "}
+                            {connection.remote_herdr_path || "auto (herdr.exe)"}
+                          </code>
+                          <code>
+                            Windows session:{" "}
+                            {connection.remote_session || "default"}
+                          </code>
+                        </>
+                      ) : (
+                        <>
+                          <code
+                            title={
+                              connection.remote_control_socket_path ||
+                              "Inferred under the remote home directory"
+                            }
+                          >
+                            Remote control:{" "}
+                            {connection.remote_control_socket_path ||
+                              "auto (~/.config/herdr/herdr.sock)"}
+                          </code>
+                          <code
+                            title={
+                              connection.remote_client_socket_path ||
+                              "Inferred under the remote home directory"
+                            }
+                          >
+                            Remote render:{" "}
+                            {connection.remote_client_socket_path ||
+                              "auto (~/.config/herdr/herdr-client.sock)"}
+                          </code>
+                        </>
+                      )}
                     </>
                   ) : (
                     <>

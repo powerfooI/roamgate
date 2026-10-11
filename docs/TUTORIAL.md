@@ -258,13 +258,16 @@ Serve, not Roamgate, and does not prevent sleep. For daily use, configure a
 
 ### SSH: remote Herdr or remote web interface
 
-**Option A — local Roamgate, remote Herdr:** requires a Linux/macOS bridge;
-Windows supports native local profiles, not SSH socket forwarding.
+**Option A — local Roamgate, remote Herdr:** requires a Linux/macOS bridge.
+The remote host may run Unix or Windows. A Windows bridge supports local profiles.
 
 1. Verify system SSH, host fingerprint, authentication, and remote Herdr readiness.
    Put keys, ports, and jump hosts in `~/.ssh/config`, for example alias `workbox`.
 2. Add an SSH profile from Roamgate's connection selector: Destination `workbox`,
-   socket paths empty for automatic resolution. Test/connect and verify `pwd`.
+   choose the remote host OS. For Unix, leave socket paths empty for automatic
+   resolution. For Windows, install/start Herdr 0.9.1+ first, optionally specify
+   its executable path and session, then test/connect and verify `Get-Location`
+   in PowerShell. See [Windows requirements and limitations](./DEPLOYMENT.md#multiple-and-remote-herdr-connections).
 
 Alternatively, on a free port:
 

@@ -2,6 +2,7 @@ import type { ConnectionLifecycleState, ConnectionSummary } from "./api";
 import {
   validateRemoteSocketPath,
   validateSshDestination,
+  validateWindowsSshOptions,
 } from "./sshProfileValidation";
 
 export type LocalConnectionProfileInput = {
@@ -21,6 +22,9 @@ export type SshConnectionProfileInput = {
   remote_control_socket_path: string;
   remote_client_socket_path: string;
   auto_connect: boolean;
+  remote_platform?: "windows";
+  remote_herdr_path?: string;
+  remote_session?: string;
 };
 
 export type ConnectionProfileInput =
@@ -159,6 +163,9 @@ export function sshConnectionProfilePayload(value: {
   remoteControlSocketPath: string;
   remoteClientSocketPath: string;
   autoConnect: boolean;
+  remotePlatform?: "windows";
+  remoteHerdrPath?: string;
+  remoteSession?: string;
 }): SshConnectionProfileInput {
   const id = value.id.trim();
   const label = value.label.trim();
@@ -191,7 +198,7 @@ export function sshConnectionProfilePayload(value: {
   ) {
     throw new Error("Remote control and render socket paths must differ.");
   }
-  return {
+  const payload: SshConnectionProfileInput = {
     id,
     label,
     type: "ssh",
@@ -199,7 +206,16 @@ export function sshConnectionProfilePayload(value: {
     remote_control_socket_path: remoteControlSocketPath,
     remote_client_socket_path: remoteClientSocketPath,
     auto_connect: value.autoConnect,
+    ...(value.remotePlatform ? { remote_platform: value.remotePlatform } : {}),
+    ...(value.remoteHerdrPath?.trim()
+      ? { remote_herdr_path: value.remoteHerdrPath.trim() }
+      : {}),
+    ...(value.remoteSession?.trim()
+      ? { remote_session: value.remoteSession.trim() }
+      : {}),
   };
+  validateWindowsSshOptions(payload);
+  return payload;
 }
 
 export async function selectConnectionProfile(args: {
