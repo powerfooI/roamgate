@@ -11,6 +11,50 @@ const live =
     ? test
     : test.skip;
 
+function dispatchRpcReply(
+  pending: Map<string, (message: unknown) => void>,
+  message: unknown,
+): void {
+  if (
+    !message ||
+    typeof message !== "object" ||
+    Array.isArray(message) ||
+    !("id" in message) ||
+    typeof message.id !== "string" ||
+    !pending.has(message.id)
+  )
+    return;
+  const callback = pending.get(message.id);
+  if (typeof callback === "function") callback(message);
+}
+
+test("Windows SSH live fixture dispatches only registered string reply IDs", () => {
+  const replies: unknown[] = [];
+  const pending = new Map<string, (message: unknown) => void>([
+    ["request-1", (message) => replies.push(message)],
+  ]);
+  for (const message of [
+    null,
+    [],
+    {},
+    { id: 1 },
+    { id: ["request-1"] },
+    { id: "missing" },
+    { id: "__proto__" },
+    { id: "constructor" },
+    { id: "toString" },
+  ]) {
+    dispatchRpcReply(pending, message);
+  }
+  expect(replies).toEqual([]);
+  const reply = { id: "request-1", result: { ok: true } };
+  dispatchRpcReply(pending, reply);
+  expect(replies).toEqual([reply]);
+  pending.delete(reply.id);
+  dispatchRpcReply(pending, reply);
+  expect(replies).toEqual([reply]);
+});
+
 live(
   "Windows SSH supports browser RPC, PowerShell, resize, reconnect, and session isolation",
   async () => {
@@ -25,7 +69,7 @@ live(
     let sequence = 0;
     ws.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data));
-      if (typeof message.id === "string") pending.get(message.id)?.(message);
+      dispatchRpcReply(pending, message);
       if (message.terminal) {
         terminals.push(message);
         if (terminals.length > 200) terminals.shift();
