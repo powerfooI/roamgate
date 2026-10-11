@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -47,9 +47,34 @@ export type SshConnectionProfile = {
   remote_control_socket_path: string;
   remote_client_socket_path: string;
   auto_connect: boolean;
+  remote_platform?: "windows";
+  remote_herdr_path?: string;
+  remote_session?: string;
 };
 
 export type ConnectionProfile = LocalConnectionProfile | SshConnectionProfile;
+
+export function connectionRecoveryFingerprint(
+  profile: ConnectionProfile,
+): string {
+  const target =
+    profile.type === "local"
+      ? [profile.type, profile.control_socket_path, profile.client_socket_path]
+      : [
+          profile.type,
+          profile.ssh_destination,
+          profile.remote_control_socket_path,
+          profile.remote_client_socket_path,
+          ...(profile.remote_platform === "windows"
+            ? [
+                profile.remote_platform,
+                profile.remote_herdr_path,
+                profile.remote_session,
+              ]
+            : []),
+        ];
+  return createHash("sha256").update(JSON.stringify(target)).digest("hex");
+}
 
 export type PersistedConnectionRegistry = {
   version: 1 | typeof CONNECTION_PROFILE_FILE_VERSION;
@@ -78,8 +103,9 @@ function assertExactKeys(
   value: Record<string, unknown>,
   keys: readonly string[],
   description: string,
+  optionalKeys: readonly string[] = [],
 ): void {
-  const expected = new Set(keys);
+  const expected = new Set([...keys, ...optionalKeys]);
   for (const key of Object.keys(value)) {
     if (!expected.has(key))
       throw new Error(`${description} has unknown field: ${key}`);
@@ -223,6 +249,7 @@ export function validateSshConnectionProfile(
       "auto_connect",
     ],
     "connection profile",
+    ["remote_platform", "remote_herdr_path", "remote_session"],
   );
   const id = validateConnectionId(value.id);
   if (id === LEGACY_DEFAULT_CONNECTION_ID) {
@@ -240,6 +267,37 @@ export function validateSshConnectionProfile(
     value.remote_client_socket_path,
     "remote_client_socket_path",
   );
+  const windows = value.remote_platform === "windows";
+  if (value.remote_platform !== undefined && !windows)
+    throw new Error("invalid remote_platform");
+  if (
+    !windows &&
+    (value.remote_herdr_path !== undefined ||
+      value.remote_session !== undefined)
+  )
+    throw new Error("Windows SSH options require remote_platform windows");
+  if (windows && (remoteControlSocketPath || remoteClientSocketPath))
+    throw new Error(
+      "Windows SSH uses Herdr bridges instead of remote socket paths",
+    );
+  if (
+    value.remote_herdr_path !== undefined &&
+    (typeof value.remote_herdr_path !== "string" ||
+      value.remote_herdr_path.length > 1024 ||
+      !/^[A-Za-z]:[\\/][^\u0000-\u001f\u007f-\u009f]+\.exe$/i.test(
+        value.remote_herdr_path,
+      ) ||
+      value.remote_herdr_path.split(/[\\/]/).includes(".."))
+  )
+    throw new Error(
+      "remote_herdr_path must be an absolute Windows executable path",
+    );
+  if (
+    value.remote_session !== undefined &&
+    (typeof value.remote_session !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value.remote_session))
+  )
+    throw new Error("remote_session must be a valid Herdr session name");
   if (
     remoteControlSocketPath &&
     remoteClientSocketPath &&
@@ -255,6 +313,13 @@ export function validateSshConnectionProfile(
     remote_control_socket_path: remoteControlSocketPath,
     remote_client_socket_path: remoteClientSocketPath,
     auto_connect: value.auto_connect,
+    ...(windows ? { remote_platform: "windows" as const } : {}),
+    ...(typeof value.remote_herdr_path === "string"
+      ? { remote_herdr_path: value.remote_herdr_path }
+      : {}),
+    ...(typeof value.remote_session === "string"
+      ? { remote_session: value.remote_session }
+      : {}),
   };
 }
 
@@ -541,6 +606,15 @@ export function publicConnectionProfile(
       remote_client_socket_path: profile.remote_client_socket_path,
       auto_connect: profile.auto_connect,
       read_only: readOnly,
+      ...(profile.remote_platform
+        ? { remote_platform: profile.remote_platform }
+        : {}),
+      ...(profile.remote_herdr_path
+        ? { remote_herdr_path: profile.remote_herdr_path }
+        : {}),
+      ...(profile.remote_session
+        ? { remote_session: profile.remote_session }
+        : {}),
     };
   }
   return {

@@ -38,6 +38,23 @@ afterEach(() => {
 });
 
 describe("SSH profile runtime socket allocation", () => {
+  test("selects Windows bridges and passes the explicit binary and session", () => {
+    if (process.platform === "win32") return;
+    const config = createSshProfileRuntimeConfig({
+      ...profile(),
+      remote_control_socket_path: "",
+      remote_client_socket_path: "",
+      remote_platform: "windows",
+      remote_herdr_path: "C:/Test Herdr/herdr.exe",
+      remote_session: "isolated-session",
+    });
+    directories.push(config.ownedRuntimeDirectory!);
+    expect(config).toMatchObject({
+      remotePlatform: "windows",
+      remoteHerdrPath: String.raw`C:\Test Herdr\herdr.exe`,
+      session: "isolated-session",
+    });
+  });
   test("allocates short private paths without profile-controlled names", () => {
     if (process.platform === "win32") return;
     const config = createSshProfileRuntimeConfig(profile());

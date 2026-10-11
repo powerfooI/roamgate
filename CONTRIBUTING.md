@@ -78,6 +78,25 @@ a real backend for affected changes:
 Record device/browser and results in the PR. Passing unit and server integration
 tests does not establish browser behavior or real-user-experience acceptance.
 
+For the opt-in Windows SSH end-to-end test, run a disposable Roamgate bridge
+with two connected Windows profiles pointing at dedicated Herdr 0.9.1+ sessions.
+Use session names beginning with `roamgate-ssh-`, and open a PowerShell pane in
+each. Close browser terminal viewers before the test so they cannot compete
+for terminal sizing. The loopback bridge must allow this test WebSocket without
+login (for example, a separate development server). Run:
+
+```bash
+ROAMGATE_LIVE_WINDOWS_SSH_URL=http://127.0.0.1:8788 \
+ROAMGATE_LIVE_WINDOWS_SSH_SESSION=roamgate-ssh-e2e \
+ROAMGATE_LIVE_WINDOWS_SSH_OTHER_SESSION=roamgate-ssh-other \
+bun test server/src/connections/windows-ssh-live.test.ts
+```
+
+The test sends commands to those panes, changes terminal size, disconnects and
+reconnects the first profile, and checks session/generation isolation. It leaves
+the Herdr servers running. Never point it at working sessions. It is skipped
+without these explicit environment variables.
+
 Workspace types: `bun run --filter roamgate-web typecheck` or
 `bun run --filter roamgate-server typecheck` (builds web assets first).
 Frontend changes also need `bun run build:web`; bundling needs `bun run build`.

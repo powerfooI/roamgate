@@ -1,6 +1,5 @@
 import { loadOrCreateSessionSecret } from "./config/session-secret";
 import type { ServerWebSocket } from "bun";
-import { createHash } from "node:crypto";
 import { createAssistantContext } from "./assistant/context";
 import { isHtmlPath } from "../../shared/filePreview";
 import { DOWNLOAD_TIMEOUT_MS } from "./workspace/file-constants";
@@ -57,6 +56,7 @@ import {
 import {
   type ConnectionProfile,
   ConnectionProfileStore,
+  connectionRecoveryFingerprint,
 } from "./connections/profiles";
 import { createSshProfileRuntimeConfig } from "./connections/ssh-profile-runtime";
 import {
@@ -439,20 +439,7 @@ const assistantContext = createAssistantContext({
       .list()
       .find((profile) => profile.id === id);
     if (!profile) throw new Error("Ranger connection is no longer configured");
-    const target =
-      profile.type === "local"
-        ? [
-            profile.type,
-            profile.control_socket_path,
-            profile.client_socket_path,
-          ]
-        : [
-            profile.type,
-            profile.ssh_destination,
-            profile.remote_control_socket_path,
-            profile.remote_client_socket_path,
-          ];
-    return createHash("sha256").update(JSON.stringify(target)).digest("hex");
+    return connectionRecoveryFingerprint(profile);
   },
   createWorktree: (runtime, params, isCurrent, beforeDispatch) =>
     createWorkspaceWorktree(
@@ -927,6 +914,20 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     return null;
   }
   const connection = route.runtime;
+  if (
+    connection.remotePlatform === "windows" &&
+    /^(?:file\.|git\.|worktree\.|agent_history\.|agent_session\.|settings\.(?:workspace_auto_sync|worktree_hooks)\.)/.test(
+      method,
+    )
+  ) {
+    sendError(
+      "unsupported-windows-operation",
+      new Error(
+        "This operation requires a Unix SSH host and is unavailable on Windows.",
+      ),
+    );
+    return;
+  }
   const {
     sshHost,
     herdr,
@@ -989,9 +990,10 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
 
   if (method === "agent.list") {
     try {
-      const result = await connection.agentSessions.listWithActivity(
-        params ?? {},
-      );
+      const result =
+        connection.remotePlatform === "windows"
+          ? await herdr.call("agent.list", params ?? {})
+          : await connection.agentSessions.listWithActivity(params ?? {});
       sendReply({ id, result }, "agent-list");
     } catch (e) {
       sendError("agent-list-error", e);
@@ -1300,15 +1302,20 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
   try {
     const rawResult = await herdr.call(method, params ?? {});
     let result = rawResult;
-    if (method === "integration.list") {
+    if (
+      method === "integration.list" &&
+      connection.remotePlatform !== "windows"
+    ) {
       result = await enrichIntegrationVersions(result, {
         sshHost: sshHost(),
         ping: () => herdr.ping(),
       });
     }
     if (method === "workspace.list") {
-      result = await worktreeParents.enrichWorkspaceList(result);
-      result = await enrichWorkspacesWithGitStatus(result);
+      if (connection.remotePlatform !== "windows") {
+        result = await worktreeParents.enrichWorkspaceList(result);
+        result = await enrichWorkspacesWithGitStatus(result);
+      }
       result = {
         ...result,
         navigation_mode: await terminalBridge.navigationMode(),
@@ -1359,6 +1366,18 @@ async function handleConnectionHttpRequest(
   }
 
   const { runtime: connection, endpoint } = resolved;
+  if (connection.remotePlatform === "windows" && endpoint !== "herdr-info") {
+    return publishConnectionHttpResponse(
+      resolved,
+      Response.json(
+        {
+          error:
+            "Remote file transfers and agent history require a Unix SSH host.",
+        },
+        { status: 501 },
+      ),
+    );
+  }
   try {
     let response: Response;
     if (endpoint === "herdr-info") {

@@ -535,7 +535,8 @@ separate for desktop/mobile. Jump from a diff to its file preview.
 ## Remote, Multi-Client, and Operations
 
 - Shared local/SSH profiles have independent browser selection. Disconnecting
-  does not stop Herdr. SSH forwarding requires Linux/macOS; Windows supports
+  does not stop Herdr. Linux/macOS bridges connect to Unix or Windows SSH hosts;
+  Windows hosts require Herdr 0.9.1+ and Windows PowerShell. Windows bridges support
   native local profiles. [Connection setup](docs/DEPLOYMENT.md#multiple-and-remote-herdr-connections).
 - Browsers receive pushed events; inspect client counts or pause/resume clients.
   **Configuration > Behavior > Task notifications** independently enables

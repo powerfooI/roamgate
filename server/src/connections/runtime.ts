@@ -127,6 +127,7 @@ export function createLegacyConnectionRuntime(args: {
   lastStepTransitionDebounceMs?: number;
 }) {
   const { config } = args;
+  const remotePlatform = config.remotePlatform;
   const logger = args.logger ?? silentLogger;
   const identity = { ...(args.identity ?? LEGACY_DEFAULT_CONNECTION) };
   const socketPath = config.socketPath;
@@ -321,6 +322,7 @@ export function createLegacyConnectionRuntime(args: {
 
   const lastStepTurns = createLastStepTurnTracker({
     captureWorkspaceBaseline: async (workspaceId) => {
+      if (remotePlatform === "windows") return;
       await lastStepBaselines.captureWorkspace(workspaceId, async () => {
         if (args.resolveLastStepWorkspaceGitRoot) {
           return args.resolveLastStepWorkspaceGitRoot(workspaceId);
@@ -605,8 +607,10 @@ export function createLegacyConnectionRuntime(args: {
     if (disposed) throw new Error("connection runtime is disposed");
     if (backgroundStarted) return;
     backgroundStarted = true;
-    void handleTerminalUpload.startCleanup().catch(onUploadCleanupError);
-    workspaceAutoSync.start();
+    if (remotePlatform !== "windows") {
+      void handleTerminalUpload.startCleanup().catch(onUploadCleanupError);
+      workspaceAutoSync.start();
+    }
     subscriptionLoop.start();
     agentStatusSubscriptions.start();
     herdrNotifications?.start();
@@ -648,6 +652,7 @@ export function createLegacyConnectionRuntime(args: {
     identity,
     socketPath,
     clientSocketPath,
+    remotePlatform,
     sshHost,
     herdr,
     worktreeParents,

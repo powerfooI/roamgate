@@ -1,6 +1,7 @@
 import { existsSync, rmSync } from "node:fs";
 import { type Logger, silentLogger } from "../utils/logger";
 import { sshCommandArgv, sshTunnelArgv } from "./ssh-command";
+import { createWindowsSshTunnel } from "./ssh-windows";
 
 const SSH_STDERR_MAX_BYTES = 16 * 1024;
 
@@ -135,9 +136,11 @@ export type SshTunnelConfig = {
   remoteSocketPath?: string;
   remoteClientSocketPath?: string;
   ownedRuntimeDirectory?: string;
+  remotePlatform?: "windows";
+  remoteHerdrPath?: string;
 };
 
-type RunProcess = (
+export type RunProcess = (
   argv: string[],
   input?: string,
 ) => Promise<{ stdout: string; stderr: string }>;
@@ -159,6 +162,11 @@ type SocketWait = {
 
 class SocketWaitCancelledError extends Error {}
 
+export type SshTunnelManager = {
+  startAutoSshTunnel(): Promise<void>;
+  cleanupAutoSshTunnel(): Promise<void>;
+};
+
 export function createSshTunnelManager(args: {
   connectionId?: string;
   formatError?: (error: unknown) => string;
@@ -179,7 +187,11 @@ export function createSshTunnelManager(args: {
     processForceKillTimeoutMs?: number;
     platform?: string;
   };
-}) {
+}): SshTunnelManager {
+  if (args.config.remotePlatform === "windows") {
+    assertSshTunnelPlatformSupported(args.dependencies?.platform);
+    return createWindowsSshTunnel(args);
+  }
   const logger = args.logger ?? silentLogger;
   const platform = args.dependencies?.platform ?? process.platform;
   const exists = args.dependencies?.exists ?? existsSync;
