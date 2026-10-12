@@ -28,6 +28,13 @@ type TerminalSession = {
   rows: number;
 };
 
+type ViewerViewport = {
+  cols: number;
+  rows: number;
+  /** Bridge-wide order of the attach or resize that set this viewport. */
+  revision: number;
+};
+
 type SharedTerminalSession = {
   thin: ThinClient | EndpointTerminalSession;
   connecting: Promise<void> | null;
@@ -106,8 +113,11 @@ export function createTerminalBridge(args: {
   const terminals = new Map<ServerWebSocket<unknown>, TerminalSession>();
   const terminalViewers = new Map<
     ServerWebSocket<unknown>,
-    Map<string, { cols: number; rows: number }>
+    Map<string, ViewerViewport>
   >();
+  // Orders viewport changes across viewers so a departing viewer can hand the
+  // shared size back to whoever sized the terminal most recently before it.
+  let viewportRevision = 0;
   const sharedTerminals = new Map<string, SharedTerminalSession>();
   /** The dedicated endpoint observer owns this connection-wide popup state. */
   let popupState: PopupIdentity | null = null;
@@ -593,6 +603,40 @@ export function createTerminalBridge(args: {
     await waitForClipboardRelay(size.cols, size.rows, revision);
   }
 
+  // A shared stream has one size: the last viewer to attach or resize sets it
+  // for everyone. When a viewer leaves (a phone app suspended again after a
+  // background reconnect, a closed tab), the others would otherwise stay at
+  // its size until their own container happens to change, because each
+  // browser only re-sends a size it has not sent before. Hand the size back
+  // to the remaining viewer that sized the terminal most recently.
+  function restoreSharedTerminalSize(
+    shared: SharedTerminalSession,
+    departed: ServerWebSocket<unknown>,
+  ) {
+    // A connecting stream is sized by the attach that awaits it.
+    if (disposed || shared.connecting || shared.thin.isClosed) return;
+    let latest: ViewerViewport | null = null;
+    for (const viewer of shared.viewers) {
+      const viewport = terminalViewers.get(viewer)?.get(shared.terminalId);
+      if (viewport && (!latest || viewport.revision > latest.revision))
+        latest = viewport;
+    }
+    if (!latest || (latest.cols === shared.cols && latest.rows === shared.rows))
+      return;
+    shared.thin.resize(latest.cols, latest.rows);
+    shared.cols = latest.cols;
+    shared.rows = latest.rows;
+    // Frames held under backpressure were rendered for the departed size.
+    for (const viewer of shared.viewers)
+      args.dropCoalesced?.(viewer, terminalCoalesceKey(shared.terminalId));
+    logger.debug("terminal size restored", {
+      connection: args.connectionId ?? "legacy-default",
+      departed: args.clientLabel(departed),
+      terminal: shared.terminalId,
+      size: `${latest.cols}x${latest.rows}`,
+    });
+  }
+
   function detachTerminalViewer(
     ws: ServerWebSocket<unknown>,
     terminalId?: string | null,
@@ -620,6 +664,8 @@ export function createTerminalBridge(args: {
         if (shared.viewers.size === 0) {
           shared.thin.close();
           if (sharedTerminals.get(id) === shared) sharedTerminals.delete(id);
+        } else {
+          restoreSharedTerminalSize(shared, ws);
         }
       }
       viewed?.delete(id);
@@ -1098,7 +1144,11 @@ export function createTerminalBridge(args: {
           existingShared?.cols === cols &&
           existingShared.rows === rows;
         terminals.set(ws, { terminalId, cols, rows });
-        viewed.set(terminalId, { cols, rows });
+        // Ordered once the size is applied below: concurrent attaches can
+        // resolve out of request order, and only the applied order says whose
+        // size the shared stream currently has.
+        const viewport: ViewerViewport = { cols, rows, revision: 0 };
+        viewed.set(terminalId, viewport);
         terminalViewers.set(ws, viewed);
         const tokens = attachmentTokens.get(ws) ?? new Map<string, object>();
         const token = {};
@@ -1130,6 +1180,7 @@ export function createTerminalBridge(args: {
               throw new Error("terminal attachment changed");
           };
           validate();
+          viewport.revision = ++viewportRevision;
           if (
             shared.cols !== cols ||
             shared.rows !== rows ||
@@ -1346,7 +1397,11 @@ export function createTerminalBridge(args: {
         const rows = Number(params.rows ?? 30);
         const relaySize = relaySizeFromParams(params, { cols, rows });
         thin.resize(cols, rows);
-        terminalViewers.get(ws)!.set(requestedTerminalId!, { cols, rows });
+        terminalViewers.get(ws)!.set(requestedTerminalId!, {
+          cols,
+          rows,
+          revision: ++viewportRevision,
+        });
         shared.cols = cols;
         shared.rows = rows;
         // Anything held for this terminal was rendered for the previous size.

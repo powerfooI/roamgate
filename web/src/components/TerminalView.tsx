@@ -2870,6 +2870,12 @@ export function TerminalView({
       attachedRef.current = null;
       attachingRef.current = null;
     }
+    // An attach carries this viewport and resizes the terminal for every
+    // other viewer. A hidden page can still reconnect (iOS resumes a Home
+    // Screen app in the background, a backgrounded tab's socket drops), so
+    // defer the attach until the page is shown; the visibility recovery below
+    // retries the desired terminal when it is neither attached nor attaching.
+    if (document.visibilityState === "hidden") return;
     if (attachTimeoutTerminalRef.current !== terminalId) {
       attachTimeoutTerminalRef.current = terminalId;
       attachTimeoutCountRef.current = 0;
@@ -3073,11 +3079,17 @@ export function TerminalView({
           // The attach recovery below still applies.
         }
       }
-      if (!desiredTerminalRef.current) return;
+      const desiredTerminalId = desiredTerminalRef.current;
+      if (!desiredTerminalId) return;
       if (store.get().status !== "connected") return;
       // A live attach keeps streaming on its own; only a terminal that lost
-      // its attach (watchdog give-up, failed attach) needs a nudge.
-      if (attachedRef.current || attachingRef.current) return;
+      // its attach (watchdog give-up, failed attach) or whose attach was
+      // deferred while hidden needs a nudge.
+      if (
+        attachedRef.current === desiredTerminalId ||
+        attachingRef.current === desiredTerminalId
+      )
+        return;
       setAttachRetry((value) => value + 1);
     };
     const onVisibilityChange = () => {

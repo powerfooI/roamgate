@@ -1493,3 +1493,114 @@ test("drops held frames for every viewer when an attach resizes the shared termi
     bridge.dispose();
   }
 });
+
+// A phone that attaches (even from a page resumed in the background) resizes
+// the shared terminal for every viewer. Once it leaves, the remaining viewer
+// must get its own size back: its browser only re-sends a size it has not
+// already sent, so nothing else would ever undo the phone's size.
+describe("shared terminal size after a viewer leaves", () => {
+  async function setup() {
+    const tracker = {
+      appConnects: 0,
+      appCloses: 0,
+      appSizes: [] as string[],
+      events: [] as string[],
+    };
+    const socketPath = await startThinServer({ tracker });
+    const desktop = {} as ServerWebSocket<unknown>;
+    const phone = {} as ServerWebSocket<unknown>;
+    const messages = new Map<ServerWebSocket<unknown>, string[]>([
+      [desktop, []],
+      [phone, []],
+    ]);
+    const bridge = createTerminalBridge({
+      clientSocketPath: socketPath,
+      herdrProtocol: async () => 17,
+      safeSend: (ws, payload) => {
+        messages.get(ws)?.push(payload);
+        return true;
+      },
+      clientLabel: (ws) => (ws === desktop ? "desktop" : "phone"),
+      markRpcError: () => undefined,
+    });
+    const framesFor = (ws: ServerWebSocket<unknown>) =>
+      messages
+        .get(ws)!
+        .map((message) => JSON.parse(message))
+        .filter((message) => message.terminal)
+        .map(
+          (message) => `${message.terminal.width}x${message.terminal.height}`,
+        );
+    const resizes = () =>
+      tracker.events.filter((event) => event === "resize").length;
+    return { bridge, desktop, phone, framesFor, resizes };
+  }
+
+  test("restores the remaining viewer's size when the resizing viewer leaves", async () => {
+    const { bridge, desktop, phone, framesFor } = await setup();
+    try {
+      await bridge.handleTerminalRpc(desktop, "d", "terminal.attach", {
+        terminal_id: "term_1",
+        cols: 160,
+        rows: 45,
+      });
+      await waitForCondition(
+        () => framesFor(desktop).includes("160x45"),
+        "desktop never received its own size",
+      );
+      await bridge.handleTerminalRpc(phone, "p", "terminal.attach", {
+        terminal_id: "term_1",
+        cols: 60,
+        rows: 50,
+      });
+      await waitForCondition(
+        () => framesFor(desktop).at(-1) === "60x50",
+        "phone attach did not resize the shared terminal",
+      );
+
+      bridge.cleanupWs(phone);
+
+      await waitForCondition(
+        () => framesFor(desktop).at(-1) === "160x45",
+        "desktop size was not restored after the phone left",
+      );
+    } finally {
+      bridge.dispose();
+    }
+  });
+
+  test("leaves the size alone when the departing viewer did not set it", async () => {
+    const { bridge, desktop, phone, framesFor, resizes } = await setup();
+    try {
+      await bridge.handleTerminalRpc(desktop, "d", "terminal.attach", {
+        terminal_id: "term_1",
+        cols: 160,
+        rows: 45,
+      });
+      await bridge.handleTerminalRpc(phone, "p", "terminal.attach", {
+        terminal_id: "term_1",
+        cols: 60,
+        rows: 50,
+      });
+      // The desktop resizes after the phone, so its size is already current.
+      await bridge.handleTerminalRpc(desktop, "r", "terminal.resize", {
+        terminal_id: "term_1",
+        cols: 170,
+        rows: 47,
+      });
+      await waitForCondition(
+        () => framesFor(desktop).at(-1) === "170x47",
+        "desktop resize did not apply",
+      );
+      const resizesBefore = resizes();
+
+      bridge.cleanupWs(phone);
+      await Bun.sleep(10);
+
+      expect(resizes()).toBe(resizesBefore);
+      expect(framesFor(desktop).at(-1)).toBe("170x47");
+    } finally {
+      bridge.dispose();
+    }
+  });
+});
