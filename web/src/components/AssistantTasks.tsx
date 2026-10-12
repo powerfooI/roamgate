@@ -794,13 +794,16 @@ export function AssistantTasks({
           </p>
           {tasks.some((item) => item.status === "cancelled") ? (
             <label className="assistant-task-filter">
-              <input
-                type="checkbox"
-                checked={showCancelled}
-                onChange={(event) =>
-                  setShowCancelled(event.currentTarget.checked)
-                }
-              />
+              <button
+                type="button"
+                role="switch"
+                aria-label="Show cancelled"
+                aria-checked={showCancelled}
+                className={`settings-switch${showCancelled ? " is-on" : ""}`}
+                onClick={() => setShowCancelled((current) => !current)}
+              >
+                <span />
+              </button>
               Show cancelled
             </label>
           ) : null}
@@ -810,7 +813,7 @@ export function AssistantTasks({
                 <li key={item.id}>
                   <button
                     type="button"
-                    className="ghost assistant-task-row"
+                    className="assistant-task-row"
                     onClick={() => select(item.id)}
                   >
                     <div>
@@ -876,99 +879,137 @@ export function AssistantTasks({
           </div>
           {task ? (
             <>
-              <div className="assistant-task-heading">
-                <h3>{task.title}</h3>
-                <span className={`assistant-task-state is-${task.status}`}>
-                  {task.status}
-                </span>
-              </div>
-              <p className="assistant-hint">
-                {taskScheduleLabel(task.schedule)}
-                {task.next_run_at
-                  ? ` / Next: ${formatUiDateTime(task.next_run_at)}`
-                  : " / No upcoming run"}
-              </p>
-              <span className="assistant-hint">
-                {task.workspaces
-                  .map((ref) => `${ref.connection_label} / ${ref.label}`)
-                  .join(", ")}{" "}
-                / {task.model.id}
-              </span>
-              <details className="assistant-task-prompt">
-                <summary>Task prompt</summary>
-                <p>{task.prompt}</p>
-              </details>
-              <span className="assistant-hint">
-                {task.approval_mode === "auto"
-                  ? snapshot.config.approval_mode === "auto"
-                    ? "High permission: supported operations execute automatically"
-                    : "High permission saved; global mode is off, so operations need confirmation"
-                  : "Manual permission: operations need confirmation"}
-              </span>
-              <span className="assistant-hint">
-                {task.notification_mode === "agent"
-                  ? "Ranger decides when to notify"
-                  : "Notify when each run finishes"}
-              </span>
-              <div className="assistant-task-buttons">
-                <button
-                  type="button"
-                  disabled={
-                    busy ||
-                    !connected ||
-                    task.status === "cancelled" ||
-                    liveRun(task.current_run?.status)
-                  }
-                  onClick={() => void mutate("run_now", { task_id: task.id })}
-                >
-                  Run now
-                </button>
-                {task.status !== "cancelled" ? (
-                  <>
-                    <button
-                      type="button"
-                      className="ghost"
-                      disabled={busy || !connected}
-                      onClick={() =>
-                        void mutate(
-                          task.status === "paused" ? "resume" : "pause",
-                          { task_id: task.id },
-                        )
-                      }
-                    >
-                      {task.status === "paused" ? "Resume" : "Pause"}
-                    </button>
+              <section
+                className="assistant-task-overview"
+                aria-label="Task overview"
+              >
+                <div className="assistant-task-heading">
+                  <h3>{task.title}</h3>
+                  <span className={`assistant-task-state is-${task.status}`}>
+                    {task.status}
+                  </span>
+                </div>
+                <dl className="assistant-task-schedule">
+                  <div>
+                    <dt>Schedule</dt>
+                    <dd>{taskScheduleLabel(task.schedule)}</dd>
+                  </div>
+                  <div>
+                    <dt>Next run</dt>
+                    <dd>
+                      {task.next_run_at
+                        ? formatUiDateTime(task.next_run_at)
+                        : "No upcoming run"}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="assistant-task-buttons">
+                  <button
+                    type="button"
+                    className="assistant-task-primary"
+                    disabled={
+                      busy ||
+                      !connected ||
+                      task.status === "cancelled" ||
+                      liveRun(task.current_run?.status)
+                    }
+                    onClick={() => void mutate("run_now", { task_id: task.id })}
+                  >
+                    Run now
+                  </button>
+                  {task.status !== "cancelled" ? (
+                    <>
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={busy || !connected}
+                        onClick={() =>
+                          void mutate(
+                            task.status === "paused" ? "resume" : "pause",
+                            { task_id: task.id },
+                          )
+                        }
+                      >
+                        {task.status === "paused" ? "Resume" : "Pause"}
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost danger-text"
+                        disabled={busy || !connected}
+                        onClick={() => setConfirmation("cancel")}
+                      >
+                        Cancel task
+                      </button>
+                    </>
+                  ) : null}
+                  {task.status === "cancelled" && !task.current_run ? (
                     <button
                       type="button"
                       className="ghost danger-text"
                       disabled={busy || !connected}
-                      onClick={() => setConfirmation("cancel")}
+                      onClick={() => setConfirmation("delete")}
                     >
-                      Cancel task
+                      Delete task
                     </button>
-                  </>
-                ) : null}
-                {task.status === "cancelled" && !task.current_run ? (
-                  <button
-                    type="button"
-                    className="ghost danger-text"
-                    disabled={busy || !connected}
-                    onClick={() => setConfirmation("delete")}
-                  >
-                    Delete task
-                  </button>
-                ) : null}
-                {liveRun(task.current_run?.status) ? (
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={busy || !connected}
-                    onClick={() => void mutate("stop", { task_id: task.id })}
-                  >
-                    Stop run
-                  </button>
-                ) : null}
-              </div>
+                  ) : null}
+                  {liveRun(task.current_run?.status) ? (
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={busy || !connected}
+                      onClick={() => void mutate("stop", { task_id: task.id })}
+                    >
+                      Stop run
+                    </button>
+                  ) : null}
+                </div>
+              </section>
+              <section
+                className="assistant-task-details"
+                aria-label="Task details"
+              >
+                <details className="assistant-task-prompt" open>
+                  <summary>Task prompt</summary>
+                  <p>{task.prompt}</p>
+                </details>
+                <dl className="assistant-task-metadata">
+                  <div>
+                    <dt>Workspaces</dt>
+                    <dd>
+                      <ul className="assistant-task-workspaces">
+                        {task.workspaces.map((ref) => (
+                          <li key={workspaceKey(ref)}>
+                            <span>{ref.connection_label} / </span>
+                            {ref.label}
+                          </li>
+                        ))}
+                      </ul>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Model</dt>
+                    <dd>{task.model.id}</dd>
+                  </div>
+                  <div>
+                    <dt>Permissions</dt>
+                    <dd>
+                      {task.approval_mode === "auto"
+                        ? snapshot.config.approval_mode === "auto"
+                          ? "High permission: supported operations execute automatically"
+                          : "High permission saved; global mode is off, so operations need confirmation"
+                        : "Manual permission: operations need confirmation"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Notifications</dt>
+                    <dd>
+                      {task.notification_mode === "agent"
+                        ? "Ranger decides when to notify"
+                        : "Notify when each run finishes"}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
             </>
           ) : null}
           {loading && (!detail || (runId && !selectedRun)) ? (
@@ -978,26 +1019,28 @@ export function AssistantTasks({
             </p>
           ) : null}
           {detail ? (
-            <>
-              <div className="form-field">
-                <span>Run history</span>
-                {detail.runs.length ? (
-                  <ThemedSelect
-                    aria-label="Task run"
-                    value={selectedRun?.id ?? ""}
-                    options={detail.runs.map((run) => ({
-                      value: run.id,
-                      label: `${formatUiDateTime(run.scheduled_at)} / ${run.status}`,
-                    }))}
-                    onChange={(id) => {
-                      setRunId(id);
-                      setDetail(null);
-                    }}
-                  />
-                ) : (
-                  <span className="assistant-hint">No runs yet.</span>
-                )}
-              </div>
+            <section
+              className="assistant-task-history"
+              aria-label="Run history"
+            >
+              <h4>Run history</h4>
+              {detail.runs.length ? (
+                <ThemedSelect
+                  aria-label="Task run"
+                  value={runId ?? selectedRun?.id ?? ""}
+                  options={detail.runs.map((run) => ({
+                    value: run.id,
+                    label: `${formatUiDateTime(run.scheduled_at)} / ${run.status}`,
+                  }))}
+                  onChange={(id) => {
+                    if (id === runId) return;
+                    setRunId(id);
+                    setDetail({ ...detail, run: undefined });
+                  }}
+                />
+              ) : (
+                <p className="assistant-task-history-empty">No runs yet.</p>
+              )}
               {selectedRun ? (
                 <div
                   className="assistant-task-run"
@@ -1094,7 +1137,7 @@ export function AssistantTasks({
                   ))}
                 </div>
               ) : null}
-            </>
+            </section>
           ) : null}
           <ConfirmDialog
             open={active && confirmation !== null}

@@ -395,8 +395,10 @@ in the window, choose a default model, select allowed workspaces under
 authorized workspaces that are currently available; no workspaces are authorized
 by default.
 
-**High-permission mode** is a separate switch under **Workspace access**, off by
-default. Enabling it requires an explicit confirmation and authorizes all
+**High-permission mode** is in the permissions menu below the chat input, off by
+default. The button shows **Ask for approval**, **Full access**, or **High permission**
+for older configurations limited to selected workspaces. Enabling it requires an
+explicit confirmation and authorizes all
 currently discoverable workspaces, including new workspaces that appear while
 the mode is enabled,
 without individual selection. Workspace content may be sent to the selected

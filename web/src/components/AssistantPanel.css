@@ -98,20 +98,13 @@
   gap: 6px;
 }
 
-.assistant-panel-head .assistant-panel-experimental,
-.assistant-panel-head .assistant-panel-access {
+.assistant-panel-head .assistant-panel-experimental {
   padding: 1px 5px;
   border: 1px solid var(--border-soft);
   border-radius: 4px;
   font-size: 9px;
   line-height: 1.3;
   white-space: nowrap;
-}
-
-.assistant-panel-head .assistant-panel-access {
-  white-space: normal;
-  color: var(--warning-text);
-  background: var(--warning-soft);
 }
 
 .assistant-panel-meta {
@@ -221,6 +214,7 @@
   /* Keep input above the map when a short viewport exhausts chat space. */
   position: relative;
   z-index: 1;
+  border-top: 0;
 }
 
 .assistant-panel-empty {
@@ -366,7 +360,7 @@
 .assistant-panel-settings .assistant-provider-status > button,
 .assistant-custom-models > button,
 .assistant-workspaces-heading > button:not(.assistant-icon-button),
-.assistant-panel-settings .assistant-settings-inline-action {
+.assistant-permission-upgrade {
   min-height: 26px;
   padding: 3px 9px;
   border-radius: 6px;
@@ -381,7 +375,7 @@
 }
 
 .assistant-custom-models > div,
-.assistant-settings-toggle > div {
+.assistant-permission-toggle > div {
   flex: 1 1 auto;
   min-width: 0;
   display: grid;
@@ -389,7 +383,7 @@
 }
 
 .assistant-custom-models strong,
-.assistant-settings-toggle strong {
+.assistant-permission-toggle strong {
   color: var(--text);
   font-size: 12px;
   font-weight: 600;
@@ -403,17 +397,17 @@
   white-space: nowrap;
 }
 
-.assistant-settings-toggle {
+.assistant-permission-toggle {
   display: flex;
   align-items: flex-start;
   gap: 12px;
 }
 
-.assistant-settings-toggle > .settings-switch {
+.assistant-permission-toggle > .settings-switch {
   margin-top: 1px;
 }
 
-.assistant-panel-settings .assistant-settings-inline-action {
+.assistant-permission-upgrade {
   justify-self: start;
 }
 
@@ -1203,9 +1197,66 @@
   gap: 8px;
 }
 
-.assistant-compose-actions > span {
+.assistant-compose-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.assistant-compose-options > .assistant-chat-controls {
+  grid-column: 1 / -1;
+}
+
+.assistant-permission-trigger {
+  justify-self: start;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 5px 9px;
+  border-color: transparent;
+  border-radius: 999px;
+  background: transparent;
   color: var(--muted);
-  font-size: 9px;
+}
+
+.assistant-permission-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-permission-trigger > svg {
+  flex-shrink: 0;
+}
+
+.assistant-permission-trigger.is-high-permission {
+  background: var(--warning-soft);
+  color: var(--warning-text);
+}
+
+.assistant-permission-trigger:hover,
+.assistant-permission-trigger[data-state="open"] {
+  border-color: var(--viewer-border);
+  color: var(--text);
+}
+
+.assistant-permission-popover {
+  z-index: 5010;
+  display: grid;
+  gap: 12px;
+  width: min(340px, calc(100vw / var(--ui-scale, 1) - 16px));
+  max-height: calc(
+    var(--radix-popover-content-available-height) /
+    var(--ui-scale, 1)
+  );
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.assistant-permission-popover p {
+  margin: 0;
 }
 
 .assistant-compose-actions > button {
@@ -1265,8 +1316,12 @@
   min-height: 44px;
 }
 
-.assistant-panel.is-mobile .assistant-settings-toggle > .settings-switch {
+.assistant-permission-popover.is-mobile .settings-switch {
   min-height: 22px;
+}
+
+.assistant-permission-popover.is-mobile .assistant-permission-upgrade {
+  min-height: 44px;
 }
 
 .assistant-settings-select.is-mobile .command-item {
@@ -1279,22 +1334,6 @@
 
 .assistant-panel.is-mobile .assistant-panel-footer {
   padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
-}
-
-.assistant-panel.is-mobile .assistant-compose-input {
-  position: relative;
-  display: block;
-}
-
-.assistant-panel.is-mobile .assistant-compose-input textarea {
-  display: block;
-  padding-right: 58px;
-}
-
-.assistant-panel.is-mobile .assistant-compose-actions {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
 }
 
 .assistant-panel.is-mobile .assistant-compose-actions > button {

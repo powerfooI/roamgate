@@ -251,7 +251,8 @@ The conversation stays available when switching workspaces or connections.
   checked at its target before proposing another one; reconnects never replay it.
   In normal mode, newly created workspaces must be explicitly allowed before
   Ranger can use them.
-- **High-permission mode** in Settings is off by default. Enable it explicitly
+- **High-permission mode** is in the permissions menu below the chat input and
+  is off by default. Enable it explicitly
   to authorize all current and newly discovered workspaces and let Ranger
   execute supported management operations and manage scheduled
   tasks without individual confirmations. Results remain visible in the chat.

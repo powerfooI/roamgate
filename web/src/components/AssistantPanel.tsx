@@ -1,4 +1,5 @@
 import {
+  ChevronDown,
   ChevronLeft,
   Compass,
   ExternalLink,
@@ -12,6 +13,7 @@ import {
   RefreshCw,
   Send,
   Settings,
+  ShieldCheck,
   Square,
   X,
 } from "lucide-react";
@@ -59,6 +61,7 @@ import { useStoreSelector } from "../store";
 import { MarkdownPreview } from "./markdown";
 import { ConfirmDialog } from "./ModalDialogs";
 import { ThemedSelect } from "./ThemedSelect";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { AssistantChatControls } from "./AssistantChatControls";
 import {
   sameAssistantSelection,
@@ -955,6 +958,7 @@ export function AssistantPanel({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [view, setView] = useState<"chat" | "tasks">("chat");
   const [confirmApproval, setConfirmApproval] = useState(false);
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [panelWidth, setPanelWidth] = useState(380);
   const [maximumWidth, setMaximumWidth] = useState(380);
   const [contextTruncated, setContextTruncated] = useState(false);
@@ -1210,6 +1214,7 @@ export function AssistantPanel({
   }, [open, snapshot?.messages, showSettings, view, historyOpen]);
 
   useEffect(() => {
+    setPermissionsOpen(false);
     if (!open || showSettings || view !== "chat") return;
     if (historyOpen) historyHeadingRef.current?.focus({ preventScroll: true });
     else inputRef.current?.focus({ preventScroll: true });
@@ -1493,27 +1498,7 @@ export function AssistantPanel({
             <strong title="Experimental workspace management assistant">
               Ranger
             </strong>
-            {snapshot?.config.approval_mode === "auto" ? (
-              <span
-                className="assistant-panel-access"
-                aria-label={
-                  allWorkspacesAllowed
-                    ? "High permission: all workspaces"
-                    : "High permission: selected workspaces"
-                }
-                title={
-                  allWorkspacesAllowed
-                    ? "High permission: all current and future workspaces"
-                    : "High permission: selected workspaces"
-                }
-              >
-                {allWorkspacesAllowed
-                  ? "Full access"
-                  : "High permission: selected workspaces"}
-              </span>
-            ) : (
-              <span className="assistant-panel-experimental">Experimental</span>
-            )}
+            <span className="assistant-panel-experimental">Experimental</span>
           </div>
           <div className="assistant-panel-meta">
             <nav className="assistant-primary-nav" aria-label="Ranger views">
@@ -1954,60 +1939,6 @@ export function AssistantPanel({
                   aria-label="Workspace access"
                 >
                   <h4>Workspace access</h4>
-                  <div className="assistant-settings-toggle">
-                    <div>
-                      <strong>High-permission mode</strong>
-                      <p
-                        className="assistant-hint"
-                        id="ranger-high-permission-description"
-                      >
-                        {highPermission && !allWorkspacesAllowed
-                          ? "High permission currently applies only to your selected workspaces. Enable all-workspace access below to include every current and future workspace."
-                          : "Automatically allow every current and future workspace and skip action and schedule confirmations."}{" "}
-                        New or edited tasks keep this mode; started operations
-                        may finish.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-label="High-permission mode"
-                      aria-describedby="ranger-high-permission-description"
-                      aria-checked={highPermission}
-                      className={`settings-switch${highPermission ? " is-on" : ""}`}
-                      disabled={
-                        busy ||
-                        !connected ||
-                        !!authPending ||
-                        (!highPermission && (executing || snapshot.running))
-                      }
-                      onClick={() => {
-                        if (highPermission)
-                          void run("configure_approval", {
-                            approval_mode: "manual",
-                          });
-                        else setConfirmApproval(true);
-                      }}
-                    >
-                      <span />
-                    </button>
-                  </div>
-                  {highPermission && !allWorkspacesAllowed ? (
-                    <button
-                      type="button"
-                      className="assistant-settings-inline-action"
-                      disabled={
-                        busy ||
-                        !connected ||
-                        !!authPending ||
-                        executing ||
-                        snapshot.running
-                      }
-                      onClick={() => setConfirmApproval(true)}
-                    >
-                      Enable high permission for all workspaces
-                    </button>
-                  ) : null}
                   <div className="assistant-workspaces-heading">
                     <span>
                       Allowed workspaces
@@ -2470,22 +2401,122 @@ export function AssistantPanel({
                 composing.current = value;
               }}
               onOpenMention={(target) => void openMention(target)}
-            >
+            />
+            <div className="assistant-compose-options">
+              <AssistantChatControls
+                key={`${snapshot.instance_id}:${snapshot.session_id ?? ""}`}
+                snapshot={snapshot}
+                mobile={mobile}
+                disabled={busy || !connected || !!authPending}
+                onChange={(params) => {
+                  if (!composing.current) void run("configure_chat", params);
+                }}
+                onSelectedClose={() =>
+                  inputRef.current?.focus({ preventScroll: true })
+                }
+              />
+              <Popover open={permissionsOpen} onOpenChange={setPermissionsOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className={`assistant-permission-trigger${highPermission ? " is-high-permission" : ""}`}
+                    aria-label="Ranger permissions"
+                    title={
+                      highPermission
+                        ? allWorkspacesAllowed
+                          ? "High permission: all current and future workspaces"
+                          : "High permission: selected workspaces"
+                        : "Actions require confirmation"
+                    }
+                  >
+                    <ShieldCheck size={13} aria-hidden="true" />
+                    <span>
+                      {highPermission
+                        ? allWorkspacesAllowed
+                          ? "Full access"
+                          : "High permission"
+                        : "Ask for approval"}
+                    </span>
+                    <ChevronDown size={13} aria-hidden="true" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  className={`assistant-permission-popover${mobile ? " is-mobile" : ""}`}
+                  aria-label="Ranger permission settings"
+                  side="top"
+                  align="end"
+                  collisionPadding={8}
+                  onEscapeKeyDown={(event) => event.stopPropagation()}
+                  onCloseAutoFocus={(event) => {
+                    if (confirmApproval) event.preventDefault();
+                  }}
+                >
+                  <div className="assistant-permission-toggle">
+                    <div>
+                      <strong>High-permission mode</strong>
+                      <p
+                        className="assistant-hint"
+                        id="ranger-high-permission-description"
+                      >
+                        {highPermission && !allWorkspacesAllowed
+                          ? "High permission currently applies only to your selected workspaces. Enable all-workspace access below to include every current and future workspace."
+                          : "Automatically allow every current and future workspace and skip action and schedule confirmations."}{" "}
+                        New or edited tasks keep this mode; started operations
+                        may finish.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-label="High-permission mode"
+                      aria-describedby="ranger-high-permission-description"
+                      aria-checked={highPermission}
+                      className={`settings-switch${highPermission ? " is-on" : ""}`}
+                      disabled={
+                        busy ||
+                        !connected ||
+                        !!authPending ||
+                        (!highPermission && (executing || snapshot.running))
+                      }
+                      onClick={() => {
+                        setPermissionsOpen(false);
+                        if (highPermission)
+                          void run("configure_approval", {
+                            approval_mode: "manual",
+                          });
+                        else setConfirmApproval(true);
+                      }}
+                    >
+                      <span />
+                    </button>
+                  </div>
+                  {highPermission && !allWorkspacesAllowed ? (
+                    <button
+                      type="button"
+                      className="assistant-permission-upgrade"
+                      disabled={
+                        busy ||
+                        !connected ||
+                        !!authPending ||
+                        executing ||
+                        snapshot.running
+                      }
+                      onClick={() => {
+                        setPermissionsOpen(false);
+                        setConfirmApproval(true);
+                      }}
+                    >
+                      Enable high permission for all workspaces
+                    </button>
+                  ) : null}
+                </PopoverContent>
+              </Popover>
               <div
                 className="assistant-compose-actions"
                 onMouseDown={
                   mobile ? (event) => event.preventDefault() : undefined
                 }
               >
-                {!mobile ? (
-                  <span>
-                    {executing
-                      ? "Confirmed action is executing"
-                      : snapshot.running
-                        ? "Ranger is working"
-                        : "Enter to send, Shift+Enter for a new line"}
-                  </span>
-                ) : null}
                 {snapshot.running ? (
                   <button
                     type="button"
@@ -2501,7 +2532,7 @@ export function AssistantPanel({
                   <button
                     type="submit"
                     aria-label="Send"
-                    title="Send message"
+                    title="Send message (Enter); Shift+Enter for a new line"
                     disabled={
                       operationBusy ||
                       !connected ||
@@ -2516,19 +2547,7 @@ export function AssistantPanel({
                   </button>
                 )}
               </div>
-            </AssistantMentionComposer>
-            <AssistantChatControls
-              key={`${snapshot.instance_id}:${snapshot.session_id ?? ""}`}
-              snapshot={snapshot}
-              mobile={mobile}
-              disabled={busy || !connected || !!authPending}
-              onChange={(params) => {
-                if (!composing.current) void run("configure_chat", params);
-              }}
-              onSelectedClose={() =>
-                inputRef.current?.focus({ preventScroll: true })
-              }
-            />
+            </div>
           </form>
         </>
       )}

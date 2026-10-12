@@ -107,6 +107,7 @@
   width: 100%;
   justify-content: center;
   padding: 2px 12px;
+  border-top: 1px solid var(--viewer-border);
 }
 
 .assistant-panel

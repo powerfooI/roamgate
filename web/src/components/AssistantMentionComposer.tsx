@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
   type RefObject,
 } from "react";
 import {
@@ -36,7 +35,6 @@ export function AssistantMentionComposer({
   onSubmit,
   onOpenMention,
   onCompositionChange,
-  children,
 }: {
   value: string;
   mentions: AssistantMention[];
@@ -54,7 +52,6 @@ export function AssistantMentionComposer({
   onSubmit: () => void;
   onOpenMention: (target: AssistantMentionTarget) => void;
   onCompositionChange: (composing: boolean) => void;
-  children: ReactNode;
 }) {
   const [picker, setPicker] =
     useState<ReturnType<typeof assistantMentionQuery>>(null);
@@ -489,7 +486,6 @@ export function AssistantMentionComposer({
         >
           <AtSign size={15} />
         </button>
-        {children}
       </div>
       {mentions.length ? (
         <div className="assistant-mention-tray" aria-label="Message references">

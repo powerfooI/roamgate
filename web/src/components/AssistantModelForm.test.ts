@@ -513,7 +513,6 @@ async function registerDomTests() {
       "Ranger model",
       "Edit custom models",
       "Add custom models",
-      "High-permission mode",
       "Refresh Ranger workspaces",
     ])
       expect(

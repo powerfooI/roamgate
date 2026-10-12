@@ -489,11 +489,18 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
       ).not.toContain("Resume");
       await ui.click("All tasks");
       expect(ui.container.querySelector(".assistant-task-row")).toBeNull();
-      await React.act(async () =>
-        ui.container
-          .querySelector<HTMLInputElement>('[type="checkbox"]')!
-          .click(),
+      expect(ui.button("Show cancelled").getAttribute("role")).toBe("switch");
+      expect(ui.button("Show cancelled").getAttribute("aria-checked")).toBe(
+        "false",
       );
+      await ui.click("Show cancelled");
+      expect(ui.button("Show cancelled").getAttribute("aria-checked")).toBe(
+        "true",
+      );
+      expect(ui.container.querySelector(".assistant-task-row")).not.toBeNull();
+      await ui.click("Show cancelled");
+      expect(ui.container.querySelector(".assistant-task-row")).toBeNull();
+      await ui.click("Show cancelled");
       await React.act(async () =>
         ui.container
           .querySelector<HTMLButtonElement>(".assistant-task-row")!
@@ -743,6 +750,73 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
     }
   });
 
+  test("task history survives reselection and stays selectable while another run loads or fails", async () => {
+    const ui = await install();
+    try {
+      const latest = run("history", "latest");
+      const older = run("history", "older");
+      const saved = task("history", { last_run: latest });
+      const detail = (entry: AssistantTaskRun): AssistantTaskDetail => ({
+        task: saved,
+        runs: [latest, older],
+        run: {
+          ...entry,
+          messages: [
+            {
+              id: `${entry.id}-output`,
+              role: "assistant",
+              text: `${entry.id} output`,
+              sent_at: now,
+              tools: [],
+              sources: [],
+            },
+          ],
+        },
+      });
+      ui.get.mockImplementation(async (_taskId, runId) =>
+        runId ? detail(latest) : { ...detail(latest), run: undefined },
+      );
+      await ui.render(snapshot([saved]));
+      await React.act(async () =>
+        ui.container
+          .querySelector<HTMLButtonElement>(".assistant-task-row")!
+          .click(),
+      );
+      expect(ui.container.textContent).toContain("latest output");
+      const requests = ui.get.mock.calls.length;
+      await ui.input("Task run", "latest");
+      expect(ui.container.textContent).toContain("latest output");
+      expect(ui.get).toHaveBeenCalledTimes(requests);
+
+      const pending = Promise.withResolvers<AssistantTaskDetail>();
+      ui.get.mockReturnValueOnce(pending.promise);
+      await ui.input("Task run", "older");
+      const picker = () =>
+        ui.container.querySelector<HTMLSelectElement>(
+          '[aria-label="Task run"]',
+        );
+      expect(picker()?.value).toBe("older");
+      expect(ui.container.textContent).toContain("Loading run history");
+      expect(ui.container.textContent).not.toContain("latest output");
+      await React.act(async () => pending.resolve(detail(older)));
+      expect(ui.container.textContent).toContain("older output");
+
+      ui.get.mockRejectedValueOnce(new Error("History unavailable"));
+      await ui.input("Task run", "latest");
+      expect(ui.container.querySelector('[role="alert"]')?.textContent).toBe(
+        "History unavailable",
+      );
+      expect(picker()?.value).toBe("latest");
+      expect(ui.container.textContent).not.toContain("older output");
+      ui.get.mockResolvedValueOnce(detail(older));
+      await ui.input("Task run", "older");
+      expect(ui.container.textContent).toContain("older output");
+      expect(ui.container.querySelector('[role="alert"]')).toBeNull();
+    } finally {
+      await ui.close();
+    }
+  });
+
   test("only the selected task polls, stale replies stay hidden and waiting actions keep their own run identity", async () => {
     const ui = await install();
     try {
@@ -946,11 +1020,7 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
       ui.get.mockReturnValueOnce(oldDetail.promise);
       ui.call.mockReturnValueOnce(acknowledgement.promise);
       await ui.render(snapshot([saved]));
-      await React.act(async () =>
-        ui.container
-          .querySelector<HTMLInputElement>('[type="checkbox"]')!
-          .click(),
-      );
+      await ui.click("Show cancelled");
       await React.act(async () =>
         ui.container
           .querySelector<HTMLButtonElement>(".assistant-task-row")!

@@ -22,7 +22,7 @@
 }
 .assistant-task-list {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   list-style: none;
   padding: 0;
   margin: 0;
@@ -32,8 +32,11 @@
   gap: 5px;
   width: 100%;
   min-width: 0;
-  padding: 9px;
+  padding: 12px;
   text-align: left;
+}
+.assistant-task-row:hover:not(:disabled) {
+  background: var(--accent-soft);
 }
 .assistant-task-row > div,
 .assistant-task-heading {
@@ -70,17 +73,122 @@
   background: var(--accent-soft);
   color: var(--accent);
 }
+.assistant-task-overview {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--viewer-border);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.assistant-task-overview .assistant-task-heading h3 {
+  color: var(--text-strong);
+  font-size: 15px;
+  line-height: 1.4;
+}
+.assistant-task-schedule,
+.assistant-task-metadata {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.assistant-task-schedule {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.assistant-task-schedule dt,
+.assistant-task-metadata dt {
+  color: var(--muted);
+}
+.assistant-task-schedule dd,
+.assistant-task-metadata dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.assistant-task-schedule dd {
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: 500;
+}
 .assistant-task-buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
+.assistant-task-primary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.assistant-task-buttons .danger-text {
+  margin-left: auto;
+  color: var(--danger-text);
+}
+.assistant-task-details {
+  display: grid;
+  gap: 14px;
+  padding: 4px 2px;
+}
+.assistant-task-details .assistant-task-prompt summary {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.assistant-task-details .assistant-task-prompt p {
+  font-size: 12px;
+  line-height: 1.6;
+}
+.assistant-task-metadata {
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+.assistant-task-metadata > div {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 10px;
+}
+.assistant-task-workspaces {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.assistant-task-workspaces span {
+  color: var(--muted);
+}
+.assistant-task-history {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--viewer-border);
+}
+.assistant-task-history h4 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 12px;
+}
+.assistant-task-history-empty {
+  padding: 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
 .assistant-task-filter {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  width: fit-content;
+  min-height: 28px;
   color: var(--muted);
   font-size: 11px;
+  cursor: pointer;
 }
 .assistant-tasks .assistant-section-heading > button,
 .assistant-task-buttons button {

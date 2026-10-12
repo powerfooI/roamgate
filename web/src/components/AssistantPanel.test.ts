@@ -12,10 +12,26 @@ import { bridge, type ConnectionSummary } from "../api";
 import * as storeModule from "../store";
 import type { RangerTaskNotificationTarget } from "../taskNotifications";
 import { terminalFocusBlockedByOverlay } from "../terminalFocus";
-import { AssistantPanel, assistantAuthUrl } from "./AssistantPanel";
-import { AssistantChatControls } from "./AssistantChatControls";
-import { AssistantMentionComposer } from "./AssistantMentionComposer";
-import * as taskControls from "./AssistantTasks";
+
+// Radix chooses its layout effect at import time; DOM tests need the browser path.
+const bootstrapBrowser =
+  process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST === "1"
+    ? new (await import("happy-dom")).Window()
+    : null;
+if (bootstrapBrowser)
+  Object.defineProperty(globalThis, "document", {
+    value: bootstrapBrowser.document,
+    configurable: true,
+    writable: true,
+  });
+const { AssistantPanel, assistantAuthUrl } = await import("./AssistantPanel");
+const { AssistantChatControls } = await import("./AssistantChatControls");
+const { AssistantMentionComposer } = await import("./AssistantMentionComposer");
+const taskControls = await import("./AssistantTasks");
+if (bootstrapBrowser) {
+  Reflect.deleteProperty(globalThis, "document");
+  await bootstrapBrowser.happyDOM.close();
+}
 
 test("assistant sign-in links only open explicit http or https destinations", () => {
   expect(assistantAuthUrl("https://example.com/device?code=test")).toBe(
@@ -1123,9 +1139,18 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       navigator: browser.navigator,
       HTMLElement: browser.HTMLElement,
       HTMLButtonElement: browser.HTMLButtonElement,
+      HTMLInputElement: browser.HTMLInputElement,
+      HTMLTextAreaElement: browser.HTMLTextAreaElement,
       Element: browser.Element,
       Node: browser.Node,
       Event: browser.Event,
+      NodeFilter: browser.NodeFilter,
+      CustomEvent: browser.CustomEvent,
+      MutationObserver: browser.MutationObserver,
+      ResizeObserver: browser.ResizeObserver,
+      getComputedStyle: browser.getComputedStyle.bind(browser),
+      requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
+      cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
       IS_REACT_ACT_ENVIRONMENT: true,
     })) {
       originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
@@ -2213,9 +2238,30 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         container.querySelector<HTMLElement>(
           '[role="dialog"][aria-label="Enable high-permission mode?"]',
         );
+      expect(
+        container.querySelector('[aria-label="High-permission mode"]'),
+      ).toBeNull();
+      await React.act(async () => button("Chat").click());
+      const trigger = button("Ranger permissions");
+      expect(trigger.closest(".assistant-panel-footer")).not.toBeNull();
+      expect(trigger.textContent).toContain("Ask for approval");
+      expect(button("Send").closest(".assistant-compose-options")).toBe(
+        trigger.parentElement,
+      );
+      expect(button("Send").closest(".assistant-mention-editor")).toBeNull();
+      expect(button("Send").title).toContain("Shift+Enter");
+      const permissionSwitch = () => button("High-permission mode", document);
+      const openPermissions = async () => {
+        await React.act(async () => button("Ranger permissions").click());
+      };
       const callsBeforeApproval = call.mock.calls.length;
-      await React.act(async () => button("High-permission mode").click());
+      await openPermissions();
+      await React.act(async () => permissionSwitch().click());
       expect(approvalDialog()).not.toBeNull();
+      expect(approvalDialog()!.contains(document.activeElement)).toBe(true);
+      expect(
+        document.querySelector(".assistant-permission-popover"),
+      ).toBeNull();
       expect(approvalDialog()!.textContent).toContain(
         "all current and future workspaces",
       );
@@ -2227,7 +2273,8 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       await React.act(async () => button("Cancel", approvalDialog()!).click());
       expect(approvalDialog()).toBeNull();
       expect(call).toHaveBeenCalledTimes(callsBeforeApproval);
-      await React.act(async () => button("High-permission mode").click());
+      await openPermissions();
+      await React.act(async () => permissionSwitch().click());
       await React.act(async () =>
         button("Enable high-permission mode", approvalDialog()!).click(),
       );
@@ -2246,6 +2293,8 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         },
       };
       await render();
+      expect(button("Ranger permissions").textContent).toContain("Full access");
+      await React.act(async () => button("Ranger settings").click());
       expect(workspaceDraft().checked).toBe(true);
       expect(workspaceDraft().disabled).toBe(true);
       expect(
@@ -2261,16 +2310,16 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(button("Ranger model").textContent).toBe(modelDraft);
       expect(
         container.querySelector(
-          ".assistant-panel-title .assistant-panel-access",
+          ".assistant-panel-title .assistant-panel-experimental",
         )?.textContent,
-      ).toBe("Full access");
-      expect(button("High-permission mode").getAttribute("aria-checked")).toBe(
-        "true",
-      );
+      ).toBe("Experimental");
+      await React.act(async () => button("Chat").click());
+      await openPermissions();
+      expect(permissionSwitch().getAttribute("aria-checked")).toBe("true");
       clientState.snapshot.running = true;
       await render();
-      expect(button("High-permission mode").disabled).toBe(false);
-      await React.act(async () => button("High-permission mode").click());
+      expect(permissionSwitch().disabled).toBe(false);
+      await React.act(async () => permissionSwitch().click());
       expect(call).toHaveBeenLastCalledWith("configure_approval", {
         approval_mode: "manual",
       });
@@ -2284,8 +2333,9 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         })),
       };
       await render();
-      expect(button("High-permission mode").disabled).toBe(false);
-      await React.act(async () => button("High-permission mode").click());
+      await openPermissions();
+      expect(permissionSwitch().disabled).toBe(false);
+      await React.act(async () => permissionSwitch().click());
       expect(call).toHaveBeenLastCalledWith("configure_approval", {
         approval_mode: "manual",
       });
@@ -2295,7 +2345,12 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         approval_mode: "manual",
       };
       await render();
-      expect(button("High-permission mode").disabled).toBe(true);
+      await openPermissions();
+      expect(permissionSwitch().disabled).toBe(true);
+      await React.act(async () => button("Ranger settings").click());
+      expect(
+        document.querySelector(".assistant-permission-popover"),
+      ).toBeNull();
       expect(workspaceDraft().checked).toBe(false);
       expect(container.querySelector(".assistant-panel-access")).toBeNull();
 
@@ -2308,14 +2363,22 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       clientState.snapshot.messages = [];
       await render();
       expect(
-        container.querySelector(".assistant-panel-access")?.textContent,
-      ).toBe("High permission: selected workspaces");
+        container.querySelector(".assistant-panel-experimental")?.textContent,
+      ).toBe("Experimental");
       expect(workspaceDraft().checked).toBe(false);
       expect(workspaceDraft().disabled).toBe(false);
-      expect(button("High-permission mode").disabled).toBe(false);
       expect(button("Select all available Ranger workspaces")).toBeDefined();
+      await React.act(async () => button("Chat").click());
+      expect(button("Ranger permissions").textContent).toContain(
+        "High permission",
+      );
+      expect(
+        document.querySelector(".assistant-permission-popover"),
+      ).toBeNull();
+      await openPermissions();
+      expect(permissionSwitch().disabled).toBe(false);
       await React.act(async () =>
-        button("Enable high permission for all workspaces").click(),
+        button("Enable high permission for all workspaces", document).click(),
       );
       expect(approvalDialog()!.textContent).toContain(
         "all current and future workspaces",
@@ -2329,6 +2392,26 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         workspace_scope: "all",
       });
       expect(call).toHaveBeenCalledTimes(callsBeforeApproval + 4);
+      panelMobile = true;
+      await render();
+      await openPermissions();
+      expect(
+        document.querySelector(".assistant-permission-popover.is-mobile"),
+      ).not.toBeNull();
+      const closesBeforeEscape = close.mock.calls.length;
+      await React.act(async () =>
+        document.activeElement!.dispatchEvent(
+          new window.KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      );
+      expect(
+        document.querySelector(".assistant-permission-popover"),
+      ).toBeNull();
+      expect(close).toHaveBeenCalledTimes(closesBeforeEscape);
     } finally {
       await React.act(async () => root.unmount());
       for (const spy of [context, state, readState, send, call])
@@ -2339,7 +2422,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         else Reflect.deleteProperty(globalThis, key);
       }
     }
-  });
+  }, 10_000);
 }
 
 test("assistant uses saved workspace permissions, guards IME sends, and hides without stopping work", async () => {
@@ -2727,7 +2810,7 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
     expect(find("aria-label", "Message Ranger").props.value).toBe(
       "Explain the changes",
     );
-    expect(find("children", "Ranger is working")).toBeDefined();
+    expect(find("children", "Working")).toBeDefined();
 
     snapshot.running = false;
     snapshot.providers.unshift({

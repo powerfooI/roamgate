@@ -109,9 +109,7 @@ if (process.env.ROAMGATE_MENTION_DOM_TEST !== "1") {
           onSubmit={submit}
           onOpenMention={openMention}
           onCompositionChange={composing}
-        >
-          <div className="assistant-compose-actions" />
-        </AssistantMentionComposer>
+        />
       );
     }
     const input = () => inputRef.current!;
