@@ -71,9 +71,9 @@
     "@types/proper-lockfile": "4.1.4",
     "@types/web-push": "^3.6.4",
     "bun-types": "1.4.3",
-    "happy-dom": "^20.14.5",
+    "happy-dom": "^20.14.6",
     "jsdom": "^30.1.1",
-    "oxlint": "1.86.0",
+    "oxlint": "1.87.0",
     "typescript": "^7.0.2"
   },
   "overrides": {
