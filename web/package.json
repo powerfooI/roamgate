@@ -37,7 +37,7 @@
     "@lezer/highlight": "^1.2.5",
     "@lobehub/icons-static-svg": "^1.95.1",
     "@pierre/diffs": "^1.5.1",
-    "@radix-ui/react-popover": "^1.1.23",
+    "@radix-ui/react-popover": "^1.2.0",
     "@shikijs/core": "^4.5.0",
     "@shikijs/langs": "^4.5.0",
     "@xterm/addon-clipboard": "^0.2.0",
