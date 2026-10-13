@@ -39,16 +39,20 @@
     transform: translate3d(0, 0, 0) scale(1);
     transform-origin: var(--mobile-controls-origin-x)
       var(--mobile-controls-origin-y);
-    /* Dragging the controls toggle moves the whole stack; see
-       useMobileControlsDrag. `translate` composes with `transform`. */
-    translate: var(--mobile-controls-drag-x, 0px)
-      var(--mobile-controls-drag-y, 0px);
     opacity: 1;
     transition:
       opacity 160ms ease,
       transform 180ms ease;
     -webkit-backdrop-filter: blur(14px);
     backdrop-filter: blur(14px);
+  }
+
+  /* Apply drag only to outer pills; builds can drop `translate: none` resets. */
+  .app:not([data-mobile-controls-compact]) .mobile-terminal-controls,
+  .app:not([data-mobile-controls-compact])
+    .mobile-nav:not(.mobile-terminal-tools) {
+    translate: var(--mobile-controls-drag-x, 0px)
+      var(--mobile-controls-drag-y, 0px);
   }
 
   .mobile-workspace-tools {
@@ -180,8 +184,6 @@
     box-shadow: var(--shadow-lg);
     transform: translate3d(0, 0, 0) scale(1);
     transform-origin: right bottom;
-    translate: var(--mobile-controls-drag-x, 0px)
-      var(--mobile-controls-drag-y, 0px);
     opacity: 1;
     transition:
       opacity 160ms ease,
@@ -192,8 +194,6 @@
 
   .mobile-nav.mobile-terminal-tools {
     position: static;
-    /* Moves with its parent pill, not on its own. */
-    translate: none;
     right: auto;
     bottom: auto;
     z-index: auto;
@@ -314,7 +314,6 @@
     position: static;
     flex: 0 0 auto;
     direction: ltr;
-    translate: none;
   }
 
   .mobile-terminal-controls {
