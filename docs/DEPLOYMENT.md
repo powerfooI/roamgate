@@ -533,14 +533,13 @@ syntax; entering a key in the custom model editor accepts literal keys only.
 Pi's extensions, skills, project instructions, and
 built-in write/command tools are not loaded into Ranger.
 
-When upgrading from Pi SDK 1.0.2, Azure users must migrate the provider ID
-`azure-openai-responses` to `azure`. In the selected credential store, rename
-that provider key in `auth.json` and `models.json` if present; keep the model API
-value `azure-openai-responses` unchanged. Refresh the catalog and reselect the
-Azure model in Ranger. Existing Azure task configurations and interrupted runs
-retain their old provider ID: review and recreate affected tasks, and start a
-new conversation rather than resuming an old Azure run. Back up the store before
-editing it, and never paste credential contents into a chat or issue.
+Pi SDK 1.1 names its Azure provider `azure`. Ranger also keeps
+`azure-openai-responses` as **Azure OpenAI (legacy ID)**, so existing selections,
+scheduled tasks, and interrupted runs continue using their original credentials
+and model configuration. No file migration is required. When both provider IDs
+are configured, their credentials and custom model overrides stay independent;
+Ranger does not copy or rename either store entry. The Responses model API value
+remains `azure-openai-responses` for both provider IDs.
 
 For remote bridge deployments, follow the provider's displayed device-code or
 manual authorization flow. A browser's localhost callback points to the browser

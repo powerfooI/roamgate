@@ -34,6 +34,10 @@ import {
   workspaceTools,
 } from "./tools";
 import { surfaceAssistantUserError } from "./errors";
+import {
+  LEGACY_AZURE_PROVIDER,
+  registerLegacyAzureProvider,
+} from "./pi-azure-compat";
 
 type AuthPrompt = {
   type: "text" | "secret" | "select" | "manual_code";
@@ -221,7 +225,8 @@ export function createPiDriver(
   directory: string,
   loadSdk = async () => {
     // Embed Pi's otherwise opaque OAuth imports for standalone executables.
-    // Keep undici aligned with the SDK so Bun resolves one pi-ai peer context.
+    // The root undici override keeps SDK and server on one pi-ai peer context.
+    // Split contexts leave the SDK OAuth loaders unregistered in Bun bundles.
     const { registerBunOAuthFlows } = await import(
       "@earendil-works/pi-ai/bun-oauth"
     );
@@ -275,6 +280,7 @@ export function createPiDriver(
           allowModelNetwork: false,
           refreshOnCreate: false,
         });
+        await registerLegacyAzureProvider(models);
         initialized.add(source);
         return models;
       })().catch((error) => {
@@ -432,6 +438,7 @@ export function createPiDriver(
       const builtinIds = new Set(
         builtinProviders().map((provider) => provider.id),
       );
+      builtinIds.add(LEGACY_AZURE_PROVIDER);
       // Enumeration must not resolve API keys: Pi supports executable !command keys.
       const stored = new Map(
         (await models.listCredentials())
@@ -518,7 +525,10 @@ export function createPiDriver(
       const { builtinProviders } = await import(
         "@earendil-works/pi-ai/providers/all"
       );
-      if (builtinProviders().some((provider) => provider.id === input.provider))
+      if (
+        input.provider === LEGACY_AZURE_PROVIDER ||
+        builtinProviders().some((provider) => provider.id === input.provider)
+      )
         throw new Error("Use a distinct custom provider identifier");
       const { path, saved } = modelConfiguration(input.credential_source);
       const previous = Object.hasOwn(saved.providers, input.provider)
