@@ -73,7 +73,7 @@ export async function fetchOriginDefaultBranch(
   const tracking = trackingRefs.find(([name]) => name === trackingRef);
   // shortcut: Preserve conflicting refs; use fetch --prune for tracking cleanup after renames.
   const normalizedRef = trackingRef.toLowerCase();
-  const namespaceBlocked =
+  let namespaceBlocked =
     tracking?.[2] ||
     trackingRefs.some(([name]) => {
       const normalizedName = name.toLowerCase();
@@ -83,6 +83,25 @@ export async function fetchOriginDefaultBranch(
         normalizedRef.startsWith(`${normalizedName}/`)
       );
     });
+  // for-each-ref omits dangling symrefs. Probe each branch prefix through Git
+  // rather than assuming its absence from the snapshot means it is available.
+  const branchParts = branch.split("/");
+  for (
+    let length = 1;
+    !namespaceBlocked && length < branchParts.length;
+    length++
+  ) {
+    const prefix = `refs/remotes/origin/${branchParts.slice(0, length).join("/")}`;
+    const prefixResult = await runGit(
+      `symbolic-ref --quiet ${shQuote(prefix)}`,
+    );
+    if (prefixResult.code !== 0 && prefixResult.code !== 1) {
+      throw new Error(
+        `Unable to check ${base}'s tracking prefix: ${processError(prefixResult, "git symbolic-ref failed")}`,
+      );
+    }
+    namespaceBlocked = prefixResult.code === 0;
+  }
   if (!namespaceBlocked) {
     const symbolicResult = await runGit(
       `symbolic-ref --quiet ${shQuote(trackingRef)}`,

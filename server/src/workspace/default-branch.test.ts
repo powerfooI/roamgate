@@ -165,6 +165,101 @@ describe("origin default branch with real Git", () => {
   );
 
   test.each([
+    ["HEAD/topic", "HEAD"],
+    ["HEAD/deep/topic", "HEAD"],
+    ["release/alias/topic", "release/alias"],
+    ["release/next", "HEAD"],
+    ["HEAD", "HEAD"],
+  ])(
+    "prepares and syncs %s while preserving dangling origin/%s",
+    async (branch, blocker) => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "roamgate-dangling-head-"),
+      );
+      try {
+        const seed = join(directory, "seed");
+        const remote = join(directory, "remote.git");
+        const root = join(directory, "checkout");
+        await git("init", "--initial-branch=main", seed);
+        const original = await commit(seed, "initial");
+        await git("clone", "--bare", seed, remote);
+        await git("clone", remote, root);
+        const expectedCommit = await commit(seed, "new default");
+        await git("-C", seed, "push", remote, `HEAD:refs/heads/${branch}`);
+        await git("-C", remote, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
+        await git("-C", remote, "update-ref", "-d", "refs/heads/main");
+        await git("-C", root, "remote", "prune", "origin");
+        await git(
+          "-C",
+          root,
+          "symbolic-ref",
+          `refs/remotes/origin/${blocker}`,
+          "refs/remotes/origin/main",
+        );
+        expect(
+          await git("-C", root, "for-each-ref", "refs/remotes/origin/"),
+        ).toBe("");
+        const fetchHeadPath = join(root, ".git", "FETCH_HEAD");
+        const fetchHead = `${original}\t\tbranch 'unrelated' of test\n`;
+        await writeFile(fetchHeadPath, fetchHead);
+        const dirty = join(root, "uncommitted.txt");
+        await writeFile(dirty, "keep me");
+        const base = await syncWorktreeBase({
+          workspaceId: "w1",
+          resolveGitRoot: async () => ({ root }),
+          shQuote,
+          runProcessWithCodeTimeout,
+        });
+        expect(base.base).toBe(`origin/${branch}`);
+        expect(base.commit).toBe(expectedCommit);
+        expect(await git("-C", root, "rev-parse", "HEAD")).toBe(original);
+        expect(await readFile(dirty, "utf8")).toBe("keep me");
+        await git(
+          "-C",
+          root,
+          "worktree",
+          "add",
+          "-b",
+          "created",
+          join(directory, "created"),
+          base.commit,
+        );
+        expect(
+          await git("-C", join(directory, "created"), "rev-parse", "HEAD"),
+        ).toBe(expectedCommit);
+        await unlink(dirty);
+        const sync = await syncWorkspaceBranch({
+          root,
+          shQuote,
+          runProcessWithCodeTimeout,
+        });
+        expect(sync.last_status).toBe("updated");
+        expect(await git("-C", root, "rev-parse", "HEAD")).toBe(expectedCommit);
+        expect(
+          await git("-C", root, "symbolic-ref", "refs/remotes/origin/HEAD"),
+        ).toBe("refs/remotes/origin/main");
+        expect(
+          await git(
+            "-C",
+            root,
+            "symbolic-ref",
+            `refs/remotes/origin/${blocker}`,
+          ),
+        ).toBe("refs/remotes/origin/main");
+        expect(await readFile(fetchHeadPath, "utf8")).toBe(fetchHead);
+        if (branch === "release/next") {
+          expect(
+            await git("-C", root, "rev-parse", `refs/remotes/origin/${branch}`),
+          ).toBe(expectedCommit);
+        }
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
+
+  test.each([
     ["foo", "foo/bar"],
     ["foo/bar", "foo"],
   ])(
