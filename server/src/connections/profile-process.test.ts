@@ -340,6 +340,9 @@ test("production dispatcher isolates two local profiles and profile CRUD", async
   );
   const env: Record<string, string | undefined> = {
     ...process.env,
+    HOME: root,
+    APPDATA: root,
+    XDG_CONFIG_HOME: root,
     HOST: "127.0.0.1",
     ROAMGATE_PASSWORD: password,
     PORT: "0",
@@ -645,6 +648,9 @@ for (const { protocol, welcomeProtocol, accepted } of [
     const profile = await fakeHerdr(root, "test", protocol, welcomeProtocol);
     const env: Record<string, string | undefined> = {
       ...process.env,
+      HOME: root,
+      APPDATA: root,
+      XDG_CONFIG_HOME: root,
       HOST: "127.0.0.1",
       ROAMGATE_PASSWORD: password,
       PORT: "0",
@@ -754,6 +760,9 @@ test("production routing bootstraps only a verified empty session and serializes
   );
   const env: Record<string, string | undefined> = {
     ...process.env,
+    HOME: root,
+    APPDATA: root,
+    XDG_CONFIG_HOME: root,
     HOST: "127.0.0.1",
     ROAMGATE_PASSWORD: password,
     PORT: "0",
