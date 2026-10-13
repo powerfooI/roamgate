@@ -350,9 +350,14 @@ Open **Worktree Lifecycle** from a workspace menu or the command menu to:
   process cleanup, and preservation of residual files when safe removal fails.
 
 Worktree creation and automatic branch updates fetch the advertised default
-commit by its object ID without rewriting remote-tracking refs or `FETCH_HEAD`.
-Stale tracking-ref names do not block creation or sync, and both operations use
-the resolved commit rather than a ref that another fetch could change.
+commit by its object ID without rewriting `FETCH_HEAD`. They refresh the matching
+`origin/<default-branch>` tracking ref so ahead/behind badges reflect that commit;
+a conflicting concurrent tracking-ref change stops sync rather than overwriting it.
+Symbolic, case-conflicting, and prefix-conflicting tracking refs are preserved;
+pruning remains an explicit Git operation. Stale tracking-ref names do not block creation or sync,
+and both operations use the resolved commit rather than a ref that another fetch
+could change. Concurrency checks compare commit IDs; do not reconfigure symbolic
+tracking refs while sync is running.
 
 ### Worktree Hooks
 

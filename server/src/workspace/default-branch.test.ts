@@ -98,6 +98,18 @@ describe("origin default branch with real Git", () => {
         });
         expect(base.base).toBe(`origin/${branch}`);
         expect(base.commit).toBe(expectedCommit);
+        const expectedMainTracking =
+          branch === "main"
+            ? `${expectedCommit} refs/remotes/origin/main`
+            : trackingRefs;
+        if (!["head", "head/topic"].includes(branch.toLowerCase())) {
+          expect(
+            await git("-C", root, "rev-parse", `refs/remotes/origin/${branch}`),
+          ).toBe(expectedCommit);
+        }
+        expect(
+          await git("-C", root, "symbolic-ref", "refs/remotes/origin/HEAD"),
+        ).toBe("refs/remotes/origin/main");
         expect(
           await git(
             "-C",
@@ -106,7 +118,7 @@ describe("origin default branch with real Git", () => {
             "--verify",
             "refs/remotes/origin/main",
           ),
-        ).toBe(trackingRefs);
+        ).toBe(expectedMainTracking);
         expect(await readFile(fetchHeadPath, "utf8")).toBe(fetchHead);
         expect(await git("-C", root, "rev-parse", "HEAD")).toBe(before);
         expect(await git("-C", root, "status", "--porcelain")).toBe(status);
@@ -143,7 +155,7 @@ describe("origin default branch with real Git", () => {
             "--verify",
             "refs/remotes/origin/main",
           ),
-        ).toBe(trackingRefs);
+        ).toBe(expectedMainTracking);
         expect(await readFile(fetchHeadPath, "utf8")).toBe(fetchHead);
       } finally {
         await rm(directory, { recursive: true, force: true });
@@ -207,6 +219,144 @@ describe("origin default branch with real Git", () => {
         expect(
           await git("-C", root, "rev-parse", `refs/remotes/origin/${from}`),
         ).toBe(original);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
+
+  test("refreshes stale origin/main when the workspace is already up to date", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "roamgate-stale-tracking-"));
+    try {
+      const seed = join(directory, "seed");
+      const remote = join(directory, "remote.git");
+      const root = join(directory, "checkout");
+      await git("init", "--initial-branch=main", seed);
+      const before = await commit(seed, "initial");
+      await git("clone", "--bare", seed, remote);
+      await git("clone", remote, root);
+      const expectedCommit = await commit(seed, "remote update");
+      await git("-C", seed, "push", remote, "main");
+      await git(
+        "-C",
+        root,
+        "fetch",
+        "--no-write-fetch-head",
+        "--refmap=",
+        "origin",
+        expectedCommit,
+      );
+      await git("-C", root, "merge", "--no-edit", expectedCommit);
+      expect(await git("-C", root, "rev-parse", "origin/main")).toBe(before);
+      expect(
+        await git("-C", root, "status", "--porcelain=v1", "--branch"),
+      ).toContain("ahead 1");
+      const fetchHeadPath = join(root, ".git", "FETCH_HEAD");
+      const fetchHead = `${before}\t\tbranch 'unrelated' of test\n`;
+      await writeFile(fetchHeadPath, fetchHead);
+
+      const sync = await syncWorkspaceBranch({
+        root,
+        shQuote,
+        runProcessWithCodeTimeout,
+      });
+      expect(sync.last_status).toBe("up_to_date");
+      expect(await git("-C", root, "rev-parse", "HEAD")).toBe(expectedCommit);
+      expect(await git("-C", root, "rev-parse", "origin/main")).toBe(
+        expectedCommit,
+      );
+      expect(
+        await git("-C", root, "status", "--porcelain=v1", "--branch"),
+      ).toBe("## main...origin/main");
+      expect(await readFile(fetchHeadPath, "utf8")).toBe(fetchHead);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  test.each(["same", "newer", "symbolic"] as const)(
+    "preserves a concurrent %s tracking-ref change during fetch",
+    async (change) => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "roamgate-concurrent-tracking-"),
+      );
+      try {
+        const seed = join(directory, "seed");
+        const remote = join(directory, "remote.git");
+        const root = join(directory, "checkout");
+        await git("init", "--initial-branch=main", seed);
+        const before = await commit(seed, "initial");
+        await git("clone", "--bare", seed, remote);
+        await git("clone", remote, root);
+        const advertised = await commit(seed, "advertised update");
+        await git("-C", seed, "push", remote, "main");
+        let concurrentCommit = advertised;
+        const fetchHeadPath = join(root, ".git", "FETCH_HEAD");
+        const fetchHead = `${before}\t\tbranch 'unrelated' of test\n`;
+        await writeFile(fetchHeadPath, fetchHead);
+        const sync = await syncWorkspaceBranch({
+          root,
+          shQuote,
+          runProcessWithCodeTimeout: async (argv, timeoutMs) => {
+            const result = await runProcessWithCodeTimeout(argv, timeoutMs);
+            if (argv.at(-1)?.includes(`--refmap= origin '${advertised}'`)) {
+              if (change === "newer") {
+                concurrentCommit = await commit(seed, "concurrent update");
+                await git("-C", seed, "push", remote, "main");
+              }
+              if (change === "symbolic") {
+                concurrentCommit = before;
+                await git(
+                  "-C",
+                  root,
+                  "update-ref",
+                  "refs/heads/preserved",
+                  before,
+                );
+                await git(
+                  "-C",
+                  root,
+                  "symbolic-ref",
+                  "refs/remotes/origin/main",
+                  "refs/heads/preserved",
+                );
+              } else {
+                await git(
+                  "-C",
+                  root,
+                  "fetch",
+                  "--no-write-fetch-head",
+                  "origin",
+                );
+              }
+            }
+            return result;
+          },
+        });
+        expect(sync.last_status).toBe(
+          change === "newer" ? "failed" : "updated",
+        );
+        if (change === "newer") {
+          expect(sync.last_message).toContain(
+            "Unable to update origin/main's tracking ref",
+          );
+        }
+        expect(await git("-C", root, "rev-parse", "origin/main")).toBe(
+          concurrentCommit,
+        );
+        if (change === "symbolic") {
+          expect(
+            await git("-C", root, "symbolic-ref", "refs/remotes/origin/main"),
+          ).toBe("refs/heads/preserved");
+          expect(
+            await git("-C", root, "rev-parse", "refs/heads/preserved"),
+          ).toBe(before);
+        }
+        expect(await git("-C", root, "rev-parse", "HEAD")).toBe(
+          change === "newer" ? before : advertised,
+        );
+        expect(await readFile(fetchHeadPath, "utf8")).toBe(fetchHead);
       } finally {
         await rm(directory, { recursive: true, force: true });
       }

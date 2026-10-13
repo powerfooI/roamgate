@@ -11,11 +11,12 @@ describe("worktree creation preparation", () => {
     { name: "local SHA-1", host: undefined, oid: commit },
     { name: "SSH SHA-256", host: "dev@example.test", oid: "b".repeat(64) },
   ])(
-    "fetches the advertised commit without writing refs ($name)",
+    "fetches the advertised commit and refreshes its tracking ref ($name)",
     async ({ host, oid }) => {
       const calls: string[][] = [];
       const fetchCommand = `git fetch --no-tags --no-write-fetch-head --refmap= origin '${oid}'`;
       const results = [
+        { code: 0, stdout: "", stderr: "" },
         {
           code: 0,
           stdout: `ref: refs/heads/master\tHEAD\n${oid}\tHEAD\n`,
@@ -24,6 +25,8 @@ describe("worktree creation preparation", () => {
         { code: 0, stdout: "", stderr: "" },
         { code: 0, stdout: "", stderr: "fetched\n" },
         { code: 0, stdout: `${oid}\n`, stderr: "" },
+        { code: 1, stdout: "", stderr: "" },
+        { code: 0, stdout: "", stderr: "" },
       ];
       const result = await syncWorktreeBase({
         workspaceId: "w1",
@@ -37,14 +40,17 @@ describe("worktree creation preparation", () => {
           return result;
         },
       });
-      expect(calls).toHaveLength(4);
+      expect(calls).toHaveLength(7);
       expect(calls[0][0]).toBe(host ? "ssh" : "sh");
       if (host) expect(calls[0].slice(-3, -1)).toEqual(["--", host]);
       expect(calls.map((argv) => argv.at(-1))).toEqual([
+        "GIT_TERMINAL_PROMPT=0 git -C '/repo with spaces' for-each-ref --format='%(refname) %(objectname) %(symref)' refs/remotes/origin/",
         "GIT_TERMINAL_PROMPT=0 git -C '/repo with spaces' ls-remote --symref origin HEAD",
         "GIT_TERMINAL_PROMPT=0 git -C '/repo with spaces' check-ref-format 'refs/heads/master'",
         `GIT_TERMINAL_PROMPT=0 git -C '/repo with spaces' ${fetchCommand.slice(4)}`,
         `GIT_TERMINAL_PROMPT=0 git -C '/repo with spaces' rev-parse --verify '${oid}^{commit}'`,
+        "GIT_TERMINAL_PROMPT=0 git -C '/repo with spaces' symbolic-ref --quiet 'refs/remotes/origin/master'",
+        `GIT_TERMINAL_PROMPT=0 git -C '/repo with spaces' update-ref --no-deref 'refs/remotes/origin/master' '${oid}' ''`,
       ]);
       expect(result).toMatchObject({
         workspace_id: "w1",
@@ -59,24 +65,39 @@ describe("worktree creation preparation", () => {
 
   test.each([
     {
+      name: "tracking lookup fails",
+      results: [{ code: 128, stdout: "", stderr: "unable to read refs" }],
+      error: "Unable to read origin's tracking refs: unable to read refs",
+    },
+    {
       name: "remote lookup fails",
-      results: [{ code: 128, stdout: "", stderr: "origin is unavailable" }],
+      results: [
+        { code: 0, stdout: "", stderr: "" },
+        { code: 128, stdout: "", stderr: "origin is unavailable" },
+      ],
       error:
         "Unable to determine origin's default branch: origin is unavailable",
     },
     {
       name: "remote HEAD has no symbolic branch",
-      results: [{ code: 0, stdout: `${commit}\tHEAD\n`, stderr: "" }],
+      results: [
+        { code: 0, stdout: "", stderr: "" },
+        { code: 0, stdout: `${commit}\tHEAD\n`, stderr: "" },
+      ],
       error: "origin HEAD does not identify a branch",
     },
     {
       name: "remote is empty",
-      results: [{ code: 0, stdout: "", stderr: "" }],
+      results: [
+        { code: 0, stdout: "", stderr: "" },
+        { code: 0, stdout: "", stderr: "" },
+      ],
       error: "origin HEAD does not identify a branch",
     },
     {
       name: "remote HEAD is invalid",
       results: [
+        { code: 0, stdout: "", stderr: "" },
         { code: 0, stdout: "ref: refs/heads/bad:name\tHEAD\n", stderr: "" },
         { code: 1, stdout: "", stderr: "" },
       ],
@@ -85,6 +106,7 @@ describe("worktree creation preparation", () => {
     {
       name: "remote HEAD has no valid object ID",
       results: [
+        { code: 0, stdout: "", stderr: "" },
         {
           code: 0,
           stdout: "ref: refs/heads/master\tHEAD\n$(id)\tHEAD\n",
@@ -97,6 +119,7 @@ describe("worktree creation preparation", () => {
     {
       name: "fetch fails",
       results: [
+        { code: 0, stdout: "", stderr: "" },
         { code: 0, stdout: remoteHead, stderr: "" },
         { code: 0, stdout: "", stderr: "" },
         { code: 128, stdout: "", stderr: "remote master is unavailable" },
@@ -106,6 +129,7 @@ describe("worktree creation preparation", () => {
     {
       name: "fetched commit cannot be resolved",
       results: [
+        { code: 0, stdout: "", stderr: "" },
         { code: 0, stdout: remoteHead, stderr: "" },
         { code: 0, stdout: "", stderr: "" },
         { code: 0, stdout: "", stderr: "" },
@@ -117,12 +141,41 @@ describe("worktree creation preparation", () => {
     {
       name: "resolved commit differs from the advertised object",
       results: [
+        { code: 0, stdout: "", stderr: "" },
         { code: 0, stdout: remoteHead, stderr: "" },
         { code: 0, stdout: "", stderr: "" },
         { code: 0, stdout: "", stderr: "" },
         { code: 0, stdout: "b".repeat(40), stderr: "" },
       ],
       error: "Unable to resolve origin/master after fetching it",
+    },
+    {
+      name: "symbolic tracking lookup fails",
+      results: [
+        { code: 0, stdout: "", stderr: "" },
+        { code: 0, stdout: remoteHead, stderr: "" },
+        { code: 0, stdout: "", stderr: "" },
+        { code: 0, stdout: "", stderr: "" },
+        { code: 0, stdout: commit, stderr: "" },
+        { code: 128, stdout: "", stderr: "unable to read tracking ref" },
+      ],
+      error:
+        "Unable to check origin/master's tracking ref: unable to read tracking ref",
+    },
+    {
+      name: "tracking update fails",
+      results: [
+        { code: 0, stdout: "", stderr: "" },
+        { code: 0, stdout: remoteHead, stderr: "" },
+        { code: 0, stdout: "", stderr: "" },
+        { code: 0, stdout: "", stderr: "" },
+        { code: 0, stdout: commit, stderr: "" },
+        { code: 1, stdout: "", stderr: "" },
+        { code: 128, stdout: "", stderr: "tracking ref changed" },
+        { code: 1, stdout: "", stderr: "" },
+      ],
+      error:
+        "Unable to update origin/master's tracking ref: tracking ref changed",
     },
   ])(
     "does not fall back to another base when $name",
