@@ -1604,3 +1604,60 @@ describe("shared terminal size after a viewer leaves", () => {
     }
   });
 });
+
+// Before protocol 22 the connection-wide app relay sizes every tab's pane
+// runtime, so a departing phone must not leave it at the phone's layout.
+test("restores the legacy relay to a remaining browser's layout when the sizing browser leaves", async () => {
+  const tracker = {
+    appConnects: 0,
+    appCloses: 0,
+    appSizes: [] as string[],
+    events: [] as string[],
+  };
+  const socketPath = await startThinServer({ protocol: 20, tracker });
+  const desktop = {} as ServerWebSocket<unknown>;
+  const phone = {} as ServerWebSocket<unknown>;
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 20,
+    safeSend: () => true,
+    clientLabel: (ws) => (ws === desktop ? "desktop" : "phone"),
+    markRpcError: () => undefined,
+  });
+  try {
+    await bridge.handleTerminalRpc(desktop, "d", "terminal.attach", {
+      terminal_id: "term_1",
+      cols: 160,
+      rows: 45,
+      relay_active: true,
+      relay_cols: 170,
+      relay_rows: 50,
+    });
+    await waitForCondition(
+      () => tracker.appSizes.at(-1) === "170x50",
+      "relay never took the desktop layout",
+    );
+    await bridge.handleTerminalRpc(phone, "p", "terminal.attach", {
+      terminal_id: "term_1",
+      cols: 60,
+      rows: 50,
+      relay_active: true,
+      relay_cols: 60,
+      relay_rows: 55,
+    });
+    await waitForCondition(
+      () => tracker.appSizes.at(-1) === "60x55",
+      "phone attach did not resize the relay",
+    );
+
+    bridge.cleanupWs(phone);
+
+    await waitForCondition(
+      () => tracker.appSizes.at(-1) === "170x50",
+      "relay kept the departed phone's layout",
+    );
+    expect(tracker.appConnects).toBe(1);
+  } finally {
+    bridge.dispose();
+  }
+});

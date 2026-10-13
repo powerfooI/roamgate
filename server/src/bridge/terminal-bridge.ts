@@ -31,7 +31,10 @@ type TerminalSession = {
 type ViewerViewport = {
   cols: number;
   rows: number;
-  /** Bridge-wide order of the attach or resize that set this viewport. */
+  /**
+   * Order of the request that set this viewport. Terminal viewports use the
+   * bridge-wide viewport counter; relay viewports use the relay revision.
+   */
   revision: number;
 };
 
@@ -139,6 +142,9 @@ export function createTerminalBridge(args: {
   let clipboardTarget: ClipboardTarget | null = null;
   let clipboardRelaySize: { cols: number; rows: number } | null = null;
   let clipboardRelayRevision = 0;
+  // Each browser's newest relay request, so the relay can return to a
+  // remaining browser's layout when the browser that sized it disconnects.
+  const relayViewports = new Map<ServerWebSocket<unknown>, ViewerViewport>();
   // Set when the server speaks protocol 22+ and the relay is known to be
   // undeliverable, so repeated checks neither reconnect nor re-log.
   let clipboardRelaySkipped = false;
@@ -637,6 +643,39 @@ export function createTerminalBridge(args: {
     });
   }
 
+  // The relay is connection-wide and follows the newest relay request, and on
+  // Herdr before protocol 22 its size drives the pane-runtime layout of every
+  // tab. When the browser that made that request disconnects, return the
+  // relay to the newest request of a browser that is still connected.
+  function restoreClipboardRelaySize(departed: ServerWebSocket<unknown>) {
+    const own = relayViewports.get(departed);
+    relayViewports.delete(departed);
+    if (disposed || !own || own.revision !== clipboardRelayRevision) return;
+    let latest: ViewerViewport | null = null;
+    for (const viewport of relayViewports.values()) {
+      if (!latest || viewport.revision > latest.revision) latest = viewport;
+    }
+    if (!latest) return;
+    // The restored request now owns the relay. The new revision also stops a
+    // delayed attach from the departed browser from resizing it back.
+    const revision = ++clipboardRelayRevision;
+    latest.revision = revision;
+    const { cols, rows } = latest;
+    const apply = () => {
+      if (disposed || revision !== clipboardRelayRevision) return;
+      if (!syncClipboardRelaySize(cols, rows)) return;
+      logger.debug("clipboard relay size restored", {
+        connection: args.connectionId ?? "legacy-default",
+        departed: args.clientLabel(departed),
+        size: `${cols}x${rows}`,
+      });
+    };
+    // A relay still connecting was sized by the request that created it.
+    if (clipboardRelayConnecting)
+      void clipboardRelayConnecting.then(apply, () => undefined);
+    else apply();
+  }
+
   function detachTerminalViewer(
     ws: ServerWebSocket<unknown>,
     terminalId?: string | null,
@@ -1132,6 +1171,8 @@ export function createTerminalBridge(args: {
         }
         const relaySize = relaySizeFromParams(params, { cols, rows });
         const relayRevision = relaySize ? ++clipboardRelayRevision : null;
+        if (relaySize && relayRevision !== null)
+          relayViewports.set(ws, { ...relaySize, revision: relayRevision });
 
         const existingShared = sharedTerminals.get(terminalId);
         const sharedMode =
@@ -1251,6 +1292,11 @@ export function createTerminalBridge(args: {
             ? params.pane_id
             : null;
         clipboardRelayRevision += 1;
+        relayViewports.set(ws, {
+          cols,
+          rows,
+          revision: clipboardRelayRevision,
+        });
         const confirmed = await resizeClipboardRelayAndConfirm(
           cols,
           rows,
@@ -1408,6 +1454,10 @@ export function createTerminalBridge(args: {
         args.dropCoalesced?.(ws, terminalCoalesceKey(requestedTerminalId!));
         if (relaySize) {
           clipboardRelayRevision += 1;
+          relayViewports.set(ws, {
+            ...relaySize,
+            revision: clipboardRelayRevision,
+          });
           syncClipboardRelaySize(relaySize.cols, relaySize.rows);
         }
         logger.debug("terminal resized", {
@@ -1468,6 +1518,7 @@ export function createTerminalBridge(args: {
     focusIntents.delete(ws);
     focusChains.delete(ws);
     detachTerminalViewer(ws);
+    restoreClipboardRelaySize(ws);
   }
 
   function viewedTerminals(ws: ServerWebSocket<unknown>): string[] {
@@ -1514,6 +1565,7 @@ export function createTerminalBridge(args: {
     for (const shared of sharedTerminals.values()) shared.thin.close();
     sharedTerminals.clear();
     terminalViewers.clear();
+    relayViewports.clear();
     attachmentTokens.clear();
     focusIntents.clear();
     focusChains.clear();
