@@ -1661,3 +1661,69 @@ test("restores the legacy relay to a remaining browser's layout when the sizing 
     bridge.dispose();
   }
 });
+
+test("never restores the legacy relay to an abandoned attach's layout", async () => {
+  const tracker = {
+    appConnects: 0,
+    appCloses: 0,
+    appSizes: [] as string[],
+    events: [] as string[],
+  };
+  const socketPath = await startThinServer({ protocol: 20, tracker });
+  const desktop = {} as ServerWebSocket<unknown>;
+  const phone = {} as ServerWebSocket<unknown>;
+  const laptop = {} as ServerWebSocket<unknown>;
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 20,
+    safeSend: () => true,
+    clientLabel: () => "test",
+    markRpcError: () => undefined,
+  });
+  try {
+    await bridge.handleTerminalRpc(desktop, "d", "terminal.attach", {
+      terminal_id: "term_1",
+      cols: 160,
+      rows: 45,
+      relay_active: true,
+      relay_cols: 170,
+      relay_rows: 50,
+    });
+    await waitForCondition(
+      () => tracker.appSizes.at(-1) === "170x50",
+      "relay never took the desktop layout",
+    );
+    // The phone gives up on its attach before it completes, so its layout
+    // never reaches the relay.
+    const abandoned = bridge.handleTerminalRpc(phone, "p", "terminal.attach", {
+      terminal_id: "term_2",
+      cols: 60,
+      rows: 50,
+      relay_active: true,
+      relay_cols: 60,
+      relay_rows: 55,
+    });
+    await bridge.handleTerminalRpc(phone, "pd", "terminal.detach", {
+      terminal_id: "term_2",
+    });
+    await abandoned;
+    await bridge.handleTerminalRpc(laptop, "l", "terminal.relay_resize", {
+      cols: 120,
+      rows: 40,
+    });
+    await waitForCondition(
+      () => tracker.appSizes.at(-1) === "120x40",
+      "laptop relay resize did not apply",
+    );
+
+    bridge.cleanupWs(laptop);
+
+    await waitForCondition(
+      () => tracker.appSizes.at(-1) === "170x50",
+      "relay did not return to the desktop layout",
+    );
+    expect(tracker.appSizes).not.toContain("60x55");
+  } finally {
+    bridge.dispose();
+  }
+});

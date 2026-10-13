@@ -591,9 +591,11 @@ export function createTerminalBridge(args: {
   }
 
   async function syncClipboardRelayAfterAttach(
+    ws: ServerWebSocket<unknown>,
     shared: SharedTerminalSession,
     size: { cols: number; rows: number },
     revision: number,
+    isAttachCurrent: () => boolean,
   ) {
     // The first direct terminal frame is the protocol-level evidence that
     // Herdr processed AttachTerminal and installed its resize lock. Only then
@@ -602,6 +604,10 @@ export function createTerminalBridge(args: {
     // A newer tab switch/resize owns the relay now; never let this delayed
     // attach move it back to a stale tab's viewport.
     if (revision !== clipboardRelayRevision) return;
+    // A superseded or abandoned attach (its browser detached or left) never
+    // owns the relay, so it must not size it now or be restored later.
+    if (!isAttachCurrent()) return;
+    relayViewports.set(ws, { ...size, revision });
     if (clipboardRelay && !clipboardRelay.isClosed) {
       syncClipboardRelaySize(size.cols, size.rows);
       return;
@@ -1171,8 +1177,6 @@ export function createTerminalBridge(args: {
         }
         const relaySize = relaySizeFromParams(params, { cols, rows });
         const relayRevision = relaySize ? ++clipboardRelayRevision : null;
-        if (relaySize && relayRevision !== null)
-          relayViewports.set(ws, { ...relaySize, revision: relayRevision });
 
         const existingShared = sharedTerminals.get(terminalId);
         const sharedMode =
@@ -1247,9 +1251,11 @@ export function createTerminalBridge(args: {
           }
           if (relaySize && relayRevision !== null) {
             await syncClipboardRelayAfterAttach(
+              ws,
               shared,
               relaySize,
               relayRevision,
+              attemptIsCurrent,
             );
           }
           validate();
