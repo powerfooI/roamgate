@@ -1727,3 +1727,79 @@ test("never restores the legacy relay to an abandoned attach's layout", async ()
     bridge.dispose();
   }
 });
+
+test("restores the legacy relay when its owner leaves during another browser's pending attach", async () => {
+  const tracker = {
+    appConnects: 0,
+    appCloses: 0,
+    appSizes: [] as string[],
+    events: [] as string[],
+  };
+  const socketPath = await startThinServer({ protocol: 20, tracker });
+  const desktop = {} as ServerWebSocket<unknown>;
+  const laptop = {} as ServerWebSocket<unknown>;
+  const phone = {} as ServerWebSocket<unknown>;
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 20,
+    safeSend: () => true,
+    clientLabel: () => "test",
+    markRpcError: () => undefined,
+  });
+  try {
+    await bridge.handleTerminalRpc(desktop, "d", "terminal.attach", {
+      terminal_id: "term_1",
+      cols: 160,
+      rows: 45,
+      relay_active: true,
+      relay_cols: 170,
+      relay_rows: 50,
+    });
+    await waitForCondition(
+      () => tracker.appSizes.at(-1) === "170x50",
+      "relay never took the desktop layout",
+    );
+    await bridge.handleTerminalRpc(laptop, "l", "terminal.relay_resize", {
+      cols: 120,
+      rows: 40,
+    });
+    // The desktop sizes the relay again, so it owns it and the laptop's
+    // layout is the older saved one.
+    await bridge.handleTerminalRpc(desktop, "dr", "terminal.resize", {
+      terminal_id: "term_1",
+      cols: 165,
+      rows: 47,
+      relay_active: true,
+      relay_cols: 175,
+      relay_rows: 52,
+    });
+    await waitForCondition(
+      () => tracker.appSizes.at(-1) === "175x52",
+      "desktop relay resize did not apply",
+    );
+    const pending = bridge.handleTerminalRpc(phone, "p", "terminal.attach", {
+      terminal_id: "term_2",
+      cols: 60,
+      rows: 50,
+      relay_active: true,
+      relay_cols: 60,
+      relay_rows: 55,
+    });
+
+    // The owner leaves while the phone's attach is still pending, and the
+    // phone then abandons it.
+    bridge.cleanupWs(desktop);
+    await bridge.handleTerminalRpc(phone, "pd", "terminal.detach", {
+      terminal_id: "term_2",
+    });
+    await pending;
+
+    await waitForCondition(
+      () => tracker.appSizes.at(-1) === "120x40",
+      "relay kept the departed desktop's layout",
+    );
+    expect(tracker.appSizes).not.toContain("60x55");
+  } finally {
+    bridge.dispose();
+  }
+});
