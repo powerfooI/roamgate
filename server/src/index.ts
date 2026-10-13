@@ -81,6 +81,7 @@ import {
 import { createShutdownController } from "./connections/shutdown";
 import { bindListenerBeforeConnectionStart } from "./connections/startup";
 import { LEGACY_DEFAULT_CONNECTION_ID } from "./connections/types";
+import { unixOnlyMessage } from "./connections/unix-only";
 import { createAuthHandlers, unauthenticatedLoginRedirect } from "./http/auth";
 import { serveStatic } from "./http/static-files";
 import { handleInstanceSettings } from "./http/instance-settings";
@@ -922,9 +923,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
   ) {
     sendError(
       "unsupported-windows-operation",
-      new Error(
-        "This operation requires a Unix SSH host and is unavailable on Windows.",
-      ),
+      new Error(unixOnlyMessage("This operation")),
     );
     return;
   }

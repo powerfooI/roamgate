@@ -69,6 +69,7 @@ import { createAgentStatusSubscriptionLoop } from "./agent-status-subscription";
 import { sanitizeConnectionError } from "./manager";
 import { createEventSubscriptionLoop } from "./subscription-loop";
 import { type ConnectionIdentity, LEGACY_DEFAULT_CONNECTION } from "./types";
+import { unixOnlyHandlers } from "./unix-only";
 
 const DEFAULT_EVENTS = [
   "workspace.created",
@@ -139,10 +140,15 @@ export function createLegacyConnectionRuntime(args: {
     runBinaryProcessWithTimeout,
     shQuote,
   });
-  const agentSessions = createAgentSessionHandlers({
-    herdrCall: (method, params) => herdr.call(method, params),
-    files: agentSessionFiles,
-  });
+  // These helper groups run Unix shell commands over SSH.
+  const agentSessions = unixOnlyHandlers(
+    remotePlatform,
+    "Agent history",
+    createAgentSessionHandlers({
+      herdrCall: (method, params) => herdr.call(method, params),
+      files: agentSessionFiles,
+    }),
+  );
   const worktreeParents = createWorktreeParentStore({
     connectionId: identity.id,
     herdr,
@@ -158,13 +164,17 @@ export function createLegacyConnectionRuntime(args: {
       runProcessWithCodeTimeout,
       shQuote,
     });
-  const files = createFileHandlers({
-    herdr,
-    sshHost,
-    runProcessWithCodeTimeout,
-    shQuote,
-    lastStepBaselines,
-  });
+  const files = unixOnlyHandlers(
+    remotePlatform,
+    "Workspace file and Git access",
+    createFileHandlers({
+      herdr,
+      sshHost,
+      runProcessWithCodeTimeout,
+      shQuote,
+      lastStepBaselines,
+    }),
+  );
   const status = createStatusEnricher({
     connectionId: identity.id,
     sshHost,
@@ -183,14 +193,18 @@ export function createLegacyConnectionRuntime(args: {
     resolveWorkspaceGitRoot: async (workspaceId) =>
       files.resolveWorkspaceGitRoot({ workspace_id: workspaceId }),
   });
-  const worktreeHooks = createWorktreeHookRunner({
-    connectionId: identity.id,
-    herdr,
-    sshHost,
-    runProcess,
-    runProcessWithCode,
-    shQuote,
-  });
+  const worktreeHooks = unixOnlyHandlers(
+    remotePlatform,
+    "Worktree hook access",
+    createWorktreeHookRunner({
+      connectionId: identity.id,
+      herdr,
+      sshHost,
+      runProcess,
+      runProcessWithCode,
+      shQuote,
+    }),
+  );
   const worktreeRemovalCoordinator = createWorktreeRemovalCoordinator();
   const worktreeRemovalRuntime = createWorktreeRemovalRuntime({
     host: sshHost(),

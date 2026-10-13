@@ -428,3 +428,32 @@ test("herdr notification source falls back to agent status on legacy Herdr", asy
     await runtime.stop();
   }
 });
+
+test("Windows runtimes refuse Unix-only helper groups", async () => {
+  const runtime = createLegacyConnectionRuntime({
+    config: {
+      socketPath: "/tmp/m3-runtime-windows-control.sock",
+      clientSocketPath: "/tmp/m3-runtime-windows-client.sock",
+      sshHost: "windows-host",
+      session: undefined,
+      hasExplicitSocketPath: true,
+      hasExplicitClientSocketPath: true,
+      remotePlatform: "windows",
+    },
+    safeSend: () => true,
+    clientLabel: () => "browser",
+    markRpcError: () => undefined,
+    onEvent: () => undefined,
+  });
+  try {
+    for (const call of [
+      () => runtime.files.resolveWorkspaceGitRoot({ workspace_id: "w1" }),
+      () => runtime.files.readGitDiffSummary({ workspace_id: "w1" }),
+      () => runtime.worktreeHooks.readWorktreeHooks("/repo"),
+      () => runtime.agentSessions.readHistory({ pane_id: "w1:p1" }),
+    ])
+      expect(call).toThrow("unavailable on Windows");
+  } finally {
+    await runtime.stop();
+  }
+});

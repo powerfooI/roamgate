@@ -3,6 +3,7 @@ import { fetchOriginDefaultBranch } from "../workspace/default-branch";
 import { GIT_PULL_TIMEOUT_MS } from "../workspace/file-constants";
 import type { RunProcessWithCodeTimeout } from "../workspace/file-types";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
+import { assertUnixHost } from "../connections/unix-only";
 import { runProcessWithCodeTimeout, shQuote } from "../utils/process-utils";
 import type { WorktreeHookExpectation } from "./worktree-hooks";
 
@@ -55,6 +56,7 @@ export async function createWorkspaceWorktree(
     beforeDispatch?.();
   };
   assertCurrent();
+  assertUnixHost(runtime, "Worktree creation");
   const {
     expected_setup_hook: expectedCommand,
     expected_hooks_enabled: expectedEnabled,

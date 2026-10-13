@@ -546,9 +546,10 @@ other grants, then save settings. A complete authoritative listing still removes
 grants for deleted workspaces. High mode must be turned off before restricting
 its all-workspace access with individual manual grants.
 
-On Windows SSH workspaces, Ranger supports native status and terminal reads.
-Agent history and Git diff reads and worktree creation return an
-unsupported-operation error before running Unix-only resource helpers.
+On Windows SSH workspaces, Ranger can read workspace status and terminal output.
+Agent history reads, Git diff reads, and worktree creation fail with an error
+stating that they require a Unix SSH host. See
+[Ranger tool contracts](ARCHITECTURE.md#ranger).
 
 ## Web Push notifications
 

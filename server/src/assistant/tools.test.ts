@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { ASSISTANT_MAX_WORKSPACES } from "../../../shared/assistant";
+import { UnsupportedPlatformError } from "../connections/unix-only";
 import { AssistantUserError } from "./errors";
 import {
   type ActionToolProposer,
@@ -886,4 +887,32 @@ test("task tool scope schema shares the bounded workspace limit", async () => {
     ),
   ).rejects.toThrow("Invalid task tool parameters");
   expect(calls).toBe(1);
+});
+
+test("Windows platform refusals reach the model instead of the generic mask", async () => {
+  const target = { connection_id: "windows", workspace_id: "w1" };
+  const refusal = new UnsupportedPlatformError("Ranger worktree creation");
+  await expect(
+    callActionTool(
+      "propose_worktree_create",
+      { ...target, branch: "feature" },
+      async () => {
+        throw refusal;
+      },
+    ),
+  ).rejects.toThrow(refusal);
+  await expect(
+    callWorkspaceTool("workspace_diff", target, async () => {
+      throw new UnsupportedPlatformError("Ranger diff read");
+    }),
+  ).rejects.toThrow("unavailable on Windows");
+  for (const name of [
+    "workspace_history",
+    "workspace_diff",
+    "propose_worktree_create",
+  ])
+    expect(
+      [...workspaceTools, ...actionTools].find((tool) => tool.name === name)
+        ?.description,
+    ).toContain('remote_platform "windows"');
 });

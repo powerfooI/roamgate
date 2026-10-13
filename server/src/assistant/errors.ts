@@ -1,3 +1,5 @@
+import { UnsupportedPlatformError } from "../connections/unix-only";
+
 /**
  * An assistant error whose message is safe and useful to show the model and
  * the user. Tool wrappers surface these messages verbatim and keep masking
@@ -5,6 +7,13 @@
  * or credentials.
  */
 export class AssistantUserError extends Error {}
+
+function surfaced(error: unknown) {
+  return (
+    error instanceof AssistantUserError ||
+    error instanceof UnsupportedPlatformError
+  );
+}
 
 /**
  * Rethrow user-facing errors verbatim and mask any other failure behind the
@@ -15,6 +24,6 @@ export function surfaceAssistantUserError(
   error: unknown,
   masked: string,
 ): never {
-  if (error instanceof AssistantUserError) throw error;
+  if (surfaced(error)) throw error;
   throw new Error(masked);
 }

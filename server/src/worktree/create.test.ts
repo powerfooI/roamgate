@@ -419,3 +419,18 @@ describe("shared worktree creation pipeline", () => {
     },
   );
 });
+
+test("Windows runtimes refuse worktree creation before any helper runs", async () => {
+  const fixture = creationFixture();
+  Object.assign(fixture.runtime, { remotePlatform: "windows" });
+  await expect(
+    createWorkspaceWorktree(
+      fixture.runtime,
+      { workspace_id: "source", branch: "feature" },
+      fixture.isCurrent,
+      undefined,
+      fixture.syncBase,
+    ),
+  ).rejects.toThrow("unavailable on Windows");
+  expect(fixture.calls).toEqual([]);
+});

@@ -1698,12 +1698,14 @@ test.each(["status", "terminal"] as const)(
     const f = fixture();
     Object.assign(f.runtime, { remotePlatform: "windows" });
     const captured = await f.context.captureScope([first]);
-    await expect(
-      f.context.read(kind, captured, {
-        ...first,
-        ...(kind === "terminal" ? { pane_id: "w1:p1" } : {}),
-      }),
-    ).resolves.toHaveProperty("text");
+    const result = await f.context.read(kind, captured, {
+      ...first,
+      ...(kind === "terminal" ? { pane_id: "w1:p1" } : {}),
+    });
+    // Status tells the model which workspaces cannot use Unix-only tools.
+    expect(JSON.parse(result.text)[0].remote_platform).toBe(
+      kind === "status" ? "windows" : undefined,
+    );
     expect(f.readHistory).not.toHaveBeenCalled();
     expect(f.readGitDiffSummary).not.toHaveBeenCalled();
     expect(f.readGitDiffFile).not.toHaveBeenCalled();

@@ -1647,7 +1647,10 @@ describe("Windows Ranger actions", () => {
     expect(f.resolveWorkspaceGitRoot).not.toHaveBeenCalled();
     expect(f.readWorktreeHooks).not.toHaveBeenCalled();
     expect(f.createWorktree).not.toHaveBeenCalled();
-    expect(f.call).not.toHaveBeenCalled();
+    // Only the native lease and workspace check runs before the refusal.
+    expect(f.call.mock.calls.map(([method]) => method)).toEqual([
+      "workspace.get",
+    ]);
     expect(f.mutations).toEqual([]);
   });
 

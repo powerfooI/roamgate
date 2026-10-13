@@ -465,6 +465,14 @@ The model receives `workspace_status`, `workspace_history`, `workspace_diff`,
 and `workspace_terminal`, plus proposal tools for workspace creation,
 worktree creation, tab creation, pane splitting, agent startup, agent prompts,
 and closing agents, panes, and workspaces.
+On Windows-host profiles, `workspace_status` reports `remote_platform: "windows"`.
+Status and terminal reads and the other proposals use only native Herdr RPCs
+there. History reads, diff reads, and worktree creation fail with an error that
+names the operation and states that it requires a Unix SSH host; tool wrappers
+return it to the model verbatim instead of the generic failure. The connection
+runtime also makes its Unix-only file, Git, agent-history, and worktree-hook
+helpers throw that error on Windows hosts, so a caller that skips its own check
+cannot run Unix shell commands there.
 By default, proposal tools prepare previews for user confirmation. In explicitly
 enabled high-permission mode, the service executes the same validated operations
 and returns their actual receipts to the model. Built-in tools and discovered extensions, skills,

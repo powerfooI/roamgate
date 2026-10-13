@@ -16,6 +16,7 @@ import {
 import { isRecord } from "../agent/session-utils";
 import { validateConnectionId } from "../connections/protocol";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
+import { assertUnixHost } from "../connections/unix-only";
 import { sanitizeExplorerPath } from "../workspace/file-paths";
 import {
   prepareAssistantAction,
@@ -814,13 +815,8 @@ export function createAssistantContext(args: {
     for (const target of selected) {
       const lease = leases.get(target.connection_id)!;
       assertCurrent(lease, signal);
-      if (
-        lease.runtime.remotePlatform === "windows" &&
-        (kind === "history" || kind === "diff")
-      )
-        throw new Error(
-          "Ranger diff and history reads require a Unix SSH host and are unavailable on Windows.",
-        );
+      if (kind === "history" || kind === "diff")
+        assertUnixHost(lease.runtime, `Ranger ${kind} read`);
       const currentWorkspace = await workspace(
         lease,
         target.workspace_id,
@@ -844,6 +840,9 @@ export function createAssistantContext(args: {
           (pane) => pane.workspace_id === target.workspace_id,
         );
         data = {
+          ...(lease.runtime.remotePlatform === "windows"
+            ? { remote_platform: "windows" }
+            : {}),
           agent_status: limitedText(currentWorkspace.agent_status),
           pane_count: count(currentWorkspace.pane_count),
           tab_count: count(currentWorkspace.tab_count),
