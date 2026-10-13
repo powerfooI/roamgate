@@ -205,6 +205,11 @@ export async function prepareAssistantAction(args: {
     params.workspace_id !== target.workspace_id
   )
     throw new Error("Action is outside the approved workspace scope");
+  // Worktree creation uses Unix-only Git root and hook helpers, unlike native Herdr RPCs.
+  if (kind === "create_worktree" && runtime.remotePlatform === "windows")
+    throw new Error(
+      "Ranger worktree creation requires a Unix SSH host and is unavailable on Windows.",
+    );
 
   function check() {
     if (preparing) signal?.throwIfAborted();

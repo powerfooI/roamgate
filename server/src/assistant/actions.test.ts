@@ -1631,3 +1631,32 @@ describe("confirmed Ranger close actions", () => {
     },
   );
 });
+
+describe("Windows Ranger actions", () => {
+  test("create_worktree refuses Unix resource helpers", async () => {
+    const f = fixture();
+    Object.assign(f.runtime, { remotePlatform: "windows" });
+    const scope = await f.context.captureScope([ref]);
+    f.call.mockClear();
+    await expect(
+      f.context.prepareAction("create_worktree", scope, {
+        ...ref,
+        branch: "feature",
+      }),
+    ).rejects.toThrow("unavailable on Windows");
+    expect(f.resolveWorkspaceGitRoot).not.toHaveBeenCalled();
+    expect(f.readWorktreeHooks).not.toHaveBeenCalled();
+    expect(f.createWorktree).not.toHaveBeenCalled();
+    expect(f.call).not.toHaveBeenCalled();
+    expect(f.mutations).toEqual([]);
+  });
+
+  test("native create_tab keeps working", async () => {
+    const f = fixture();
+    Object.assign(f.runtime, { remotePlatform: "windows" });
+    const prepared = await f.prepare("create_tab", {});
+    expect((await prepared.execute()).status).toBe("succeeded");
+    expect(f.resolveWorkspaceGitRoot).not.toHaveBeenCalled();
+    expect(f.readWorktreeHooks).not.toHaveBeenCalled();
+  });
+});
