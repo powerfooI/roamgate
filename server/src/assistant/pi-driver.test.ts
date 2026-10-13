@@ -31,6 +31,28 @@ import {
   workspaceTools,
 } from "./tools";
 
+// Pi 1.1 context ordering activates hidden Anthropic cache scaffolding, not a Ranger tool.
+function expectAnthropicTools(
+  tools: {
+    name: string;
+    description?: string;
+    input_schema?: unknown;
+    defer_loading?: boolean;
+  }[],
+  names: string[],
+) {
+  expect(tools.at(-1)).toEqual({
+    name: "__pi_deferred_placeholder__",
+    description: "Reserved placeholder. Never available. Never call this.",
+    input_schema: { type: "object", properties: {}, required: [] },
+    defer_loading: true,
+  });
+  expect(tools.map((tool) => tool.name)).toEqual([
+    ...names,
+    "__pi_deferred_placeholder__",
+  ]);
+}
+
 function durableEntries(directory: string, entries: unknown[]) {
   const pointer = entries[0] as { id: string };
   const sqlite = join(directory, "durable", pointer.id, "execution.sqlite");
@@ -504,6 +526,55 @@ function hangingReply(index: number) {
   );
 }
 
+test("Anthropic cache placeholder cannot dispatch Ranger capabilities", async () => {
+  const f = await durableFixture((index) =>
+    modelReply(
+      index,
+      index === 1
+        ? [
+            ...toolUse("__pi_deferred_placeholder__", "placeholder", {}, 0),
+            ...finish("tool_use"),
+          ]
+        : [...text("Done"), ...finish("end_turn")],
+    ),
+  );
+  let calls = 0;
+  const denied = async () => {
+    calls++;
+    throw new Error("Placeholder must not dispatch");
+  };
+  try {
+    const entries = await f.createDriver().run(
+      f.input({
+        read: denied,
+        propose: denied,
+        task: denied,
+        notify: denied,
+      }),
+    );
+    expect(calls).toBe(0);
+    expectAnthropicTools(
+      f.requests[0]!.tools,
+      [
+        ...workspaceTools,
+        ...actionTools,
+        ...taskTools,
+        ...notificationTools,
+      ].map((tool) => tool.name),
+    );
+    const results = durableEntries(f.directory, entries)
+      .flatMap((entry) => entry.model ?? [])
+      .filter((message) => message.role === "toolResult");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      toolName: "__pi_deferred_placeholder__",
+      isError: true,
+    });
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("task tools use shared credentials with isolated durable storage and never replay a recorded proposal", async () => {
   const proposed = {
     title: "Daily status",
@@ -554,7 +625,7 @@ test("task tools use shared credentials with isolated durable storage and never 
     expect(creates).toBe(1);
     expect(lists).toBe(1);
     expect(f.requests).toHaveLength(3);
-    expect(f.requests[0]!.tools.map((tool) => tool.name)).toEqual([
+    expectAnthropicTools(f.requests[0]!.tools, [
       ...workspaceTools.map((tool) => tool.name),
       ...taskTools.map((tool) => tool.name),
     ]);
@@ -667,7 +738,8 @@ test("management tools register only with their handlers, record pending receipt
       calls.map((call) => call.kind).sort(),
     );
     expect(f.requests).toHaveLength(2);
-    expect(f.requests[0]!.tools.map((tool) => tool.name)).toEqual(
+    expectAnthropicTools(
+      f.requests[0]!.tools,
       [...workspaceTools, ...actionTools, ...taskTools].map(
         (tool) => tool.name,
       ),
@@ -702,7 +774,8 @@ test("management tools register only with their handlers, record pending receipt
     for (const result of results)
       if (result.role === "toolResult") expect(result.isError).toBe(false);
     await f.createDriver(join(f.directory, "read-only")).run(f.input());
-    expect(f.requests.at(-1)!.tools.map((tool) => tool.name)).toEqual(
+    expectAnthropicTools(
+      f.requests.at(-1)!.tools,
       workspaceTools.map((tool) => tool.name),
     );
   } finally {
@@ -986,7 +1059,7 @@ test("confirmed task notification tools preserve custom content, run after reads
     expect(sends).toBe(1);
     expect(reads).toBe(1);
     expect(f.requests).toHaveLength(2);
-    expect(f.requests[0]?.tools.map((tool) => tool.name)).toEqual([
+    expectAnthropicTools(f.requests[0]!.tools, [
       ...workspaceTools.map((tool) => tool.name),
       ...notificationTools.map((tool) => tool.name),
     ]);

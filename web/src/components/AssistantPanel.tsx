@@ -1375,6 +1375,9 @@ export function AssistantPanel({
   const customEndpoint = selectedModel?.custom ?? provider?.custom;
   const workspaceSet = (refs: AssistantWorkspaceRef[]) =>
     refs.map(workspaceKey).sort().join("\n");
+  const unavailableWorkspaces = (config?.allowed_workspaces ?? []).filter(
+    (ref) => !includesWorkspace(workspaces, ref),
+  );
   const settingsChanged =
     !!snapshot &&
     !!config &&
@@ -2066,6 +2069,48 @@ export function AssistantPanel({
                         </span>
                       </label>
                     ))}
+                    {unavailableWorkspaces.length ? (
+                      <div
+                        role="group"
+                        aria-label="Unavailable authorized workspaces"
+                      >
+                        <p className="assistant-hint">
+                          Unavailable authorized workspaces. Remove permissions
+                          individually, then save settings.
+                        </p>
+                        {unavailableWorkspaces.map((ref) => (
+                          <div
+                            key={workspaceKey(ref)}
+                            className="assistant-workspace-choice"
+                          >
+                            <span>
+                              {ref.workspace_id}
+                              <small>{ref.connection_id}</small>
+                            </span>
+                            <button
+                              type="button"
+                              className="assistant-icon-button"
+                              aria-label={`Remove unavailable workspace ${ref.workspace_id} on ${ref.connection_id}`}
+                              title="Remove workspace permission"
+                              disabled={allWorkspacesAllowed}
+                              onClick={() =>
+                                setConfig({
+                                  ...config,
+                                  allowed_workspaces:
+                                    config.allowed_workspaces.filter(
+                                      (candidate) =>
+                                        workspaceKey(candidate) !==
+                                        workspaceKey(ref),
+                                    ),
+                                })
+                              }
+                            >
+                              <X size={12} aria-hidden="true" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                     {!workspaces.length ? (
                       <span className="assistant-hint">
                         {contextLoading

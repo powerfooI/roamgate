@@ -28,6 +28,16 @@ type TerminalSession = {
   rows: number;
 };
 
+type ViewerViewport = {
+  cols: number;
+  rows: number;
+  /**
+   * Order of the request that set this viewport. Terminal viewports use the
+   * bridge-wide viewport counter; relay viewports use the relay revision.
+   */
+  revision: number;
+};
+
 type SharedTerminalSession = {
   thin: ThinClient | EndpointTerminalSession;
   connecting: Promise<void> | null;
@@ -106,8 +116,11 @@ export function createTerminalBridge(args: {
   const terminals = new Map<ServerWebSocket<unknown>, TerminalSession>();
   const terminalViewers = new Map<
     ServerWebSocket<unknown>,
-    Map<string, { cols: number; rows: number }>
+    Map<string, ViewerViewport>
   >();
+  // Orders viewport changes across viewers so a departing viewer can hand the
+  // shared size back to whoever sized the terminal most recently before it.
+  let viewportRevision = 0;
   const sharedTerminals = new Map<string, SharedTerminalSession>();
   /** The dedicated endpoint observer owns this connection-wide popup state. */
   let popupState: PopupIdentity | null = null;
@@ -129,6 +142,21 @@ export function createTerminalBridge(args: {
   let clipboardTarget: ClipboardTarget | null = null;
   let clipboardRelaySize: { cols: number; rows: number } | null = null;
   let clipboardRelayRevision = 0;
+  // Each browser's newest relay request, so the relay can return to a
+  // remaining browser's layout when the browser that sized it disconnects.
+  const relayViewports = new Map<ServerWebSocket<unknown>, ViewerViewport>();
+  // The browser whose layout was last applied to the relay. Ownership moves
+  // only when a size is applied: the revision above also advances for
+  // attaches that may still fail, so it cannot say who owns the relay.
+  let relayOwner: ServerWebSocket<unknown> | null = null;
+  function recordRelayViewport(
+    ws: ServerWebSocket<unknown>,
+    size: { cols: number; rows: number },
+    revision: number,
+  ) {
+    relayViewports.set(ws, { cols: size.cols, rows: size.rows, revision });
+    relayOwner = ws;
+  }
   // Set when the server speaks protocol 22+ and the relay is known to be
   // undeliverable, so repeated checks neither reconnect nor re-log.
   let clipboardRelaySkipped = false;
@@ -575,9 +603,11 @@ export function createTerminalBridge(args: {
   }
 
   async function syncClipboardRelayAfterAttach(
+    ws: ServerWebSocket<unknown>,
     shared: SharedTerminalSession,
     size: { cols: number; rows: number },
     revision: number,
+    isAttachCurrent: () => boolean,
   ) {
     // The first direct terminal frame is the protocol-level evidence that
     // Herdr processed AttachTerminal and installed its resize lock. Only then
@@ -586,11 +616,87 @@ export function createTerminalBridge(args: {
     // A newer tab switch/resize owns the relay now; never let this delayed
     // attach move it back to a stale tab's viewport.
     if (revision !== clipboardRelayRevision) return;
+    // A superseded or abandoned attach (its browser detached or left) never
+    // owns the relay, so it must not size it now or be restored later.
+    if (!isAttachCurrent()) return;
+    recordRelayViewport(ws, size, revision);
     if (clipboardRelay && !clipboardRelay.isClosed) {
       syncClipboardRelaySize(size.cols, size.rows);
       return;
     }
     await waitForClipboardRelay(size.cols, size.rows, revision);
+  }
+
+  // A shared stream has one size: the last viewer to attach or resize sets it
+  // for everyone. When a viewer leaves (a phone app suspended again after a
+  // background reconnect, a closed tab), the others would otherwise stay at
+  // its size until their own container happens to change, because each
+  // browser only re-sends a size it has not sent before. Hand the size back
+  // to the remaining viewer that sized the terminal most recently.
+  function restoreSharedTerminalSize(
+    shared: SharedTerminalSession,
+    departed: ServerWebSocket<unknown>,
+  ) {
+    // A connecting stream is sized by the attach that awaits it.
+    if (disposed || shared.connecting || shared.thin.isClosed) return;
+    let latest: ViewerViewport | null = null;
+    for (const viewer of shared.viewers) {
+      const viewport = terminalViewers.get(viewer)?.get(shared.terminalId);
+      if (viewport && (!latest || viewport.revision > latest.revision))
+        latest = viewport;
+    }
+    if (!latest || (latest.cols === shared.cols && latest.rows === shared.rows))
+      return;
+    shared.thin.resize(latest.cols, latest.rows);
+    shared.cols = latest.cols;
+    shared.rows = latest.rows;
+    // Frames held under backpressure were rendered for the departed size.
+    for (const viewer of shared.viewers)
+      args.dropCoalesced?.(viewer, terminalCoalesceKey(shared.terminalId));
+    logger.debug("terminal size restored", {
+      connection: args.connectionId ?? "legacy-default",
+      departed: args.clientLabel(departed),
+      terminal: shared.terminalId,
+      size: `${latest.cols}x${latest.rows}`,
+    });
+  }
+
+  // The relay is connection-wide and follows the newest applied relay
+  // request, and on Herdr before protocol 22 its size drives the pane-runtime
+  // layout of every tab. When the browser that owns it disconnects, return
+  // the relay to the newest applied request of a browser still connected.
+  // A pending attach does not block this; it still applies its own layout
+  // if it completes as the newest request.
+  function restoreClipboardRelaySize(departed: ServerWebSocket<unknown>) {
+    relayViewports.delete(departed);
+    if (disposed || relayOwner !== departed) return;
+    relayOwner = null;
+    let latestWs: ServerWebSocket<unknown> | null = null;
+    let latest: ViewerViewport | null = null;
+    for (const [ws, viewport] of relayViewports) {
+      if (!latest || viewport.revision > latest.revision) {
+        latestWs = ws;
+        latest = viewport;
+      }
+    }
+    if (!latest || !latestWs) return;
+    relayOwner = latestWs;
+    // A newer relay request made after this point wins over the restore.
+    const revision = clipboardRelayRevision;
+    const { cols, rows } = latest;
+    const apply = () => {
+      if (disposed || revision !== clipboardRelayRevision) return;
+      if (!syncClipboardRelaySize(cols, rows)) return;
+      logger.debug("clipboard relay size restored", {
+        connection: args.connectionId ?? "legacy-default",
+        departed: args.clientLabel(departed),
+        size: `${cols}x${rows}`,
+      });
+    };
+    // A relay still connecting was sized by the request that created it.
+    if (clipboardRelayConnecting)
+      void clipboardRelayConnecting.then(apply, () => undefined);
+    else apply();
   }
 
   function detachTerminalViewer(
@@ -620,6 +726,8 @@ export function createTerminalBridge(args: {
         if (shared.viewers.size === 0) {
           shared.thin.close();
           if (sharedTerminals.get(id) === shared) sharedTerminals.delete(id);
+        } else {
+          restoreSharedTerminalSize(shared, ws);
         }
       }
       viewed?.delete(id);
@@ -1098,7 +1206,11 @@ export function createTerminalBridge(args: {
           existingShared?.cols === cols &&
           existingShared.rows === rows;
         terminals.set(ws, { terminalId, cols, rows });
-        viewed.set(terminalId, { cols, rows });
+        // Ordered once the size is applied below: concurrent attaches can
+        // resolve out of request order, and only the applied order says whose
+        // size the shared stream currently has.
+        const viewport: ViewerViewport = { cols, rows, revision: 0 };
+        viewed.set(terminalId, viewport);
         terminalViewers.set(ws, viewed);
         const tokens = attachmentTokens.get(ws) ?? new Map<string, object>();
         const token = {};
@@ -1130,6 +1242,7 @@ export function createTerminalBridge(args: {
               throw new Error("terminal attachment changed");
           };
           validate();
+          viewport.revision = ++viewportRevision;
           if (
             shared.cols !== cols ||
             shared.rows !== rows ||
@@ -1155,9 +1268,11 @@ export function createTerminalBridge(args: {
           }
           if (relaySize && relayRevision !== null) {
             await syncClipboardRelayAfterAttach(
+              ws,
               shared,
               relaySize,
               relayRevision,
+              attemptIsCurrent,
             );
           }
           validate();
@@ -1200,6 +1315,7 @@ export function createTerminalBridge(args: {
             ? params.pane_id
             : null;
         clipboardRelayRevision += 1;
+        recordRelayViewport(ws, { cols, rows }, clipboardRelayRevision);
         const confirmed = await resizeClipboardRelayAndConfirm(
           cols,
           rows,
@@ -1346,13 +1462,18 @@ export function createTerminalBridge(args: {
         const rows = Number(params.rows ?? 30);
         const relaySize = relaySizeFromParams(params, { cols, rows });
         thin.resize(cols, rows);
-        terminalViewers.get(ws)!.set(requestedTerminalId!, { cols, rows });
+        terminalViewers.get(ws)!.set(requestedTerminalId!, {
+          cols,
+          rows,
+          revision: ++viewportRevision,
+        });
         shared.cols = cols;
         shared.rows = rows;
         // Anything held for this terminal was rendered for the previous size.
         args.dropCoalesced?.(ws, terminalCoalesceKey(requestedTerminalId!));
         if (relaySize) {
           clipboardRelayRevision += 1;
+          recordRelayViewport(ws, relaySize, clipboardRelayRevision);
           syncClipboardRelaySize(relaySize.cols, relaySize.rows);
         }
         logger.debug("terminal resized", {
@@ -1413,6 +1534,7 @@ export function createTerminalBridge(args: {
     focusIntents.delete(ws);
     focusChains.delete(ws);
     detachTerminalViewer(ws);
+    restoreClipboardRelaySize(ws);
   }
 
   function viewedTerminals(ws: ServerWebSocket<unknown>): string[] {
@@ -1459,6 +1581,8 @@ export function createTerminalBridge(args: {
     for (const shared of sharedTerminals.values()) shared.thin.close();
     sharedTerminals.clear();
     terminalViewers.clear();
+    relayViewports.clear();
+    relayOwner = null;
     attachmentTokens.clear();
     focusIntents.clear();
     focusChains.clear();

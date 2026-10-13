@@ -467,6 +467,12 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       await catalog({ ...ssh, state: "ready", generation: 4 });
       expect(checkbox("Latest remote project")?.checked).toBe(true);
       expect(checkbox("Local project")?.checked).toBe(true);
+      const retainedPeer = {
+        ...remoteWorkspace,
+        workspace_id: "retained-peer",
+        label: "Peer remote project",
+      };
+      snapshot.config.allowed_workspaces = [remoteWorkspace, retainedPeer];
       contextResult = {
         workspaces: [localWorkspace],
         errors: [unavailable],
@@ -475,15 +481,39 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       };
       await catalog({ ...ssh, state: "disconnected", generation: 5 });
       expect(checkbox("Latest remote project")).toBeUndefined();
-      expect(container.textContent).not.toContain("remote-project");
+      expect(container.textContent).toContain("remote-project");
+      expect(
+        container.querySelector<HTMLButtonElement>(
+          `button[aria-label="Remove unavailable workspace ${remoteWorkspace.workspace_id} on ${remoteWorkspace.connection_id}"]`,
+        )?.disabled,
+      ).toBe(false);
+      await React.act(async () =>
+        container
+          .querySelector<HTMLButtonElement>(
+            `button[aria-label="Remove unavailable workspace ${remoteWorkspace.workspace_id} on ${remoteWorkspace.connection_id}"]`,
+          )!
+          .click(),
+      );
+      expect(
+        container.querySelector(
+          `button[aria-label="Remove unavailable workspace ${remoteWorkspace.workspace_id} on ${remoteWorkspace.connection_id}"]`,
+        ),
+      ).toBeNull();
+      expect(
+        container.querySelector(
+          `button[aria-label="Remove unavailable workspace retained-peer on ${remoteWorkspace.connection_id}"]`,
+        ),
+      ).not.toBeNull();
+      expect(checkbox("Local project")?.checked).toBe(true);
       contextResult = {
-        workspaces: [localWorkspace, remoteWorkspace],
+        workspaces: [localWorkspace, remoteWorkspace, retainedPeer],
         errors: [],
         connection_ids: [local.id, ssh.id],
         complete_connection_ids: [local.id, ssh.id],
       };
       await catalog({ ...ssh, state: "ready", generation: 6 });
-      expect(checkbox("Remote project")?.checked).toBe(true);
+      expect(checkbox("Remote project")?.checked).toBe(false);
+      expect(checkbox("Peer remote project")?.checked).toBe(true);
 
       // Successful complete inventory removes the deleted saved grant, while
       // an unrelated unsaved local selection survives the pushed snapshot.
@@ -2954,6 +2984,33 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
       connection_id: "offline",
       workspace_id: "workspace",
     };
+    const offlinePeer = {
+      ...offlineWorkspace,
+      workspace_id: "other-workspace",
+    };
+    states[1] = {
+      ...snapshot.config,
+      allowed_workspaces: [offlineWorkspace, offlinePeer, workspace],
+    };
+    states[2] = [workspace];
+    render();
+    const removeLabel = "Remove unavailable workspace workspace on offline";
+    expect(find("aria-label", removeLabel).props.disabled).toBe(false);
+    invoke("aria-label", removeLabel, "onClick");
+    expect(states[1]).toMatchObject({
+      allowed_workspaces: [offlinePeer, workspace],
+    });
+    expect(snapshot.config.allowed_workspaces).toEqual([workspace]);
+    render();
+    expect(
+      elements.some((item) => item.props["aria-label"] === removeLabel),
+    ).toBe(false);
+    expect(
+      find(
+        "aria-label",
+        "Remove unavailable workspace other-workspace on offline",
+      ).props.disabled,
+    ).toBe(false);
     const otherConnectionWorkspace = { ...workspace, connection_id: "remote" };
     states[1] = { ...snapshot.config, allowed_workspaces: [offlineWorkspace] };
     states[2] = [workspace, otherConnectionWorkspace, workspace];

@@ -1669,3 +1669,43 @@ describe("Ranger structured mention targets", () => {
     ).toHaveLength(200);
   });
 });
+
+// These paths use Unix-only resource helpers, unlike native status/terminal RPCs.
+test.each([
+  ["history", { pane_id: "w1:p1" }],
+  ["diff", {}],
+  ["diff", { path: "src/main.ts", kind: "unstaged" }],
+] as const)(
+  "Windows Ranger %s reads refuse Unix resource helpers: %j",
+  async (kind, query) => {
+    const f = fixture();
+    Object.assign(f.runtime, { remotePlatform: "windows" });
+    const captured = await f.context.captureScope([first]);
+    f.call.mockClear();
+    await expect(
+      f.context.read(kind, captured, { ...first, ...query }),
+    ).rejects.toThrow("unavailable on Windows");
+    expect(f.readHistory).not.toHaveBeenCalled();
+    expect(f.readGitDiffSummary).not.toHaveBeenCalled();
+    expect(f.readGitDiffFile).not.toHaveBeenCalled();
+    expect(f.call).not.toHaveBeenCalled();
+  },
+);
+
+test.each(["status", "terminal"] as const)(
+  "Windows Ranger %s reads keep native RPC support",
+  async (kind) => {
+    const f = fixture();
+    Object.assign(f.runtime, { remotePlatform: "windows" });
+    const captured = await f.context.captureScope([first]);
+    await expect(
+      f.context.read(kind, captured, {
+        ...first,
+        ...(kind === "terminal" ? { pane_id: "w1:p1" } : {}),
+      }),
+    ).resolves.toHaveProperty("text");
+    expect(f.readHistory).not.toHaveBeenCalled();
+    expect(f.readGitDiffSummary).not.toHaveBeenCalled();
+    expect(f.readGitDiffFile).not.toHaveBeenCalled();
+  },
+);
