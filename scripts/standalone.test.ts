@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import serverPackage from "../server/package.json";
+import rootPackage from "../package.json";
 
 async function run(argv: string[], cwd: string, env = process.env) {
   const child = Bun.spawn(argv, {
@@ -210,6 +211,10 @@ test(
   () => checkStandalone(true),
   45_000,
 );
+
+test("standalone OAuth keeps the SDK undici override aligned with the server", () => {
+  expect(rootPackage.overrides.undici).toBe(serverPackage.dependencies.undici);
+});
 
 test("standalone Ranger emits Kimi device codes and saves OAuth credentials in either store", async () => {
   const dir = await mkdtemp(join(tmpdir(), "roamgate-oauth-"));

@@ -540,6 +540,16 @@ does not disconnect the bridge or its Herdr profiles. See
 [Ranger behavior](../FEATURES.md#ranger) and
 [tool and session contracts](ARCHITECTURE.md#ranger).
 
+Saved grants for temporarily unavailable workspaces remain visible under
+**Unavailable authorized workspaces**. Remove one permission without clearing
+other grants, then save settings. A complete authoritative listing still removes
+grants for deleted workspaces. High mode must be turned off before restricting
+its all-workspace access with individual manual grants.
+
+On Windows SSH workspaces, Ranger supports native status and terminal reads.
+Agent history and Git diff reads return an unsupported-operation error before
+running Unix-only resource helpers.
+
 ## Web Push notifications
 
 1. Use trusted HTTPS; on iOS/iPadOS 16.4+, open the installed Home Screen app.

@@ -814,6 +814,13 @@ export function createAssistantContext(args: {
     for (const target of selected) {
       const lease = leases.get(target.connection_id)!;
       assertCurrent(lease, signal);
+      if (
+        lease.runtime.remotePlatform === "windows" &&
+        (kind === "history" || kind === "diff")
+      )
+        throw new Error(
+          "Ranger diff and history reads require a Unix SSH host and are unavailable on Windows.",
+        );
       const currentWorkspace = await workspace(
         lease,
         target.workspace_id,

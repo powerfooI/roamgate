@@ -221,7 +221,8 @@ export function createPiDriver(
   directory: string,
   loadSdk = async () => {
     // Embed Pi's otherwise opaque OAuth imports for standalone executables.
-    // Keep undici aligned with the SDK so Bun resolves one pi-ai peer context.
+    // The root undici override keeps SDK and server on one pi-ai peer context.
+    // Split contexts leave the SDK OAuth loaders unregistered in Bun bundles.
     const { registerBunOAuthFlows } = await import(
       "@earendil-works/pi-ai/bun-oauth"
     );
