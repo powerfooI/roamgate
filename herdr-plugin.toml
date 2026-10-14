@@ -1,23 +1,25 @@
 id = "roamgate"
 name = "Roamgate"
 version = "0.8.3"
-min_herdr_version = "0.7.2"
+min_herdr_version = "0.9.4"
 description = "Web and PWA client for Herdr: workspaces, tabs, panes, agent status, session inspection, diffs, and review annotations"
 platforms = ["linux", "macos", "windows"]
 
-# Thin launcher: every action delegates to scripts/studio-plugin.ts, which
-# downloads the checksum-verified prebuilt release binary matching this
-# checkout's version on demand and forwards service verbs to it (systemd,
-# launchd, or Windows Task Scheduler). The verb set is a frozen contract; see
-# scripts/studio-plugin.ts. The shim itself runs on Bun. For an unreleased
-# checkout, run `bun scripts/studio-plugin.ts build-source`, then
-# `herdr plugin link .`; see docs/DEPLOYMENT.md#herdr-plugin.
+# System installers download and verify the matching standalone release.
+# Actions and the panel run that executable; users do not need Bun.
+# Unreleased checkouts require `bun scripts/studio-plugin.ts build-source`,
+# then `herdr plugin link .`; see docs/DEPLOYMENT.md#herdr-plugin.
 # The panel opens as a session-modal popup in the Herdr TUI by default. Open
 # it with --placement split (or tab/zoomed/overlay) to get a regular pane
 # that other Herdr clients, including Roamgate itself, can see.
 
 [[build]]
-command = ["bun", "scripts/studio-plugin.ts", "build"]
+platforms = ["linux", "macos"]
+command = ["sh", "scripts/install-plugin.sh"]
+
+[[build]]
+platforms = ["windows"]
+command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "scripts/install-plugin.ps1"]
 
 [[panes]]
 id = "panel"
@@ -25,40 +27,40 @@ title = "Roamgate"
 placement = "popup"
 width = "72%"
 height = 12
-command = ["bun", "scripts/studio-plugin.ts", "panel"]
+command = ["./server/roamgate", "plugin", "panel"]
 
 [[actions]]
 id = "start"
 title = "Start Roamgate"
 contexts = ["workspace"]
-command = ["bun", "scripts/studio-plugin.ts", "start"]
+command = ["./server/roamgate", "plugin", "start"]
 
 [[actions]]
 id = "restart"
 title = "Restart Roamgate"
 contexts = ["workspace"]
-command = ["bun", "scripts/studio-plugin.ts", "restart"]
+command = ["./server/roamgate", "plugin", "restart"]
 
 [[actions]]
 id = "status"
 title = "Roamgate status"
 contexts = ["workspace"]
-command = ["bun", "scripts/studio-plugin.ts", "status"]
+command = ["./server/roamgate", "plugin", "status"]
 
 [[actions]]
 id = "url"
 title = "Show Roamgate URL"
 contexts = ["workspace"]
-command = ["bun", "scripts/studio-plugin.ts", "url"]
+command = ["./server/roamgate", "plugin", "url"]
 
 [[actions]]
 id = "version"
 title = "Show Roamgate version"
 contexts = ["workspace"]
-command = ["bun", "scripts/studio-plugin.ts", "version"]
+command = ["./server/roamgate", "plugin", "version"]
 
 [[actions]]
 id = "uninstall"
 title = "Uninstall Roamgate service"
 contexts = ["workspace"]
-command = ["bun", "scripts/studio-plugin.ts", "uninstall"]
+command = ["./server/roamgate", "plugin", "uninstall"]

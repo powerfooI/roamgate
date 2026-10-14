@@ -27,6 +27,7 @@ import {
   SERVICE_COMMAND_CONTINUE,
 } from "./config/service-manager";
 import { runHerdrCommand } from "./herdr/cli";
+import { runPluginCommand } from "./config/plugin-command";
 import { enrichIntegrationVersions } from "./herdr/integration-versions";
 import {
   createHerdrSetupHandlers,
@@ -109,6 +110,11 @@ import {
 } from "./worktree/remove";
 
 const APP_VERSION = packageJson.version;
+const pluginCommandResult = await runPluginCommand(
+  process.argv.slice(2),
+  APP_VERSION,
+);
+if (pluginCommandResult !== null) process.exit(pluginCommandResult);
 const serviceCommandResult = runServiceCommand(process.argv.slice(2));
 if (serviceCommandResult === SERVICE_COMMAND_CONTINUE) {
   process.argv.splice(2);

@@ -26,7 +26,7 @@ and **tagged Herdr 0.9.0 and 0.9.4 / protocol 22**. Protocol 21 and unknown vers
 are rejected at control/binary probes. Use a compatible Roamgate build or separate
 server; **do not downgrade a live server**. Published binaries follow their
 [release notes](https://github.com/powerfooI/roamgate/releases).
-The [plugin](#herdr-plugin) separately requires Herdr 0.7.2+.
+The [plugin](#herdr-plugin) separately requires Herdr 0.9.4+.
 Tab reordering requires Herdr 0.7.2+; Herdr 0.7.0 and 0.7.1 retain their fixed
 tab order. The bridge confirms support before enabling dragging.
 
@@ -210,8 +210,12 @@ curl -fsSL \
 
 ## Herdr plugin
 
-Requires Herdr 0.7.2+ and Bun for the shim. Plugin ID is `roamgate` from 0.7.1;
-0.7.0 uses `herdr.studio`. The shim refuses prebuilt downloads through 0.7.0.
+Requires Herdr 0.9.4+. The native plugin uses the standalone Roamgate executable
+for its actions and panel; users do not need Bun or Node.js. Unix installation
+uses the same system tools as the standalone installer; Windows uses Windows
+PowerShell and `tar.exe`. Bun remains a source-build dependency.
+Herdr's GitHub plugin installation also requires Git.
+Plugin ID is `roamgate` from 0.7.1; 0.7.0 uses `herdr.studio`.
 
 **Migrating `herdr.studio`:** stop/uninstall its old service first, close old plugin
 panes, finish pending actions, then unregister:
@@ -234,9 +238,9 @@ bun scripts/studio-plugin.ts build-source
 herdr plugin link .
 ```
 
-`build-source` installs workspace dependencies and builds `server/roamgate`
-(`roamgate.exe` on Windows). Linking after success skips release download;
-neither step starts the service.
+`build-source` installs the root workspace with its frozen lockfile and builds
+`server/roamgate` (`roamgate.exe` on Windows). Linking after success skips release
+download; neither step starts the service.
 
 For a **published release**, replace `X.Y.Z` with 0.7.1 or newer:
 
@@ -244,8 +248,18 @@ For a **published release**, replace `X.Y.Z` with 0.7.1 or newer:
 herdr plugin install powerfooI/roamgate --ref vX.Y.Z
 ```
 
-The manifest downloads/checksum-verifies that version's binary. Failure never
-falls back to compilation or legacy assets; unpublished versions cannot use this path.
+The system installer downloads that version's package into a staging directory,
+checks its SHA-256, version and platform, and verifies native plugin commands
+before publishing the executable. Failure preserves an existing executable and
+never falls back to compilation or legacy assets. Tags predating native plugin
+commands still use their own Bun launcher; installing an unreleased checkout
+against one of those older release packages fails with source-build guidance.
+
+To upgrade a version-pinned installation, run the install command with the new
+published tag. Herdr 0.9.4's `herdr plugin update roamgate` follows the original
+ref, so a fixed tag remains pinned. Locally linked checkouts are updated and
+rebuilt by their owner. Neither installation nor plugin update starts Roamgate
+automatically.
 
 Plugin actions manage the same [user service](#run-as-a-user-service):
 
@@ -270,6 +284,10 @@ restart it, preserving its environment file and credentials. Start retains its
 forced-install behavior; Restart refuses to overwrite a service definition that
 Roamgate did not generate. Use the standalone `roamgate service restart` command
 to restart an existing custom definition without changing it.
+
+The panel and actions invoke `roamgate plugin` directly. The source-only
+`scripts/studio-plugin.ts` entry point remains available for build helpers and
+delegates runtime verbs to the built executable.
 
 ## Basic runtime configuration
 

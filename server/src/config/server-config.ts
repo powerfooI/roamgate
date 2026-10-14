@@ -154,6 +154,7 @@ export function loadServerConfig(appVersion: string): ServerConfig {
 
 Usage: roamgate [options]
        roamgate service <action>
+       roamgate plugin <action>
 
 Service actions:
   install [--force]           install and start the platform user service

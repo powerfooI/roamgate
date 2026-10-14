@@ -262,7 +262,7 @@ test("plugin URL reads legacy files without migrating and prefers new paths", as
   const current = dataRoot(root, process.platform, appData);
   write(join(legacy, "herdr-gui.env"), "HOST=0.0.0.0\nPORT=8890\n");
   write(join(legacy, "auth-token"), `${"c".repeat(64)}\n`);
-  const script = `import { computeUrl } from ${JSON.stringify(join(import.meta.dir, "../../..", "scripts/studio-plugin.ts"))}; console.log(computeUrl());`;
+  const script = `import { computeUrl } from ${JSON.stringify(join(import.meta.dir, "plugin-command.ts"))}; console.log(computeUrl());`;
   const invoke = async () => {
     const child = Bun.spawn([process.execPath, "-e", script], {
       env: { ...process.env, HOME: root, USERPROFILE: root, APPDATA: appData },
