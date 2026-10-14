@@ -1,4 +1,4 @@
-import { afterAll, afterEach, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, expect, jest, spyOn, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { ReactElement } from "react";
 import type { Root } from "react-dom/client";
@@ -61,6 +61,8 @@ async function registerDomTests() {
   const { CreateWorkspaceDialog } = await import("./CreateWorkspaceDialog");
   const { WorktreeOpenDialog } = await import("./WorktreeOpenDialog");
   const { bridge } = await import("../api");
+  const { __storeTesting, store } = await import("../store");
+  const { WorkspaceTree } = await import("./WorkspaceTree");
   let listCalls = 0;
   const client: ConnectionClient = {
     connectionId: "dialog-test",
@@ -147,6 +149,281 @@ async function registerDomTests() {
       focus: "input",
     },
   ];
+
+  test("first workspace creation stays pending across an early topology refresh", async () => {
+    const previousState = store.get();
+    let finish!: (result: unknown) => void;
+    const create = spyOn(store, "createWorkspace").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const render = () => root!.render(h(WorkspaceTree));
+    try {
+      __storeTesting.replaceState({
+        ...previousState,
+        status: "connected",
+        navigationMode: "shared",
+        workspaces: [],
+        panes: [],
+        tabs: [],
+      });
+      await act(async () => render());
+      await act(async () =>
+        container
+          .querySelector<HTMLButtonElement>('[title="New workspace"]')!
+          .click(),
+      );
+      const form = container.querySelector("form")!;
+      const submit = () =>
+        form.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+      await act(async () => submit());
+      expect(
+        form.querySelector<HTMLButtonElement>('button[type="submit"]')!
+          .disabled,
+      ).toBe(true);
+
+      __storeTesting.replaceState({
+        ...store.get(),
+        workspaces: [
+          {
+            workspace_id: "first",
+            number: 1,
+            label: "First",
+            focused: true,
+            pane_count: 0,
+            tab_count: 0,
+            agent_status: "unknown",
+          },
+        ],
+      });
+      await act(async () => render());
+      expect(container.querySelector("form")).toBe(form);
+      expect(
+        form.querySelector<HTMLButtonElement>('button[type="submit"]')!
+          .disabled,
+      ).toBe(true);
+      await act(async () => submit());
+      expect(create).toHaveBeenCalledTimes(1);
+      await act(async () => finish({ type: "workspace_created" }));
+      expect(
+        container.querySelector('[aria-label="Create workspace"]'),
+      ).toBeNull();
+    } finally {
+      create.mockRestore();
+      await act(async () => root!.unmount());
+      root = null;
+      __storeTesting.replaceState(previousState);
+    }
+  });
+
+  for (const [directory, label] of [
+    ["/parent/project\\", "project\\/"],
+    ["C:\\Projects\\Example", "Example/"],
+    ["C:\\", "C:/"],
+  ]) {
+    test(`selecting ${directory} preserves the suggested directory`, async () => {
+      const pathCall = spyOn(client, "call").mockImplementation(
+        async (_method, params) => ({
+          path: params?.path === "/parent" ? "/parent" : directory,
+          error: null,
+          directories: params?.path === "/parent" ? [directory] : [],
+        }),
+      );
+      const create = spyOn(store, "createWorkspace").mockResolvedValue({
+        type: "workspace_created",
+      });
+      const container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+      jest.useFakeTimers();
+      try {
+        await act(async () =>
+          root!.render(
+            h(CreateWorkspaceDialog, {
+              open: true,
+              initialName: "Path test",
+              initialCwd: "/parent",
+              onClose: () => {},
+            }),
+          ),
+        );
+        await act(async () => {
+          jest.advanceTimersByTime(200);
+        });
+        const suggestion = container.querySelector<HTMLButtonElement>(
+          '[aria-label="Directory suggestions"] button',
+        )!;
+        expect(suggestion.textContent).toBe(label);
+        await act(async () => suggestion.click());
+        expect(
+          container.querySelectorAll<HTMLInputElement>("input")[1].value,
+        ).toBe(`${directory}/`);
+        await act(async () => {
+          jest.advanceTimersByTime(200);
+        });
+        expect(pathCall).toHaveBeenLastCalledWith("workspace.path", {
+          path: `${directory}/`,
+        });
+        await act(async () =>
+          container
+            .querySelector("form")!
+            .dispatchEvent(
+              new Event("submit", { bubbles: true, cancelable: true }),
+            ),
+        );
+        expect(create).toHaveBeenLastCalledWith("Path test", directory);
+      } finally {
+        jest.useRealTimers();
+        pathCall.mockRestore();
+        create.mockRestore();
+      }
+    });
+  }
+
+  test("workspace paths show expansion, navigate suggestions and keep failed creation open", async () => {
+    const calls: string[] = [];
+    let fail = true;
+    const pathCall = spyOn(client, "call").mockImplementation(
+      async (method, params) => {
+        expect(method).toBe("workspace.path");
+        calls.push(String(params?.path));
+        if (params?.path === "~/missing")
+          return {
+            path: "/home/test/missing",
+            error: "Directory does not exist.",
+            directories: [],
+          };
+        if (params?.path === "/home/test/project/")
+          return { path: "/home/test/project", error: null, directories: [] };
+        return {
+          path: "/home/test",
+          error: null,
+          directories: ["/home/test/project"],
+        };
+      },
+    );
+    const create = spyOn(store, "createWorkspace").mockImplementation(
+      async () => (fail ? undefined : { type: "workspace_created" }),
+    );
+    let closed = 0;
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const render = (initialCwd: string) =>
+      root!.render(
+        h(CreateWorkspaceDialog, {
+          open: true,
+          initialName: "Test",
+          initialCwd,
+          onClose: () => {
+            closed += 1;
+          },
+        }),
+      );
+    jest.useFakeTimers();
+    try {
+      await act(async () => render("~/missing"));
+      const submit = () =>
+        container
+          .querySelector("form")!
+          .dispatchEvent(
+            new Event("submit", { bubbles: true, cancelable: true }),
+          );
+      expect(
+        container.querySelector<HTMLButtonElement>('button[type="submit"]')!
+          .disabled,
+      ).toBe(true);
+      await act(async () => {
+        jest.advanceTimersByTime(200);
+      });
+      expect(container.textContent).toContain("Directory does not exist.");
+      await act(async () => submit());
+      expect(create).not.toHaveBeenCalled();
+      expect(closed).toBe(0);
+
+      await act(async () => render("~/"));
+      await act(async () => {
+        jest.advanceTimersByTime(200);
+      });
+      expect(container.textContent).toContain("/home/test");
+      const suggestion = container.querySelector<HTMLButtonElement>(
+        '[aria-label="Directory suggestions"] button',
+      )!;
+      await act(async () => suggestion.click());
+      expect(
+        container.querySelectorAll<HTMLInputElement>("input")[1].value,
+      ).toBe("/home/test/project/");
+      expect(document.activeElement).toBe(
+        container.querySelectorAll("input")[1],
+      );
+      await act(async () => {
+        jest.advanceTimersByTime(200);
+      });
+      await act(async () => submit());
+      expect(create).toHaveBeenLastCalledWith("Test", "/home/test/project");
+      expect(closed).toBe(0);
+      expect(container.querySelector('[role="alert"]')).not.toBeNull();
+      fail = false;
+      await act(async () => submit());
+      expect(closed).toBe(1);
+      expect(calls).toEqual(["~/missing", "~/", "/home/test/project/"]);
+    } finally {
+      jest.useRealTimers();
+      pathCall.mockRestore();
+      create.mockRestore();
+    }
+  });
+
+  test("workspace path checks discard replies for an older input", async () => {
+    let resolveOld!: (value: unknown) => void;
+    const pathCall = spyOn(client, "call").mockImplementation(
+      async (_method, params) => {
+        if (params?.path === "~/old")
+          return new Promise((resolve) => {
+            resolveOld = resolve;
+          });
+        return { path: "/home/test/new", error: null, directories: [] };
+      },
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const render = (initialCwd: string) =>
+      root!.render(
+        h(CreateWorkspaceDialog, { open: true, initialCwd, onClose: () => {} }),
+      );
+    jest.useFakeTimers();
+    try {
+      await act(async () => render("~/old"));
+      await act(async () => {
+        jest.advanceTimersByTime(200);
+      });
+      await act(async () => render("~/new"));
+      await act(async () => {
+        jest.advanceTimersByTime(200);
+      });
+      await act(async () =>
+        resolveOld({
+          path: "/home/test/old",
+          error: "Old error",
+          directories: ["/home/test/old/child"],
+        }),
+      );
+      expect(container.textContent).toContain("/home/test/new");
+      expect(container.textContent).not.toContain("Old error");
+      expect(container.textContent).not.toContain("old/child");
+    } finally {
+      jest.useRealTimers();
+      pathCall.mockRestore();
+    }
+  });
 
   for (const dialog of dialogs) {
     test(`${dialog.name} keeps committed keyboard callbacks and cleans up focus/listeners`, async () => {

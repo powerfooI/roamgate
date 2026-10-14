@@ -1,5 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import * as net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -823,7 +829,9 @@ test("production routing bootstraps only a verified empty session and serializes
           JSON.stringify({
             id,
             method,
-            connection_id: method === "workspace.create" ? "empty" : undefined,
+            connection_id: method.startsWith("workspace.")
+              ? "empty"
+              : undefined,
             ...(generation === undefined
               ? {}
               : { connection_generation: generation }),
@@ -842,6 +850,15 @@ test("production routing bootstraps only a verified empty session and serializes
       message: "Cannot verify an empty session. Refresh and retry creation.",
     });
     expect(mutations).toHaveLength(0);
+    const chosen = join(realpathSync(root), "chosen");
+    mkdirSync(chosen);
+    expect(
+      (await rpc(browsers[0], "workspace.path", { path: "~/chosen" })).result,
+    ).toEqual({
+      path: chosen,
+      error: null,
+      directories: [],
+    });
     valid = true;
     const results = await Promise.all(
       browsers.map((ws) =>
@@ -858,21 +875,24 @@ test("production routing bootstraps only a verified empty session and serializes
       (
         await rpc(browsers[0], "workspace.create", {
           browser_source: null,
-          cwd: "/wrong",
+          cwd: join(root, "missing"),
         })
       ).error,
-    ).toBeDefined();
+    ).toMatchObject({
+      message: expect.stringContaining("Directory does not exist."),
+    });
+    expect(mutations).toHaveLength(1);
     workspaces = [];
     expect(
       (
         await rpc(browsers[0], "workspace.create", {
           browser_source: null,
-          cwd: "/explicit",
+          cwd: "~/chosen",
           focus: true,
         })
       ).result.type,
     ).toBe("workspace_created");
-    expect(mutations[1]).toEqual({ cwd: "/explicit", focus: false });
+    expect(mutations[1]).toEqual({ cwd: chosen, focus: false });
     workspaces = [];
     expect(
       (

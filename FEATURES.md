@@ -9,6 +9,9 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
 - Create, rename, pin, switch, and close workspaces/tabs. Linked Git worktrees
   group under their repository; pins and collapsed groups stay in this browser.
   Double-click a tab to rename it, or use its context menu.
+- Workspace creation expands `~/` on the connected host, checks that the
+  directory exists, and suggests subdirectories as you type. Use an absolute
+  path or `~/`; leave the field blank to preserve Herdr's default cwd policy.
 - Pinned tabs lead the tab strip and cannot be closed from Roamgate; their
   panes still close while another pane remains. Herdr keeps tab ids across
   restarts, so pins persist until the tab closes elsewhere, such as in the TUI.

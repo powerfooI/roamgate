@@ -230,6 +230,14 @@ serialized focus/scroll lane without another endpoint or focus call. Omitting
 synthetic cwd preserves Herdr's `terminal.new_cwd`; explicit cwd wins. Shared
 same-tab focus still controls the `follow` source.
 
+`workspace.path` expands `~`/`~/` on the selected connection's host, validates
+directory access, and returns up to 50 directory suggestions for a directory
+or partial basename. Explicit workspace creation paths must be absolute or
+home-relative; the bridge resolves and checks them again before dispatch, so
+invalid paths fail instead of silently falling back to Herdr's home directory.
+Empty cwd still preserves Herdr's configured policy. These checks use native
+filesystem access locally and quoted Bash/PowerShell commands over SSH.
+
 Missing source attachments fail. Only first-workspace bootstrap uses control
 creation, serializing an empty-topology check per runtime. Competing requests
 retry when topology becomes nonempty. A 20-second admission deadline covers

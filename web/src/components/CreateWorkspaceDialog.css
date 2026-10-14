@@ -1,0 +1,31 @@
+.workspace-path-hint {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.workspace-path-hint p {
+  margin: 8px 0 0;
+}
+
+.workspace-path-directories {
+  max-height: 160px;
+  overflow-y: auto;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.workspace-path-directories button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+}
+
+.workspace-path-directories button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

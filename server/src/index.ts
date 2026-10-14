@@ -104,6 +104,7 @@ import {
 import { runProcessWithCodeTimeout, shQuote } from "./utils/process-utils";
 import { rpcLogLevel } from "./utils/rpc-logging";
 import { createWorkspaceWorktree } from "./worktree/create";
+import { inspectWorkspacePath } from "./workspace/path";
 import {
   removeWorktreeWithRecovery,
   WORKTREE_REMOVE_TIMEOUT_MS,
@@ -689,7 +690,8 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     return;
   }
   const req = parsed as RpcRequest;
-  const { id, method, params } = req;
+  const { id, method } = req;
+  let { params } = req;
   let validationConnectionId: string | undefined;
   let connectionIdValidationFailed = false;
   if (Object.hasOwn(req, "connection_id")) {
@@ -973,6 +975,30 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     readSummary: readAgentSessionSummary,
     readEntry: readAgentHistoryEntry,
   } = connection.agentSessions;
+
+  if (
+    method === "workspace.path" ||
+    (method === "workspace.create" && params?.cwd != null && params.cwd !== "")
+  ) {
+    try {
+      const info = await inspectWorkspacePath(
+        method === "workspace.path" ? params?.path : params?.cwd,
+        { host: sshHost(), remotePlatform: connection.remotePlatform },
+        method === "workspace.path",
+      );
+      if (method === "workspace.path") {
+        sendReply({ id, result: info }, method);
+        return;
+      }
+      if (info.error) throw new Error(`${info.error} ${info.path}`);
+      if (!requestIsCurrent())
+        throw new Error("Creation connection changed. Reconnect and retry.");
+      params = { ...params, cwd: info.path };
+    } catch (error) {
+      sendError(`${method}-error`, error);
+      return;
+    }
+  }
 
   if (
     (method === "tab.create" || method === "workspace.create") &&
