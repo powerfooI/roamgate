@@ -13,6 +13,7 @@ import {
 import { validateConnectionId } from "../connections/protocol";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
 import { assertUnixHost } from "../connections/unix-only";
+import { inspectWorkspacePath } from "../workspace/path";
 import { checkoutPath } from "../workspace/utils";
 import { surfaceAssistantUserError } from "./errors";
 
@@ -378,6 +379,18 @@ export async function prepareAssistantAction(args: {
             status: "failed",
             detail:
               "A workspace with this label already exists. No duplicate was created.",
+          };
+        const directory = await read(() =>
+          inspectWorkspacePath(
+            cwd,
+            { host: runtime.sshHost(), remotePlatform: runtime.remotePlatform },
+            false,
+          ),
+        );
+        if (directory.error)
+          return {
+            status: "failed",
+            detail: `${directory.error} Nothing was sent; prepare a new preview.`,
           };
         const previousIds = new Set(before.map((item) => item.workspace_id));
         let response: unknown;

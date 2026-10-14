@@ -1,8 +1,23 @@
-import { describe, expect, jest, mock, test } from "bun:test";
+import { afterAll, describe, expect, jest, mock, spyOn, test } from "bun:test";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AssistantActionKind } from "../../../shared/assistant";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
+import * as processUtils from "../utils/process-utils";
 import { createWorkspaceWorktree } from "../worktree/create";
 import { createAssistantContext } from "./context";
+
+const fixtureDirectory = realpathSync(
+  mkdtempSync(join(tmpdir(), "ranger-actions-")),
+);
+afterAll(() => rmSync(fixtureDirectory, { recursive: true, force: true }));
 
 const ref = { connection_id: "local", workspace_id: "w1" };
 function deferred<T>() {
@@ -24,7 +39,7 @@ function fixture(paneId = "w1:p1") {
     {
       workspace_id: ref.workspace_id,
       label: "Source",
-      cwd: "/ranger-actions-fixture",
+      cwd: fixtureDirectory,
     },
   ];
   const panes: Record<string, any>[] = [
@@ -33,7 +48,7 @@ function fixture(paneId = "w1:p1") {
       pane_id: paneId,
       tab_id: `${ref.workspace_id}:t1`,
       terminal_id: "term1",
-      cwd: "/ranger-actions-fixture",
+      cwd: fixtureDirectory,
       focused: true,
       agent: null,
       agent_session: null,
@@ -213,12 +228,12 @@ function fixture(paneId = "w1:p1") {
       ? null
       : {
           config: { setup },
-          path: "/ranger-actions-fixture/roamgate.json",
+          path: join(fixtureDirectory, "roamgate.json"),
           source: "roamgate" as const,
         },
   );
   const resolveWorkspaceGitRoot = mock(async () => ({
-    root: "/ranger-actions-fixture",
+    root: fixtureDirectory,
     workspace: workspaces[0],
   }));
   const runtime = {
@@ -515,7 +530,7 @@ describe("confirmed Ranger action targets", () => {
     const prepared = await f.prepare("create_tab", {});
     expect(f.mutations).toEqual([]);
     expect(prepared.preview.params).toEqual({
-      cwd: "/ranger-actions-fixture",
+      cwd: fixtureDirectory,
     });
     const [first, repeated] = await Promise.all([
       prepared.execute(),
@@ -528,7 +543,7 @@ describe("confirmed Ranger action targets", () => {
     expect(f.mutations).toEqual(["tab.create"]);
     expect(f.call).toHaveBeenCalledWith(
       "tab.create",
-      { workspace_id: "w1", cwd: "/ranger-actions-fixture", focus: false },
+      { workspace_id: "w1", cwd: fixtureDirectory, focus: false },
       30_000,
       expect.any(Function),
     );
@@ -553,7 +568,7 @@ describe("confirmed Ranger action targets", () => {
     delete f.workspaces[0]!.cwd;
     const prepared = await f.prepare("create_tab", {});
     expect(prepared.preview.params).toEqual({
-      cwd: "/ranger-actions-fixture",
+      cwd: fixtureDirectory,
       pane_id: "w1:p1",
       tab_id: "w1:t1",
       terminal_id: "term1",
@@ -570,7 +585,7 @@ describe("confirmed Ranger action targets", () => {
     expect((await prepared.execute()).status).toBe("succeeded");
     expect(f.call).toHaveBeenCalledWith(
       "tab.create",
-      { workspace_id: "w1", cwd: "/ranger-actions-fixture", focus: false },
+      { workspace_id: "w1", cwd: fixtureDirectory, focus: false },
       30_000,
       expect.any(Function),
     );
@@ -589,7 +604,7 @@ describe("confirmed Ranger action targets", () => {
         pane_id: "w1:p1",
         tab_id: "w1:t1",
         terminal_id: "term1",
-        cwd: "/ranger-actions-fixture",
+        cwd: fixtureDirectory,
         direction,
       });
       const result = await prepared.execute();
@@ -602,7 +617,7 @@ describe("confirmed Ranger action targets", () => {
         {
           target_pane_id: "w1:p1",
           direction,
-          cwd: "/ranger-actions-fixture",
+          cwd: fixtureDirectory,
           focus: false,
         },
         30_000,
@@ -741,7 +756,7 @@ describe("confirmed Ranger action targets", () => {
       ...ref,
       runtime_generation: 7,
       workspace_label: "Source",
-      params: { label: "New workspace", cwd: "/ranger-actions-fixture" },
+      params: { label: "New workspace", cwd: fixtureDirectory },
     });
     expect(Object.isFrozen(prepared)).toBe(true);
     expect(Object.isFrozen(prepared.preview.params)).toBe(true);
@@ -757,7 +772,7 @@ describe("confirmed Ranger action targets", () => {
       "workspace.create",
       {
         label: "New workspace",
-        cwd: "/ranger-actions-fixture",
+        cwd: fixtureDirectory,
         source_workspace_id: "w1",
         focus: false,
       },
@@ -765,6 +780,79 @@ describe("confirmed Ranger action targets", () => {
       expect.any(Function),
     );
   });
+
+  test.each(["explicit", "inferred", "removed", "file"] as const)(
+    "workspace creation checks directories before dispatch: %s",
+    async (kind) => {
+      const f = fixture();
+      const root = mkdtempSync(join(fixtureDirectory, "cwd-"));
+      const cwd = join(root, "project");
+      try {
+        if (kind === "removed") mkdirSync(cwd);
+        if (kind === "file") writeFileSync(cwd, "not a directory");
+        if (kind === "inferred") f.workspaces[0]!.cwd = cwd;
+        const prepared = await f.prepare("create_workspace", {
+          label: "New",
+          ...(kind === "inferred" ? {} : { cwd }),
+        });
+        if (kind === "removed") rmSync(cwd, { recursive: true });
+        const result = await prepared.execute();
+        expect(result.status).toBe("failed");
+        expect(result.detail).toContain(
+          kind === "file"
+            ? "Path is not a directory."
+            : "Directory does not exist.",
+        );
+        expect(f.mutations).toEqual([]);
+        expect(await prepared.execute()).toBe(result);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.each(["valid", "missing", "retired", "unreachable"] as const)(
+    "workspace creation validates the selected Windows SSH host: %s",
+    async (state) => {
+      const f = fixture();
+      Object.assign(f.runtime, {
+        sshHost: () => "windows-host",
+        remotePlatform: "windows",
+      });
+      const cwd = "C:\\Users\\remote\\project";
+      const command = spyOn(
+        processUtils,
+        "runProcessWithCodeTimeout",
+      ).mockImplementation(async (argv) => {
+        expect(argv.at(-2)).toBe("windows-host");
+        expect(argv.at(-1)).toStartWith("powershell.exe ");
+        if (state === "retired") f.retire();
+        if (state === "unreachable") throw new Error("SECRET /private/socket");
+        const error = state === "missing" ? "Directory does not exist." : "";
+        return {
+          code: 0,
+          stdout: `PATH\t${Buffer.from(cwd).toString("base64")}\nERROR\t${Buffer.from(error).toString("base64")}\n`,
+          stderr: "",
+        };
+      });
+      try {
+        const prepared = await f.prepare("create_workspace", {
+          label: "New",
+          cwd,
+        });
+        const result = await prepared.execute();
+        expect(result.status).toBe(state === "valid" ? "succeeded" : "failed");
+        expect(f.mutations).toEqual(
+          state === "valid" ? ["workspace.create"] : [],
+        );
+        expect(command).toHaveBeenCalledTimes(1);
+        expect(JSON.stringify(result)).not.toContain("SECRET");
+        expect(await prepared.execute()).toBe(result);
+      } finally {
+        command.mockRestore();
+      }
+    },
+  );
 
   test("a completed preview survives disposal of the model tool signal", async () => {
     const f = fixture();
@@ -918,7 +1006,7 @@ describe("confirmed Ranger action targets", () => {
       focus: false,
       expected_setup_hook: "bun install",
       expected_hooks_enabled: true,
-      expected_source_root: "/ranger-actions-fixture",
+      expected_source_root: fixtureDirectory,
     });
     expect(
       f.call.mock.calls.some(([method]) => method === "worktree.create"),
@@ -1259,7 +1347,7 @@ describe("confirmed Ranger close actions", () => {
   const closeParams = (kind: (typeof closeKinds)[number]) =>
     kind === "close_workspace" ? {} : { pane_id: "w1:p1" };
   const addSibling = (f: ReturnType<typeof fixture>) =>
-    f.createPane({ cwd: "/ranger-actions-fixture" }, "w1:t1");
+    f.createPane({ cwd: fixtureDirectory }, "w1:t1");
 
   test.each(["close_pane", "close_agent"] as const)(
     "%s verifies a successful close after the native automatic label changes",
@@ -1319,7 +1407,7 @@ describe("confirmed Ranger close actions", () => {
       const f = fixture();
       f.useAgent();
       addSibling(f);
-      f.worktrees.push({ branch: "feature", path: "/ranger-actions-fixture" });
+      f.worktrees.push({ branch: "feature", path: fixtureDirectory });
       const prepared = await f.prepare(kind, closeParams(kind));
       expect(prepared.preview.kind).toBe(kind);
       expect(prepared.preview.summary).toContain(
@@ -1377,8 +1465,8 @@ describe("confirmed Ranger close actions", () => {
         addSibling(f);
         f.workspaces[0]!.worktree = {
           repo_key: "repo",
-          repo_root: "/ranger-actions-fixture",
-          checkout_path: "/ranger-actions-fixture",
+          repo_root: fixtureDirectory,
+          checkout_path: fixtureDirectory,
           is_linked_worktree: linked,
         };
         if (linked === true) {
@@ -1399,8 +1487,8 @@ describe("confirmed Ranger close actions", () => {
     addSibling(f);
     f.workspaces[0]!.worktree = {
       repo_key: "repo",
-      repo_root: "/ranger-actions-fixture",
-      checkout_path: "/ranger-actions-fixture",
+      repo_root: fixtureDirectory,
+      checkout_path: fixtureDirectory,
       is_linked_worktree: true,
     };
     const prepared = await f.prepare(kind, closeParams(kind));
