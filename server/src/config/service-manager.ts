@@ -571,7 +571,7 @@ function assertNoLegacyService(
 
 function isPublishedLegacyDefinition(
   platform: ServicePlatform,
-  runtime: ServiceRuntime,
+  runtime: Pick<ServiceRuntime, "homeDir" | "execPath">,
   paths: ServicePaths,
 ): boolean {
   const binary = resolve(runtime.execPath);
@@ -962,18 +962,38 @@ export function launchdJobRunning(printed: string): boolean {
   return /^\tstate = (\S+)$/m.exec(printed)?.[1] === "running";
 }
 
-/** Whether the Roamgate service definition exists and its manager runs it. */
+/**
+ * Whether the service definition that `service` commands manage exists and
+ * its manager runs it: the Roamgate one, else a published legacy one.
+ */
 export function roamgateServiceStatus(
-  runtime: Pick<ServiceRuntime, "platform" | "homeDir" | "appDataDir" | "uid">,
+  runtime: Pick<
+    ServiceRuntime,
+    "platform" | "homeDir" | "appDataDir" | "uid" | "execPath"
+  >,
   runCommand: RunCommand = defaultRunCommand,
   captureCommand: CaptureCommand = defaultCaptureCommand,
 ): { installed: boolean; active: boolean; definition: string } {
   const platform = resolveServicePlatform(runtime.platform);
-  const paths = resolveServicePaths(
+  let paths = resolveServicePaths(
     platform,
     runtime.homeDir,
     runtime.appDataDir,
   );
+  if (!existsSync(paths.definition)) {
+    const legacy = resolveLegacyServicePaths(
+      platform,
+      runtime.homeDir,
+      runtime.appDataDir,
+    );
+    assertSafeDataPath(legacy.definition);
+    if (
+      existsSync(legacy.definition) &&
+      isPublishedLegacyDefinition(platform, runtime, legacy)
+    ) {
+      paths = legacy;
+    }
+  }
   const installed = existsSync(paths.definition);
   const status = (active: boolean) => ({
     installed,
@@ -984,7 +1004,13 @@ export function roamgateServiceStatus(
   if (platform === "systemd") {
     return status(
       runCommand(
-        ["systemctl", "--user", "is-active", "--quiet", "roamgate.service"],
+        [
+          "systemctl",
+          "--user",
+          "is-active",
+          "--quiet",
+          basename(paths.definition),
+        ],
         { quiet: true },
       ) === 0,
     );
@@ -994,7 +1020,7 @@ export function roamgateServiceStatus(
     const printed = captureCommand([
       "launchctl",
       "print",
-      `gui/${runtime.uid}/${SERVICE_LABEL}`,
+      `gui/${runtime.uid}/${basename(paths.definition, ".plist")}`,
     ]);
     return status(printed.code === 0 && launchdJobRunning(printed.stdout));
   }

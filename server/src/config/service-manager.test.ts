@@ -17,6 +17,7 @@ import {
   runServiceCommand as runServiceCommandWithLegacyCheck,
   launchdJobRunning,
   queryWindowsTask,
+  roamgateServiceStatus,
   SERVICE_COMMAND_CONTINUE,
 } from "./service-manager";
 import {
@@ -2122,5 +2123,49 @@ describe("launchdJobRunning", () => {
     expect(launchdJobRunning(printed("running"))).toBe(true);
     expect(launchdJobRunning(printed("waiting"))).toBe(false);
     expect(launchdJobRunning("")).toBe(false);
+  });
+});
+
+describe("roamgateServiceStatus", () => {
+  test("reports a published legacy service that service commands manage", () => {
+    const homeDir = tempHome();
+    const execPath = join(homeDir, "roamgate");
+    const legacy = resolveLegacyServicePaths("systemd", homeDir);
+    mkdirSync(dirname(legacy.definition), { recursive: true });
+    writeFileSync(
+      legacy.definition,
+      publishedLegacyDefinition("systemd", homeDir, execPath),
+    );
+    const commands: string[][] = [];
+    const status = roamgateServiceStatus(
+      { platform: "linux", homeDir, execPath },
+      (argv) => {
+        commands.push(argv);
+        return 0;
+      },
+    );
+    expect(status).toEqual({
+      installed: true,
+      active: true,
+      definition: legacy.definition,
+    });
+    expect(commands).toEqual([
+      ["systemctl", "--user", "is-active", "--quiet", "herdr-gui.service"],
+    ]);
+  });
+
+  test("ignores a customized legacy definition", () => {
+    const homeDir = tempHome();
+    const legacy = resolveLegacyServicePaths("systemd", homeDir);
+    mkdirSync(dirname(legacy.definition), { recursive: true });
+    writeFileSync(legacy.definition, "[Service]\nExecStart=/custom\n");
+    const status = roamgateServiceStatus(
+      { platform: "linux", homeDir, execPath: join(homeDir, "roamgate") },
+      () => 0,
+    );
+    expect(status.installed).toBe(false);
+    expect(status.definition).toBe(
+      resolveServicePaths("systemd", homeDir).definition,
+    );
   });
 });
