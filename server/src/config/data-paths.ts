@@ -10,6 +10,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -59,15 +60,20 @@ export function assertSafeDataPath(path: string): void {
   }
 }
 
-/** Publish a complete private file without replacing a concurrent winner. */
-export function publishDataFile(
+/**
+ * Write a complete private file through a synced temporary file. Publishing
+ * links it and keeps a concurrent winner; replacing renames over the target.
+ */
+function writeDataFile(
   path: string,
   contents: string | Buffer,
-  mode = 0o600,
+  mode: number,
+  replace: boolean,
 ): void {
   assertSafeDataPath(path);
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const temporaryPath = join(dirname(path), `.roamgate-${randomUUID()}.tmp`);
+  const directory = dirname(path);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temporaryPath = join(directory, `.roamgate-${randomUUID()}.tmp`);
   let fd: number | undefined;
   try {
     fd = openSync(
@@ -81,16 +87,54 @@ export function publishDataFile(
     closeSync(fd);
     fd = undefined;
     assertSafeDataPath(path);
-    try {
-      linkSync(temporaryPath, path);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      assertSafeDataPath(path);
+    if (replace) {
+      renameSync(temporaryPath, path);
+    } else {
+      try {
+        linkSync(temporaryPath, path);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        assertSafeDataPath(path);
+      }
     }
   } finally {
     if (fd !== undefined) closeSync(fd);
     rmSync(temporaryPath, { force: true });
   }
+  // Persist the new directory entry too. Windows cannot open directories, and
+  // some filesystems reject directory fsync; the file itself is already synced.
+  if (process.platform === "win32") return;
+  try {
+    const directoryFd = openSync(
+      directory,
+      constants.O_RDONLY | (constants.O_DIRECTORY ?? 0),
+    );
+    try {
+      fsyncSync(directoryFd);
+    } finally {
+      closeSync(directoryFd);
+    }
+  } catch {
+    // Best effort, as for the connection registry.
+  }
+}
+
+/** Publish a complete private file without replacing a concurrent winner. */
+export function publishDataFile(
+  path: string,
+  contents: string | Buffer,
+  mode = 0o600,
+): void {
+  writeDataFile(path, contents, mode, false);
+}
+
+/** Atomically replace a private file, unlike publishDataFile which never overwrites. */
+export function replaceDataFile(
+  path: string,
+  contents: string | Buffer,
+  mode = 0o600,
+): void {
+  writeDataFile(path, contents, mode, true);
 }
 
 /** Copy only missing files. Originals and concurrent/new values always win. */

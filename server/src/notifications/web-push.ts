@@ -23,11 +23,11 @@ export interface PushPreferences {
   completed: boolean;
   blocked: boolean;
 }
-interface Device {
+export interface Device {
   subscription: webpush.PushSubscription;
   preferences: PushPreferences;
 }
-interface Registry {
+export interface Registry {
   version: 1;
   publicKey: string;
   privateKey: string;
@@ -164,6 +164,81 @@ export function validatePushDevice(value: unknown): Device {
   };
 }
 
+/** An empty subject disables push; unset restores the project contact. */
+export function webPushSubject(
+  environment: Record<string, string | undefined> = process.env,
+): string {
+  return (
+    roamgateEnv("WEB_PUSH_SUBJECT", environment) ??
+    "https://github.com/powerfooI/roamgate/issues"
+  );
+}
+
+export function webPushPath(
+  environment: Record<string, string | undefined> = process.env,
+  root = dataRoot(),
+): string {
+  return (
+    roamgateEnv("WEB_PUSH_PATH", environment) ?? join(root, "web-push.json")
+  );
+}
+
+export function assertValidPushSubject(subject: string): void {
+  const contact = new URL(subject);
+  if (
+    !(
+      contact.protocol === "https:" ||
+      (contact.protocol === "mailto:" && contact.pathname.includes("@"))
+    )
+  )
+    throw new Error("Invalid VAPID subject");
+}
+
+/** Load and fully validate an existing registry without creating or changing it. */
+export function readPushRegistry(path: string): Registry {
+  assertSafeDataPath(path);
+  if (statSync(path).size > 1024 * 1024)
+    throw new Error("Push registry too large");
+  const stored = JSON.parse(readFileSync(path, "utf8")) as Registry;
+  if (
+    stored.version !== 1 ||
+    !Array.isArray(stored.devices) ||
+    stored.devices.length > MAX_DEVICES
+  )
+    throw new Error("Invalid push registry");
+  const ecdh = createECDH("prime256v1");
+  ecdh.setPrivateKey(keyBytes(stored.privateKey, 32));
+  if (ecdh.getPublicKey().toString("base64url") !== stored.publicKey)
+    throw new Error("Invalid VAPID key pair");
+  return { ...stored, devices: stored.devices.map(validatePushDevice) };
+}
+
+/** Deliver one encrypted message without following redirects. */
+export const sendPushRequest: typeof webpush.sendNotification = async (
+  subscription,
+  payload,
+  settings,
+) => {
+  const details = webpush.generateRequestDetails(
+    subscription,
+    payload ?? undefined,
+    settings,
+  );
+  const response = await fetch(details.endpoint, {
+    method: details.method,
+    headers: details.headers,
+    body: Uint8Array.from(details.body),
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
+  });
+  await response.body?.cancel();
+  if (!response.ok)
+    throw Object.assign(new Error("Push provider rejected delivery"), {
+      statusCode: response.status,
+    });
+  return { statusCode: response.status, body: "", headers: {} };
+};
+
 export function createWebPushService(
   options: {
     subject?: string;
@@ -172,36 +247,9 @@ export function createWebPushService(
     warn?: (message: string) => void;
   } = {},
 ) {
-  const subject =
-    options.subject ??
-    roamgateEnv("WEB_PUSH_SUBJECT") ??
-    "https://github.com/powerfooI/roamgate/issues";
-  const path =
-    options.path ??
-    roamgateEnv("WEB_PUSH_PATH") ??
-    join(dataRoot(), "web-push.json");
-  const send: typeof webpush.sendNotification =
-    options.send ??
-    (async (subscription, payload, settings) => {
-      const details = webpush.generateRequestDetails(
-        subscription,
-        payload ?? undefined,
-        settings,
-      );
-      const response = await fetch(details.endpoint, {
-        method: details.method,
-        headers: details.headers,
-        body: Uint8Array.from(details.body),
-        redirect: "error",
-        signal: AbortSignal.timeout(10_000),
-      });
-      await response.body?.cancel();
-      if (!response.ok)
-        throw Object.assign(new Error("Push provider rejected delivery"), {
-          statusCode: response.status,
-        });
-      return { statusCode: response.status, body: "", headers: {} };
-    });
+  const subject = options.subject ?? webPushSubject();
+  const path = options.path ?? webPushPath();
+  const send: typeof webpush.sendNotification = options.send ?? sendPushRequest;
   const warn = options.warn ?? (() => {});
   // ponytail: one process owns this file; use a transactional store for shared deployments.
   let registry: Registry | null = null;
@@ -228,14 +276,7 @@ export function createWebPushService(
 
   if (subject) {
     try {
-      const contact = new URL(subject);
-      if (
-        !(
-          contact.protocol === "https:" ||
-          (contact.protocol === "mailto:" && contact.pathname.includes("@"))
-        )
-      )
-        throw new Error("Invalid VAPID subject");
+      assertValidPushSubject(subject);
       assertSafeDataPath(path);
       if (!existsSync(path))
         publishDataFile(
@@ -246,20 +287,7 @@ export function createWebPushService(
             devices: [],
           }),
         );
-      if (statSync(path).size > 1024 * 1024)
-        throw new Error("Push registry too large");
-      const stored = JSON.parse(readFileSync(path, "utf8")) as Registry;
-      if (
-        stored.version !== 1 ||
-        !Array.isArray(stored.devices) ||
-        stored.devices.length > MAX_DEVICES
-      )
-        throw new Error("Invalid push registry");
-      const ecdh = createECDH("prime256v1");
-      ecdh.setPrivateKey(keyBytes(stored.privateKey, 32));
-      if (ecdh.getPublicKey().toString("base64url") !== stored.publicKey)
-        throw new Error("Invalid VAPID key pair");
-      registry = { ...stored, devices: stored.devices.map(validatePushDevice) };
+      registry = readPushRegistry(path);
       chmodSync(path, 0o600);
     } catch {
       registry = null;

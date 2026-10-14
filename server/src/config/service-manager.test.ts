@@ -15,6 +15,7 @@ import legacyDefinitions from "./service-legacy-definitions.test.json";
 import { tmpdir } from "node:os";
 import {
   runServiceCommand as runServiceCommandWithLegacyCheck,
+  launchdJobRunning,
   queryWindowsTask,
   SERVICE_COMMAND_CONTINUE,
 } from "./service-manager";
@@ -2113,3 +2114,13 @@ test.each(["12345", "1234567890123", "12345a"])(
     expect(existsSync(paths.definition)).toBe(false);
   },
 );
+
+describe("launchdJobRunning", () => {
+  test("reads only the job's own state, not nested endpoint states", () => {
+    const printed = (state: string) =>
+      `gui/501/dev.roamgate = {\n\tactive count = 1\n\tstate = ${state}\n\tendpoints = {\n\t\t"x" = {\n\t\t\tstate = active\n\t\t}\n\t}\n}\n`;
+    expect(launchdJobRunning(printed("running"))).toBe(true);
+    expect(launchdJobRunning(printed("waiting"))).toBe(false);
+    expect(launchdJobRunning("")).toBe(false);
+  });
+});

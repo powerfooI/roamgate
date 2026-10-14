@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import { roamgateEnv } from "../config/environment";
 
-type RunProcessWithCodeTimeout = (
+export type RunProcessWithCodeTimeout = (
   argv: string[],
   timeoutMs: number,
 ) => Promise<{ code: number; stdout: string; stderr: string }>;
@@ -43,7 +43,7 @@ const DEFAULT_UPDATE_BASE_URL =
 const UPDATE_METADATA_MAX_BYTES = 4096;
 const UPDATE_CHECK_CACHE_MS = 5 * 60 * 1000;
 const UPDATE_CHECK_TIMEOUT_MS = 15000;
-const UPDATE_INSTALL_TIMEOUT_MS = 120000;
+export const UPDATE_INSTALL_TIMEOUT_MS = 120000;
 function hasUpdateConfirmation(req: Request): boolean {
   return (
     (req.headers.get("x-roamgate-update") ??
@@ -191,6 +191,163 @@ export function compareVersion(a: string, b: string): number {
   return 0;
 }
 
+/**
+ * Verify and atomically install a release over targetPath, keeping the old
+ * executable as targetPath.previous. Shared by the in-app and CLI updaters.
+ */
+export function renderUpdateInstallScript({
+  targetPath,
+  target,
+  manifest,
+  archiveUrl,
+  curlTransport,
+  shQuote,
+}: {
+  targetPath: string;
+  target: UpdateTarget;
+  manifest: UpdateManifest;
+  archiveUrl: string;
+  curlTransport: string;
+  shQuote: (value: string) => string;
+}): string {
+  return `
+set -eu
+tmp="$(mktemp -d "\${TMPDIR:-/tmp}/roamgate-update.XXXXXX")"
+target=${shQuote(targetPath)}
+target_tmp=""
+backup_tmp=""
+if [ ! -f "$target" ] || [ -L "$target" ]; then
+  echo "running executable is not a regular file" >&2
+  exit 1
+fi
+cleanup() {
+  rm -rf "$tmp"
+  if [ -n "\${target_tmp:-}" ]; then
+    rm -f "$target_tmp"
+  fi
+  if [ -n "\${backup_tmp:-}" ]; then
+    rm -f "$backup_tmp"
+  fi
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+archive="$tmp/${target.archiveName}"
+expected_sha256=${shQuote(manifest.sha256)}
+curl ${curlTransport} -fsSL ${shQuote(archiveUrl)} -o "$archive"
+if command -v shasum >/dev/null 2>&1; then
+  actual_sha256="$(shasum -a 256 "$archive" | awk 'NR == 1 { print $1 }')"
+elif command -v sha256sum >/dev/null 2>&1; then
+  actual_sha256="$(sha256sum "$archive" | awk 'NR == 1 { print $1 }')"
+else
+  echo "shasum or sha256sum is required to verify updates" >&2
+  exit 1
+fi
+if [ "$actual_sha256" != "$expected_sha256" ]; then
+  echo "downloaded archive checksum does not match update manifest" >&2
+  exit 1
+fi
+tar -xJf "$archive" -C "$tmp" \
+  ${shQuote(`${target.packageDir}/VERSION`)} \
+  ${shQuote(`${target.packageDir}/roamgate`)}
+package_dir="$tmp/${target.packageDir}"
+version_file="$package_dir/VERSION"
+binary="$package_dir/roamgate"
+if [ ! -d "$package_dir" ] || [ -L "$package_dir" ] || \
+   [ ! -f "$version_file" ] || [ -L "$version_file" ] || \
+   [ ! -f "$binary" ] || [ -L "$binary" ] || [ ! -x "$binary" ]; then
+  echo "downloaded archive does not contain regular package files" >&2
+  exit 1
+fi
+expected_version=${shQuote(manifest.version)}
+package_name=""
+actual_version=""
+actual_platform=""
+extra_version_field=""
+read -r package_name actual_version actual_platform extra_version_field < "$version_file"
+if [ "$package_name" != "roamgate" ] || \
+   [ "$actual_version" != "$expected_version" ] || \
+   [ "$actual_platform" != ${shQuote(target.platform)} ] || \
+   [ -n "$extra_version_field" ]; then
+  echo "downloaded VERSION metadata does not match update manifest" >&2
+  exit 1
+fi
+binary_version="$("$binary" --version)"
+if [ "$binary_version" != "roamgate $expected_version" ]; then
+  echo "downloaded binary version does not match update manifest" >&2
+  exit 1
+fi
+if [ ! -f "$target" ] || [ -L "$target" ]; then
+  echo "running executable changed during update" >&2
+  exit 1
+fi
+target_dir="$(dirname "$target")"
+target_base="$(basename "$target")"
+target_tmp="$(mktemp "$target_dir/.$target_base.new.XXXXXX")"
+install -m 0755 "$binary" "$target_tmp"
+if [ -f "$target" ] && [ ! -L "$target" ]; then
+  backup="$target.previous"
+  backup_tmp="$(mktemp "$target_dir/.$target_base.previous.XXXXXX")"
+  install -m 0755 "$target" "$backup_tmp"
+  mv -f "$backup_tmp" "$backup"
+  backup_tmp=""
+fi
+mv -f "$target_tmp" "$target"
+target_tmp=""
+`;
+}
+
+export function curlTransportArgs(baseUrl: string): string[] {
+  const protocol = new URL(baseUrl).protocol === "https:" ? "=https" : "=http";
+  return ["--proto", protocol, "--proto-redir", protocol];
+}
+
+/** Download, parse and check the latest manifest for one platform target. */
+export async function fetchLatestUpdateManifest({
+  baseUrl,
+  target,
+  runProcessWithCodeTimeout,
+}: {
+  baseUrl: string;
+  target: UpdateTarget;
+  runProcessWithCodeTimeout: RunProcessWithCodeTimeout;
+}): Promise<UpdateManifest> {
+  const result = await runProcessWithCodeTimeout(
+    [
+      "curl",
+      ...curlTransportArgs(baseUrl),
+      "-fsSL",
+      "--max-filesize",
+      String(UPDATE_METADATA_MAX_BYTES),
+      `${baseUrl}/${target.manifestName}`,
+    ],
+    UPDATE_CHECK_TIMEOUT_MS,
+  );
+  // Every Roamgate release has a manifest. Never probe legacy archives.
+  if (result.code !== 0) {
+    throw new Error(
+      (
+        result.stderr ||
+        result.stdout ||
+        `update manifest download exited ${result.code}`
+      )
+        .trim()
+        .slice(0, 500),
+    );
+  }
+  const manifest = parseUpdateManifest(result.stdout);
+  if (manifest.platform !== target.platform) {
+    throw new Error(
+      `latest update platform is ${manifest.platform}, expected ${target.platform}`,
+    );
+  }
+  if (manifest.archive !== target.archiveName) {
+    throw new Error(
+      `latest update archive is ${manifest.archive}, expected ${target.archiveName}`,
+    );
+  }
+  return manifest;
+}
+
 export function isSupervisorManagedEnvironment(
   environment: Record<string, string | undefined>,
 ): boolean {
@@ -273,14 +430,8 @@ export function createUpdateHandlers({
     };
   }
 
-  function curlTransportArgs(): string[] {
-    const protocol =
-      new URL(updateBaseUrl()).protocol === "https:" ? "=https" : "=http";
-    return ["--proto", protocol, "--proto-redir", protocol];
-  }
-
   function curlTransportCommand(): string {
-    return curlTransportArgs().map(shQuote).join(" ");
+    return curlTransportArgs(updateBaseUrl()).map(shQuote).join(" ");
   }
 
   function autoUpdateCapability(): {
@@ -327,59 +478,17 @@ export function createUpdateHandlers({
     }
   }
 
-  function processFailure(
-    result: { code: number; stdout: string; stderr: string },
-    operation: string,
-  ): Error {
-    return new Error(
-      (result.stderr || result.stdout || `${operation} exited ${result.code}`)
-        .trim()
-        .slice(0, 500),
-    );
-  }
-
-  function validateUpdateManifest(manifest: UpdateManifest): UpdateManifest {
-    if (!updateTarget) {
-      throw new Error(
-        `no update package is available for ${runtime.platform}-${runtime.arch}`,
-      );
-    }
-    if (manifest.platform !== updateTarget.platform) {
-      throw new Error(
-        `latest update platform is ${manifest.platform}, expected ${updateTarget.platform}`,
-      );
-    }
-    if (manifest.archive !== updateTarget.archiveName) {
-      throw new Error(
-        `latest update archive is ${manifest.archive}, expected ${updateTarget.archiveName}`,
-      );
-    }
-    return manifest;
-  }
-
   async function loadLatestUpdateManifest(): Promise<UpdateManifest> {
     if (!updateTarget) {
       throw new Error(
         `no update package is available for ${runtime.platform}-${runtime.arch}`,
       );
     }
-
-    const manifestResult = await runProcessWithCodeTimeout(
-      [
-        "curl",
-        ...curlTransportArgs(),
-        "-fsSL",
-        "--max-filesize",
-        String(UPDATE_METADATA_MAX_BYTES),
-        updateManifestUrl(),
-      ],
-      UPDATE_CHECK_TIMEOUT_MS,
-    );
-    // Every Roamgate release has a manifest. Never probe legacy archives.
-    if (manifestResult.code !== 0) {
-      throw processFailure(manifestResult, "update manifest download");
-    }
-    return validateUpdateManifest(parseUpdateManifest(manifestResult.stdout));
+    return fetchLatestUpdateManifest({
+      baseUrl: updateBaseUrl(),
+      target: updateTarget,
+      runProcessWithCodeTimeout,
+    });
   }
 
   async function readLatestUpdateManifest(
@@ -519,90 +628,14 @@ export function createUpdateHandlers({
         });
       }
 
-      const command = `
-set -eu
-tmp="$(mktemp -d "\${TMPDIR:-/tmp}/roamgate-update.XXXXXX")"
-target=${shQuote(capability.targetPath)}
-target_tmp=""
-backup_tmp=""
-if [ ! -f "$target" ] || [ -L "$target" ]; then
-  echo "running executable is not a regular file" >&2
-  exit 1
-fi
-cleanup() {
-  rm -rf "$tmp"
-  if [ -n "\${target_tmp:-}" ]; then
-    rm -f "$target_tmp"
-  fi
-  if [ -n "\${backup_tmp:-}" ]; then
-    rm -f "$backup_tmp"
-  fi
-}
-trap cleanup EXIT
-trap 'exit 1' HUP INT TERM
-archive="$tmp/${updateTarget.archiveName}"
-expected_sha256=${shQuote(latest.sha256)}
-curl ${curlTransportCommand()} -fsSL ${shQuote(updateArchiveUrl())} -o "$archive"
-if command -v shasum >/dev/null 2>&1; then
-  actual_sha256="$(shasum -a 256 "$archive" | awk 'NR == 1 { print $1 }')"
-elif command -v sha256sum >/dev/null 2>&1; then
-  actual_sha256="$(sha256sum "$archive" | awk 'NR == 1 { print $1 }')"
-else
-  echo "shasum or sha256sum is required to verify updates" >&2
-  exit 1
-fi
-if [ "$actual_sha256" != "$expected_sha256" ]; then
-  echo "downloaded archive checksum does not match update manifest" >&2
-  exit 1
-fi
-tar -xJf "$archive" -C "$tmp" \
-  ${shQuote(`${updateTarget.packageDir}/VERSION`)} \
-  ${shQuote(`${updateTarget.packageDir}/roamgate`)}
-package_dir="$tmp/${updateTarget.packageDir}"
-version_file="$package_dir/VERSION"
-binary="$package_dir/roamgate"
-if [ ! -d "$package_dir" ] || [ -L "$package_dir" ] || \
-   [ ! -f "$version_file" ] || [ -L "$version_file" ] || \
-   [ ! -f "$binary" ] || [ -L "$binary" ] || [ ! -x "$binary" ]; then
-  echo "downloaded archive does not contain regular package files" >&2
-  exit 1
-fi
-expected_version=${shQuote(latest.version)}
-package_name=""
-actual_version=""
-actual_platform=""
-extra_version_field=""
-read -r package_name actual_version actual_platform extra_version_field < "$version_file"
-if [ "$package_name" != "roamgate" ] || \
-   [ "$actual_version" != "$expected_version" ] || \
-   [ "$actual_platform" != ${shQuote(updateTarget.platform)} ] || \
-   [ -n "$extra_version_field" ]; then
-  echo "downloaded VERSION metadata does not match update manifest" >&2
-  exit 1
-fi
-binary_version="$("$binary" --version)"
-if [ "$binary_version" != "roamgate $expected_version" ]; then
-  echo "downloaded binary version does not match update manifest" >&2
-  exit 1
-fi
-if [ ! -f "$target" ] || [ -L "$target" ]; then
-  echo "running executable changed during update" >&2
-  exit 1
-fi
-target_dir="$(dirname "$target")"
-target_base="$(basename "$target")"
-target_tmp="$(mktemp "$target_dir/.$target_base.new.XXXXXX")"
-install -m 0755 "$binary" "$target_tmp"
-if [ -f "$target" ] && [ ! -L "$target" ]; then
-  backup="$target.previous"
-  backup_tmp="$(mktemp "$target_dir/.$target_base.previous.XXXXXX")"
-  install -m 0755 "$target" "$backup_tmp"
-  mv -f "$backup_tmp" "$backup"
-  backup_tmp=""
-fi
-mv -f "$target_tmp" "$target"
-target_tmp=""
-`;
+      const command = renderUpdateInstallScript({
+        targetPath: capability.targetPath,
+        target: updateTarget,
+        manifest: latest,
+        archiveUrl: updateArchiveUrl(),
+        curlTransport: curlTransportCommand(),
+        shQuote,
+      });
       const result = await runProcessWithCodeTimeout(
         ["sh", "-c", command],
         UPDATE_INSTALL_TIMEOUT_MS,

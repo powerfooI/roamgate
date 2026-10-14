@@ -1,7 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { dataRoot, legacyDataRoot, assertSafeDataPath } from "./data-paths";
+import { type CliRuntime, currentRuntime } from "../cli/command";
+import {
+  accessUrls,
+  locateServiceConfig,
+  readServiceAccess,
+  readServiceSetup,
+} from "../cli/service-context";
 
 function capture(binary: string, args: string[]) {
   const result = spawnSync(binary, args, { encoding: "utf8" });
@@ -12,86 +16,37 @@ function capture(binary: string, args: string[]) {
   };
 }
 
-function configDir(): string {
-  return dataRoot();
+/** The service's local login URL, computed exactly as `roamgate url` does. */
+export function serviceLoginUrl(
+  runtime: CliRuntime = currentRuntime(),
+): string {
+  return accessUrls(readServiceAccess(readServiceSetup(runtime)), () => [])
+    .local;
 }
 
-// URL/status are read-only: prefer the new file, but do not migrate on inspection.
-function readableConfigFile(dir: string, name: string): string {
-  const path = join(dir, name);
-  assertSafeDataPath(path);
-  if (existsSync(path) || dir !== configDir()) return path;
-  const legacy = join(
-    legacyDataRoot(),
-    name === "roamgate.env" ? "herdr-gui.env" : name,
-  );
-  assertSafeDataPath(legacy);
-  return legacy;
-}
-
-// Mirrors the server's service env parser: leading whitespace, an optional
-// `export` prefix, whitespace around `=`, and optionally quoted values; the
-// last occurrence wins.
-export function readServiceEnv(
-  contents: string,
-  name: string,
-): string | undefined {
-  let value: string | undefined;
-  for (const line of contents.split(/\r?\n/)) {
-    const match = line.match(
-      new RegExp(`^\\s*(?:export\\s+)?${name}\\s*=\\s*(.*?)\\s*$`),
-    );
-    if (!match) continue;
-    const raw = match[1] ?? "";
-    value =
-      raw.length >= 2 &&
-      (raw.startsWith("'") || raw.startsWith('"')) &&
-      raw.at(-1) === raw[0]
-        ? raw.slice(1, -1)
-        : raw;
+function urlText(): string {
+  try {
+    return serviceLoginUrl();
+  } catch (error) {
+    return `unavailable (${(error as Error).message})`;
   }
-  return value;
-}
-
-export function computeUrl(dir = configDir()): string {
-  const envFile = readableConfigFile(dir, "roamgate.env");
-  let host = "127.0.0.1";
-  let port = "8787";
-  let usesFixedPassword = false;
-  if (existsSync(envFile)) {
-    const contents = readFileSync(envFile, "utf8");
-    host = readServiceEnv(contents, "HOST") ?? host;
-    port = readServiceEnv(contents, "PORT") ?? port;
-    usesFixedPassword =
-      (
-        readServiceEnv(contents, "ROAMGATE_PASSWORD") ??
-        readServiceEnv(contents, "HERDR_GUI_PASSWORD") ??
-        ""
-      ).length > 0;
-  }
-  const anyHost = host === "0.0.0.0" || host === "::";
-  const browserHost = anyHost ? "localhost" : host;
-  const formatted = browserHost.includes(":")
-    ? `[${browserHost}]`
-    : browserHost;
-  let url = `http://${formatted}:${port}`;
-  const tokenPath = readableConfigFile(dir, "auth-token");
-  if (!usesFixedPassword && existsSync(tokenPath)) {
-    const token = readFileSync(tokenPath, "utf8").trim();
-    if (token) url = `${url}/?token=${encodeURIComponent(token)}`;
-  }
-  return url;
 }
 
 function printUrl(): number {
-  const envFile = readableConfigFile(configDir(), "roamgate.env");
-  if (!existsSync(envFile)) {
-    console.error(
-      `roamgate plugin: no service environment at ${envFile}, showing defaults`,
-    );
+  const runtime = currentRuntime();
+  try {
+    const file = locateServiceConfig(runtime);
+    if (!file.configExists) {
+      console.error(
+        `roamgate plugin: no service environment at ${file.configPath}, showing defaults`,
+      );
+    }
+    console.log(serviceLoginUrl(runtime));
+    return 0;
+  } catch (error) {
+    console.error(`roamgate plugin: ${(error as Error).message}`);
+    return 1;
   }
-  console.log(computeUrl());
-  return 0;
 }
 
 function statusText(binary: string): string {
@@ -103,7 +58,7 @@ function statusText(binary: string): string {
 function panel(binary: string, version: string): Promise<number> {
   if (!process.stdin.isTTY) {
     console.log(`Status:  ${statusText(binary)}`);
-    console.log(`URL:     ${computeUrl()}`);
+    console.log(`URL:     ${urlText()}`);
     console.log(`Version: roamgate ${version}`);
     return Promise.resolve(0);
   }
@@ -115,7 +70,7 @@ function panel(binary: string, version: string): Promise<number> {
         "Roamgate",
         "",
         `Status:  ${statusText(binary)}`,
-        `URL:     ${computeUrl()}`,
+        `URL:     ${urlText()}`,
         `Version: roamgate ${version}`,
         "",
         "[s] start  [r] restart  [u] uninstall  [q] close",

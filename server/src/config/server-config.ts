@@ -83,9 +83,12 @@ const cliOptions = {
   "profile-duration": { type: "string" },
   "profile-dir": { type: "string" },
   open: { type: "boolean" },
-  help: { type: "boolean" },
+  help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "V" },
 } as const;
+
+/** Long server flags, for shell completion. */
+export const SERVER_FLAGS = Object.keys(cliOptions).map((name) => `--${name}`);
 
 export function resolveServerLogLevel(
   cliValue: string | undefined,
@@ -134,37 +137,9 @@ export function loadServerTls(
   }
 }
 
-export function loadServerConfig(appVersion: string): ServerConfig {
-  let args: CliArgs;
-  try {
-    args = parseArgs({
-      args: process.argv.slice(2),
-      options: cliOptions,
-      strict: true,
-      allowPositionals: false,
-    }).values as CliArgs;
-  } catch (e) {
-    console.error(`[bridge] ${(e as Error).message}`);
-    console.error("Run `roamgate --help` for usage.");
-    process.exit(2);
-  }
-
-  if (args.help) {
-    console.log(`Roamgate — Web and PWA client for Herdr
-
-Usage: roamgate [options]
-       roamgate service <action>
-       roamgate plugin <action>
-
-Service actions:
-  install [--force]           install and start the platform user service
-  status                      show service status
-  restart                     restart the managed service
-  reload                      reload its definition and restart the service
-  uninstall                   stop and remove the service definition
-  Run \`roamgate service --help\` for service details.
-
-Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
+/** The server's own flags, shared by `roamgate --help` and `roamgate help`. */
+export function serverOptionsHelp(): string {
+  return `Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
   --host <addr>              listen address        (env HOST,            default 127.0.0.1)
   --port <n>                 listen port           (env PORT,            default 8787)
   --password <pw>            fixed login password, ${MIN_PASSWORD_LENGTH}..${MAX_PASSWORD_LENGTH} characters
@@ -185,8 +160,38 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
   --profile-dir <path>        output parent directory (env ROAMGATE_PROFILE_DIR, default: Roamgate data dir/profiles)
   --open                     open browser on start (env OPEN_BROWSER=1)
   -V, --version              show version
-  --help                     show this help
-`);
+  -h, --help                 show this help
+`;
+}
+
+function serverHelp(): string {
+  return `Roamgate — Web and PWA client for Herdr
+
+Usage: roamgate [options]
+
+${serverOptionsHelp()}`;
+}
+
+export function loadServerConfig(
+  appVersion: string,
+  options: { helpText?: () => string } = {},
+): ServerConfig {
+  let args: CliArgs;
+  try {
+    args = parseArgs({
+      args: process.argv.slice(2),
+      options: cliOptions,
+      strict: true,
+      allowPositionals: false,
+    }).values as CliArgs;
+  } catch (e) {
+    console.error(`[bridge] ${(e as Error).message}`);
+    console.error("Run `roamgate --help` for usage.");
+    process.exit(2);
+  }
+
+  if (args.help) {
+    console.log(options.helpText?.() ?? serverHelp());
     process.exit(0);
   }
 
@@ -302,8 +307,11 @@ Options (flags override env vars; ROAMGATE_* overrides HERDR_GUI_*):
     typeof args["client-socket-path"] === "string" ||
     !!process.env.HERDR_CLIENT_SOCKET_PATH;
 
-  const socketPath = resolveSocketPath(args, sshHost, session);
-  const clientSocketPath = resolveClientSocketPath(args, sshHost, session);
+  const { socketPath, clientSocketPath } = resolveSocketPaths(
+    args,
+    sshHost,
+    session,
+  );
 
   return {
     appVersion,
@@ -349,11 +357,12 @@ function remoteTunnelLocalPath(
 export function herdrConfigDir(
   platform: string = process.platform,
   appData: string | null | undefined = process.env.APPDATA,
+  homeDir: string = homedir(),
 ): string {
   if (platform === "win32") {
-    return join(appData ?? join(homedir(), "AppData", "Roaming"), "herdr");
+    return join(appData ?? join(homeDir, "AppData", "Roaming"), "herdr");
   }
-  return join(homedir(), ".config", "herdr");
+  return join(homeDir, ".config", "herdr");
 }
 
 export function nativeSocketPath(
@@ -371,40 +380,67 @@ export function nativeSocketPath(
   return `\\\\.\\pipe\\${socketPath}`;
 }
 
-function resolveSocketPath(
-  args: CliArgs,
-  sshHost: string | undefined,
-  session: string | undefined,
-): string {
-  const fromFlag = args["socket-path"];
-  if (typeof fromFlag === "string") return nativeSocketPath(fromFlag);
-  if (process.env.HERDR_SOCKET_PATH) {
-    return nativeSocketPath(process.env.HERDR_SOCKET_PATH);
-  }
-  if (sshHost) return remoteTunnelLocalPath(sshHost, session, "control");
-  const base = herdrConfigDir();
-  const socketPath = session
-    ? resolve(base, "sessions", session, "herdr.sock")
-    : resolve(base, "herdr.sock");
-  return nativeSocketPath(socketPath);
+export type HerdrSocketSettings = {
+  socketPath?: string;
+  clientSocketPath?: string;
+  sshHost?: string;
+  session?: string;
+  /** Herdr's configuration directory; defaults to this process's user. */
+  herdrDir?: string;
+};
+
+/**
+ * Resolve the control and render sockets from already-merged settings, so
+ * management commands can apply the service environment instead of the shell's.
+ */
+export function resolveHerdrSocketPaths(settings: HerdrSocketSettings): {
+  socketPath: string;
+  clientSocketPath: string;
+} {
+  const resolveOne = (
+    explicit: string | undefined,
+    kind: "control" | "client",
+  ) => {
+    if (explicit) return nativeSocketPath(explicit);
+    if (settings.sshHost)
+      return remoteTunnelLocalPath(settings.sshHost, settings.session, kind);
+    const base = settings.herdrDir ?? herdrConfigDir();
+    const name = kind === "control" ? "herdr.sock" : "herdr-client.sock";
+    const socketPath = settings.session
+      ? resolve(base, "sessions", settings.session, name)
+      : resolve(base, name);
+    return nativeSocketPath(socketPath);
+  };
+  return {
+    socketPath: resolveOne(settings.socketPath, "control"),
+    clientSocketPath: resolveOne(settings.clientSocketPath, "client"),
+  };
 }
 
-function resolveClientSocketPath(
+function resolveSocketPaths(
   args: CliArgs,
   sshHost: string | undefined,
   session: string | undefined,
-): string {
-  const fromFlag = args["client-socket-path"];
-  if (typeof fromFlag === "string") return nativeSocketPath(fromFlag);
-  if (process.env.HERDR_CLIENT_SOCKET_PATH) {
-    return nativeSocketPath(process.env.HERDR_CLIENT_SOCKET_PATH);
-  }
-  if (sshHost) return remoteTunnelLocalPath(sshHost, session, "client");
-  const base = herdrConfigDir();
-  const socketPath = session
-    ? resolve(base, "sessions", session, "herdr-client.sock")
-    : resolve(base, "herdr-client.sock");
-  return nativeSocketPath(socketPath);
+) {
+  // An explicit empty flag is still explicit and selects nativeSocketPath("").
+  const socketPath = args["socket-path"];
+  const clientSocketPath = args["client-socket-path"];
+  const resolved = resolveHerdrSocketPaths({
+    socketPath: socketPath || process.env.HERDR_SOCKET_PATH,
+    clientSocketPath: clientSocketPath || process.env.HERDR_CLIENT_SOCKET_PATH,
+    sshHost,
+    session,
+  });
+  return {
+    socketPath:
+      typeof socketPath === "string" && !socketPath
+        ? nativeSocketPath(socketPath)
+        : resolved.socketPath,
+    clientSocketPath:
+      typeof clientSocketPath === "string" && !clientSocketPath
+        ? nativeSocketPath(clientSocketPath)
+        : resolved.clientSocketPath,
+  };
 }
 
 function resolvePublicDir(args: CliArgs): string {

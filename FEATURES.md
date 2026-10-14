@@ -563,6 +563,10 @@ separate for desktop/mobile. Jump from a diff to its file preview.
 - Manage [user services](docs/DEPLOYMENT.md#run-as-a-user-service), use
   checksum-verified standalone updates under a supported supervisor, and probe
   `/health` or `/healthz`.
+- [Command-line management](docs/DEPLOYMENT.md#command-line-management):
+  `roamgate doctor` diagnoses an installation, `url --qr` opens it on a phone,
+  and `config`, `auth`, `connections`, `push test`, `update`/`rollback`,
+  `service logs` and shell completions cover routine operations.
 
 **Normal runtime requires a token or password, including loopback.** The local
 development exception, password policy, and login limits are described in

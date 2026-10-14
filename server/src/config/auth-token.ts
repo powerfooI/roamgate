@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import {
   defaultDataFile,
   publishDataFile,
+  replaceDataFile,
   assertSafeDataPath,
 } from "./data-paths";
 import { randomBytes } from "node:crypto";
@@ -41,7 +42,7 @@ export function defaultAuthTokenPath(
   return defaultDataFile("auth-token", homeDir, platform, appDataDir);
 }
 
-function readAuthToken(path: string): string {
+export function readAuthToken(path: string): string {
   const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     if (!fstatSync(fd).isFile()) {
@@ -70,5 +71,12 @@ export function loadOrCreateAuthToken(path = defaultAuthTokenPath()): string {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   publishDataFile(path, `${randomBytes(32).toString("hex")}\n`);
+  return readAuthToken(path);
+}
+
+/** Replace the generated token; running servers keep the old one until restart. */
+export function rotateAuthToken(path = defaultAuthTokenPath()): string {
+  assertSafeDataPath(path);
+  replaceDataFile(path, `${randomBytes(32).toString("hex")}\n`);
   return readAuthToken(path);
 }

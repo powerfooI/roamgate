@@ -22,12 +22,8 @@ import {
   openBrowser,
   withLoginToken,
 } from "./config/server-config";
-import {
-  runServiceCommand,
-  SERVICE_COMMAND_CONTINUE,
-} from "./config/service-manager";
-import { runHerdrCommand } from "./herdr/cli";
-import { runPluginCommand } from "./config/plugin-command";
+import { cliCommands, runCli, topLevelHelp } from "./cli";
+import { CONTINUE_TO_SERVER, defaultCliContext } from "./cli/command";
 import { enrichIntegrationVersions } from "./herdr/integration-versions";
 import {
   createHerdrSetupHandlers,
@@ -110,25 +106,21 @@ import {
 } from "./worktree/remove";
 
 const APP_VERSION = packageJson.version;
-const pluginCommandResult = await runPluginCommand(
+const cliCommandList = cliCommands();
+const cliResult = await runCli(
   process.argv.slice(2),
-  APP_VERSION,
+  defaultCliContext(APP_VERSION),
+  cliCommandList,
 );
-if (pluginCommandResult !== null) process.exit(pluginCommandResult);
-const serviceCommandResult = runServiceCommand(process.argv.slice(2));
-if (serviceCommandResult === SERVICE_COMMAND_CONTINUE) {
+if (cliResult === CONTINUE_TO_SERVER) {
+  // `service run <env>` loaded the service environment; start the listener.
   process.argv.splice(2);
-} else if (serviceCommandResult !== null) {
-  process.exit(serviceCommandResult);
+} else if (cliResult !== null) {
+  process.exit(cliResult);
 }
-const herdrCommandResult = await runHerdrCommand(
-  process.argv.slice(2),
-  APP_VERSION,
-);
-if (herdrCommandResult !== null) {
-  process.exit(herdrCommandResult);
-}
-const config = loadServerConfig(APP_VERSION);
+const config = loadServerConfig(APP_VERSION, {
+  helpText: () => topLevelHelp(cliCommandList),
+});
 // Only a listener startup may rotate sessions. Management commands also read
 // ServerConfig, sometimes with a different environment from the running service.
 let sessionSecret = "";

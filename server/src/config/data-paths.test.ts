@@ -19,6 +19,7 @@ import {
   legacyDataRoot,
   migrateDataFile,
   publishDataFile,
+  replaceDataFile,
 } from "./data-paths";
 import { defaultAuthTokenPath, loadOrCreateAuthToken } from "./auth-token";
 
@@ -130,6 +131,21 @@ test("failed publication leaves no partial target and retries without overwritin
   publishDataFile(target, "second");
   expect(readFileSync(target, "utf8")).toBe("first");
   expect(readdirSync(dirname(target))).toEqual(["settings.json"]);
+});
+
+test("replacement overwrites atomically with private permissions", () => {
+  const root = home();
+  const target = join(root, "roamgate", "roamgate.env");
+  publishDataFile(target, "first", 0o644);
+  replaceDataFile(target, "second");
+  expect(readFileSync(target, "utf8")).toBe("second");
+  expect(readdirSync(dirname(target))).toEqual(["roamgate.env"]);
+  if (process.platform !== "win32")
+    expect(statSync(target).mode & 0o777).toBe(0o600);
+  const link = join(root, "roamgate", "link.env");
+  symlinkSync(target, link);
+  expect(() => replaceDataFile(link, "third")).toThrow("symlink");
+  expect(readFileSync(target, "utf8")).toBe("second");
 });
 
 test("concurrent first use publishes one complete legacy token", async () => {
@@ -262,7 +278,7 @@ test("plugin URL reads legacy files without migrating and prefers new paths", as
   const current = dataRoot(root, process.platform, appData);
   write(join(legacy, "herdr-gui.env"), "HOST=0.0.0.0\nPORT=8890\n");
   write(join(legacy, "auth-token"), `${"c".repeat(64)}\n`);
-  const script = `import { computeUrl } from ${JSON.stringify(join(import.meta.dir, "plugin-command.ts"))}; console.log(computeUrl());`;
+  const script = `import { serviceLoginUrl } from ${JSON.stringify(join(import.meta.dir, "plugin-command.ts"))}; console.log(serviceLoginUrl());`;
   const invoke = async () => {
     const child = Bun.spawn([process.execPath, "-e", script], {
       env: { ...process.env, HOME: root, USERPROFILE: root, APPDATA: appData },
@@ -277,7 +293,7 @@ test("plugin URL reads legacy files without migrating and prefers new paths", as
   expect(await invoke()).toBe(`http://localhost:8890/?token=${"c".repeat(64)}`);
   expect(existsSync(current)).toBeFalse();
   write(join(current, "roamgate.env"), "HOST=127.0.0.1\nPORT=8891\n");
-  expect(await invoke()).toBe(`http://127.0.0.1:8891/?token=${"c".repeat(64)}`);
+  expect(await invoke()).toBe(`http://localhost:8891/?token=${"c".repeat(64)}`);
   expect(readFileSync(join(legacy, "herdr-gui.env"), "utf8")).toBe(
     "HOST=0.0.0.0\nPORT=8890\n",
   );

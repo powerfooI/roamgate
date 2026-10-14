@@ -9,87 +9,74 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { computeUrl, readServiceEnv, runPluginCommand } from "./plugin-command";
+import { runPluginCommand, serviceLoginUrl } from "./plugin-command";
 
-describe("readServiceEnv", () => {
-  test("reads plain values", () => {
-    expect(readServiceEnv("HOST=0.0.0.0\nPORT=8791\n", "HOST")).toBe("0.0.0.0");
-    expect(readServiceEnv("HOST=0.0.0.0\nPORT=8791\n", "PORT")).toBe("8791");
-  });
-
-  test("accepts export prefix, whitespace, and quoted values", () => {
-    const contents = "export HOST=\"0.0.0.0\"\n  PORT = '8799'\n";
-    expect(readServiceEnv(contents, "HOST")).toBe("0.0.0.0");
-    expect(readServiceEnv(contents, "PORT")).toBe("8799");
-  });
-
-  test("last occurrence wins and missing keys are undefined", () => {
-    expect(readServiceEnv("PORT=1\nPORT=2\n", "PORT")).toBe("2");
-    expect(readServiceEnv("HOST=x\n", "PORT")).toBeUndefined();
-  });
-
-  test("ignores comments and unrelated keys", () => {
-    const contents =
-      "# HOST=10.0.0.1\nHERDR_GUI_LOG_LEVEL=info\nHOST=127.0.0.1\n";
-    expect(readServiceEnv(contents, "HOST")).toBe("127.0.0.1");
-  });
-});
-
-describe("computeUrl", () => {
-  const dirs: string[] = [];
-  function fixture(files: Record<string, string>): string {
-    const dir = mkdtempSync(join(tmpdir(), "studio-plugin-"));
-    dirs.push(dir);
+describe("serviceLoginUrl", () => {
+  const TOKEN = "d".repeat(64);
+  const homes: string[] = [];
+  function fixture(files: Record<string, string>) {
+    const home = mkdtempSync(join(tmpdir(), "roamgate-plugin-url-"));
+    homes.push(home);
+    const dir = join(home, ".config", "roamgate");
+    mkdirSync(dir, { recursive: true });
     for (const [name, text] of Object.entries(files)) {
       writeFileSync(join(dir, name), text);
     }
-    return dir;
+    return {
+      platform: "linux",
+      arch: "x64",
+      homeDir: home,
+      execPath: join(home, "roamgate"),
+      argv: [join(home, "roamgate")],
+      env: {},
+    };
   }
   afterEach(() => {
-    while (dirs.length) {
-      rmSync(dirs.pop()!, { recursive: true, force: true });
+    while (homes.length) {
+      rmSync(homes.pop()!, { recursive: true, force: true });
     }
   });
 
-  test("defaults to loopback when no env file exists", () => {
-    expect(computeUrl(fixture({}))).toBe("http://127.0.0.1:8787");
-  });
-
-  test("includes the login token for non-loopback binds", () => {
-    const dir = fixture({
-      "roamgate.env": "HOST=0.0.0.0\nPORT=8791\n",
-      "auth-token": "abc123\n",
-    });
-    expect(computeUrl(dir)).toBe("http://localhost:8791/?token=abc123");
-  });
-
-  test("includes the login token for loopback binds", () => {
-    const dir = fixture({
-      "roamgate.env": "HOST=127.0.0.1\nPORT=8787\n",
-      "auth-token": "abc123\n",
-    });
-    expect(computeUrl(dir)).toBe("http://127.0.0.1:8787/?token=abc123");
+  test("matches `roamgate url`, including defaults and the login token", () => {
+    expect(serviceLoginUrl(fixture({}))).toBe("http://localhost:8787");
+    expect(
+      serviceLoginUrl(
+        fixture({
+          "roamgate.env": "HOST=0.0.0.0\nPORT=8791\n",
+          "auth-token": `${TOKEN}\n`,
+        }),
+      ),
+    ).toBe(`http://localhost:8791/?token=${TOKEN}`);
   });
 
   test("new password values take precedence, including empty values", () => {
-    const dir = fixture({
+    const runtime = fixture({
       "roamgate.env":
-        "HOST=0.0.0.0\nHERDR_GUI_PASSWORD=old\nROAMGATE_PASSWORD=new\n",
-      "auth-token": "saved-token\n",
+        "HERDR_GUI_PASSWORD=old-password-value\nROAMGATE_PASSWORD=new-password-value\n",
+      "auth-token": `${TOKEN}\n`,
     });
-    expect(computeUrl(dir)).toBe("http://localhost:8787");
+    expect(serviceLoginUrl(runtime)).toBe("http://localhost:8787");
     writeFileSync(
-      join(dir, "roamgate.env"),
-      "HOST=0.0.0.0\nHERDR_GUI_PASSWORD=old\nROAMGATE_PASSWORD=\n",
+      join(runtime.homeDir, ".config", "roamgate", "roamgate.env"),
+      "HERDR_GUI_PASSWORD=old-password-value\nROAMGATE_PASSWORD=\n",
     );
-    expect(computeUrl(dir)).toBe("http://localhost:8787/?token=saved-token");
+    expect(serviceLoginUrl(runtime)).toBe(
+      `http://localhost:8787/?token=${TOKEN}`,
+    );
   });
 
-  test("honors exported and quoted entries without a token file", () => {
-    const dir = fixture({
+  test("honors exported and quoted entries and native TLS", () => {
+    if (process.platform === "win32") return;
+    const runtime = fixture({
       "roamgate.env": 'export HOST="0.0.0.0"\nPORT = "8799"\n',
     });
-    expect(computeUrl(dir)).toBe("http://localhost:8799");
+    expect(serviceLoginUrl(runtime)).toBe("http://localhost:8799");
+  });
+
+  test("rejects configurations the service could not start with", () => {
+    expect(() =>
+      serviceLoginUrl(fixture({ "roamgate.env": "PORT=0\n" })),
+    ).toThrow("invalid PORT");
   });
 });
 

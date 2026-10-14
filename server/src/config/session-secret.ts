@@ -2,7 +2,6 @@ import {
   createHash,
   createHmac,
   randomBytes,
-  randomUUID,
   timingSafeEqual,
 } from "node:crypto";
 import {
@@ -11,18 +10,15 @@ import {
   constants,
   fchmodSync,
   fstatSync,
-  fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
-  renameSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { lockSync } from "proper-lockfile";
-import { assertSafeDataPath, dataRoot } from "./data-paths";
+import { assertSafeDataPath, dataRoot, replaceDataFile } from "./data-paths";
 import { roamgateEnv } from "./environment";
 
 const SECRET_PATTERN = /^[a-f0-9]{64}$/;
@@ -133,58 +129,49 @@ function acquireSessionLock(path: string): () => void {
 }
 
 function writeSessionSecret(path: string, state: SessionSecretState): void {
-  const directory = dirname(path);
-  const temporaryPath = join(
-    directory,
-    `.roamgate-session-${randomUUID()}.tmp`,
-  );
-  let fd: number | undefined;
-  try {
-    fd = openSync(
-      temporaryPath,
-      constants.O_CREAT |
-        constants.O_EXCL |
-        constants.O_WRONLY |
-        (constants.O_NOFOLLOW ?? 0),
-      0o600,
-    );
-    writeFileSync(fd, `${JSON.stringify(state)}\n`);
-    fchmodSync(fd, 0o600);
-    fsyncSync(fd);
-    closeSync(fd);
-    fd = undefined;
-    assertSafeDataPath(path);
-    renameSync(temporaryPath, path);
-    // Flush the replacement directory entry as well as the file contents.
-    // Windows does not support opening directories for fsync this way.
-    if (process.platform !== "win32") {
-      const directoryFd = openSync(
-        directory,
-        constants.O_RDONLY | (constants.O_DIRECTORY ?? 0),
-      );
-      try {
-        fsyncSync(directoryFd);
-      } finally {
-        closeSync(directoryFd);
-      }
-    }
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-    rmSync(temporaryPath, { force: true });
-  }
+  replaceDataFile(path, `${JSON.stringify(state)}\n`);
 }
 
 /** Persist independent signing material, rotating it when login credentials change. */
-export function loadOrCreateSessionSecret(
-  credentials: readonly string[],
-  path?: string,
+export function sessionSecretPath(
+  settingsPath = roamgateEnv("SETTINGS_PATH"),
+  root = dataRoot(),
 ): string {
-  const settingsPath = roamgateEnv("SETTINGS_PATH");
   // Settings identify the instance; signing material stays in private storage.
   const filename = settingsPath
     ? `session-secret-${createHash("sha256").update(resolve(settingsPath)).digest("hex")}.json`
     : "session-secret.json";
-  path = resolve(path ?? join(dataRoot(), filename));
+  return resolve(join(root, filename));
+}
+
+/**
+ * Discard the signing secret so the next startup signs with fresh material and
+ * every existing browser session becomes invalid. Returns false when absent.
+ */
+export function revokeSessionSecret(path = sessionSecretPath()): boolean {
+  path = resolve(path);
+  assertSafeDataPath(path);
+  try {
+    lstatSync(dirname(path));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  const release = acquireSessionLock(path);
+  try {
+    if (!readSessionSecret(path)) return false;
+    rmSync(path);
+    return true;
+  } finally {
+    release();
+  }
+}
+
+export function loadOrCreateSessionSecret(
+  credentials: readonly string[],
+  path?: string,
+): string {
+  path = resolve(path ?? sessionSecretPath());
   assertSafeDataPath(path);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const release = acquireSessionLock(path);

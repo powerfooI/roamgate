@@ -117,6 +117,8 @@ Click any screenshot to open the full-resolution image.
    [latest release](https://github.com/powerfooI/roamgate/releases/latest).
 3. On Linux/macOS, add `~/.local/bin` to `PATH` and run `roamgate`.
    On Windows, extract the archive and run `roamgate.exe`. Open the printed URL.
+   `roamgate url --qr` shows a QR code for a phone, and `roamgate doctor`
+   checks the setup when something does not work.
 
 See [deployment](./docs/DEPLOYMENT.md) for checksums, configuration, updates,
 and services, or [historical installation](./docs/DEPLOYMENT.md#install-historical-herdr-studio)

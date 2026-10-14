@@ -18,7 +18,11 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { dataRoot } from "./data-paths";
-import { loadOrCreateSessionSecret } from "./session-secret";
+import {
+  loadOrCreateSessionSecret,
+  revokeSessionSecret,
+  sessionSecretPath,
+} from "./session-secret";
 
 const tempDirs: string[] = [];
 const password = "correct horse battery staple";
@@ -462,4 +466,28 @@ describe("session signing secret", () => {
       await holder.exited;
     }
   }, 10_000);
+});
+
+describe("revokeSessionSecret", () => {
+  test("removes the secret so the next load signs with fresh material", () => {
+    const root = join(tempHome(), ".config", "roamgate");
+    const path = sessionSecretPath(undefined, root);
+    expect(path).toBe(join(root, "session-secret.json"));
+    expect(revokeSessionSecret(path)).toBe(false);
+    const original = loadOrCreateSessionSecret([password], path);
+    expect(revokeSessionSecret(path)).toBe(true);
+    expect(existsSync(path)).toBe(false);
+    expect(loadOrCreateSessionSecret([password], path)).not.toBe(original);
+  });
+
+  test("keys the path by the settings file like startup does", () => {
+    const root = join(tempHome(), "data");
+    const settings = join(root, "custom-settings.json");
+    expect(sessionSecretPath(settings, root)).toBe(
+      join(
+        root,
+        `session-secret-${createHash("sha256").update(settings).digest("hex")}.json`,
+      ),
+    );
+  });
 });

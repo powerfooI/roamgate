@@ -75,7 +75,8 @@ curl -fsSL \
 ```
 
 Add `~/.local/bin` to PATH, run `roamgate --version`, then `roamgate` and open the
-printed URL. Rerun the installer to update.
+printed URL. Rerun the installer or run `roamgate update` to update;
+`roamgate rollback` restores the previous executable.
 
 On Windows, download matching `roamgate-windows-<arch>.tar.xz` and `.sha256`
 files from the [latest release](https://github.com/powerfooI/roamgate/releases/latest),
@@ -597,6 +598,7 @@ stating that they require a Unix SSH host. See
    local-only users should toggle off/on once.
 
 Server push is enabled by default; every device still needs enrollment.
+`roamgate push test` sends a test notification to every enrolled device.
 `ROAMGATE_WEB_PUSH_SUBJECT` optionally sets a `mailto:`/HTTPS operator contact,
 not a delivery destination. Default: `https://github.com/powerfooI/roamgate/issues`.
 An explicitly empty value disables push; restart after changes. Removing the
@@ -677,6 +679,7 @@ Herdr sockets. It does not establish browser or system notification delivery.
 
 Logs use one line per event: timestamp, severity, scope, bounded key/value context.
 `info` covers lifecycle/failures, not routine RPC/events/frames/successful auto-sync.
+`roamgate service logs -f` follows a managed service's output.
 Use `roamgate --log-level debug` or `ROAMGATE_LOG_LEVEL=debug` temporarily;
 restart services after editing their environment. Debug can expose paths/IDs;
 return to `info` afterwards. Logs omit URL auth tokens, which remain in protected files.
@@ -730,6 +733,7 @@ combine `--profile` with Bun's other CPU sampling profilers in the same process.
 The title's selector adds/tests/connects/disconnects/edits/removes shared profiles;
 each browser selects independently. Local profiles attach to sockets, not start
 Herdr. The first saved profile retains the default as writable `Local`.
+`roamgate connections` lists, tests and edits the same profiles from a terminal.
 
 ![Connection selector with local and SSH profiles](./screenshots/multi-connection-selector.png)
 
@@ -908,6 +912,7 @@ not establish trust: review configuration and scripts before worktree operations
 | `roamgate service restart` | Restart after environment changes |
 | `roamgate service reload` | Reload definition, then restart |
 | `roamgate service uninstall` | Stop/remove service; retain configuration/tokens |
+| `roamgate service logs [-f]` | Show recent service output |
 
 | Platform | Definition / behavior |
 | --- | --- |
@@ -919,7 +924,8 @@ Stop/remove legacy services first via the [migration procedure](#transition-from
 **New services bind `0.0.0.0:8787`**, generate a persistent token, and print
 localhost/LAN token URLs. Config lives in `~/.config/roamgate/roamgate.env` or
 `%APPDATA%\roamgate\roamgate.env`, preserved on reinstall/uninstall. Edit HOST,
-PORT, password, and Herdr settings there, then restart. For local-only installation,
+PORT, password, and Herdr settings there, then restart, or use
+`roamgate config set NAME=value --restart`. For local-only installation,
 set `HOST=127.0.0.1` first. On Windows, allow Private networks only if prompted;
 on Linux, `sudo loginctl enable-linger "$USER"` keeps services after logout.
 On macOS, installation checks the configured listener before registering the
@@ -978,8 +984,11 @@ restarting. A busy lock fails closed after a bounded wait; it is never stolen
 from a potentially live writer.
 
 A `?token=...` visit sets an HttpOnly cookie and removes the URL token. To rotate,
-stop the service, replace the file with a fresh 64-character lowercase hexadecimal
-secret (mode `0600`), then restart. **Deleting only the new file can restore a
+run `roamgate auth rotate`, which also restarts a running managed service and
+prints the new URLs. Manually, stop the service, replace the file with a fresh
+64-character lowercase hexadecimal secret (mode `0600`), then restart.
+`roamgate auth revoke-sessions` removes the signing state and restarts the
+service to sign out every browser without changing credentials. **Deleting only the new file can restore a
 readable legacy token**, not rotate it.
 
 Manual templates live under `deploy/`. Keep systemd as restart owner for wrappers:
@@ -993,6 +1002,26 @@ ExecStart=/absolute/path/service-wrapper -- %h/.local/bin/roamgate --host 0.0.0.
 The updater saves `roamgate.previous`, atomically installs a verified binary, and
 exits; it never starts its replacement. Reinstall preserves custom `ExecStart`
 in a managed unit when it still invokes the same binary.
+
+## Command-line management
+
+Management commands act on the [user service](#run-as-a-user-service)'s
+environment file and data directory, not on the shell's flags or variables.
+`roamgate --help` lists them; `roamgate <command> --help` describes each.
+They exit 0 on success, 1 on failure and 2 on invalid arguments. Commands with
+`--json` print machine-readable output for scripts.
+
+| Command | Purpose |
+| --- | --- |
+| `roamgate doctor [--offline]` | Check the config, credentials, TLS certificate, service, listener, network exposure, local Herdr, connections, Web Push and updates; print a fix for each problem. Exits 1 on any failure. The output contains no secrets. |
+| `roamgate url [--qr] [--address <host>]` | Print tokenized login URLs; `--qr` draws a terminal QR code for a phone, and `--address` substitutes a VPN or Tailscale name. The code contains the token. |
+| `roamgate config show\|get\|set\|unset\|edit\|path` | Read or change `roamgate.env`. Changes are validated as a whole and written atomically, preserving comments; `--restart` restarts a running service. `KEY=-` reads a secret from standard input. |
+| `roamgate auth show\|rotate\|revoke-sessions` | Show the login method, replace the generated token (which also signs out every browser), or sign out every browser without changing credentials; both restart a running service unless `--no-restart`. |
+| `roamgate connections list\|test\|add\|remove\|set-default` | Manage the profiles the [connection selector](#multiple-and-remote-herdr-connections) edits. A running Roamgate keeps its own copy, so edits are refused while it serves unless `--restart` restarts the managed service. Only the service config's address is checked; stop other processes sharing the registry, such as a foreground run on another port, first. |
+| `roamgate push test` | Send a test notification to every enrolled [Web Push](#web-push-notifications) device and report each provider's answer. |
+| `roamgate update [--check]` / `roamgate rollback` | Install the latest release with the same verification as the in-app updater, or swap back to `roamgate.previous`; a running service using this executable restarts. Linux and macOS only. |
+| `roamgate service logs [-f] [-n <count>]` | Show service output: the user journal on Linux, `~/Library/Logs` on macOS. Windows tasks do not capture output. |
+| `roamgate completion bash\|zsh\|fish` | Print a shell completion script; its help shows where to install it. |
 
 ## Build a standalone executable
 
@@ -1038,6 +1067,7 @@ map-free executable does not restore source-level stack traces.
 
 | Symptom | Action |
 | --- | --- |
+| Not sure what is wrong | Run `roamgate doctor`; it checks each part below and prints a fix. |
 | Cannot connect to Herdr | Check server and both socket paths; default local setup can use `roamgate herdr setup`. Override with `--socket-path /path/to/herdr.sock` only deliberately. |
 | Another device cannot open the page | Check bind, token URL, network/firewall, and [private access setup](./TUTORIAL.md#networking). |
 | SSH connects locally | Remove explicit socket flags/`HERDR_SOCKET_PATH`/`HERDR_CLIENT_SOCKET_PATH`; they override tunnel paths. |

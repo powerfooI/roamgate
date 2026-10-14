@@ -14,6 +14,7 @@ import {
   assertValidAuthPassword,
   defaultAuthTokenPath,
   loadOrCreateAuthToken,
+  rotateAuthToken,
 } from "./auth-token";
 
 const tempDirs: string[] = [];
@@ -116,5 +117,27 @@ describe("generated authentication token", () => {
     expect(() => loadOrCreateAuthToken(path)).toThrow(
       "data path contains a symlink",
     );
+  });
+});
+
+describe("rotateAuthToken", () => {
+  test("replaces the token atomically with private permissions", () => {
+    const path = tempAuthTokenPath();
+    const original = loadOrCreateAuthToken(path);
+    const rotated = rotateAuthToken(path);
+    expect(rotated).toMatch(/^[a-f0-9]{64}$/);
+    expect(rotated).not.toBe(original);
+    expect(readFileSync(path, "utf8")).toBe(`${rotated}\n`);
+    if (process.platform !== "win32")
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  test("refuses symlinked token paths", () => {
+    const home = tempHome();
+    const path = tempAuthTokenPath(home);
+    loadOrCreateAuthToken(path);
+    const link = join(home, "link-token");
+    symlinkSync(path, link);
+    expect(() => rotateAuthToken(link)).toThrow("symlink");
   });
 });
