@@ -380,11 +380,13 @@ function panel(): Promise<number> {
         return;
       }
       const args =
-        key === "s" || key === "r"
+        key === "s"
           ? ["install", "--force"]
-          : key === "u"
-            ? ["uninstall"]
-            : null;
+          : key === "r"
+            ? ["install"]
+            : key === "u"
+              ? ["uninstall"]
+              : null;
       if (!args || busy) return;
       busy = true;
       message = "working...";
@@ -418,8 +420,9 @@ async function main(): Promise<number> {
     case "build-source":
       return buildSource();
     case "start":
-    case "restart":
       return service("install", "--force");
+    case "restart":
+      return service("install");
     case "status":
       return service("status");
     case "url":
