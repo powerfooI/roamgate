@@ -22,15 +22,15 @@ use the remote host's shell and tools.
 ### Herdr compatibility
 
 This source build supports verified legacy protocols 14–20 (Herdr 0.7.0–0.8.2)
-and **tagged Herdr 0.9.0 / protocol 22**. Protocol 21 and unknown versions are
-rejected at control/binary probes. Use a compatible Roamgate build or separate
+and **tagged Herdr 0.9.0 and 0.9.4 / protocol 22**. Protocol 21 and unknown versions
+are rejected at control/binary probes. Use a compatible Roamgate build or separate
 server; **do not downgrade a live server**. Published binaries follow their
 [release notes](https://github.com/powerfooI/roamgate/releases).
 The [plugin](#herdr-plugin) separately requires Herdr 0.7.2+.
 Tab reordering requires Herdr 0.7.2+; Herdr 0.7.0 and 0.7.1 retain their fixed
 tab order. The bridge confirms support before enabling dragging.
 
-Herdr 0.9.0 uses stable endpoint generation 1, distinct from protocol 22.
+Herdr 0.9.0 and 0.9.4 use stable endpoint generation 1, distinct from protocol 22.
 `ROAMGATE_DISABLE_ENDPOINT=1` explicitly selects legacy direct-terminal fallback.
 
 | Area | Behavior / limitation |
@@ -47,7 +47,7 @@ Herdr supplies no producing-pane/input identity: a delayed write from A after B
 becomes foreground can reach B's recent input owner. This is not source-PTY or
 original-browser isolation. Detach/replacement/disposal invalidates ownership.
 Reads are disabled; permission failures show copy-retry UI. Ordinary copy/paste
-is unchanged. OSC 52 is unavailable on the **0.9.0 legacy fallback**; older
+is unchanged. OSC 52 is unavailable on the **protocol 22 legacy fallback**; older
 servers retain their existing relay.
 
 Closing one workspace never implicitly closes its linked group. If Herdr requires
@@ -100,13 +100,17 @@ roamgate herdr setup
 roamgate herdr status
 ```
 
-If absent, setup downloads **Herdr 0.9.0**, verifies build-pinned SHA-256 hashes,
+If absent, setup downloads **Herdr 0.9.4**, verifies build-pinned SHA-256 hashes,
 and installs to `~/.local/bin/herdr` on Unix or
-`%APPDATA%\roamgate\herdr\0.9.0` on Windows. It never replaces a binary it did not
+`%APPDATA%\roamgate\herdr\0.9.4` on Windows. It never replaces a binary it did not
 install. If already installed, it uses the first binary on PATH or in those
 locations, leaving it in place. Unix's standard location supports `herdr update`;
 Windows uses Roamgate's private versioned directory, not the official junctioned
 store, and needs a newer verified Roamgate install for replacement.
+
+The verified Windows asset is x64 only; managed setup has no native Windows
+ARM64 Herdr asset. Windows ARM64 SSH hosts can run Herdr's x64 build under
+emulation on a best-effort basis.
 
 Setup installs/starts `herdr server` as a user service: `roamgate-herdr.service`
 (Linux), `dev.roamgate.herdr` (macOS), or a per-user Windows scheduled task.
@@ -604,9 +608,11 @@ notifications (Herdr 0.9+), so Roamgate alerts match Herdr's toasts, including
 runtime for this; Herdr counts it as a connected client for `notification show`,
 but it never takes focus or tab geometry. `status` (or older Herdr servers) instead
 observes `working -> blocked` and `working -> done/idle`; startup snapshots are
-silent. Delivery is best-effort: OS/Focus settings, outages, expired
-subscriptions, or stopped runtimes can prevent it. Messages expire after five
-minutes, with no durable replay; HTTP 404/410 removes expired subscriptions.
+silent. Herdr 0.9.4 treats Antigravity and Grok as idle once they return to the
+foreground prompt, even while background tasks or subagents continue; Roamgate
+preserves that policy. Delivery is best-effort: OS/Focus settings, outages,
+expired subscriptions, or stopped runtimes can prevent it. Messages expire after
+five minutes, with no durable replay; HTTP 404/410 removes expired subscriptions.
 
 Turning notifications off revokes on the server before browser unsubscribe.
 If revocation fails, reconnect/retry or revoke OS/browser permission immediately;

@@ -151,6 +151,14 @@ describe("installVerifiedHerdr", () => {
   test("extracts the Windows zip layout via PowerShell", async () => {
     const homeDir = scratch();
     const appDataDir = scratch();
+    const previous = herdrManagedBinaryPath(
+      homeDir,
+      appDataDir,
+      "win32",
+      "0.9.0",
+    );
+    mkdirSync(dirname(previous), { recursive: true });
+    writeFileSync(previous, "previous-herdr");
     const content = "fake-zip";
     const expectedSha256 = createHash("sha256").update(content).digest("hex");
     const installDir = dirname(
@@ -187,6 +195,10 @@ describe("installVerifiedHerdr", () => {
     expect(commands).toHaveLength(1);
     expect(commands[0].join(" ")).toContain("Expand-Archive");
     expect(result.installed).toBe(true);
+    expect(result.binaryPath).toBe(
+      join(appDataDir, "roamgate", "herdr", "0.9.4", "herdr.exe"),
+    );
+    expect(await Bun.file(previous).text()).toBe("previous-herdr");
     expect(
       existsSync(join(result.binaryPath, "..", "conpty", "conpty.dll")),
     ).toBe(true);

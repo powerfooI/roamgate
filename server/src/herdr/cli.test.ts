@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { runHerdrCommand } from "./cli";
+import { VERIFIED_HERDR_VERSION } from "./release";
 
 function fakeConfig() {
   return {
@@ -46,11 +47,17 @@ describe("runHerdrCommand", () => {
       ...io,
       loadConfig: () => fakeConfig() as never,
       detect: () =>
-        Promise.resolve({ state: "running", version: "0.9.0", protocol: 22 }),
+        Promise.resolve({
+          state: "running",
+          version: VERIFIED_HERDR_VERSION,
+          protocol: 22,
+        }),
       serviceStatus: () => ({ installed: true, active: true }),
     });
     expect(code).toBe(0);
-    expect(io.out.join("\n")).toContain("running (version 0.9.0");
+    expect(io.out.join("\n")).toContain(
+      `running (version ${VERIFIED_HERDR_VERSION}`,
+    );
     expect(io.out.join("\n")).toContain("installed, active");
   });
 
@@ -76,12 +83,14 @@ describe("runHerdrCommand", () => {
         Promise.resolve({
           outcome: "installed-and-started",
           binaryPath: "/managed/herdr",
-          version: "0.9.0",
+          version: VERIFIED_HERDR_VERSION,
           protocol: 22,
         }),
     });
     expect(code).toBe(0);
-    expect(io.out.join("\n")).toContain("Installed Herdr 0.9.0");
+    expect(io.out.join("\n")).toContain(
+      `Installed Herdr ${VERIFIED_HERDR_VERSION}`,
+    );
     expect(io.out.join("\n")).toContain("/managed/herdr");
   });
 

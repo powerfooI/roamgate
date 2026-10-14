@@ -74,7 +74,7 @@ Backend selection uses a verified protocol allowlist, not browser inference.
 [Compatibility](./DEPLOYMENT.md#herdr-compatibility) defines supported versions,
 legacy fallback, and clipboard limitations.
 
-Herdr 0.9.0 endpoints require generation 1 and exact codecs
+Herdr 0.9.0 and 0.9.4 endpoints require generation 1 and exact codecs
 `shell.snapshot.v1`, `shell.surface.v1`, `shell.input.semantic.v1`, and
 `shell.blob.v1`. Unknown generations/codecs fail closed. Attachment waits for the
 initial snapshot; each viewer crops its pane from the shared tab surface.
@@ -700,8 +700,10 @@ do not multiply alerts. Finished/needs-attention map to completed/blocked;
 pane-less custom alerts use their sound (`request` = blocked). The runtime relays
 each one to Web Push and to browsers as `roamgate.task_notification`; the bridge
 hello advertises `herdr_task_notifications` so pages disable their own status
-tracker. The shell reconnects with capped backoff. Servers without endpoint
-support (older Herdr, or endpoints disabled) fall back to the status tracker
+tracker. Herdr 0.9.4's Antigravity/Grok foreground-idle policy stays authoritative;
+Roamgate does not synthesize extra alerts for their background tasks. The shell
+reconnects with capped backoff. Servers without endpoint support (older Herdr,
+or endpoints disabled) fall back to the status tracker
 below, relayed the same way; a temporarily disconnected endpoint server does not.
 
 The `status` source tracks agent transitions through per-pane subscriptions and

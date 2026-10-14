@@ -11,7 +11,7 @@ import { join } from "node:path";
  * Herdr release against Roamgate's supported protocol range
  * (server/src/bridge/protocol-compat.ts).
  */
-export const VERIFIED_HERDR_VERSION = "0.9.0";
+export const VERIFIED_HERDR_VERSION = "0.9.4";
 export const VERIFIED_HERDR_PROTOCOL = 22;
 
 export type HerdrReleaseTarget =
@@ -23,15 +23,15 @@ export type HerdrReleaseTarget =
 
 export const VERIFIED_HERDR_SHA256: Record<HerdrReleaseTarget, string> = {
   "linux-x86_64":
-    "4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f",
+    "493304fbefb0ed0ea0455f373b47f48d24e8774bc7974f4c916ad2e937675b23",
   "linux-aarch64":
-    "9c8db20fb7e7427b138d5367113f1621ffd319f2f65d6f009e2594029115f0d2",
+    "9511cb70982c1ef115f232058e7ed7cf9640aa5a2c0ca78934cefda3aeb093fd",
   "macos-x86_64":
-    "d0c920b2a126a74809fa1491411c9a097a44786cac9c2ca51b818a995581cf16",
+    "2015ca1de3e93b84cdcccbfd94fbbd65dd56338cea4d3e57a8660e977a3bd700",
   "macos-aarch64":
-    "32b53df09872628059c789a69f02a6b8e29e14ddf26711421f3463f70c1aef17",
+    "ea20bfff9cb8c83a996081c926e6ff9370de8e543baa859bca48d19175d895ff",
   "windows-x86_64":
-    "b4508c445de1c1a68c760a01735da2aba2fa214b2aafd4b07f732e49b2a64b11",
+    "0e4ccb5cd7b6ca464a69637cda66d3c93334ebc057c50c5878b8e89e1a20afee",
 };
 
 export function resolveHerdrReleaseTarget(

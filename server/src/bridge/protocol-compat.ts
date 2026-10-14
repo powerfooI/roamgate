@@ -3,7 +3,7 @@ export const MAXIMUM_HERDR_PROTOCOL = 22;
 
 export class HerdrCompatibilityError extends Error {}
 
-// Retain the verified legacy codecs (14-20) and add only tagged v0.9.0 (22).
+// Retain legacy codecs (14-20); tagged Herdr 0.9.0 and 0.9.4 both use 22.
 // Protocol 21 and future versions must never be echoed through either codec.
 export function isSupportedHerdrProtocol(
   protocol: unknown,
