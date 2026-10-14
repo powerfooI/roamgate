@@ -87,6 +87,7 @@ export function createTerminalBridge(args: {
     params: Record<string, unknown>,
     isCurrent: () => boolean,
     deadline: EndpointCreationDeadline,
+    validatePath?: () => Promise<void>,
   ) => Promise<unknown>;
   safeSend: (
     ws: ServerWebSocket<unknown>,
@@ -1061,6 +1062,7 @@ export function createTerminalBridge(args: {
     method: "tab.create" | "workspace.create",
     params: Record<string, unknown>,
     requestIsCurrent: () => boolean,
+    validatePath: () => Promise<void> = async () => {},
   ) {
     const deadline = new EndpointCreationDeadline();
     return deadline.wait(
@@ -1075,6 +1077,7 @@ export function createTerminalBridge(args: {
             params,
             () => !disposed && requestIsCurrent(),
             deadline,
+            validatePath,
           );
         }
         const source = parseEndpointCreationSource(params.browser_source);
@@ -1115,6 +1118,7 @@ export function createTerminalBridge(args: {
             if (!args.validateCreationSource)
               throw new Error("Creation source validation is unavailable.");
             await args.validateCreationSource(source);
+            await validatePath();
             validateAttachment();
           },
           deadline,

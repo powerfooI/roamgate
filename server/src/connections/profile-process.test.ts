@@ -730,6 +730,7 @@ test("production routing bootstraps only a verified empty session and serializes
   mkdirSync(root, { recursive: true, mode: 0o700 });
   let valid = false;
   let workspaces: Array<{ workspace_id: string }> = [];
+  let beforeTopology: (() => Promise<void>) | undefined;
   const mutations: Record<string, unknown>[] = [];
   const profile = await fakeHerdr(
     root,
@@ -737,10 +738,12 @@ test("production routing bootstraps only a verified empty session and serializes
     22,
     undefined,
     async (request) => {
-      if (request.method === "workspace.list")
+      if (request.method === "workspace.list") {
+        await beforeTopology?.();
         return valid
           ? { type: "workspace_list", workspaces }
           : { workspaces: [] };
+      }
       if (request.method === "workspace.create") {
         mutations.push(request.params ?? {});
         await Bun.sleep(20);
@@ -894,6 +897,28 @@ test("production routing bootstraps only a verified empty session and serializes
     ).toBe("workspace_created");
     expect(mutations[1]).toEqual({ cwd: chosen, focus: false });
     workspaces = [];
+    const topologyEntered = Promise.withResolvers<void>();
+    const releaseTopology = Promise.withResolvers<void>();
+    beforeTopology = async () => {
+      topologyEntered.resolve();
+      await releaseTopology.promise;
+    };
+    try {
+      const creating = rpc(browsers[0], "workspace.create", {
+        browser_source: null,
+        cwd: "~/chosen",
+      });
+      await topologyEntered.promise;
+      rmSync(chosen, { recursive: true });
+      releaseTopology.resolve();
+      expect((await creating).error).toMatchObject({
+        message: expect.stringContaining("Directory does not exist."),
+      });
+      expect(mutations).toHaveLength(2);
+    } finally {
+      releaseTopology.resolve();
+      beforeTopology = undefined;
+    }
     expect(
       (
         await rpc(

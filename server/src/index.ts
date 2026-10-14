@@ -1011,6 +1011,20 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
         method,
         params,
         requestIsCurrent,
+        async () => {
+          if (
+            method === "workspace.create" &&
+            params?.cwd != null &&
+            params.cwd !== ""
+          ) {
+            const info = await inspectWorkspacePath(
+              params.cwd,
+              { host: sshHost(), remotePlatform: connection.remotePlatform },
+              false,
+            );
+            if (info.error) throw new Error(`${info.error} ${info.path}`);
+          }
+        },
       );
       sendReply({ id, result }, method);
     } catch (error) {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, jest, spyOn, test } from "bun:test";
 import { EventEmitter, once } from "node:events";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
@@ -15,6 +16,7 @@ import type { Popup } from "./endpoint-surface";
 import type { ServerWebSocket } from "bun";
 import { createTerminalBridge } from "./terminal-bridge";
 import { silentLogger } from "../utils/logger";
+import { inspectWorkspacePath } from "../workspace/path";
 import { EndpointCreationDeadline } from "./endpoint-creation";
 import {
   dropCoalescedMessage,
@@ -2800,6 +2802,97 @@ test("two browser source endpoints create concurrently without changing each oth
     bridge.dispose();
   }
 });
+
+for (const stage of ["readiness", "queue", "source validation"] as const) {
+  test(`workspace directory is rechecked after ${stage} before dispatch`, async () => {
+    const root = realpathSync(
+      mkdtempSync(path.join(tmpdir(), "creation-path-")),
+    );
+    const cwd = path.join(root, "project");
+    mkdirSync(cwd);
+    const held = deferred<void>();
+    let waiting = false;
+    const requests: string[] = [];
+    const socketPath = await startSessionServer({
+      methods: creationMethods,
+      onRequest: async (method) => {
+        requests.push(method);
+        if (stage === "queue" && method === "tab.create") await held.promise;
+      },
+    });
+    const { bridge, ws, attach } = creationBridge(socketPath, {
+      lookup: async () => {
+        if (stage === "readiness") {
+          waiting = true;
+          await held.promise;
+        }
+        return "w1:p1";
+      },
+      validate: async () => {
+        if (stage === "source validation") {
+          waiting = true;
+          await held.promise;
+        }
+      },
+    });
+    let prior: Promise<unknown> | undefined;
+    try {
+      expect((await inspectWorkspacePath(cwd, {}, false)).error).toBeNull();
+      const attaching = attach();
+      if (stage === "readiness") await settleUntil(() => waiting);
+      else await attaching;
+      if (stage === "queue") {
+        prior = bridge.createFromTerminal(
+          ws,
+          "tab.create",
+          { workspace_id: "w1", browser_source: creationSource },
+          () => true,
+        );
+        await settleUntil(() => requests.includes("tab.create"));
+      }
+      const params = { cwd, browser_source: creationSource };
+      const checkDirectory = async () => {
+        const info = await inspectWorkspacePath(params.cwd, {}, false);
+        if (info.error) throw new Error(info.error);
+      };
+      const pending = bridge
+        .createFromTerminal(
+          ws,
+          "workspace.create",
+          params,
+          () => true,
+          checkDirectory,
+        )
+        .then(
+          () => null,
+          (error: Error) => error,
+        );
+      if (stage === "source validation") await settleUntil(() => waiting);
+      rmSync(cwd, { recursive: true });
+      held.resolve();
+      await attaching;
+      await prior;
+      expect((await pending)?.message).toContain("Directory does not exist.");
+      expect(requests).not.toContain("workspace.create");
+      mkdirSync(cwd);
+      await bridge.createFromTerminal(
+        ws,
+        "workspace.create",
+        params,
+        () => true,
+        checkDirectory,
+      );
+      expect(
+        requests.filter((method) => method === "workspace.create"),
+      ).toHaveLength(1);
+    } finally {
+      held.resolve();
+      await prior;
+      bridge.dispose();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
 
 test("creation queued behind readiness or validation cannot mutate a detached source", async () => {
   const validation = deferred<void>();

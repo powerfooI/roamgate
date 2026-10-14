@@ -119,6 +119,7 @@ export function createEmptyWorkspaceCreator(
     params: Record<string, unknown>,
     isCurrent: () => boolean,
     deadline: EndpointCreationDeadline,
+    validatePath: () => Promise<void> = async () => {},
   ) => {
     const check = () => {
       deadline.assertBeforeDispatch();
@@ -143,6 +144,7 @@ export function createEmptyWorkspaceCreator(
         throw new Error(
           "Session is no longer empty. Open a terminal in the desired workspace and retry creation.",
         );
+      await validatePath();
       check();
       const creationParams: Record<string, unknown> = {
         ...params,

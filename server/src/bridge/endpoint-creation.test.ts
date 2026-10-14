@@ -1,4 +1,8 @@
 import { expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { inspectWorkspacePath } from "../workspace/path";
 import {
   assertEndpointCreationSource,
   createEmptyWorkspaceCreator,
@@ -94,5 +98,58 @@ test("empty bootstrap rejects malformed and nonempty topology without mutation",
       ),
     ).rejects.toThrow();
     expect(calls).toEqual(["workspace.list"]);
+  }
+});
+
+test("empty bootstrap rechecks the directory after waiting for topology", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "bootstrap-path-")));
+  const cwd = join(root, "project");
+  mkdirSync(cwd);
+  const entered = Promise.withResolvers<void>();
+  const held = Promise.withResolvers<void>();
+  const calls: string[] = [];
+  const create = createEmptyWorkspaceCreator(async (method) => {
+    calls.push(method);
+    if (method === "workspace.list") {
+      entered.resolve();
+      await held.promise;
+    }
+    return { type: "workspace_list", workspaces: [] };
+  });
+  try {
+    expect((await inspectWorkspacePath(cwd, {}, false)).error).toBeNull();
+    const checkDirectory = async () => {
+      const info = await inspectWorkspacePath(cwd, {}, false);
+      if (info.error) throw new Error(info.error);
+    };
+    const pending = create(
+      { cwd, browser_source: null },
+      () => true,
+      new EndpointCreationDeadline(),
+      checkDirectory,
+    ).then(
+      () => null,
+      (error: Error) => error,
+    );
+    await entered.promise;
+    rmSync(cwd, { recursive: true });
+    held.resolve();
+    expect((await pending)?.message).toContain("Directory does not exist.");
+    expect(calls).toEqual(["workspace.list"]);
+    mkdirSync(cwd);
+    await create(
+      { cwd, browser_source: null },
+      () => true,
+      new EndpointCreationDeadline(),
+      checkDirectory,
+    );
+    expect(calls).toEqual([
+      "workspace.list",
+      "workspace.list",
+      "workspace.create",
+    ]);
+  } finally {
+    held.resolve();
+    rmSync(root, { recursive: true, force: true });
   }
 });
