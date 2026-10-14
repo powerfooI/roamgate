@@ -114,7 +114,7 @@ export function createWindowsSshTunnel(args: {
       ? `$path = ${psQuote(config.remoteHerdrPath)}`
       : "$command = Get-Command herdr.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; $path = if ($command) { $command.Source } else { Join-Path $env:LOCALAPPDATA 'Programs\\Herdr\\bin\\herdr.exe' }";
     const command = powershellCommand(
-      `$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; ${path}; if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw 'roamgate-windows-herdr-unavailable' }; $check = & $path remote-api-bridge --check; if ($LASTEXITCODE -ne 0 -or $check -ne 'herdr-api-bridge-v1') { throw 'roamgate-windows-herdr-unavailable' }; $status = & $path --session ${psQuote(config.session ?? "default")} status server --json; if ($LASTEXITCODE -ne 0 -or !($status | ConvertFrom-Json).running) { throw 'roamgate-windows-session-unavailable' }; [Console]::Out.WriteLine('roamgate-herdr-path:' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($path)))`,
+      `$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; ${path}; if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw 'roamgate-windows-herdr-unavailable' }; $check = & $path remote-api-bridge --check; if ($LASTEXITCODE -ne 0 -or $check -ne 'herdr-api-bridge-v1') { throw 'roamgate-windows-herdr-unavailable' }; $status = & $path --session ${psQuote(config.session ?? "default")} status server --json; if ($LASTEXITCODE -ne 0) { throw 'roamgate-windows-status-failed' }; if (!($status | ConvertFrom-Json).running) { throw 'roamgate-windows-session-unavailable' }; [Console]::Out.WriteLine('roamgate-herdr-path:' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($path)))`,
     );
     try {
       const { stdout } = await args.runProcess(
@@ -135,6 +135,15 @@ export function createWindowsSshTunnel(args: {
       return resolved;
     } catch (error) {
       const diagnostic = String(error);
+      const failure = classifySshTunnelFailure(-1, diagnostic);
+      if (failure.kind === "permission") throw failure;
+      if (diagnostic.includes("roamgate-windows-status-failed"))
+        throw new SshTunnelError(
+          "Could not read the Windows Herdr server status. Check the selected session on the remote host.",
+          true,
+          "exited",
+          -1,
+        );
       if (diagnostic.includes("roamgate-windows-session-unavailable"))
         throw new SshTunnelError(
           "The selected Windows Herdr session is not running. Start it on the remote host before connecting.",
@@ -148,7 +157,7 @@ export function createWindowsSshTunnel(args: {
           diagnostic,
         )
       )
-        throw classifySshTunnelFailure(-1, diagnostic);
+        throw failure;
       throw new SshTunnelError(
         "Windows SSH requires Windows PowerShell and Herdr 0.9.1+ with remote-api-bridge. Install it on the remote host or set its executable path.",
         false,

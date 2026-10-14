@@ -731,6 +731,18 @@ Remote socket fields are unavailable for Windows. Roamgate checks bridge support
 before connecting and never installs or updates remote software on reconnect.
 The Roamgate-managed local Herdr version does not determine the remote version.
 
+Herdr 0.9.4 restricts an elevated Windows server to administrator clients by
+default. Run Herdr and its clients (including the SSH bridge) at matching
+privilege levels; prefer an ordinary server when elevation is unnecessary.
+Roamgate reports this access denial separately from SSH login failure and does
+not retry it automatically. After correcting privileges, reconnect the profile.
+To deliberately share an elevated server with ordinary clients of the same
+account, Herdr supports `allow_unelevated_clients = true` under `[server]` in
+its TOML configuration or `herdr --session <name> server --allow-unelevated-clients`.
+Stop and restart the selected server from an administrator terminal to apply
+this change; stopping it closes its panes. This permits ordinary clients to
+control the elevated server. Roamgate never enables it automatically.
+
 Windows SSH supports Herdr API operations and interactive terminals, including
 PowerShell, resize and reconnect. Remote file, Git, worktree and agent-history
 helpers that require a POSIX shell remain Unix-only. Failed remote operations
@@ -747,8 +759,8 @@ retires routing and blocks edits rather than letting memory/disk disagree.
 
 `auto_connect` controls startup, not browser selection. Disconnect/removal stops
 only the runtime/tunnel, never Herdr/workspaces. SSH retries transient failures,
-not auth/host-key/permanent protocol errors. There is no idle cleanup or aggregate
-resource budget; disconnect unused profiles.
+not auth/host-key/Herdr permission/permanent protocol errors. There is no idle
+cleanup or aggregate resource budget; disconnect unused profiles.
 
 GUI preferences and worktree source relationships live in
 `~/.config/roamgate/settings.json` (Windows: `%APPDATA%\roamgate\settings.json`).

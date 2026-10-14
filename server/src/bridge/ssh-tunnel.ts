@@ -7,6 +7,7 @@ const SSH_STDERR_MAX_BYTES = 16 * 1024;
 
 export type SshTunnelFailureKind =
   | "authentication"
+  | "permission"
   | "host-key"
   | "unreachable"
   | "unsupported"
@@ -42,6 +43,16 @@ export function classifySshTunnelFailure(
       "SSH host-key verification failed; verify the host outside Roamgate",
       false,
       "host-key",
+      exitCode,
+    );
+  }
+  if (
+    diagnostic.includes("for an elevated server, use an administrator terminal")
+  ) {
+    return new SshTunnelError(
+      "Windows Herdr denied access to its server. Match the server's privilege level (use an administrator client for an elevated server). Sharing with ordinary clients requires explicitly enabling allow_unelevated_clients and restarting Herdr, which closes panes.",
+      false,
+      "permission",
       exitCode,
     );
   }

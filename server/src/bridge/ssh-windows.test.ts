@@ -106,7 +106,13 @@ describe.skipIf(process.platform === "win32")(
       }
     });
 
-    test("reports authentication failures without leaking stderr", async () => {
+    test.each([
+      ["Permission denied (publickey).", "authentication"],
+      [
+        "For an elevated server, use an administrator terminal. Sharing with ordinary clients requires stopping it there and restarting its `herdr server` command with --allow-unelevated-clients (closes panes). Access is denied. (os error 5)",
+        "permission",
+      ],
+    ])("reports %s without leaking stderr", async (diagnostic, kind) => {
       const settings = config();
       let report!: (error: SshTunnelError) => void;
       const failure = new Promise<SshTunnelError>((resolve) => {
@@ -121,7 +127,7 @@ describe.skipIf(process.platform === "win32")(
             process.execPath,
             [
               "-e",
-              "process.stderr.write('Permission denied (publickey). private detail'); process.exit(255)",
+              `process.stderr.write(${JSON.stringify(`${diagnostic} private detail`)}); process.exit(1)`,
             ],
             { stdio: "pipe" },
           ),
@@ -131,8 +137,9 @@ describe.skipIf(process.platform === "win32")(
         const socket = createConnection(settings.socketPath);
         socket.on("error", () => undefined);
         expect(await failure).toMatchObject({
-          kind: "authentication",
+          kind,
           retryable: false,
+          message: expect.not.stringContaining("private detail"),
         });
         socket.destroy();
       } finally {
@@ -241,5 +248,37 @@ describe.skipIf(process.platform === "win32")(
         await manager.cleanupAutoSshTunnel();
       }
     });
+
+    test.each([
+      [
+        "For an elevated server, use an administrator terminal. Permission denied (os error 5)\nroamgate-windows-status-failed",
+        "permission",
+        false,
+        "administrator",
+      ],
+      ["Permission denied (publickey).", "authentication", false, "SSH"],
+      ["roamgate-windows-status-failed", "exited", true, "status"],
+    ])(
+      "distinguishes preflight failure: %s",
+      async (message, kind, retryable, hint) => {
+        const settings = config();
+        const manager = createWindowsSshTunnel({
+          config: settings,
+          runProcess: async () => {
+            throw new Error(message);
+          },
+        });
+        try {
+          await expect(manager.startAutoSshTunnel()).rejects.toMatchObject({
+            kind,
+            retryable,
+            message: expect.stringContaining(hint),
+          });
+          expect(existsSync(settings.socketPath)).toBeFalse();
+        } finally {
+          await manager.cleanupAutoSshTunnel();
+        }
+      },
+    );
   },
 );
