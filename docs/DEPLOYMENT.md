@@ -26,7 +26,7 @@ and **tagged Herdr 0.9.0 and 0.9.4 / protocol 22**. Protocol 21 and unknown vers
 are rejected at control/binary probes. Use a compatible Roamgate build or separate
 server; **do not downgrade a live server**. Published binaries follow their
 [release notes](https://github.com/powerfooI/roamgate/releases).
-The [plugin](#herdr-plugin) separately requires Herdr 0.9.4+.
+The [plugin](#herdr-plugin) separately requires Herdr 0.7.2+.
 Tab reordering requires Herdr 0.7.2+; Herdr 0.7.0 and 0.7.1 retain their fixed
 tab order. The bridge confirms support before enabling dragging.
 
@@ -210,7 +210,7 @@ curl -fsSL \
 
 ## Herdr plugin
 
-Requires Herdr 0.9.4+. The native plugin uses the standalone Roamgate executable
+Requires Herdr 0.7.2+. The native plugin uses the standalone Roamgate executable
 for its actions and panel; users do not need Bun or Node.js. Unix installation
 uses the same system tools as the standalone installer; Windows uses Windows
 PowerShell and `tar.exe`. Bun remains a source-build dependency.

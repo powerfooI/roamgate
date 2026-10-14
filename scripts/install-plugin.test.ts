@@ -23,7 +23,7 @@ test("plugin manifest runs system installers and the native executable", () => {
   const manifest = Bun.TOML.parse(
     readFileSync(join(import.meta.dir, "../herdr-plugin.toml"), "utf8"),
   ) as any;
-  expect(manifest.min_herdr_version).toBe("0.9.4");
+  expect(manifest.min_herdr_version).toBe("0.7.2");
   expect(manifest.build.map((entry: any) => entry.platforms)).toEqual([
     ["linux", "macos"],
     ["windows"],
