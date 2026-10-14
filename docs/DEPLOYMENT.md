@@ -259,6 +259,12 @@ URL, version, and start/restart/uninstall controls. Default is a session-modal
 popup; `--placement split`, `tab`, `zoomed`, or `overlay` creates a regular pane
 visible to other Herdr clients.
 
+After updating the plugin, close and reopen its panel before choosing Start or
+Restart. Herdr 0.9.4+ keeps already-open plugin panes on their previous files.
+Both controls register the current plugin's binary with the user service and
+restart it, preserving its environment file and credentials. The standalone
+`roamgate service restart` command continues to use the registered binary.
+
 ## Basic runtime configuration
 
 Flags override environment variables, then defaults; `roamgate --help` lists all
