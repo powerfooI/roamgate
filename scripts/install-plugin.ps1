@@ -16,7 +16,13 @@ Get-Command tar.exe -CommandType Application -ErrorAction Stop | Out-Null
 $packageDir = "roamgate-$platform"
 $archiveName = "roamgate-v$version-$platform.tar.xz"
 $releaseBase = "https://github.com/powerfooI/roamgate/releases/download/v$version"
-if ($env:ROAMGATE_RELEASE_BASE_URL) { $releaseBase = $env:ROAMGATE_RELEASE_BASE_URL.TrimEnd('/') }
+$environment = [Environment]::GetEnvironmentVariables()
+$customReleaseBase = if ($environment.Contains('ROAMGATE_RELEASE_BASE_URL')) {
+  $environment['ROAMGATE_RELEASE_BASE_URL']
+} else {
+  $environment['HERDR_GUI_RELEASE_BASE_URL']
+}
+if ($customReleaseBase) { $releaseBase = $customReleaseBase.TrimEnd('/') }
 $uri = [Uri]$releaseBase
 if (!$uri.IsAbsoluteUri -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or
     ($uri.Scheme -ne 'https' -and !($uri.Scheme -eq 'http' -and $uri.IsLoopback))) {

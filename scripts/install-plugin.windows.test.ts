@@ -94,9 +94,14 @@ test.skipIf(process.platform !== "win32")(
             : new Response("missing", { status: 404 });
         },
       });
+      const installerEnv = {
+        ...process.env,
+        PATH: `${join(process.env.SystemRoot!, "System32")};${join(process.env.SystemRoot!, "System32/WindowsPowerShell/v1.0")}`,
+      };
       for (failure of [
         "fresh",
         "none",
+        "legacy-mirror",
         "checksum",
         "checksum-name",
         "metadata",
@@ -129,9 +134,15 @@ test.skipIf(process.platform !== "win32")(
           ],
           {
             env: {
-              ...process.env,
-              PATH: `${join(process.env.SystemRoot!, "System32")};${join(process.env.SystemRoot!, "System32/WindowsPowerShell/v1.0")}`,
-              ROAMGATE_RELEASE_BASE_URL: `http://127.0.0.1:${host.port}`,
+              ...installerEnv,
+              ROAMGATE_RELEASE_BASE_URL:
+                failure === "legacy-mirror"
+                  ? undefined
+                  : `http://127.0.0.1:${host.port}`,
+              HERDR_GUI_RELEASE_BASE_URL:
+                failure === "legacy-mirror"
+                  ? `http://127.0.0.1:${host.port}`
+                  : "http://legacy.invalid/releases",
               PLUGIN_REJECT_NATIVE: failure === "native-command" ? "1" : "",
             },
             stdout: "pipe",
@@ -142,7 +153,7 @@ test.skipIf(process.platform !== "win32")(
           child.exited,
           new Response(child.stderr).text(),
         ]);
-        if (failure === "fresh" || failure === "none") {
+        if (["fresh", "none", "legacy-mirror"].includes(failure)) {
           expect(code, stderr).toBe(0);
           expect(
             Bun.spawnSync([target, "plugin", "version"])
@@ -155,6 +166,33 @@ test.skipIf(process.platform !== "win32")(
         }
         expect(readdirSync(join(root, "server"))).toEqual(["roamgate.exe"]);
       }
+      const script = join(root, "scripts/install-plugin.ps1").replaceAll(
+        "'",
+        "''",
+      );
+      const emptyOverride = Bun.spawnSync(
+        [
+          powershell,
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          `function Invoke-WebRequest { param($Uri) throw "Selected release: $Uri" }; & '${script}'`,
+        ],
+        {
+          env: {
+            ...installerEnv,
+            ROAMGATE_RELEASE_BASE_URL: "",
+            HERDR_GUI_RELEASE_BASE_URL: "http://legacy.invalid/releases",
+          },
+        },
+      );
+      expect(emptyOverride.exitCode).not.toBe(0);
+      expect(emptyOverride.stderr.toString()).toContain(
+        "Selected release: https://github.com/powerfooI/roamgate/releases/download/v9.8.7/",
+      );
+      expect(readdirSync(join(root, "server"))).toEqual(["roamgate.exe"]);
     } finally {
       host?.stop(true);
       rmSync(root, { recursive: true, force: true });
