@@ -9,8 +9,15 @@
 }
 
 .pane-layout-cell.is-active .terminal-view {
+  border-color: var(--accent-soft);
+}
+
+.terminal-view:has(.xterm-helper-textarea:focus),
+.terminal-shell:has(.terminal-composer-input:focus) .terminal-view {
   border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent-soft);
+  outline: 2px solid var(--accent-soft);
+  outline-offset: -2px;
+  box-shadow: 0 0 10px var(--accent-soft);
 }
 
 .terminal-view {

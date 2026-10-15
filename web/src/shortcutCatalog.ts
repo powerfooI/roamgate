@@ -43,6 +43,7 @@ const descriptions: [ShortcutId, string, string][] = [
     `Run numbered action ${n} in the command menu`,
     "Command menu",
   ]),
+  ["terminal.focus", "Focus the terminal input on desktop", "Terminal"],
   ["terminal.history", "Toggle agent message history", "Terminal"],
   [
     "terminal.pageUp",

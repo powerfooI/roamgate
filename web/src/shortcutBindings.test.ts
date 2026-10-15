@@ -8,6 +8,7 @@ import {
   SHORTCUT_IDS,
   shortcutConflicts,
   shortcutFromEvent,
+  shortcutScope,
   validateShortcutKeys,
   type ShortcutBindings,
   type ShortcutEvent,
@@ -42,6 +43,27 @@ const preset = () => ({
 });
 
 describe("platform shortcut maps", () => {
+  test("terminal focus is a configurable global shortcut on every platform", () => {
+    for (const platform of ["mac", "windows", "linux"] as const) {
+      const bindings = defaultShortcutBindings(platform);
+      expect(bindings["terminal.focus"]).toEqual(["Ctrl+Backquote"]);
+      expect(
+        matchesShortcut(
+          event({ key: "`", code: "Backquote", ctrlKey: true }),
+          "terminal.focus",
+          bindings,
+        ),
+      ).toBe(true);
+      expect(
+        shortcutConflicts(
+          "terminal.focus",
+          bindings["preview.selectAll"],
+          bindings,
+        ),
+      ).toContain("preview.selectAll");
+    }
+    expect(shortcutScope("terminal.focus")).toBe("global");
+  });
   test("Linux and Windows share the pane-switcher bindings", () => {
     for (const id of ["panes.recent", "panes.search", "command.menu"] as const)
       expect(defaultShortcutBindings("linux")[id]).toEqual(
@@ -381,6 +403,21 @@ test("older presets keep a key assigned before the popup shortcut existed", () =
     const loaded = validateShortcutPreset({ ...preset(), base, bindings });
     expect(loaded.bindings["tab.close"]).toEqual(bindings["tab.close"]!);
     expect(loaded.bindings["plugin.herdrFloat.toggle"]).toEqual([]);
+  }
+});
+
+test("older presets gain terminal focus without replacing saved assignments", () => {
+  for (const base of ["mac", "windows", "linux"] as const) {
+    const defaults = defaultShortcutBindings(base);
+    const bindings: Partial<ShortcutBindings> = { ...defaults };
+    delete bindings["terminal.focus"];
+    expect(
+      validateShortcutPreset({ ...preset(), base, bindings }).bindings,
+    ).toEqual(defaults);
+    bindings["tab.create"] = defaults["terminal.focus"];
+    const loaded = validateShortcutPreset({ ...preset(), base, bindings });
+    expect(loaded.bindings["tab.create"]).toEqual(defaults["terminal.focus"]);
+    expect(loaded.bindings["terminal.focus"]).toEqual([]);
   }
 });
 

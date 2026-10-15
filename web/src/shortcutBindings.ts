@@ -47,6 +47,7 @@ const base = {
   "workspaces.open": ["Ctrl+Alt+O"],
   "files.toggle": ["Ctrl+Alt+E"],
   "diff.toggle": ["Ctrl+Alt+G"],
+  "terminal.focus": ["Ctrl+Backquote"],
   "terminal.history": ["Ctrl+Alt+H"],
   "terminal.pageUp": ["PageUp"],
   "terminal.pageDown": ["PageDown"],
@@ -289,7 +290,12 @@ export function formatShortcut(
 
 export function shortcutScope(id: ShortcutId): string {
   if (id.startsWith("command.") && id !== "command.menu") return "command";
-  if (id === "terminal.history" || id === "annotations.toggle") return "global";
+  if (
+    id === "terminal.focus" ||
+    id === "terminal.history" ||
+    id === "annotations.toggle"
+  )
+    return "global";
   if (/^(terminal|preview|composer|annotation|annotations)\./.test(id))
     return id.split(".")[0];
   return "global";

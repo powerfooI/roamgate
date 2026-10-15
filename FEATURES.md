@@ -614,6 +614,7 @@ Common defaults (Linux/Android exceptions follow):
 | Zen mode (desktop) | `Cmd+Shift+Z` | `Ctrl+Alt+Z` |
 | Recent pane switcher | `Ctrl+Tab` | `Ctrl+Alt+J` |
 | Search panes | `Alt+K` | `Alt+K` |
+| Focus terminal input (desktop) | `Ctrl+Backquote` | `Ctrl+Backquote` |
 | Create / close tab or pane | `Cmd+T` / `Cmd+W` | `Ctrl+Alt+T` / `Ctrl+Alt+W` |
 | Previous / next tab | `Cmd+Option+Left/Right` | `Alt+Shift+Left/Right` |
 | Focus neighboring pane | `Cmd+Ctrl+Arrow` | `Ctrl+Shift+Arrow` |
@@ -637,6 +638,13 @@ Linux/Android uses `Ctrl+Alt+Shift+T` for new tabs, `Ctrl+Alt+Shift+D` to split
 right, and `Ctrl+Alt+Shift+S` to split down, avoiding desktop-reserved bindings.
 Letter/number bindings use physical keys. Browsers/OSes can intercept shortcuts;
 choose alternatives in the editor or use menus.
+
+Use **Focus terminal input** to return to the current pane after using other
+controls. It reveals the terminal and focuses the draft when Composer is open,
+or direct terminal input otherwise. Close open menus or dialogs first. A bright
+accent border and glow indicate actual input focus, including single-pane and
+zoomed terminals; split panes keep a muted border on the selected pane when
+input focus moves elsewhere.
 
 Copy needs a selection; plain `Ctrl+C` remains terminal input. Page/half-page
 navigation and modified Enter are configurable. Native editing/IME/app keys

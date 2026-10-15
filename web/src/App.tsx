@@ -36,6 +36,7 @@ import {
   useShortcutPreferences,
 } from "./shortcutPreferences";
 import { SHORTCUT_NUMBERS } from "./shortcutBindings";
+import { activeTerminalInput } from "./activeTerminalInput";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -1650,11 +1651,7 @@ export default function App() {
     setMobileView("session");
     if (!mobile) {
       requestAnimationFrame(() => {
-        document
-          .querySelector<HTMLElement>(
-            ".pane-layout-cell.is-active .xterm-helper-textarea, .pane-switcher-layout .xterm-helper-textarea, .workspace-terminal-surface > .terminal-shell .xterm-helper-textarea",
-          )
-          ?.focus();
+        activeTerminalInput(document)?.focus({ preventScroll: true });
       });
     }
   }, [mobile, updateInspectorState]);
@@ -1917,11 +1914,7 @@ export default function App() {
     setAssistantOpen(false);
     if (mobile && mobileView === "assistant") setMobileView("session");
     requestAnimationFrame(() => {
-      const terminal = mobile
-        ? null
-        : document.querySelector<HTMLElement>(
-            ".pane-layout-cell.is-active .xterm-helper-textarea, .pane-switcher-layout .xterm-helper-textarea, .workspace-terminal-surface > .terminal-shell .xterm-helper-textarea",
-          );
+      const terminal = mobile ? null : activeTerminalInput(document);
       focusIfUnchanged(
         mobile && mobileControlsCollapsed
           ? mobileControlsToggleRef.current
@@ -2030,11 +2023,7 @@ export default function App() {
       );
       return;
     }
-    document
-      .querySelector<HTMLElement>(
-        ".pane-layout-cell.is-active .xterm-helper-textarea, .pane-switcher-layout .xterm-helper-textarea, .workspace-terminal-surface > .terminal-shell .xterm-helper-textarea",
-      )
-      ?.focus();
+    activeTerminalInput(document)?.focus({ preventScroll: true });
   }, [mobile]);
   const clearAnnotations = useCallback(() => {
     commitAnnotations([]);
@@ -3093,6 +3082,13 @@ export default function App() {
         openPaneJumpSearch();
         return;
       }
+      if (shortcutMatches(e, "terminal.focus")) {
+        if (mobile) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) activateTerminalSurface();
+        return;
+      }
       if (e.key === "Escape") {
         if (
           document.getElementById(CONFIG_MENU_ID) ||
@@ -3348,6 +3344,7 @@ export default function App() {
       window.removeEventListener("blur", onBlur);
     };
   }, [
+    activateTerminalSurface,
     closePaneJump,
     commitPaneJump,
     defaultPaneJumpIndex,
