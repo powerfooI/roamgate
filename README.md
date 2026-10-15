@@ -26,8 +26,6 @@ from your phone.
 
 ### Desktop
 
-[![Roamgate reviewing Northstar code changes beside passing tests][desktop-changes]][desktop-changes]
-
 A real Northstar demo workspace with code changes and passing tests.
 
 <!-- markdownlint-disable MD033 -->
@@ -35,16 +33,20 @@ A real Northstar demo workspace with code changes and passing tests.
 <table width="100%">
   <thead>
     <tr>
-      <th width="50%" align="center">File explorer</th>
-      <th width="50%" align="center">Diff annotations</th>
+      <th width="33.33%" align="center">Workspace overview</th>
+      <th width="33.33%" align="center">File explorer</th>
+      <th width="33.33%" align="center">Diff annotations</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td width="50%" align="center" valign="top">
+      <td width="33.33%" align="center" valign="top">
+        <a href="./docs/images/roamgate-desktop-changes.png"><img src="./docs/images/roamgate-desktop-changes.png" alt="Roamgate reviewing Northstar code changes beside passing tests" width="100%" /></a>
+      </td>
+      <td width="33.33%" align="center" valign="top">
         <a href="./docs/images/roamgate-desktop-files.png"><img src="./docs/images/roamgate-desktop-files.png" alt="Roamgate file explorer with the Northstar task board preview" width="100%" /></a>
       </td>
-      <td width="50%" align="center" valign="top">
+      <td width="33.33%" align="center" valign="top">
         <a href="./docs/images/roamgate-desktop-annotations.png"><img src="./docs/images/roamgate-desktop-annotations.png" alt="Northstar status-filter diff with a line comment and review feedback" width="100%" /></a>
       </td>
     </tr>
@@ -105,7 +107,6 @@ checks. Requires Herdr and the Roamgate bridge to be running.
 
 Click any screenshot to open the full-resolution image.
 
-[desktop-changes]: ./docs/images/roamgate-desktop-changes.png
 [handoff-demo]: ./docs/images/roamgate-handoff.gif
 
 > **Moving from Herdr Studio / herdr-gui?** Automatic upgrades are not supported.
