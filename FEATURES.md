@@ -595,6 +595,12 @@ sharing access.
 
 ## Keyboard Shortcuts
 
+On desktop, press `Cmd+Shift+K` (`Ctrl+Alt+Shift+K` on Windows/Linux), click
+the command (`⌘`) button to the left of the top-bar controls, choose **Menu >
+Shortcut cheat sheet**, or run **Show shortcut cheat sheet** from the command
+menu for a read-only, filterable overview of the active preset. Press the same
+shortcut or Esc to close it.
+
 Open **Menu > Configuration > Behavior > Keyboard shortcuts** for the searchable
 reference/editor. Automatic detects your platform; explicit/custom presets
 support up to three bindings per action, unassignment, reset, and JSON
@@ -606,6 +612,7 @@ Common defaults (Linux/Android exceptions follow):
 | Action | macOS / iOS | Windows / Linux / Android |
 | --- | --- | --- |
 | Command menu | `Cmd+K` | `Ctrl+Alt+K` |
+| Shortcut cheat sheet (desktop) | `Cmd+Shift+K` | `Ctrl+Alt+Shift+K` |
 | Sidebar | `Cmd+B` | `Ctrl+Alt+B` |
 | Workspace Inspector | `Cmd+Shift+B` | `Ctrl+Alt+Shift+B` |
 | Expand / restore Inspector (desktop) | `Cmd+Option+Enter` | `Ctrl+Alt+Shift+Enter` |
@@ -614,7 +621,7 @@ Common defaults (Linux/Android exceptions follow):
 | Zen mode (desktop) | `Cmd+Shift+Z` | `Ctrl+Alt+Z` |
 | Recent pane switcher | `Ctrl+Tab` | `Ctrl+Alt+J` |
 | Search panes | `Alt+K` | `Alt+K` |
-| Focus terminal input (desktop) | `Ctrl+Backquote` | `Ctrl+Backquote` |
+| Focus terminal input (desktop) | ``Ctrl+` `` | ``Ctrl+` `` |
 | Create / close tab or pane | `Cmd+T` / `Cmd+W` | `Ctrl+Alt+T` / `Ctrl+Alt+W` |
 | Previous / next tab | `Cmd+Option+Left/Right` | `Alt+Shift+Left/Right` |
 | Focus neighboring pane | `Cmd+Ctrl+Arrow` | `Ctrl+Shift+Arrow` |

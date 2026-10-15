@@ -234,10 +234,12 @@ export function CommandCombobox({
   onOpenFileExplorer,
   onOpenFile,
   onOpenDiffViewer,
+  onShowShortcuts,
 }: {
   onOpenFileExplorer?: (workspaceId?: string) => void;
   onOpenFile?: (workspaceId: string, entry: FileExplorerEntry) => void;
   onOpenDiffViewer?: (workspaceId?: string) => void;
+  onShowShortcuts?: () => void;
 }) {
   useShortcutPreferences();
   const s = useStoreSelector(
@@ -933,6 +935,20 @@ export function CommandCombobox({
     });
   }
 
+  const helpActions: ActionDefinition[] = onShowShortcuts
+    ? [
+        {
+          key: "show-shortcut-cheatsheet",
+          icon: <Keyboard size={15} />,
+          title: "Show shortcut cheat sheet",
+          detail: "Read-only overview of keyboard shortcuts",
+          shortcut: shortcutLabel("shortcuts.show"),
+          keywords: ["keyboard", "shortcuts", "keybindings", "hotkeys", "help"],
+          run: onShowShortcuts,
+        },
+      ]
+    : [];
+
   const actionGroups: ActionGroupDefinition[] = [
     { heading: "Current", actions: currentActions },
     { heading: "Files", actions: fileActions },
@@ -941,6 +957,7 @@ export function CommandCombobox({
     { heading: "Tabs", actions: tabActions },
     { heading: "Panes", actions: paneActions },
     { heading: "Agents", actions: agentActions },
+    { heading: "Help", actions: helpActions },
   ].filter((group) => group.actions.length > 0);
 
   const normalizedSearch = normalizeSearchText(search);

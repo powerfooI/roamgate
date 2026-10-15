@@ -1,0 +1,131 @@
+.shortcut-cheatsheet {
+  width: min(1120px, 100%);
+  max-height: calc(100dvh - 36px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.shortcut-cheatsheet .modal-head {
+  flex-shrink: 0;
+  margin-bottom: 0;
+}
+
+.shortcut-cheatsheet .modal-head > :first-child {
+  flex: 1;
+}
+
+.shortcut-cheatsheet .modal-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shortcut-cheatsheet-search {
+  width: min(260px, 40%);
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.shortcut-cheatsheet-body {
+  min-height: 0;
+  overflow: auto;
+  columns: 3 300px;
+  column-gap: 28px;
+  padding-right: 2px;
+}
+
+.shortcut-cheatsheet-group {
+  break-inside: avoid;
+  margin-bottom: 16px;
+}
+
+.shortcut-cheatsheet-group h3 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.shortcut-cheatsheet-group dl {
+  margin: 0;
+}
+
+.shortcut-cheatsheet-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 12px;
+}
+
+.shortcut-cheatsheet-row dt,
+.shortcut-cheatsheet-row dd {
+  margin: 0;
+}
+
+.shortcut-cheatsheet-row dt {
+  min-width: 0;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.shortcut-cheatsheet-row dd {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  max-width: 55%;
+}
+
+.shortcut-cheatsheet-combo {
+  display: inline-flex;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.shortcut-cheatsheet-combo kbd {
+  min-width: 18px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--text-strong);
+  font:
+    11px / 1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  text-align: center;
+}
+
+.shortcut-cheatsheet-or,
+.shortcut-cheatsheet-unassigned {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.shortcut-cheatsheet-empty,
+.shortcut-cheatsheet-foot {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shortcut-cheatsheet-foot {
+  flex-shrink: 0;
+}

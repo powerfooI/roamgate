@@ -7,6 +7,7 @@ import {
   Download,
   ExternalLink,
   Focus,
+  Keyboard,
   LogOut,
   Palette,
   Plug,
@@ -50,11 +51,13 @@ export function reloadApplicationPage(
 type ConfigMenuProps = ConfigurationProps & {
   zenMode: boolean;
   onZenModeChange: (zenMode: boolean) => void;
+  onShowShortcuts: () => void;
 };
 
 export function ConfigMenu({
   zenMode,
   onZenModeChange,
+  onShowShortcuts,
   ...configuration
 }: ConfigMenuProps) {
   const s = useStoreSelector(
@@ -219,6 +222,18 @@ export function ConfigMenu({
                     setConfigurationTab("Appearance");
                   }}
                 />
+                {layout.mobile ? null : (
+                  <ConfigMenuItem
+                    icon={<Keyboard size={15} />}
+                    label="Shortcut cheat sheet"
+                    description={`Read-only overview \u00b7 ${shortcutLabel("shortcuts.show")}`}
+                    className="config-menu-item-row"
+                    onClick={() => {
+                      setOpen(false);
+                      onShowShortcuts();
+                    }}
+                  />
+                )}
                 {layout.mobile ? null : (
                   <div className="config-preference-row">
                     <span className="config-item-icon">

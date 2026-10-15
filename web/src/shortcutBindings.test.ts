@@ -64,6 +64,45 @@ describe("platform shortcut maps", () => {
     }
     expect(shortcutScope("terminal.focus")).toBe("global");
   });
+  test("the cheat sheet uses a letter key that layouts cannot remap", () => {
+    const mac = defaultShortcutBindings("mac");
+    expect(mac["shortcuts.show"]).toEqual(["Meta+Shift+K"]);
+    for (const platform of ["windows", "linux"] as const)
+      expect(defaultShortcutBindings(platform)["shortcuts.show"]).toEqual([
+        "Ctrl+Alt+Shift+K",
+      ]);
+    expect(
+      matchesShortcut(
+        event({ key: "k", code: "KeyK", metaKey: true, shiftKey: true }),
+        "shortcuts.show",
+        mac,
+      ),
+    ).toBe(true);
+    // German/Nordic Macs put "-" on the Slash key; Cmd+- must stay zoom out.
+    expect(
+      SHORTCUT_IDS.filter((id) =>
+        matchesShortcut(
+          event({ key: "-", code: "Slash", metaKey: true }),
+          id,
+          mac,
+        ),
+      ),
+    ).toEqual([]);
+    // An AltGr character on the K key (Ctrl+Alt on Windows) stays text input.
+    const altGr = (key: string) => ({
+      ...event({
+        key,
+        code: "KeyK",
+        ctrlKey: true,
+        altKey: true,
+        shiftKey: true,
+      }),
+      getModifierState: (state: string) => state === "AltGraph",
+    });
+    const windows = defaultShortcutBindings("windows");
+    expect(matchesShortcut(altGr("&"), "shortcuts.show", windows)).toBe(false);
+    expect(matchesShortcut(altGr("K"), "shortcuts.show", windows)).toBe(true);
+  });
   test("Linux and Windows share the pane-switcher bindings", () => {
     for (const id of ["panes.recent", "panes.search", "command.menu"] as const)
       expect(defaultShortcutBindings("linux")[id]).toEqual(
@@ -117,6 +156,11 @@ describe("platform shortcut maps", () => {
       "Alt+Win+Left",
     );
     expect(formatShortcut("Meta+K", "linux")).toBe("Super+K");
+  });
+  test("formats punctuation keys as the characters they type", () => {
+    expect(formatShortcut("Ctrl+Backquote", "windows")).toBe("Ctrl+`");
+    expect(formatShortcut("Meta+Slash", "mac")).toBe("Cmd+/");
+    expect(formatShortcut("Ctrl+Minus", "linux")).toBe("Ctrl+-");
   });
 });
 
@@ -403,6 +447,21 @@ test("older presets keep a key assigned before the popup shortcut existed", () =
     const loaded = validateShortcutPreset({ ...preset(), base, bindings });
     expect(loaded.bindings["tab.close"]).toEqual(bindings["tab.close"]!);
     expect(loaded.bindings["plugin.herdrFloat.toggle"]).toEqual([]);
+  }
+});
+
+test("older presets gain the cheat sheet shortcut without replacing saved keys", () => {
+  for (const base of ["mac", "windows", "linux"] as const) {
+    const defaults = defaultShortcutBindings(base);
+    const bindings: Partial<ShortcutBindings> = { ...defaults };
+    delete bindings["shortcuts.show"];
+    expect(
+      validateShortcutPreset({ ...preset(), base, bindings }).bindings,
+    ).toEqual(defaults);
+    bindings["tab.create"] = defaults["shortcuts.show"];
+    const loaded = validateShortcutPreset({ ...preset(), base, bindings });
+    expect(loaded.bindings["tab.create"]).toEqual(defaults["shortcuts.show"]);
+    expect(loaded.bindings["shortcuts.show"]).toEqual([]);
   }
 });
 

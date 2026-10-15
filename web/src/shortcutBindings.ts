@@ -20,6 +20,7 @@ export function detectShortcutPlatform(
 
 const base = {
   "command.menu": ["Ctrl+Alt+K"],
+  "shortcuts.show": ["Ctrl+Alt+Shift+K"],
   "sidebar.toggle": ["Ctrl+Alt+B"],
   "inspector.toggle": ["Ctrl+Alt+Shift+B"],
   "inspector.expand": ["Ctrl+Alt+Shift+Enter"],
@@ -105,6 +106,7 @@ export function defaultShortcutBindings(
   if (platform === "mac")
     Object.assign(bindings, {
       "command.menu": ["Meta+K"],
+      "shortcuts.show": ["Meta+Shift+K"],
       "sidebar.toggle": ["Meta+B"],
       "inspector.toggle": ["Meta+Shift+B"],
       "inspector.expand": ["Alt+Meta+Enter"],
@@ -268,22 +270,38 @@ export function matchesShortcut(
   return key !== null && bindings[id].includes(key);
 }
 
+const keySymbols: Record<string, string> = {
+  Minus: "-",
+  Equal: "=",
+  BracketLeft: "[",
+  BracketRight: "]",
+  Backslash: "\\",
+  Semicolon: ";",
+  Quote: "'",
+  Comma: ",",
+  Period: ".",
+  Slash: "/",
+  Backquote: "`",
+};
+
 export function formatShortcut(
   binding: string,
   platform: ShortcutPlatform,
 ): string {
   return binding
     .split("+")
-    .map((part) =>
-      part === "Meta"
-        ? platform === "mac"
-          ? "Cmd"
-          : platform === "windows"
-            ? "Win"
-            : "Super"
-        : part === "Alt" && platform === "mac"
-          ? "Option"
-          : part.replace("Arrow", ""),
+    .map(
+      (part) =>
+        keySymbols[part] ??
+        (part === "Meta"
+          ? platform === "mac"
+            ? "Cmd"
+            : platform === "windows"
+              ? "Win"
+              : "Super"
+          : part === "Alt" && platform === "mac"
+            ? "Option"
+            : part.replace("Arrow", "")),
     )
     .join("+");
 }

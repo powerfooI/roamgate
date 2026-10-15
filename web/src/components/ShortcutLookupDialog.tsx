@@ -24,6 +24,9 @@ import {
 } from "../shortcutPreferences";
 import "./ShortcutLookupDialog.css";
 
+// Shares this lazy chunk so the cheat sheet adds no separate web assets.
+export { ShortcutCheatSheet } from "./ShortcutCheatSheet";
+
 export function ShortcutLookupDialog({
   open,
   onClose,

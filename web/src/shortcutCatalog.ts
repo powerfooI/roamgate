@@ -6,6 +6,7 @@ export type ShortcutDescription = {
 };
 const descriptions: [ShortcutId, string, string][] = [
   ["command.menu", "Open or close the command menu", "Global"],
+  ["shortcuts.show", "Show the shortcut cheat sheet on desktop", "Global"],
   ["sidebar.toggle", "Toggle the desktop sidebar", "Global"],
   ["inspector.toggle", "Toggle the Workspace Inspector", "Global"],
   ["inspector.expand", "Expand or restore the Inspector on desktop", "Global"],
