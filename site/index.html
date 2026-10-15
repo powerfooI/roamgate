@@ -167,61 +167,28 @@
           </p>
         </div>
 
-        <div class="hero-visual reveal reveal-delay" data-spotlight>
-          <div class="product-window">
-            <div class="window-bar" aria-hidden="true">
-              <span class="traffic traffic-red"></span>
-              <span class="traffic traffic-yellow"></span>
-              <span class="traffic traffic-green"></span>
-              <div class="window-title">Roamgate</div>
-              <span class="window-live"><i></i> Connected</span>
-            </div>
-            <a
-              href="./assets/roamgate-desktop-changes.png"
-              aria-label="Open the Roamgate workspace screenshot"
-            >
-              <picture>
-                <source
-                  type="image/avif"
-                  srcset="
-                    ./assets/herdr-studio-hero-720.avif   720w,
-                    ./assets/herdr-studio-hero-1200.avif 1200w,
-                    ./assets/herdr-studio-hero-2400.avif 2400w
-                  "
-                  sizes="(max-width: 620px) calc(100vw - 8px), (max-width: 1240px) calc(100vw - 48px), 1180px"
-                />
-                <img
-                  src="./assets/roamgate-desktop-changes.png"
-                  alt="Roamgate reviewing Northstar code changes beside passing tests"
-                  width="3200"
-                  height="2000"
-                  fetchpriority="high"
-                />
-              </picture>
-            </a>
-          </div>
-
-          <div class="floating-card agent-card" aria-hidden="true">
-            <div class="agent-avatar">
-              <img class="agent-logo" src="./assets/codex.svg" width="28" height="28" alt="" />
-            </div>
-            <div>
-              <strong>Codex</strong>
-              <span><i></i> Working</span>
-            </div>
-            <b>18m</b>
-          </div>
-
-          <div class="floating-card task-card" aria-hidden="true">
-            <div class="agent-avatar">
-              <img class="agent-logo agent-logo-pi" src="./assets/pi.svg" width="28" height="28" alt="" />
-            </div>
-            <div>
-              <strong>Pi is ready for your review</strong>
-              <span>Open the diff. Keep the context.</span>
-            </div>
-          </div>
-        </div>
+        <figure class="hero-visual reveal reveal-delay">
+          <video
+            data-handoff-demo
+            width="1920"
+            height="1200"
+            controls
+            loop
+            muted
+            playsinline
+            preload="none"
+            poster="./assets/roamgate-handoff.webp"
+            aria-label="Computer-to-phone workspace demo"
+            aria-describedby="handoff-caption"
+          >
+            <source src="./assets/roamgate-handoff.mp4" type="video/mp4" />
+            <a href="./assets/roamgate-handoff.gif">Watch the animated demo</a>
+          </video>
+          <figcaption id="handoff-caption">
+            Start on your computer. Continue in the same Herdr workspace on your phone.
+            <a href="./assets/roamgate-handoff.gif">Open the GIF</a>
+          </figcaption>
+        </figure>
 
         <div class="hero-proof reveal">
           <div>

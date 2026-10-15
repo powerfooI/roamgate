@@ -324,11 +324,29 @@ and must not be described as lossless. Verify native dimensions and text/icon
 clarity at 100% and intended display sizes before saving the approved PNGs in
 `docs/images/`. The existing `scripts/build-pages.ts`
 copies the shared README shots into the website.
-Generate the hero's 720/1200/2400-pixel AVIF derivatives from the preserved native
-3200 x 2000 desktop PNG, not a compressed publication PNG, preserving text clarity
-with 4:4:4 encoding and checking each result. Set desktop PNG `img` dimensions to
-`width="3200" height="2000"`, mobile dimensions to `width="780" height="1688"`,
-and hero `srcset` descriptors to `720w`, `1200w`, and `2400w`.
+Set desktop PNG `img` dimensions to `width="3200" height="2000"` and mobile
+dimensions to `width="780" height="1688"`. The homepage hero uses the
+computer-to-phone animation described below.
 Capture outputs and review drafts are not required additions to Git; publish
 only the selected product assets. Run `bun run build:site` after updating consumed
 images and links.
+
+## Computer-to-Phone Animation
+
+The README uses `docs/images/roamgate-handoff.gif`; the homepage uses the matching
+`roamgate-handoff.mp4` and a static `roamgate-handoff.webp` poster. The Pages build
+copies all three into `assets/`. The homepage starts playback when the demo is
+visible, leaves playback manual when reduced motion is requested or JavaScript
+is disabled, and exposes native playback controls.
+
+Render the 13-second English sequence at 1920 x 1200 and 15 fps from the original
+desktop Changes, mobile Changes, and mobile Terminal PNG captures. Composite
+them directly at the output size inside the device frames. The animation
+illustrates a handoff using real UI captures; it is not a live recording of a
+cross-device interaction. Keep Herdr and remote-access requirements visible.
+
+Export the GIF with a shared palette and conservative GIF compression. Encode
+the same original frames as H.264 MP4 and export a lossless WebP poster from the
+computer-and-phone scene. Preserve the source captures outside publication
+assets. Check the complete loop, code text, rounded phone corners, and controls
+at native and README display sizes before replacing the three shared files.

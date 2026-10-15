@@ -11,6 +11,13 @@ A **browser client** for [Herdr](https://herdr.dev). Control terminals, inspect
 agent sessions, and review files and diffs on desktop or mobile.
 **Requires a running Herdr server.**
 
+## Step away. Stay in flow.
+
+Start on any computer. Leave Herdr running, then continue in the same workspace
+from your phone.
+
+[![Continue the same Herdr workspace from computer to phone with Roamgate][handoff-demo]][handoff-demo]
+
 ## Screenshots
 
 ### Desktop
@@ -95,6 +102,7 @@ checks. Requires Herdr and the Roamgate bridge to be running.
 Click any screenshot to open the full-resolution image.
 
 [desktop-changes]: ./docs/images/roamgate-desktop-changes.png
+[handoff-demo]: ./docs/images/roamgate-handoff.gif
 
 > **Moving from Herdr Studio / herdr-gui?** Automatic upgrades are not supported.
 > Follow the [migration guide](./docs/DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui)

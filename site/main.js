@@ -47,6 +47,8 @@ if (reducedMotion.matches || !("IntersectionObserver" in window)) {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         entry.target.classList.add("is-visible");
+        const demo = entry.target.querySelector("[data-handoff-demo]");
+        if (demo instanceof HTMLVideoElement) demo.play().catch(() => {});
         observer.unobserve(entry.target);
       }
     },

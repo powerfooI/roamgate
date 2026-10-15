@@ -572,170 +572,29 @@
     width: min(1180px, 100%);
     margin: 64px auto 0;
     border-radius: var(--radius-lg);
-    perspective: 1600px;
   }
 
-  .product-window {
-    position: relative;
-    z-index: 1;
-    overflow: hidden;
-    border: 1px solid rgba(177, 194, 232, 0.2);
-    border-radius: 20px;
-    background: #0b0d12;
-    box-shadow:
-      var(--shadow-window),
-      0 0 0 1px rgba(255, 255, 255, 0.025) inset;
-    transform: rotateX(1.4deg);
-    transform-origin: center bottom;
-  }
-
-  .window-bar {
-    display: flex;
-    height: 42px;
-    align-items: center;
-    padding-inline: 15px;
-    border-bottom: 1px solid #2f3549;
-    background: #202331;
-  }
-
-  .traffic {
-    width: 8px;
-    height: 8px;
-    margin-right: 7px;
-    border-radius: 50%;
-  }
-
-  .traffic-red {
-    background: var(--red);
-  }
-
-  .traffic-yellow {
-    background: var(--amber);
-  }
-
-  .traffic-green {
-    background: var(--green);
-  }
-
-  .window-title {
-    position: absolute;
-    left: 50%;
-    color: #afb6cd;
-    font-size: 0.67rem;
-    font-weight: 650;
-    transform: translateX(-50%);
-  }
-
-  .window-live {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: auto;
-    color: #aab3cf;
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
-    text-transform: uppercase;
-  }
-
-  .window-live i {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--green);
-  }
-
-  .product-window > a,
-  .product-window picture {
+  .hero-visual video {
     display: block;
-  }
-
-  .product-window > a img {
     width: 100%;
     height: auto;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-lg);
+    background: var(--bg);
+    box-shadow: var(--shadow-window);
   }
 
-  .floating-card {
-    position: absolute;
-    z-index: 3;
-    display: flex;
-    align-items: center;
-    border: 1px solid rgba(170, 187, 226, 0.21);
-    border-radius: 14px;
-    background: rgba(20, 26, 40, 0.9);
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(18px);
+  .hero-visual figcaption {
+    margin-top: 20px;
+    color: var(--muted);
+    font-size: 0.85rem;
+    text-align: center;
   }
 
-  .agent-card {
-    top: -36px;
-    left: -24px;
-    gap: 11px;
-    width: 210px;
-    padding: 12px;
-    animation: float-card 6s ease-in-out infinite;
-  }
-
-  .agent-avatar {
-    display: grid;
-    width: 38px;
-    height: 38px;
-    place-items: center;
-    border: 1px solid rgba(122, 162, 247, 0.26);
-    border-radius: 10px;
+  .hero-visual figcaption a {
     color: var(--blue-bright);
-    background: rgba(122, 162, 247, 0.12);
-    flex: 0 0 auto;
-  }
-
-  .agent-card > div:nth-child(2) {
-    display: grid;
-    line-height: 1.25;
-  }
-
-  .agent-card strong,
-  .task-card strong {
-    font-size: 0.76rem;
-  }
-
-  .agent-card span,
-  .task-card span {
-    color: var(--muted);
-    font-size: 0.65rem;
-  }
-
-  .agent-card span {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-  }
-
-  .agent-card span i {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--green);
-  }
-
-  .agent-card > b {
-    margin-left: auto;
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
-    font-weight: 500;
-  }
-
-  .task-card {
-    right: -28px;
-    bottom: -28px;
-    gap: 11px;
-    width: 244px;
-    padding: 13px;
-    animation: float-card 6.8s 800ms ease-in-out infinite reverse;
-  }
-
-  .task-card > div:last-child {
-    display: grid;
-    line-height: 1.35;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
   .hero-proof {
@@ -1833,29 +1692,11 @@
       opacity: 0;
     }
   }
-
-  @keyframes float-card {
-    0%,
-    100% {
-      translate: 0 0;
-    }
-    50% {
-      translate: 0 -7px;
-    }
-  }
 }
 
 @media (max-width: 1080px) {
   .primary-nav {
     gap: 20px;
-  }
-
-  .agent-card {
-    left: 8px;
-  }
-
-  .task-card {
-    right: 8px;
   }
 
   .mobile-layout {
@@ -1941,10 +1782,6 @@
 
   .hero-visual {
     margin-top: 82px;
-  }
-
-  .floating-card {
-    display: none;
   }
 
   .hero-proof {
@@ -2100,33 +1937,8 @@
     margin-left: -8px;
   }
 
-  .product-window {
+  .hero-visual video {
     border-radius: 13px;
-    transform: none;
-  }
-
-  .window-bar {
-    height: 30px;
-    padding-inline: 10px;
-  }
-
-  .traffic {
-    width: 6px;
-    height: 6px;
-    margin-right: 5px;
-  }
-
-  .window-title {
-    font-size: 0.5rem;
-  }
-
-  .window-live {
-    font-size: 0;
-  }
-
-  .window-live i {
-    width: 5px;
-    height: 5px;
   }
 
   .hero-proof {

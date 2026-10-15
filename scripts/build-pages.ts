@@ -9,6 +9,9 @@ const outputDirectory = join(root, ".pages-dist");
 const assetDirectory = join(outputDirectory, "assets");
 
 const assets = [
+  ["docs/images/roamgate-handoff.gif", "roamgate-handoff.gif"],
+  ["docs/images/roamgate-handoff.mp4", "roamgate-handoff.mp4"],
+  ["docs/images/roamgate-handoff.webp", "roamgate-handoff.webp"],
   ["docs/images/roamgate-desktop-changes.png", "roamgate-desktop-changes.png"],
   ["docs/images/roamgate-desktop-files.png", "roamgate-desktop-files.png"],
   [
@@ -81,5 +84,5 @@ const size = await Array.fromAsync(
 ).then((sizes) => sizes.reduce((total, fileSize) => total + fileSize, 0));
 
 process.stdout.write(
-  `Built GitHub Pages site in .pages-dist (${assets.length} shared screenshots, ${(size / 1024 / 1024).toFixed(2)} MiB)\n`,
+  `Built GitHub Pages site in .pages-dist (${assets.length} shared media assets, ${(size / 1024 / 1024).toFixed(2)} MiB)\n`,
 );
