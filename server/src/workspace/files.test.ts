@@ -15,6 +15,71 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>) {
 }
 
 describe("workspace file handlers", () => {
+  test("PR/MR reads accept only available worktrees listed for the source repository, locally and over SSH", async () => {
+    for (const host of [undefined, "user@server"]) {
+      const processes: string[][] = [];
+      const target = "/repo with 'quote/topic";
+      const handlers = createFileHandlers({
+        herdr: {
+          call: async (method: string, params: Record<string, unknown>) => {
+            expect(params.workspace_id).toBe("w1");
+            if (method === "workspace.get")
+              return { workspace: { worktree: { checkout_path: "/repo" } } };
+            if (method === "worktree.list")
+              return {
+                worktrees: [
+                  { path: target },
+                  { path: "/repo/bare", is_bare: true },
+                  { path: "/repo/gone", is_prunable: true },
+                ],
+              };
+            throw new Error(`unexpected call ${method}`);
+          },
+        } as any,
+        sshHost: () => host,
+        shQuote,
+        runProcessWithCodeTimeout: async (argv, _timeout, options) => {
+          processes.push(argv);
+          if (argv.join(" ").includes("rev-parse"))
+            return { code: 0, stdout: "/repo\n", stderr: "" };
+          if (host) {
+            expect(argv[0]).toBe("ssh");
+            expect(argv.at(-1)).toContain(`cd ${shQuote(target)} &&`);
+          } else {
+            expect(options?.cwd).toBe(target);
+          }
+          return { code: 1, stdout: "", stderr: "" };
+        },
+      });
+      const status = await handlers.readWorkspacePullRequest({
+        workspace_id: "w1",
+        worktree_path: target,
+        summary: true,
+      });
+      expect(status.root).toBe(target);
+      expect(status.state).toBe("detached");
+      for (const worktree_path of ["/other/repo", 42]) {
+        processes.length = 0;
+        await expect(
+          handlers.readWorkspacePullRequest({
+            workspace_id: "w1",
+            worktree_path,
+          }),
+        ).rejects.toThrow("Worktree is unavailable");
+        expect(processes).toHaveLength(1);
+      }
+      for (const worktree_path of ["/repo/bare", "/repo/gone"]) {
+        processes.length = 0;
+        const result = await handlers.readWorkspacePullRequest({
+          workspace_id: "w1",
+          worktree_path,
+        });
+        expect(result.state).toBe("unsupported");
+        expect(result.message).toContain("Bare or prunable");
+        expect(processes).toHaveLength(1);
+      }
+    }
+  });
   test("falls back to focused pane cwd when workspace has no checkout path", async () => {
     await withTempDir(async (root) => {
       await mkdir(join(root, "src"));

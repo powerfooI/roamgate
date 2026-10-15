@@ -601,7 +601,33 @@ export function createFileHandlers({
   }
 
   async function readWorkspacePullRequest(params: Record<string, unknown>) {
-    const { root } = await workspaceAndGitRoot(params, "git.pull_request");
+    let { root } = await workspaceAndGitRoot(params, "git.pull_request");
+    if (params.worktree_path !== undefined) {
+      const listed = (await herdr.call("worktree.list", {
+        workspace_id: params.workspace_id,
+      })) as {
+        worktrees?: {
+          path: string;
+          is_bare?: boolean;
+          is_prunable?: boolean;
+        }[];
+      };
+      const worktree = listed.worktrees?.find(
+        (entry) => entry.path === params.worktree_path,
+      );
+      if (!worktree)
+        throw new Error("Worktree is unavailable in this repository.");
+      if (worktree.is_bare || worktree.is_prunable)
+        return {
+          state: "unsupported" as const,
+          root: worktree.path,
+          branch: "",
+          remotes: [],
+          refreshedAt: new Date().toISOString(),
+          message: "Bare or prunable worktrees cannot resolve PR/MR status.",
+        };
+      root = worktree.path;
+    }
     return readPullRequestStatus(
       { root, host: sshHost(), shQuote, runProcessWithCodeTimeout },
       params,

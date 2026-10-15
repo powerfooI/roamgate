@@ -367,7 +367,7 @@ export async function readPullRequestStatus(
       );
     result.request = request;
     const [repository, id] = request.id.split("#");
-    if (provider === "github") {
+    if (params.summary !== true && provider === "github") {
       const readField = (field: string) =>
         json([
           "gh",
@@ -395,7 +395,7 @@ export async function readPullRequestStatus(
         review.status === "fulfilled"
           ? review.value
           : "Unavailable (review request failed)";
-    } else {
+    } else if (params.summary !== true) {
       const path = `projects/${repository}/merge_requests/${id}`;
       const [ci, review] = await Promise.allSettled([
         api(path).then((data) => {

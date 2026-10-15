@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FolderOpen, GitBranch, RefreshCw, Settings } from "lucide-react";
 import { luckyWorktreeBranchName } from "../luckyName";
-import { useConnectionClient } from "../useConnectionClient";
+import {
+  connectionClientScopeKey,
+  useConnectionClient,
+} from "../useConnectionClient";
+import { useWorktreePullRequests } from "../useWorktreePullRequests";
 import { store, useStoreSelector } from "../store";
 import type { Workspace, WorktreeList } from "../types";
 import { resolveWorktreeOpenSource, worktreeCreationSource } from "../worktree";
@@ -98,9 +102,16 @@ export function WorktreeLifecycleDialog({
   // Listing and repository settings accept linked workspaces. Creating or
   // opening a worktree does not, so keep those two contexts independent.
   const repositoryWorkspaceId = selectedWorkspace?.workspace_id ?? workspaceId;
+  const scope = connectionClientScopeKey(
+    connectionClient,
+    repositoryWorkspaceId,
+    selectedWorkspace?.worktree?.repo_key,
+    selectedWorkspace?.cwd,
+    selectedWorkspace?.worktree?.git_status?.branch,
+  );
   const actionSourceWorkspaceId = actionSourceWorkspace?.workspace_id;
   const [listResult, setListResult] = useState<{
-    workspaceId: string;
+    scope: string;
     list: WorktreeList;
   } | null>(null);
   const [hooks, setHooks] = useState<WorktreeHookInfo | null>(null);
@@ -108,6 +119,7 @@ export function WorktreeLifecycleDialog({
     Record<string, WorkspaceAutoSyncInfo>
   >({});
   const [loading, setLoading] = useState(false);
+  const [reviewRefresh, setReviewRefresh] = useState(0);
   const [error, setError] = useState("");
   const [operation, setOperation] = useState<LifecycleOperation | null>(null);
   const [newWorktreeOpen, setNewWorktreeOpen] = useState(false);
@@ -178,7 +190,7 @@ export function WorktreeLifecycleDialog({
               result as WorkspaceAutoSyncInfo;
           }
           setListResult({
-            workspaceId: repositoryWorkspaceId,
+            scope,
             list: worktreeList,
           });
           setHooks(hookResult as WorktreeHookInfo);
@@ -212,7 +224,7 @@ export function WorktreeLifecycleDialog({
         }
       }
     },
-    [connectionClient, repositoryWorkspaceId],
+    [connectionClient, repositoryWorkspaceId, scope],
   );
 
   useEffect(() => {
@@ -236,11 +248,21 @@ export function WorktreeLifecycleDialog({
   }, [load, open, repositoryWorkspaceId]);
 
   const list =
-    listResult && listResult.workspaceId === repositoryWorkspaceId
-      ? listResult.list
-      : null;
+    listResult && listResult.scope === scope ? listResult.list : null;
+  const rows = useMemo(
+    () => (list ? buildWorktreeLifecycleRows(list, workspaces) : []),
+    [list, workspaces],
+  );
+  const reviews = useWorktreePullRequests(
+    connectionClient,
+    repositoryWorkspaceId,
+    open && list
+      ? { ...list, worktrees: rows.map((row) => row.worktree) }
+      : null,
+    reviewRefresh,
+  );
   const repositoryLoading =
-    loading || (!!open && !!repositoryWorkspaceId && !list);
+    loading || (!!open && !!repositoryWorkspaceId && !list && !error);
 
   useEffect(() => {
     if (!open) return;
@@ -259,10 +281,6 @@ export function WorktreeLifecycleDialog({
     };
   }, [hooksOpen, newWorktreeOpen, onClose, open, openWorktreeOpen, removeRow]);
 
-  const rows = useMemo(
-    () => (list ? buildWorktreeLifecycleRows(list, workspaces) : []),
-    [list, workspaces],
-  );
   const configuredHooks = hooks?.hooks
     ? Object.values(hooks.hooks).filter(Boolean).length
     : 0;
@@ -469,7 +487,11 @@ export function WorktreeLifecycleDialog({
                 aria-label="Refresh lifecycle status"
                 title="Refresh"
                 disabled={repositoryLoading || operationRunning}
-                onClick={() => void load(true, true)}
+                onClick={() => {
+                  setListResult(null);
+                  setReviewRefresh((value) => value + 1);
+                  void load(true, true);
+                }}
               >
                 <RefreshCw
                   size={16}
@@ -622,6 +644,7 @@ export function WorktreeLifecycleDialog({
                     <WorktreeLifecycleRowItem
                       key={rowKey}
                       row={row}
+                      reviewStatus={reviews[rowKey]}
                       syncInfo={syncInfo}
                       operationRunning={operationRunning}
                       rowBusy={

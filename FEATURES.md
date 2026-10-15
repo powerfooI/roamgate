@@ -349,6 +349,12 @@ Open **Worktree Lifecycle** from a workspace menu or the command menu to:
   worktrees. The default branch is queried from the remote, not cached `origin/HEAD`;
   an unavailable remote or unresolved default branch stops creation.
 - Inspect paths, open/closed state, branch status, and uncommitted counts.
+- See GitHub PR / GitLab MR merge badges in **Worktree Lifecycle** and **Open
+  Worktree**, including checkouts without an open workspace. Expand a badge for
+  details and its last check time; use the list's Refresh button to query again.
+  No match, ambiguous matches, unsupported hosts, and unavailable CLI/auth or
+  requests are explicit states. Status uses host-side `gh` / `glab` authentication
+  and refreshes when the connection, repository, or checkout branch changes.
 - Focus, pull, configure branch updates, or remove with confirmation, hooks,
   process cleanup, and preservation of residual files when safe removal fails.
 

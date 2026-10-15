@@ -1,0 +1,45 @@
+.worktree-review {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.worktree-review-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  cursor: pointer;
+  white-space: normal;
+}
+
+.worktree-review-badge::before {
+  content: "+";
+  margin-right: 5px;
+}
+
+.worktree-review[open] > .worktree-review-badge::before {
+  content: "-";
+}
+
+.worktree-review-badge[data-state="merged"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.worktree-review-badge[data-state="open"],
+.worktree-review-badge[data-state="opened"] {
+  color: var(--green);
+  background: var(--success-soft);
+}
+
+.worktree-review-badge[data-state="closed"] {
+  color: var(--red);
+  background: var(--danger-soft);
+}
+
+.worktree-review-detail {
+  display: grid;
+  gap: 4px;
+  padding: 6px 0;
+  overflow-wrap: anywhere;
+}

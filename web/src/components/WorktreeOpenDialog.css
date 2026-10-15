@@ -15,17 +15,23 @@
 }
 
 .worktree-option {
+  padding: 9px 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.worktree-option-open {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   width: 100%;
   min-height: 56px;
-  padding: 9px 10px;
+  padding: 0;
   text-align: left;
   background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 0;
 }
 
 .worktree-option:hover {
@@ -61,4 +67,14 @@
   display: flex;
   flex: 0 0 auto;
   gap: 6px;
+}
+
+@media (max-width: 520px) {
+  .worktree-open-modal .modal-head {
+    flex-wrap: wrap;
+  }
+
+  .worktree-option-open {
+    flex-wrap: wrap;
+  }
 }

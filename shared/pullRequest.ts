@@ -41,3 +41,8 @@ export type PullRequestStatus = {
   ci?: string;
   review?: string;
 };
+
+export type PullRequestSummary = Pick<
+  PullRequestStatus,
+  "state" | "message" | "refreshedAt" | "provider" | "request"
+>;

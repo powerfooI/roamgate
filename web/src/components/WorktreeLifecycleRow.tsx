@@ -9,6 +9,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { store } from "../store";
+import type { PullRequestSummary } from "../../../shared/pullRequest";
+import { WorktreePullRequestBadge } from "./WorktreePullRequestBadge";
 import type { InspectorView } from "../workspaceResource";
 import {
   lifecycleAutoSyncLabel,
@@ -22,6 +24,7 @@ import {
 export function WorktreeLifecycleRow({
   row,
   syncInfo,
+  reviewStatus,
   operationRunning,
   rowBusy,
   runOperation,
@@ -32,6 +35,7 @@ export function WorktreeLifecycleRow({
 }: {
   row: LifecycleRow;
   syncInfo?: WorkspaceAutoSyncInfo;
+  reviewStatus?: PullRequestSummary;
   operationRunning: boolean;
   rowBusy: boolean;
   runOperation: (
@@ -65,6 +69,7 @@ export function WorktreeLifecycleRow({
           </span>
         </div>
         <code title={row.worktree.path}>{row.worktree.path}</code>
+        <WorktreePullRequestBadge status={reviewStatus} />
         <div className="lifecycle-row-meta">
           <span className={changed ? "has-changes" : ""}>
             {lifecycleGitSummary(row.gitStatus)}

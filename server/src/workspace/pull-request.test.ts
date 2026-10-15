@@ -180,6 +180,67 @@ describe("PR/MR status", () => {
   });
 
   for (const provider of ["github", "gitlab"] as const) {
+    test(`${provider} summarizes open, closed and merged requests without CI/review calls`, async () => {
+      for (const state of ["open", "closed", "merged"]) {
+        const f = fixture(provider, {
+          override: (command) => {
+            if (command.includes("'repos/team/project/pulls?"))
+              return ok([
+                {
+                  ...ghPR,
+                  state: state === "merged" ? "closed" : state,
+                  merged_at: state === "merged" ? "2026-10-01T00:00:00Z" : null,
+                },
+              ]);
+            if (command.includes("'projects/2/merge_requests?"))
+              return ok([
+                { ...glMR, state: state === "open" ? "opened" : state },
+              ]);
+          },
+        });
+        const result = await f.read({ summary: true });
+        expect(result.state).toBe("ready");
+        expect(result.request?.state).toBe(
+          provider === "gitlab" && state === "open" ? "opened" : state,
+        );
+        expect(result.ci).toBeUndefined();
+        expect(result.review).toBeUndefined();
+        expect(
+          f.commands
+            .flat()
+            .some((arg) => arg === "view" || arg.includes("/merge_requests/7")),
+        ).toBe(false);
+      }
+    });
+    test(`${provider} summaries reject branch changes and ambiguous merged matches`, async () => {
+      let reads = 0;
+      const changed = await fixture(provider, {
+        override: (command) =>
+          command.includes("'symbolic-ref'") && ++reads > 1
+            ? ok("other")
+            : undefined,
+      }).read({ summary: true });
+      expect(changed.state).toBe("error");
+      expect(changed.request).toBeUndefined();
+      const ambiguous = await fixture(provider, {
+        override: (command) => {
+          if (command.includes("'repos/team/project/pulls?"))
+            return ok([
+              ghPR,
+              {
+                ...ghPR,
+                number: 13,
+                state: "closed",
+                merged_at: "2026-10-01T00:00:00Z",
+              },
+            ]);
+          if (command.includes("'projects/2/merge_requests?"))
+            return ok([glMR, { ...glMR, iid: 8, state: "merged" }]);
+        },
+      }).read({ summary: true });
+      expect(ambiguous.state).toBe("select_match");
+      expect(ambiguous.request).toBeUndefined();
+    });
     test(`${provider} resolves a renamed local branch through its upstream over local and SSH`, async () => {
       for (const ssh of [false, true]) {
         const f = fixture(provider, {
