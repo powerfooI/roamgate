@@ -148,7 +148,7 @@ if (process.env.ROAMGATE_FILE_EXPLORER_DOM_TEST !== "1") {
     async function setFolderName(name: string) {
       await update(() => {
         const input = container.querySelector<HTMLInputElement>(
-          "[role='dialog'] input",
+          "[role='dialog'][aria-label='New folder'] input",
         )!;
         Object.getOwnPropertyDescriptor(
           browser.HTMLInputElement.prototype,
@@ -596,6 +596,52 @@ if (process.env.ROAMGATE_FILE_EXPLORER_DOM_TEST !== "1") {
       expect(
         container.querySelector("[role='dialog'][aria-label='File Explorer']"),
       ).not.toBeNull();
+      await update(() =>
+        click(container.querySelector("button[aria-label='New folder']")!),
+      );
+      await setFolderName("pending-folder");
+      const pendingCreation = Promise.withResolvers<void>();
+      mkdirDelay = pendingCreation.promise;
+      try {
+        await act(async () => submitFolder());
+        const input = container.querySelector<HTMLInputElement>(
+          "[aria-label='New folder'] input",
+        )!;
+        expect(input.disabled).toBe(true);
+        // Model browser focus loss when the focused input becomes disabled.
+        document.body.focus();
+        expect(document.activeElement === document.body).toBe(true);
+        await act(async () =>
+          document.body.dispatchEvent(
+            new browser.KeyboardEvent("keydown", {
+              key: "Escape",
+              bubbles: true,
+            }) as unknown as Event,
+          ),
+        );
+        expect(closes).toBe(0);
+        expect(
+          container.querySelector("[role='dialog'][aria-label='New folder']"),
+        ).toBeNull();
+        expect(
+          container.querySelector(
+            "[role='dialog'][aria-label='File Explorer']",
+          ),
+        ).not.toBeNull();
+      } finally {
+        await update(() => pendingCreation.resolve());
+        mkdirDelay = undefined;
+      }
+      expect(await readdir(directory)).toContain("pending-folder");
+      await update(() =>
+        document.body.dispatchEvent(
+          new browser.KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+          }) as unknown as Event,
+        ),
+      );
+      expect(closes).toBe(1);
     } finally {
       await act(async () => root.unmount());
       connection.mockRestore();

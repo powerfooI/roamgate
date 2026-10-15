@@ -5,6 +5,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   Suspense,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -669,6 +670,20 @@ function FileExplorerContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [explorerRefreshKey, explorerRefreshVersion]);
 
+  const handleExplorerKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (
+      event.key === "Escape" &&
+      newFolderDirectory === null &&
+      pendingDeleteEntry === null &&
+      entryMenu === null &&
+      !(
+        event.target instanceof Element &&
+        event.target.closest(".compact-modal, .context-menu")
+      )
+    )
+      onClose();
+  });
+
   useEffect(() => {
     if (!open) return;
     const resourceChanged =
@@ -734,16 +749,7 @@ function FileExplorerContent({
     void loadGitStatus();
     let removeKeyHandler = () => {};
     if (showCloseButton) {
-      const onKey = (e: KeyboardEvent) => {
-        if (
-          e.key === "Escape" &&
-          !(
-            e.target instanceof Element &&
-            e.target.closest(".compact-modal, .context-menu")
-          )
-        )
-          onClose();
-      };
+      const onKey = (event: KeyboardEvent) => handleExplorerKeyDown(event);
       window.addEventListener("keydown", onKey);
       removeKeyHandler = () => window.removeEventListener("keydown", onKey);
     }
