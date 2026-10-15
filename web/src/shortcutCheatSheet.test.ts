@@ -89,4 +89,17 @@ test("collapsed numbered rows stay findable by number", () => {
   expect(keys("action 5")).toEqual(["command.range"]);
   expect(keys("Option+5")).toEqual(["command.range"]);
   expect(keys("command menu")).toContain("command.menu");
+  expect(keys("1-9")).toEqual(["tab.range", "command.range"]);
+  expect(keys("Switch to tab 1-9")).toEqual(["tab.range"]);
+  expect(keys("Option+1-9")).toEqual(["command.range"]);
+});
+
+test("filtering keeps punctuation keys distinct from separators", () => {
+  const mac = defaultShortcutBindings("mac");
+  mac["zen.toggle"] = ["Meta+Slash"];
+  mac["sidebar.toggle"] = ["Ctrl+Minus"];
+  const keys = (query: string) =>
+    rows(shortcutCheatSheet(mac, "mac", query)).map((row) => row.key);
+  expect(keys("Cmd+/")).toEqual(["zen.toggle"]);
+  expect(keys("Ctrl+-")).toEqual(["sidebar.toggle"]);
 });

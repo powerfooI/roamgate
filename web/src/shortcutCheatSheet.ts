@@ -21,6 +21,16 @@ const numberedRanges: Record<string, string> = {
   command: "Run numbered actions 1-9 in the command menu",
 };
 
+// Search folds "-" and "/" as separators; keep them when they are the key.
+const punctuationKeyWords: Record<string, string> = {
+  "-": "minus",
+  "/": "slash",
+};
+const searchText = (value: string) =>
+  normalizeSearchText(
+    value.replace(/\+([-/])/g, (_, key) => `+${punctuationKeyWords[key]}`),
+  );
+
 export function shortcutKeyCaps(
   binding: string,
   platform: ShortcutPlatform,
@@ -49,7 +59,7 @@ export function shortcutCheatSheet(
   platform: ShortcutPlatform,
   query = "",
 ): CheatSheetGroup[] {
-  const search = normalizeSearchText(query);
+  const search = searchText(query);
   const groups = new Map<string, CheatSheetRow[]>();
   // Index keys both as shown elsewhere (Ctrl+Alt+K) and as separate words.
   const keyText = (keys: string[]) =>
@@ -60,8 +70,7 @@ export function shortcutCheatSheet(
       )
       .join(" ");
   const add = (group: string, row: CheatSheetRow, text: string) => {
-    if (search && !normalizeSearchText(`${text} ${group}`).includes(search))
-      return;
+    if (search && !searchText(`${text} ${group}`).includes(search)) return;
     groups.set(group, [...(groups.get(group) ?? []), row]);
   };
   const collapsed = new Map<string, string | null>();
@@ -78,16 +87,21 @@ export function shortcutCheatSheet(
           const members = SHORTCUT_CATALOG.filter((entry) =>
             new RegExp(`^${prefix}\\.\\d$`).test(entry.id),
           );
+          const caps = [...shortcutKeyCaps(modifiers, platform), "1-9"];
           add(
             item.group,
             {
               key: `${prefix}.range`,
               label: numberedRanges[prefix],
-              combos: [[...shortcutKeyCaps(modifiers, platform), "1-9"]],
+              combos: [caps],
             },
-            members
-              .map((entry) => `${entry.label} ${keyText(bindings[entry.id])}`)
-              .join(" "),
+            [
+              numberedRanges[prefix],
+              caps.join("+"),
+              ...members.map(
+                (entry) => `${entry.label} ${keyText(bindings[entry.id])}`,
+              ),
+            ].join(" "),
           );
         }
         continue;
