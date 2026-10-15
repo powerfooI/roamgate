@@ -1754,6 +1754,8 @@ function FileExplorerContent({
       return;
     }
     if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
       setSelectedPaths(new Set());
       return;
     }

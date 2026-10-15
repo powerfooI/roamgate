@@ -12,7 +12,11 @@ export function sanitizeExplorerPath(value: unknown): string {
 }
 
 export function sanitizeMutationPath(value: unknown): string {
-  if (typeof value !== "string" || /^(?:[\\/]|[a-z]:)/i.test(value)) {
+  if (
+    typeof value !== "string" ||
+    isAbsolute(value) ||
+    (process.platform === "win32" && /^[a-z]:/i.test(value))
+  ) {
     throw new Error("file operations require a workspace-relative path");
   }
   if (process.platform === "win32") return sanitizeExplorerPath(value);

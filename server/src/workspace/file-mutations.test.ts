@@ -135,6 +135,34 @@ for (const remote of [false, true]) {
       },
     );
 
+    test.skipIf(process.platform === "win32")(
+      "moves POSIX names that resemble Windows paths",
+      async () => {
+        await fixture(async (files, root) => {
+          await files.createWorkspaceDirectory({ ...params, name: "a:target" });
+          await files.createWorkspaceDirectory({
+            ...params,
+            directory: "a:target",
+            name: "nested",
+          });
+          for (const name of ["a:notes", "C:\\notes", "\\notes"]) {
+            await writeFile(join(root, name), name);
+            expect(
+              await files.moveWorkspaceFile({
+                ...params,
+                path: name,
+                directory: "a:target/nested",
+              }),
+            ).toMatchObject({ path: `a:target/nested/${name}` });
+            expect(
+              await readFile(join(root, "a:target/nested", name), "utf8"),
+            ).toBe(name);
+            await expect(lstat(join(root, name))).rejects.toThrow();
+          }
+        });
+      },
+    );
+
     test("never overwrites a destination file, directory or symlink", async () => {
       await fixture(async (files, root, outside) => {
         await mkdir(join(root, "target"));
@@ -422,12 +450,15 @@ if result == 0:
 
     test("rejects invalid mutation paths, names, scopes and missing workspace identity", async () => {
       await fixture(async (files) => {
-        for (const directory of [
+        const invalidPaths = [
           "../outside",
           "/absolute",
-          "C:\\outside",
           "bad\0path",
-        ]) {
+          ...(process.platform === "win32"
+            ? ["C:\\outside", "C:outside", "\\outside"]
+            : []),
+        ];
+        for (const directory of invalidPaths) {
           await expect(
             files.createWorkspaceDirectory({
               ...params,
@@ -439,14 +470,7 @@ if result == 0:
             files.moveWorkspaceFile({ ...params, path: "a", directory }),
           ).rejects.toThrow();
         }
-        for (const path of [
-          "",
-          ".",
-          "../outside",
-          "/absolute",
-          "C:\\outside",
-          "bad\0path",
-        ])
+        for (const path of ["", ".", ...invalidPaths])
           await expect(
             files.moveWorkspaceFile({ ...params, path }),
           ).rejects.toThrow();

@@ -576,6 +576,20 @@ if (process.env.ROAMGATE_FILE_EXPLORER_DOM_TEST !== "1") {
       );
       expect(closes).toBe(0);
       expect(menuLabels()).toEqual([]);
+      await update(() => click(row("a.txt")));
+      await update(() => click(row("c.txt"), { metaKey: true }));
+      expect(selected()).toEqual(["a.txt", "c.txt"]);
+      const clearSelection = new browser.KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      });
+      await update(() =>
+        row("c.txt").dispatchEvent(clearSelection as unknown as Event),
+      );
+      expect(closes).toBe(0);
+      expect(selected()).toEqual([]);
+      expect(clearSelection.defaultPrevented).toBe(true);
       await update(() =>
         click(container.querySelector("button[aria-label='New folder']")!),
       );
