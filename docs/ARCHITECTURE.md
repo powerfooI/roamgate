@@ -347,6 +347,20 @@ view. Search filters loaded entries only.
 
 Absolute previews use `scope=filesystem` download URLs; relative Markdown links
 and images resolve beside their source. Upload/delete remain checkout-scoped.
+`file.mkdir` takes `workspace_id`, a relative `directory` (empty for the root),
+and a single-component `name`. `file.move` takes `workspace_id`, a relative
+source `path`, and a relative destination `directory`. Both reject filesystem
+scope and absolute paths, and confine resolved parent directories to the
+checkout. Moves retain the source filename, accept files and symlinks, and
+never overwrite existing entries. Moves use the host's atomic exclusive rename
+primitive (`renamex_np`, `renameat2`, or `MoveFileExW` without replacement or
+copy flags), so concurrent saves are never removed by a later source deletion.
+Cross-filesystem moves and unsupported primitives fail without a copying
+fallback. SSH moves require Python 3 to call the primitive through its standard
+library. The client submits one move request at a time and reports partial
+failures, then refreshes source and destination listings sequentially and
+retires moved source previews.
+
 `file.reveal` opens the host file manager with a fixed per-platform argv
 (`explorer.exe`, `open`, `xdg-open`), never a shell. It is disabled unless the
 host opts in with `ROAMGATE_ALLOW_FILE_REVEAL=1`, and still refuses SSH profiles

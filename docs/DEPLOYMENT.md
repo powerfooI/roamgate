@@ -747,6 +747,10 @@ passwords/keys/passphrases/options. Verify host keys and noninteractive service-
 authentication first. The Roamgate bridge must run on Linux/macOS; a Windows
 bridge supports native local profiles only.
 
+Moving files on Linux/macOS SSH hosts requires `python3` on the remote user's
+PATH and a filesystem supporting atomic exclusive renames. Unsupported hosts
+or cross-filesystem destinations fail without copying or deleting the source.
+
 For a **Windows SSH host**, select **Windows** as the remote host OS. Install
 Herdr 0.9.1 or a later compatible release on that host, including the `conpty/`
 directory from its Windows archive, and start the desired Herdr session first.

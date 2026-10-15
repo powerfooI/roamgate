@@ -942,6 +942,8 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     readWorkspaceFile,
     searchWorkspaceFiles,
     revealWorkspaceFile,
+    createWorkspaceDirectory,
+    moveWorkspaceFile,
     readGitDiffSummary,
     readWorkspacePullRequest,
     readGitDiffFile,
@@ -1079,6 +1081,17 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       sendReply({ id, result }, "file-resolve");
     } catch (e) {
       sendError("file-resolve-error", e);
+    }
+    return;
+  }
+  if (method === "file.mkdir" || method === "file.move") {
+    try {
+      const result = await (method === "file.mkdir"
+        ? createWorkspaceDirectory
+        : moveWorkspaceFile)(params ?? {});
+      sendReply({ id, result }, method);
+    } catch (e) {
+      sendError(`${method}-error`, e);
     }
     return;
   }

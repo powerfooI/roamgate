@@ -31,6 +31,7 @@ import type {
 } from "./file-types";
 import { runProcessWithInputTimeout } from "./process";
 import { decodePreviewBuffer, previewLimitForPath } from "./preview";
+import { REMOTE_EXCLUSIVE_RENAME } from "./atomic-file-move";
 
 export function parseRemoteFileList(
   stdout: string,
@@ -589,4 +590,56 @@ printf 'META\\t%s\\t%s\\n' "$(printf '%s' "$rel" | base64 | tr -d '\\n')" "$type
     );
   }
   return parseRemoteFileDelete(result.stdout);
+}
+
+export async function mutateRemoteFile({
+  host,
+  rootPath,
+  directory,
+  name,
+  path,
+  runProcessWithCodeTimeout,
+  shQuote,
+}: {
+  host: string;
+  rootPath: string;
+  directory: string;
+  name: string;
+  path?: string;
+  runProcessWithCodeTimeout: RunProcessWithCodeTimeout;
+  shQuote: (value: string) => string;
+}) {
+  const command = `
+set -euo pipefail
+# Keep trailing newlines in directory names through command substitution.
+root_real="$(cd -P -- ${shQuote(rootPath)} && printf '%s.' "$PWD")"
+root_real="\${root_real%.}"
+directory_real="$(cd -P -- "$root_real"/${shQuote(directory || ".")} && printf '%s.' "$PWD")"
+directory_real="\${directory_real%.}"
+case "$directory_real/" in "\${root_real%/}/"*) ;; *) echo "path escaped the workspace checkout" >&2; exit 13 ;; esac
+${
+  path === undefined
+    ? `mkdir -- "$directory_real"/${shQuote(name)}`
+    : `
+source_parent="$(cd -P -- "$root_real"/${shQuote(path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ".")} && printf '%s.' "$PWD")"
+source_parent="\${source_parent%.}"
+case "$source_parent/" in "\${root_real%/}/"*) ;; *) echo "path escaped the workspace checkout" >&2; exit 13 ;; esac
+source="$source_parent"/${shQuote(name)}
+if [ ! -f "$source" ] && [ ! -L "$source" ]; then echo "Only files can be moved" >&2; exit 14; fi
+command -v python3 >/dev/null || { echo "Moving files over SSH requires Python 3" >&2; exit 14; }
+python3 -c ${shQuote(REMOTE_EXCLUSIVE_RENAME)} "$source" "$directory_real"/${shQuote(name)}
+`
+}
+`;
+  const result = await runProcessWithCodeTimeout(
+    sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
+    DELETE_TIMEOUT_MS,
+  );
+  if (result.code !== 0)
+    throw new Error(
+      (result.stderr || result.stdout || `file operation exited ${result.code}`)
+        .trim()
+        .slice(0, 1000),
+    );
+  return { path: relativeExplorerPath(directory, name) };
 }

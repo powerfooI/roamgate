@@ -81,10 +81,33 @@
   flex-basis: 100%;
 }
 
+.file-explorer-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.file-explorer-side .file-explorer-controls {
+  flex: 1 1 100%;
+}
+
+.file-explorer-controls .file-toolbar-end {
+  flex-shrink: 0;
+}
+
+.file-explorer-controls .file-toolbar-icon {
+  width: 28px;
+  height: 28px;
+}
+
 .file-search-mode.themed-select-trigger {
-  min-width: 90px;
-  height: 34px;
-  padding: 0 9px;
+  flex: 1;
+  min-width: 0;
+  max-width: 110px;
+  gap: 4px;
+  height: 28px;
+  padding: 0 6px;
   border: 1px solid var(--viewer-border);
   border-radius: 8px;
   background: var(--viewer-content-bg);

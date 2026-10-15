@@ -3,6 +3,8 @@ import {
   chmodSync,
   mkdirSync,
   realpathSync,
+  readFileSync,
+  existsSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -473,6 +475,45 @@ test("production dispatcher isolates two local profiles and profile CRUD", async
     );
     expect(initialAlpha.connection_generation).toBe(oldAlphaGeneration);
     expect(initialAlpha.result.workspaces[0].name).toBe("from-alpha");
+    expect(
+      await rpc(
+        "file.mkdir",
+        { workspace_id: "shared-workspace", name: "files-target" },
+        "alpha",
+        oldAlphaGeneration,
+      ),
+    ).toMatchObject({ path: "files-target" });
+    writeFileSync(join(root, "move-me.txt"), "file contents");
+    expect(
+      await rpc(
+        "file.move",
+        {
+          workspace_id: "shared-workspace",
+          path: "move-me.txt",
+          directory: "files-target",
+        },
+        "alpha",
+        oldAlphaGeneration,
+      ),
+    ).toMatchObject({ path: "files-target/move-me.txt" });
+    expect(existsSync(join(root, "move-me.txt"))).toBe(false);
+    expect(readFileSync(join(root, "files-target/move-me.txt"), "utf8")).toBe(
+      "file contents",
+    );
+    writeFileSync(join(root, "move-me.txt"), "keep source");
+    await expect(
+      rpc(
+        "file.move",
+        {
+          workspace_id: "shared-workspace",
+          path: "move-me.txt",
+          directory: "files-target",
+        },
+        "alpha",
+        oldAlphaGeneration,
+      ),
+    ).rejects.toThrow();
+    expect(readFileSync(join(root, "move-me.txt"), "utf8")).toBe("keep source");
     // A native teardown failure must stop before dispatching removal to Herdr.
     const hookPath = join(root, "roamgate.json");
     writeFileSync(join(root, "paseo.json"), '{"worktree":{"teardown":"true"}}');

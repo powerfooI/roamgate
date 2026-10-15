@@ -11,6 +11,18 @@ export function sanitizeExplorerPath(value: unknown): string {
   return parts.join("/");
 }
 
+export function sanitizeMutationPath(value: unknown): string {
+  if (typeof value !== "string" || /^(?:[\\/]|[a-z]:)/i.test(value)) {
+    throw new Error("file operations require a workspace-relative path");
+  }
+  if (process.platform === "win32") return sanitizeExplorerPath(value);
+  const parts = value.split("/").filter(Boolean);
+  if (parts.some((part) => part === ".." || part.includes("\0"))) {
+    throw new Error("invalid file explorer path");
+  }
+  return parts.join("/");
+}
+
 /** Filesystem browsing requires an explicit absolute directory on the host. */
 export function sanitizeFilesystemPath(value: unknown): string {
   const path =

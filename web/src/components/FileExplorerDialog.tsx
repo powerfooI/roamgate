@@ -19,6 +19,7 @@ import {
   File,
   Folder,
   FolderOpen,
+  FolderPlus,
   RefreshCw,
   Search,
   Upload,
@@ -55,7 +56,8 @@ import type {
   GitDiffEntry,
 } from "../types";
 import { CloseButton } from "./CloseButton";
-import { ConfirmDialog } from "./ModalDialogs";
+import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
+import { selectFilePaths } from "./fileExplorerSelection";
 import { ThemedSelect } from "./ThemedSelect";
 import {
   focusTreeItem,
@@ -104,6 +106,7 @@ const LONG_PRESS_MOVE_PX = 10;
 
 const FILE_TREE_INDENT = 10;
 const FILE_TREE_BASE_INDENT = 6;
+const FILE_MOVE_DRAG_TYPE = "application/x-roamgate-files";
 
 export function FileExplorerDialog({
   open,
@@ -190,12 +193,11 @@ export function FileExplorerPanel({
 type FileExplorerEntryMenuState = {
   x: number;
   y: number;
-  entry: FileExplorerEntry;
+  entry: FileExplorerEntry | null;
 };
 
-// Keep ENTRY_MENU_ITEM_COUNT in sync with the items rendered in
-// FileExplorerEntryMenu; the height estimate drives clamping and flip placement.
-const ENTRY_MENU_ITEM_COUNT = 4;
+// Maximum number of directory actions, used to position the actions popup.
+const ENTRY_MENU_ITEM_COUNT = 5;
 const ENTRY_MENU_WIDTH = 220;
 const ENTRY_MENU_HEIGHT = ENTRY_MENU_ITEM_COUNT * 34 + 8;
 
@@ -206,6 +208,8 @@ function FileExplorerEntryMenu({
   onCopy,
   onReveal,
   onDelete,
+  onCreateDirectory,
+  onRefresh,
 }: {
   state: FileExplorerEntryMenuState | null;
   onClose: () => void;
@@ -213,6 +217,8 @@ function FileExplorerEntryMenu({
   onCopy: (entry: FileExplorerEntry) => void;
   onReveal?: (entry: FileExplorerEntry) => void;
   onDelete?: (entry: FileExplorerEntry) => void;
+  onCreateDirectory?: (directory: string) => void;
+  onRefresh: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -270,35 +276,49 @@ function FileExplorerEntryMenu({
   if (!state) return null;
 
   const { entry } = state;
-  const isDirectory = entry.type === "directory";
-  // Keep ENTRY_MENU_ITEM_COUNT in sync with this array.
-  const items = [
-    {
-      label: isDirectory ? "Download directory" : "Download file",
-      action: () => onDownload(entry),
-    },
-    {
-      label: "Copy absolute path",
-      action: () => onCopy(entry),
-    },
-    ...(onReveal
-      ? [
-          {
-            label: revealMenuLabel(isDirectory),
-            action: () => onReveal(entry),
-          },
-        ]
-      : []),
-    ...(onDelete
-      ? [
-          {
-            label: isDirectory ? "Delete directory" : "Delete file",
-            danger: true,
-            action: () => onDelete(entry),
-          },
-        ]
-      : []),
-  ];
+  const isDirectory = entry?.type === "directory";
+  const items: { label: string; action: () => void; danger?: boolean }[] = entry
+    ? [
+        ...(isDirectory && onCreateDirectory
+          ? [
+              {
+                label: "New folder",
+                action: () => onCreateDirectory(entry.path),
+              },
+            ]
+          : []),
+        {
+          label: isDirectory ? "Download directory" : "Download file",
+          action: () => onDownload(entry),
+        },
+        {
+          label: "Copy absolute path",
+          action: () => onCopy(entry),
+        },
+        ...(onReveal
+          ? [
+              {
+                label: revealMenuLabel(isDirectory),
+                action: () => onReveal(entry),
+              },
+            ]
+          : []),
+        ...(onDelete
+          ? [
+              {
+                label: isDirectory ? "Delete directory" : "Delete file",
+                danger: true,
+                action: () => onDelete(entry),
+              },
+            ]
+          : []),
+      ]
+    : [
+        ...(onCreateDirectory
+          ? [{ label: "New folder", action: () => onCreateDirectory("") }]
+          : []),
+        { label: "Refresh files", action: onRefresh },
+      ];
   const menuMargin = 8;
   const menuWidth = ENTRY_MENU_WIDTH;
   const style: React.CSSProperties = {
@@ -310,7 +330,10 @@ function FileExplorerEntryMenu({
     ),
     top: Math.max(
       menuMargin,
-      Math.min(state.y, window.innerHeight - ENTRY_MENU_HEIGHT - menuMargin),
+      Math.min(
+        state.y,
+        window.innerHeight - (items.length * 34 + 8) - menuMargin,
+      ),
     ),
     zIndex: 1000,
   };
@@ -405,6 +428,19 @@ function FileExplorerContent({
   );
   const [pendingDeleteEntry, setPendingDeleteEntry] =
     useState<FileExplorerEntry | null>(null);
+  const [newFolderDirectory, setNewFolderDirectory] = useState<string | null>(
+    null,
+  );
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const selectionAnchor = useRef<string | null>(null);
+  const draggedEntries = useRef<{
+    context: string;
+    entries: FileExplorerEntry[];
+  } | null>(null);
+  const movingRef = useRef(false);
+  const [moving, setMoving] = useState(false);
   const [previewEntry, setPreviewEntry] = useState<FileExplorerEntry | null>(
     null,
   );
@@ -451,6 +487,9 @@ function FileExplorerContent({
   const filesystem = filesystemContext === runtimeContext;
   useEffect(() => {
     setFilesystemContext(null);
+    draggedEntries.current = null;
+    movingRef.current = false;
+    setMoving(false);
   }, [runtimeContext]);
   const runtimeContextRef = useRef(runtimeContext);
   runtimeContextRef.current = runtimeContext;
@@ -666,6 +705,10 @@ function FileExplorerContent({
     setDropTargetPath(null);
     setEntryMenu(null);
     setPendingDeleteEntry(null);
+    setNewFolderDirectory(null);
+    setSelectedPaths(new Set(activePath ? [activePath] : []));
+    selectionAnchor.current = null;
+    draggedEntries.current = null;
     if (resourceChanged && !activePath) {
       setPreviewEntry(null);
       setPreview(null);
@@ -688,7 +731,14 @@ function FileExplorerContent({
     let removeKeyHandler = () => {};
     if (showCloseButton) {
       const onKey = (e: KeyboardEvent) => {
-        if (e.key === "Escape") onClose();
+        if (
+          e.key === "Escape" &&
+          !(
+            e.target instanceof Element &&
+            e.target.closest(".compact-modal, .context-menu")
+          )
+        )
+          onClose();
       };
       window.addEventListener("keydown", onKey);
       removeKeyHandler = () => window.removeEventListener("keydown", onKey);
@@ -708,6 +758,14 @@ function FileExplorerContent({
     showHidden,
     showCloseButton,
   ]);
+
+  useEffect(() => {
+    if (activePath && !movingRef.current) {
+      setSelectedPaths((current) =>
+        current.size > 1 ? current : new Set([activePath]),
+      );
+    }
+  }, [activePath]);
 
   useEffect(() => {
     if (
@@ -1244,6 +1302,15 @@ function FileExplorerContent({
       );
       if (!runtimeContextIsCurrent(requestContext)) return;
       removeEntryFromCache(entry);
+      setSelectedPaths(
+        (current) =>
+          new Set(
+            [...current].filter(
+              (path) =>
+                path !== entry.path && !path.startsWith(`${entry.path}/`),
+            ),
+          ),
+      );
       clearDeletedPreview(entry);
       await loadDirectory(parentDirectoryPath(entry.path), true);
       if (!runtimeContextIsCurrent(requestContext)) return;
@@ -1269,7 +1336,7 @@ function FileExplorerContent({
     }
   };
 
-  const invalidateUploadedPreviews = (paths: string[]) => {
+  const invalidateWrittenPreviews = (paths: string[]) => {
     if (!workspace?.workspace_id || !paths.length) return;
     for (const path of paths) {
       invalidateFilePreviewCache(
@@ -1285,6 +1352,129 @@ function FileExplorerContent({
 
   const isFileDrag = (event: DragEvent<HTMLElement>) =>
     Array.from(event.dataTransfer.types).includes("Files");
+
+  const isMoveDrag = (event: DragEvent<HTMLElement>) =>
+    !movingRef.current &&
+    draggedEntries.current?.context === runtimeContext &&
+    Array.from(event.dataTransfer.types).includes(FILE_MOVE_DRAG_TYPE);
+
+  const createDirectory = async (name: string) => {
+    if (!workspace?.workspace_id || newFolderDirectory === null) return;
+    const directory = newFolderDirectory;
+    const requestContext = runtimeContext;
+    try {
+      await connectionClient.call("file.mkdir", {
+        workspace_id: workspace.workspace_id,
+        directory,
+        name,
+      });
+      if (!runtimeContextIsCurrent(requestContext)) return;
+      setNewFolderDirectory(null);
+      if (directory)
+        updateCache({ expanded: new Set(expanded).add(directory) });
+      await loadDirectory(directory, true);
+      if (!runtimeContextIsCurrent(requestContext)) return;
+      setSearchRevision((value) => value + 1);
+      store.notify({
+        kind: "success",
+        message: "Folder created",
+        detail: name,
+        autoDismissMs: 5000,
+      });
+    } catch (error) {
+      if (runtimeContextIsCurrent(requestContext))
+        store.notify({
+          kind: "error",
+          message: "Create folder failed",
+          detail: (error as Error).message,
+        });
+    }
+  };
+
+  const moveDroppedFiles = async (directory: string) => {
+    const drag = draggedEntries.current;
+    draggedEntries.current = null;
+    setDropTargetPath(null);
+    if (
+      !workspace?.workspace_id ||
+      movingRef.current ||
+      drag?.context !== runtimeContext ||
+      !connectionClient.isCurrent()
+    )
+      return;
+    const entries = drag.entries.filter(
+      (entry) => parentDirectoryPath(entry.path) !== directory,
+    );
+    if (!entries.length) return;
+    const requestContext = runtimeContext;
+    movingRef.current = true;
+    setMoving(true);
+    try {
+      const results: PromiseSettledResult<unknown>[] = [];
+      for (const entry of entries) {
+        if (!runtimeContextIsCurrent(requestContext)) return;
+        try {
+          const value = await connectionClient.call("file.move", {
+            workspace_id: workspace.workspace_id,
+            path: entry.path,
+            directory,
+          });
+          results.push({ status: "fulfilled", value });
+        } catch (reason) {
+          results.push({ status: "rejected", reason });
+        }
+      }
+      if (!runtimeContextIsCurrent(requestContext)) return;
+      const moved = entries.filter(
+        (_, index) => results[index]?.status === "fulfilled",
+      );
+      for (const entry of moved) {
+        removeEntryFromCache(entry);
+        clearDeletedPreview(entry);
+      }
+      invalidateWrittenPreviews(
+        moved.map((entry) =>
+          directory ? `${directory}/${entry.name}` : entry.name,
+        ),
+      );
+      setSelectedPaths(
+        (current) =>
+          new Set(
+            [...current].filter(
+              (path) => !moved.some((entry) => entry.path === path),
+            ),
+          ),
+      );
+      if (directory)
+        updateCache({ expanded: new Set(expanded).add(directory) });
+      const directories = new Set([
+        directory,
+        ...entries.map((entry) => parentDirectoryPath(entry.path)),
+      ]);
+      for (const path of directories) {
+        if (!runtimeContextIsCurrent(requestContext)) return;
+        await loadDirectory(path, true);
+      }
+      if (!runtimeContextIsCurrent(requestContext)) return;
+      setSearchRevision((value) => value + 1);
+      void loadGitStatus(true);
+      const failed = results.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected",
+      );
+      store.notify({
+        kind: failed ? "error" : "success",
+        message: failed ? "Some files could not be moved" : "Files moved",
+        detail: `${moved.length} of ${entries.length} moved${failed ? `: ${String(failed.reason?.message ?? failed.reason)}` : ""}`,
+        autoDismissMs: failed ? undefined : 5000,
+      });
+    } finally {
+      if (runtimeContextIsCurrent(requestContext)) {
+        movingRef.current = false;
+        setMoving(false);
+      }
+    }
+  };
 
   const markUploadPath = (path: string, uploading: boolean) => {
     setUploadingPaths((current) => {
@@ -1324,7 +1514,7 @@ function FileExplorerContent({
       }
       await loadDirectory(directory, true);
       if (!runtimeContextIsCurrent(requestContext)) return;
-      invalidateUploadedPreviews(
+      invalidateWrittenPreviews(
         results.flatMap((result) =>
           result.status === "fulfilled" ? [result.value.path] : [],
         ),
@@ -1358,41 +1548,62 @@ function FileExplorerContent({
   const handleDirectoryDragOver = (
     event: DragEvent<HTMLElement>,
     directory: string,
+    isDirectory = true,
   ) => {
-    if (!isFileDrag(event)) return;
+    const move = isMoveDrag(event);
+    if (!move && !isFileDrag(event)) return;
+    if (move && !isDirectory) {
+      event.stopPropagation();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
-    event.dataTransfer.dropEffect = "copy";
+    event.dataTransfer.dropEffect = move ? "move" : "copy";
     setDropTargetPath(directory);
   };
 
   const handleDirectoryDrop = (
     event: DragEvent<HTMLElement>,
     directory: string,
+    isDirectory = true,
   ) => {
-    if (!isFileDrag(event)) return;
+    const move = isMoveDrag(event);
+    if (!move && !isFileDrag(event)) return;
+    if (move && !isDirectory) {
+      event.stopPropagation();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
-    void uploadDroppedFiles(directory, event.dataTransfer.files);
+    if (move) void moveDroppedFiles(directory);
+    else void uploadDroppedFiles(directory, event.dataTransfer.files);
   };
 
   const handleRootDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (!isFileDrag(event)) return;
+    if (!isFileDrag(event) && !isMoveDrag(event)) return;
     if ((event.target as HTMLElement | null)?.closest(".file-row")) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
+    event.dataTransfer.dropEffect = isMoveDrag(event) ? "move" : "copy";
     setDropTargetPath("");
   };
 
   const handleRootDrop = (event: DragEvent<HTMLDivElement>) => {
-    if (!isFileDrag(event)) return;
+    if (!isFileDrag(event) && !isMoveDrag(event)) return;
     if ((event.target as HTMLElement | null)?.closest(".file-row")) return;
     event.preventDefault();
-    void uploadDroppedFiles("", event.dataTransfer.files);
+    if (isMoveDrag(event)) void moveDroppedFiles("");
+    else void uploadDroppedFiles("", event.dataTransfer.files);
   };
 
   const openEntryMenu = (entry: FileExplorerEntry, x: number, y: number) => {
     setEntryMenu({ entry, x, y });
+  };
+
+  const refreshFiles = () => {
+    setSearchRevision((value) => value + 1);
+    const paths = new Set(["", ...expanded]);
+    for (const path of paths) void loadDirectory(path, true);
+    void loadGitStatus(true);
   };
 
   const handleEntryPointerDown = (
@@ -1436,6 +1647,49 @@ function FileExplorerContent({
       return;
     }
     setWorkspacePathDragData(event.dataTransfer, entryAbsolutePath(entry));
+    if (entry.type === "directory" || movingRef.current) return;
+    const entries = selectedPaths.has(entry.path)
+      ? Object.values(children)
+          .flat()
+          .filter(
+            (candidate) =>
+              candidate.type !== "directory" &&
+              selectedPaths.has(candidate.path),
+          )
+      : [entry];
+    if (!selectedPaths.has(entry.path)) {
+      setSelectedPaths(new Set([entry.path]));
+      selectionAnchor.current = entry.path;
+    }
+    draggedEntries.current = { context: runtimeContext, entries };
+    event.dataTransfer.effectAllowed = "copyMove";
+    event.dataTransfer.setData(FILE_MOVE_DRAG_TYPE, runtimeContext);
+  };
+
+  const visibleFilePaths = () =>
+    Array.from(
+      fileTreeRef.current?.querySelectorAll<HTMLElement>(
+        ".file-row[data-file-type]:not([data-file-type='directory'])",
+      ) ?? [],
+    ).map((row) => row.dataset.filePath!);
+
+  const selectEntry = (
+    entry: FileExplorerEntry,
+    range = false,
+    toggle = false,
+  ) => {
+    if (entry.type === "directory") {
+      setSelectedPaths(new Set());
+      selectionAnchor.current = null;
+      return;
+    }
+    const anchor = selectionAnchor.current;
+    const paths = visibleFilePaths();
+    setSelectedPaths((current) =>
+      selectFilePaths(current, entry.path, paths, anchor, range, toggle),
+    );
+    if (!range || anchor === null || !paths.includes(anchor))
+      selectionAnchor.current = entry.path;
   };
 
   const activateEntry = (entry: FileExplorerEntry) => {
@@ -1471,6 +1725,22 @@ function FileExplorerContent({
     isExpanded: boolean,
   ) => {
     if (event.target !== event.currentTarget) return;
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      event.stopPropagation();
+      setSelectedPaths(new Set(visibleFilePaths()));
+      return;
+    }
+    if (event.key === "Escape") {
+      setSelectedPaths(new Set());
+      return;
+    }
+    if (event.key === " " && !isDirectory) {
+      event.preventDefault();
+      event.stopPropagation();
+      selectEntry(entry, event.shiftKey, event.metaKey || event.ctrlKey);
+      return;
+    }
     const action = treeKeyboardAction(event.key, event.shiftKey);
     if (!action) return;
     event.preventDefault();
@@ -1482,6 +1752,20 @@ function FileExplorerContent({
       action === "last"
     ) {
       focusTreeItem(event.currentTarget, action);
+      if (event.shiftKey) {
+        const path = (document.activeElement as HTMLElement | null)?.dataset
+          .filePath;
+        const target = Object.values(children)
+          .flat()
+          .find(
+            (candidate) =>
+              candidate.path === path && candidate.type !== "directory",
+          );
+        if (target) {
+          selectionAnchor.current ??= entry.path;
+          selectEntry(target, true);
+        }
+      }
       return;
     }
     if (action === "expand") {
@@ -1505,8 +1789,10 @@ function FileExplorerContent({
       return;
     }
     event.stopPropagation();
-    if (action === "activate") activateEntry(entry);
-    else {
+    if (action === "activate") {
+      selectEntry(entry);
+      activateEntry(entry);
+    } else {
       const point = keyboardContextMenuPoint(event.currentTarget);
       openEntryMenu(entry, point.x, point.y);
     }
@@ -1536,7 +1822,7 @@ function FileExplorerContent({
       <div key={entry.path}>
         <div
           className={`file-row ${
-            previewEntry?.path === entry.path ? "is-selected" : ""
+            selectedPaths.has(entry.path) ? "is-selected" : ""
           } ${
             treeHasFocus && focusedTreePath === entry.path ? "is-focused" : ""
           } ${
@@ -1545,6 +1831,7 @@ function FileExplorerContent({
             entry.ignored ? "is-ignored" : ""
           }`}
           data-file-path={entry.path}
+          data-file-type={entry.type}
           data-parent-path={parentDirectoryPath(entry.path)}
           role="treeitem"
           tabIndex={
@@ -1554,7 +1841,7 @@ function FileExplorerContent({
               : -1
           }
           aria-level={depth + 1}
-          aria-selected={previewEntry?.path === entry.path}
+          aria-selected={selectedPaths.has(entry.path)}
           aria-expanded={isDirectory ? isExpanded : undefined}
           style={{
             paddingLeft: FILE_TREE_BASE_INDENT + depth * FILE_TREE_INDENT,
@@ -1565,13 +1852,19 @@ function FileExplorerContent({
           }
           draggable
           onDragStart={(e) => handleEntryDragStart(e, entry)}
-          onDragOver={(e) => handleDirectoryDragOver(e, uploadDirectory)}
+          onDragEnd={() => {
+            draggedEntries.current = null;
+            setDropTargetPath(null);
+          }}
+          onDragOver={(e) =>
+            handleDirectoryDragOver(e, uploadDirectory, isDirectory)
+          }
           onDragLeave={(e) => {
             if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
               setDropTargetPath(null);
             }
           }}
-          onDrop={(e) => handleDirectoryDrop(e, uploadDirectory)}
+          onDrop={(e) => handleDirectoryDrop(e, uploadDirectory, isDirectory)}
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -1588,7 +1881,13 @@ function FileExplorerContent({
               longPressTriggered.current = false;
               return;
             }
-            activateEntry(entry);
+            selectEntry(
+              entry,
+              !isDirectory && event.shiftKey,
+              !isDirectory && (event.metaKey || event.ctrlKey),
+            );
+            if (!event.shiftKey && !event.metaKey && !event.ctrlKey)
+              activateEntry(entry);
           }}
           onDoubleClick={(event) => {
             if (
@@ -1769,7 +2068,22 @@ function FileExplorerContent({
       ) : null}
 
       <div className="file-explorer-content">
-        <div className="file-explorer-browser">
+        <div
+          className="file-explorer-browser"
+          onContextMenu={(event) => {
+            if (
+              filesystem ||
+              !workspace ||
+              (event.target as Element).closest(
+                "[data-file-path], .file-explorer-toolbar, .file-search-result",
+              )
+            )
+              return;
+            event.preventDefault();
+            event.stopPropagation();
+            setEntryMenu({ entry: null, x: event.clientX, y: event.clientY });
+          }}
+        >
           {filesystem && workspace ? (
             <FilesystemBrowser
               key={runtimeContext}
@@ -1804,80 +2118,90 @@ function FileExplorerContent({
                     maxLength={512}
                   />
                 </label>
-                <ThemedSelect
-                  className="file-search-mode"
-                  aria-label="Search type"
-                  title="Loaded searches include only expanded directories and support globs"
-                  value={searchMode}
-                  options={[
-                    { value: "files", label: "Files" },
-                    { value: "content", label: "Content" },
-                    { value: "loaded", label: "Loaded" },
-                  ]}
-                  onChange={(value) =>
-                    setSearchMode(value as "files" | "content" | "loaded")
-                  }
-                />
-                <button
-                  type="button"
-                  className="file-hidden-toggle"
-                  aria-pressed={showHidden}
-                  title="Show hidden files"
-                  onClick={() => {
-                    writeExplorerCache(
-                      connectionClient,
-                      cacheWorkspaceId,
-                      !showHidden,
-                      { search },
-                      cacheResourceKey,
-                    );
-                    setShowHidden(!showHidden);
-                  }}
-                >
-                  {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
-                  Hidden
-                </button>
-                <span className="file-toolbar-end">
+                <div className="file-explorer-controls">
+                  <ThemedSelect
+                    className="file-search-mode"
+                    aria-label="Search type"
+                    title="Loaded searches include only expanded directories and support globs"
+                    value={searchMode}
+                    options={[
+                      { value: "files", label: "Files" },
+                      { value: "content", label: "Content" },
+                      { value: "loaded", label: "Loaded" },
+                    ]}
+                    onChange={(value) =>
+                      setSearchMode(value as "files" | "content" | "loaded")
+                    }
+                  />
                   <button
                     type="button"
-                    className="file-toolbar-icon"
-                    aria-label="Browse filesystem"
-                    title="Browse filesystem: allow navigation outside this workspace"
-                    disabled={!workspace}
+                    className="file-hidden-toggle file-toolbar-icon"
+                    aria-label="Show hidden files"
+                    aria-pressed={showHidden}
+                    title="Show hidden files"
                     onClick={() => {
-                      setEntryMenu(null);
-                      setPendingDeleteEntry(null);
-                      setFilesystemContext(runtimeContext);
+                      writeExplorerCache(
+                        connectionClient,
+                        cacheWorkspaceId,
+                        !showHidden,
+                        { search },
+                        cacheResourceKey,
+                      );
+                      setShowHidden(!showHidden);
                     }}
                   >
-                    <FolderOpen size={15} />
+                    {showHidden ? <Eye size={15} /> : <EyeOff size={15} />}
                   </button>
-                  <button
-                    type="button"
-                    className="file-toolbar-icon"
-                    aria-label="Refresh files"
-                    title="Refresh"
-                    disabled={!workspace}
-                    onClick={() => {
-                      setSearchRevision((value) => value + 1);
-                      const pathsToRefresh = Array.from(expanded);
-                      if (!pathsToRefresh.includes(""))
-                        pathsToRefresh.unshift("");
-                      for (const path of pathsToRefresh) {
-                        void loadDirectory(path, true);
-                      }
-                      void loadGitStatus(true);
-                    }}
-                  >
-                    <RefreshCw
-                      className={gitSummaryState.loading ? "is-spinning" : ""}
-                      size={15}
-                    />
-                  </button>
-                </span>
+                  <span className="file-toolbar-end">
+                    <button
+                      type="button"
+                      className="file-toolbar-icon"
+                      aria-label="New folder"
+                      title="New folder in workspace root"
+                      disabled={!workspace}
+                      onClick={() => setNewFolderDirectory("")}
+                    >
+                      <FolderPlus size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      className="file-toolbar-icon"
+                      aria-label="Browse filesystem"
+                      title="Browse filesystem: allow navigation outside this workspace"
+                      disabled={!workspace}
+                      onClick={() => {
+                        setEntryMenu(null);
+                        setPendingDeleteEntry(null);
+                        setFilesystemContext(runtimeContext);
+                      }}
+                    >
+                      <FolderOpen size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      className="file-toolbar-icon"
+                      aria-label="Refresh files"
+                      title="Refresh"
+                      disabled={!workspace}
+                      onClick={refreshFiles}
+                    >
+                      <RefreshCw
+                        className={gitSummaryState.loading ? "is-spinning" : ""}
+                        size={15}
+                      />
+                    </button>
+                  </span>
+                </div>
               </div>
 
               {error ? <p className="modal-error">{error}</p> : null}
+              {selectedPaths.size > 1 || moving ? (
+                <div className="file-upload-status" role="status">
+                  {moving
+                    ? "Moving files..."
+                    : `${selectedPaths.size} files selected`}
+                </div>
+              ) : null}
               {rootInfo?.truncated ? (
                 <p className="modal-error">
                   This directory is truncated at 1000 entries.
@@ -1888,6 +2212,10 @@ function FileExplorerContent({
                 ref={fileTreeRef}
                 className={`file-tree ${dropTargetPath === "" ? "is-drop-target" : ""}`}
                 role={query && searchMode !== "loaded" ? undefined : "tree"}
+                aria-label="Workspace files"
+                aria-multiselectable={
+                  query && searchMode !== "loaded" ? undefined : true
+                }
                 onFocusCapture={() => setTreeHasFocus(true)}
                 onBlurCapture={(event) => {
                   if (
@@ -1914,7 +2242,9 @@ function FileExplorerContent({
                 ) : dropTargetPath === "" ? (
                   <div className="file-upload-status">
                     <Upload size={14} />
-                    Drop files to upload to workspace root
+                    {draggedEntries.current
+                      ? "Drop files to move to workspace root"
+                      : "Drop files to upload to workspace root"}
                   </div>
                 ) : null}
                 {query && searchMode === "loaded" ? (
@@ -2049,6 +2379,17 @@ function FileExplorerContent({
             : undefined
         }
         onDelete={filesystem ? undefined : setPendingDeleteEntry}
+        onCreateDirectory={filesystem ? undefined : setNewFolderDirectory}
+        onRefresh={refreshFiles}
+      />
+      <TextInputDialog
+        open={newFolderDirectory !== null}
+        title="New folder"
+        label="Folder name"
+        placeholder="New folder"
+        submitLabel="Create"
+        onClose={() => setNewFolderDirectory(null)}
+        onSubmit={(name) => void createDirectory(name)}
       />
       <ConfirmDialog
         open={!!pendingDeleteEntry}

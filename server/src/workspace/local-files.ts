@@ -1,5 +1,6 @@
 import {
   lstat,
+  mkdir,
   readdir,
   realpath,
   rm,
@@ -25,6 +26,7 @@ import type {
 import { runBinaryProcessWithTimeout } from "./process";
 import { decodePreviewBuffer, previewLimitForPath } from "./preview";
 import { fileDownloadRange, type FileDownloadOptions } from "./file-download";
+import { renameFileExclusive } from "./atomic-file-move";
 
 export async function listLocalFiles(
   rootPath: string,
@@ -249,4 +251,38 @@ export async function deleteLocalFile(
         ? "symlink"
         : "file",
   };
+}
+
+export async function createLocalDirectory(
+  rootPath: string,
+  directory: string,
+  name: string,
+) {
+  const rootReal = await realpath(rootPath);
+  const parentReal = await realpath(resolve(rootReal, directory));
+  assertInsideRoot(rootReal, parentReal);
+  const target = join(parentReal, name);
+  await mkdir(target);
+  return { path: relativePreviewPath(rootReal, target) };
+}
+
+export async function moveLocalFile(
+  rootPath: string,
+  path: string,
+  directory: string,
+) {
+  const rootReal = await realpath(rootPath);
+  const sourceParent = await realpath(dirname(resolve(rootReal, path)));
+  const destination = await realpath(resolve(rootReal, directory));
+  assertInsideRoot(rootReal, sourceParent);
+  assertInsideRoot(rootReal, destination);
+  const source = join(sourceParent, basename(path));
+  const info = await lstat(source);
+  if (!info.isFile() && !info.isSymbolicLink())
+    throw new Error("Only files can be moved");
+  if (!(await stat(destination)).isDirectory())
+    throw new Error("Move target is not a directory");
+  const target = join(destination, basename(path));
+  renameFileExclusive(source, target);
+  return { path: relativePreviewPath(rootReal, target) };
 }

@@ -411,6 +411,16 @@ after fetch, and abort conflicts. They never push.
   or long-press. Upload/delete stay checkout-scoped. Operations work over SSH.
   Desktop layout downloads directly, including installed web apps. Mobile
   layout keeps native iOS sharing and its browser fallback behavior.
+- Create folders in the checkout root with **New folder**, or inside a folder
+  through its actions menu. Right-click the file tree background to create a
+  folder in the checkout root or refresh files. Select files with Cmd/Ctrl-click
+  or Shift-click, then drag them onto a folder (or empty tree space for the
+  checkout root) to move them. Cmd/Ctrl+A selects visible files; Space selects
+  the focused file.
+  Moves never overwrite existing names; failed files remain selected. Moves
+  require source and destination to be on the same filesystem; SSH moves also
+  require Python 3 on the remote host. Read-only host browsing does not allow
+  creating folders or moving files.
 - With [host file reveal enabled](docs/DEPLOYMENT.md#host-file-reveal), local
   profiles over loopback offer **Reveal on host** and **Open folder on host**
   in explorer and Changes menus. These open the Roamgate host's desktop, not

@@ -5,6 +5,7 @@ import {
   downloadContentDisposition,
   inlineContentDisposition,
   sanitizeExplorerPath,
+  sanitizeMutationPath,
   sanitizeFilesystemPath,
   sanitizePreviewPath,
   sanitizeUploadFilename,
@@ -22,6 +23,8 @@ import {
   readLocalFile,
   resolveLocalFilePaths,
   uploadLocalFile,
+  createLocalDirectory,
+  moveLocalFile,
 } from "./local-files";
 import {
   deleteRemoteFile,
@@ -30,6 +33,7 @@ import {
   readRemoteFile,
   resolveRemoteFilePaths,
   uploadRemoteFile,
+  mutateRemoteFile,
 } from "./remote-files";
 import {
   pullGit,
@@ -487,6 +491,39 @@ export function createFileHandlers({
     };
   }
 
+  async function mutateFile(params: Record<string, unknown>, move: boolean) {
+    const method = move ? "file.move" : "file.mkdir";
+    const workspaceId = String(params.workspace_id ?? "");
+    if (!workspaceId) throw new Error(`${method} requires workspace_id`);
+    if (params.scope !== undefined && params.scope !== "workspace")
+      throw new Error(`${method} only supports workspace scope`);
+    const directory = sanitizeMutationPath(params.directory ?? "");
+    const path = move ? sanitizeMutationPath(params.path) : undefined;
+    if (move && !path) throw new Error("file.move requires path");
+    const name =
+      path === undefined
+        ? sanitizeUploadFilename(params.name)
+        : path.split("/").pop()!;
+    const workspace = await getWorkspace(workspaceId);
+    const rootPath = await explorerRoot(workspaceId, workspace);
+    if (!rootPath) throw new Error("workspace has no directory path");
+    const host = sshHost();
+    const result = host
+      ? await mutateRemoteFile({
+          host,
+          rootPath,
+          directory,
+          name,
+          path,
+          runProcessWithCodeTimeout,
+          shQuote,
+        })
+      : path === undefined
+        ? await createLocalDirectory(rootPath, directory, name)
+        : await moveLocalFile(rootPath, path, directory);
+    return { workspace_id: workspaceId, ...result };
+  }
+
   async function gitRoot(workspaceId: string, workspace: any) {
     const host = sshHost();
     const tried = new Set<string>();
@@ -667,6 +704,10 @@ export function createFileHandlers({
     downloadWorkspaceFile: downloadFile,
     uploadWorkspaceFile: uploadFile,
     deleteWorkspaceFile: deleteFile,
+    createWorkspaceDirectory: (params: Record<string, unknown>) =>
+      mutateFile(params, false),
+    moveWorkspaceFile: (params: Record<string, unknown>) =>
+      mutateFile(params, true),
     readGitDiffSummary,
     readWorkspacePullRequest,
     readGitDiffFile,
