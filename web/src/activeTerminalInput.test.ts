@@ -15,13 +15,13 @@ describe("activeTerminalInput", () => {
     }
   });
   test.each(["single", "split", "switcher"])(
-    "returns keyboard input to the selected %s terminal or its composer draft",
+    "finds the selected %s terminal activation target or its composer draft",
     async (layout) => {
       const browser = new Window();
       const doc = browser.document;
       try {
         const terminal = `<div class="terminal-shell">
-          <div class="terminal-view"><textarea class="xterm-helper-textarea"></textarea></div>
+          <div class="terminal-view" tabindex="-1"><textarea class="xterm-helper-textarea"></textarea></div>
           <textarea class="terminal-composer-input" hidden></textarea>
         </div>`;
         doc.body.innerHTML = `<button>Other control</button><div class="workspace-terminal-surface">${
@@ -34,14 +34,15 @@ describe("activeTerminalInput", () => {
         const shell = doc.querySelector(
           layout === "split" ? ".is-active .terminal-shell" : ".terminal-shell",
         )!;
-        const [input, draft] = shell.querySelectorAll("textarea");
+        const input = shell.querySelector("div")!;
+        const draft = shell.querySelectorAll("textarea")[1]!;
         doc.querySelector("button")!.focus();
         activeTerminalInput(doc as unknown as Document)?.focus();
         expect(doc.activeElement).toBe(input);
-        draft!.removeAttribute("hidden");
+        draft.removeAttribute("hidden");
         activeTerminalInput(doc as unknown as Document)?.focus();
         expect(doc.activeElement).toBe(draft);
-        draft!.setAttribute("hidden", "");
+        draft.setAttribute("hidden", "");
         activeTerminalInput(doc as unknown as Document)?.focus();
         expect(doc.activeElement).toBe(input);
       } finally {

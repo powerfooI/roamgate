@@ -265,6 +265,7 @@ async function registerDomTests() {
     "../browserStorage"
   );
   const { normalizeTerminalFontScale } = await import("../appearance");
+  const { activeTerminalInput } = await import("../activeTerminalInput");
   const {
     clearTerminalComposerDraft,
     readTerminalComposerDraft,
@@ -398,6 +399,63 @@ async function registerDomTests() {
       }
     });
   }
+
+  test.each(["closed", "direct", "composer"] as const)(
+    "terminal focus activates %s input after touch on a coarse-pointer desktop",
+    async (mode) => {
+      await mount(mode !== "closed");
+      container.className = "workspace-terminal-surface";
+      if (mode === "direct") await choose("direct");
+      const term = currentTerminal();
+      const otherControl = document.createElement("button");
+      document.body.append(otherControl);
+      act(() => {
+        otherControl.dispatchEvent(
+          new browser.PointerEvent("pointerdown", {
+            bubbles: true,
+            pointerType: "touch",
+          }) as unknown as PointerEvent,
+        );
+        otherControl.focus();
+      });
+      expectInputBlocked();
+      act(() => term.textarea.focus());
+      expect(document.activeElement === term.textarea).toBe(false);
+      expectInputBlocked();
+      act(() => activeTerminalInput(document)?.focus({ preventScroll: true }));
+      if (mode === "composer") {
+        expect(document.activeElement).toBe(
+          container.querySelector(".terminal-composer-input"),
+        );
+        expectInputBlocked();
+      } else {
+        expect(document.activeElement === term.textarea).toBe(true);
+        expect(term.options.disableStdin).toBe(false);
+        expect(term.textarea.readOnly).toBe(false);
+        act(() => term.onDataCallback("focused"));
+        expect(
+          calls.filter((call) => call.method === "terminal.input"),
+        ).toHaveLength(1);
+      }
+    },
+  );
+
+  test.each(["disconnected", "paused", "inactive split"] as const)(
+    "terminal focus does not activate input when %s",
+    async (change) => {
+      explicitPane = "pane-a";
+      await mount();
+      container.className = "workspace-terminal-surface";
+      if (change === "disconnected") await patch({ status: "disconnected" });
+      if (change === "paused") await patch({ connectionPaused: true });
+      if (change === "inactive split")
+        await patch({ selectedPaneId: "pane-b" });
+      const term = currentTerminal();
+      act(() => activeTerminalInput(document)?.focus({ preventScroll: true }));
+      expect(document.activeElement).not.toBe(term.textarea);
+      expectInputBlocked();
+    },
+  );
 
   test("Ctrl+/ sends one unambiguous slash key and suppresses xterm's Ctrl+_ fallback", async () => {
     await mount(true);

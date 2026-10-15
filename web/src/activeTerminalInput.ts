@@ -6,7 +6,7 @@ export function activeTerminalInput(root: ParentNode): HTMLElement | null {
     shell?.querySelector<HTMLElement>(
       ".terminal-composer-input:not([hidden])",
     ) ??
-    shell?.querySelector<HTMLElement>(".xterm-helper-textarea") ??
+    shell?.querySelector<HTMLElement>(".terminal-view") ??
     null
   );
 }

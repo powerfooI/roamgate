@@ -3490,7 +3490,14 @@ export function TerminalView({
           onPointerDown={preventPaneActionFocus}
         />
         <div className="terminal-main">
-          <div ref={containerRef} className="terminal-view" />
+          <div
+            ref={containerRef}
+            className="terminal-view"
+            tabIndex={-1}
+            onFocus={(event) => {
+              if (event.target === event.currentTarget) focusTerminalInput();
+            }}
+          />
           {!isMobileLayout() && touchHandles.length === 0 && isActivePane ? (
             <div
               className="terminal-mobile-input-actions"
