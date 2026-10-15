@@ -431,6 +431,8 @@ function FileExplorerContent({
   const [newFolderDirectory, setNewFolderDirectory] = useState<string | null>(
     null,
   );
+  const creatingDirectoryRef = useRef(false);
+  const [creatingDirectory, setCreatingDirectory] = useState(false);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(
     () => new Set(),
   );
@@ -490,6 +492,8 @@ function FileExplorerContent({
     draggedEntries.current = null;
     movingRef.current = false;
     setMoving(false);
+    creatingDirectoryRef.current = false;
+    setCreatingDirectory(false);
   }, [runtimeContext]);
   const runtimeContextRef = useRef(runtimeContext);
   runtimeContextRef.current = runtimeContext;
@@ -1359,9 +1363,16 @@ function FileExplorerContent({
     Array.from(event.dataTransfer.types).includes(FILE_MOVE_DRAG_TYPE);
 
   const createDirectory = async (name: string) => {
-    if (!workspace?.workspace_id || newFolderDirectory === null) return;
+    if (
+      !workspace?.workspace_id ||
+      newFolderDirectory === null ||
+      creatingDirectoryRef.current
+    )
+      return;
     const directory = newFolderDirectory;
     const requestContext = runtimeContext;
+    creatingDirectoryRef.current = true;
+    setCreatingDirectory(true);
     try {
       await connectionClient.call("file.mkdir", {
         workspace_id: workspace.workspace_id,
@@ -1388,6 +1399,11 @@ function FileExplorerContent({
           message: "Create folder failed",
           detail: (error as Error).message,
         });
+    } finally {
+      if (runtimeContextIsCurrent(requestContext)) {
+        creatingDirectoryRef.current = false;
+        setCreatingDirectory(false);
+      }
     }
   };
 
@@ -2388,6 +2404,7 @@ function FileExplorerContent({
         label="Folder name"
         placeholder="New folder"
         submitLabel="Create"
+        submitting={creatingDirectory}
         onClose={() => setNewFolderDirectory(null)}
         onSubmit={(name) => void createDirectory(name)}
       />

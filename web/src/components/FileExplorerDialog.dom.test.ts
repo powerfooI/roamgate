@@ -73,6 +73,7 @@ if (process.env.ROAMGATE_FILE_EXPLORER_DOM_TEST !== "1") {
     const pending = new Set<Promise<unknown>>();
     let activeMoves = 0;
     let peakMoves = 0;
+    let mkdirDelay: Promise<void> | undefined;
     const calls: Array<{ method: string; params: Record<string, unknown> }> =
       [];
     const client: ConnectionClient = {
@@ -98,12 +99,14 @@ if (process.env.ROAMGATE_FILE_EXPLORER_DOM_TEST !== "1") {
           }),
           "file.read": (params) =>
             readLocalFile(directory, String(params.path)),
-          "file.mkdir": (params) =>
-            createLocalDirectory(
+          "file.mkdir": async (params) => {
+            await mkdirDelay;
+            return createLocalDirectory(
               directory,
               String(params.directory),
               String(params.name),
-            ),
+            );
+          },
           "file.move": (params) =>
             moveLocalFile(
               directory,
@@ -142,7 +145,7 @@ if (process.env.ROAMGATE_FILE_EXPLORER_DOM_TEST !== "1") {
         while (pending.size) await Promise.allSettled([...pending]);
       });
     }
-    async function submitFolderName(name: string) {
+    async function setFolderName(name: string) {
       await update(() => {
         const input = container.querySelector<HTMLInputElement>(
           "[role='dialog'] input",
@@ -155,14 +158,18 @@ if (process.env.ROAMGATE_FILE_EXPLORER_DOM_TEST !== "1") {
           new browser.Event("input", { bubbles: true }) as unknown as Event,
         );
       });
-      await update(() =>
-        container.querySelector("form")!.dispatchEvent(
-          new browser.Event("submit", {
-            bubbles: true,
-            cancelable: true,
-          }) as unknown as Event,
-        ),
+    }
+    function submitFolder() {
+      container.querySelector("form")!.dispatchEvent(
+        new browser.Event("submit", {
+          bubbles: true,
+          cancelable: true,
+        }) as unknown as Event,
       );
+    }
+    async function submitFolderName(name: string) {
+      await setFolderName(name);
+      await update(submitFolder);
     }
     function row(path: string) {
       const element = [
@@ -266,9 +273,64 @@ if (process.env.ROAMGATE_FILE_EXPLORER_DOM_TEST !== "1") {
       await update(() =>
         click(container.querySelector("[aria-label='New folder']")!),
       );
-      await submitFolderName("target");
+      await setFolderName("target");
+      const creation = Promise.withResolvers<void>();
+      mkdirDelay = creation.promise;
+      try {
+        await act(async () => {
+          submitFolder();
+          submitFolder();
+        });
+        expect(
+          calls.filter((call) => call.method === "file.mkdir"),
+        ).toHaveLength(1);
+        expect(
+          container.querySelector<HTMLButtonElement>("button[type='submit']")!
+            .disabled,
+        ).toBe(true);
+        expect(
+          container.querySelector<HTMLInputElement>("[role='dialog'] input")!
+            .disabled,
+        ).toBe(true);
+        await act(async () => submitFolder());
+        expect(
+          calls.filter((call) => call.method === "file.mkdir"),
+        ).toHaveLength(1);
+      } finally {
+        await update(() => creation.resolve());
+        mkdirDelay = undefined;
+      }
       expect(await readdir(directory)).toContain("target");
       expect(row("target")).toBeDefined();
+      expect(
+        notify.mock.calls.map(([notification]) => notification.kind),
+      ).toEqual(["success"]);
+      expect(container.querySelector("form")).toBeNull();
+      await update(() =>
+        click(container.querySelector("[aria-label='New folder']")!),
+      );
+      await submitFolderName("target");
+      expect(
+        notify.mock.calls[notify.mock.calls.length - 1]?.[0],
+      ).toMatchObject({
+        kind: "error",
+        message: "Create folder failed",
+      });
+      expect(
+        container.querySelector<HTMLInputElement>("[role='dialog'] input")!
+          .value,
+      ).toBe("target");
+      expect(
+        container.querySelector<HTMLInputElement>("[role='dialog'] input")!
+          .disabled,
+      ).toBe(false);
+      expect(
+        container.querySelector<HTMLButtonElement>("button[type='submit']")!
+          .disabled,
+      ).toBe(false);
+      await submitFolderName("retry-folder");
+      expect(await readdir(directory)).toContain("retry-folder");
+      expect(container.querySelector("form")).toBeNull();
       await update(() =>
         row("target").dispatchEvent(
           new browser.MouseEvent("contextmenu", {

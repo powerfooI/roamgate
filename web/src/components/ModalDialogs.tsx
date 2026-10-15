@@ -10,6 +10,7 @@ export function TextInputDialog({
   initialValue = "",
   placeholder,
   submitLabel = "Save",
+  submitting = false,
   onSubmit,
   onClose,
 }: {
@@ -19,6 +20,7 @@ export function TextInputDialog({
   initialValue?: string;
   placeholder?: string;
   submitLabel?: string;
+  submitting?: boolean;
   onSubmit: (value: string) => void;
   onClose: () => void;
 }) {
@@ -44,7 +46,7 @@ export function TextInputDialog({
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(value);
+    if (!submitting) onSubmit(value);
   };
 
   return (
@@ -54,6 +56,7 @@ export function TextInputDialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        aria-busy={submitting}
         onSubmit={submit}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -66,6 +69,7 @@ export function TextInputDialog({
           <span>{label}</span>
           <input
             ref={inputRef}
+            disabled={submitting}
             value={value}
             onChange={(e) => setValue(e.currentTarget.value)}
             placeholder={placeholder}
@@ -76,7 +80,9 @@ export function TextInputDialog({
           <button type="button" className="ghost" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit">{submitLabel}</button>
+          <button type="submit" disabled={submitting}>
+            {submitLabel}
+          </button>
         </div>
       </form>
     </div>
