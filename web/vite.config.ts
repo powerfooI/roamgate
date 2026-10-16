@@ -47,9 +47,9 @@ export default defineConfig({
               tags: ["$initial"],
             },
             {
-              // The remaining icons belong to lazy features; retain one small asset.
+              // Feature-only icons and name dictionaries share one lazy asset.
               name: "feature-icons",
-              test: /node_modules[\\/]lucide-react[\\/]/,
+              test: /node_modules[\\/](?:lucide-react|unique-names-generator)[\\/]/,
             },
             {
               // File and code previews load these together. Preserve one lazy editor

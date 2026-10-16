@@ -18,7 +18,7 @@
     },
     "server": {
       "name": "roamgate-server",
-      "version": "0.8.3",
+      "version": "0.8.4",
       "dependencies": {
         "@earendil-works/chord": "1.1.0",
         "@earendil-works/pi-ai": "1.1.0",
@@ -33,7 +33,7 @@
     },
     "web": {
       "name": "roamgate-web",
-      "version": "0.8.3",
+      "version": "0.8.4",
       "dependencies": {
         "@codemirror/commands": "^6.11.1",
         "@codemirror/lang-cpp": "^6.0.3",
@@ -79,6 +79,7 @@
         "react": "^19.3.0",
         "react-dom": "^19.3.0",
         "shiki": "^4.5.0",
+        "unique-names-generator": "^4.7.1",
       },
       "devDependencies": {
         "@types/react": "^19.3.0",
@@ -926,6 +927,8 @@
     "undici": ["undici@8.11.2", "", {}, "sha512-u4UB2/IrKdU6lFxumHmmo1a3fCQO5tzQllRorfoRS63txhrB7xTpSn1PftwC4qEHkOaqP95fCWW4lJzwErwzhQ=="],
 
     "undici-types": ["undici-types@8.11.2", "", {}, "sha512-iMVNmWZ0leK/goS6eXMizSzmm9CDWtyphwbaCms3DNLqRxDL+mMoNVcZMTyyVgXP0N+Z8neAMzDoUOUJL8veKg=="],
+
+    "unique-names-generator": ["unique-names-generator@4.7.1", "", {}, "sha512-lMx9dX+KRmG8sq6gulYYpKWZc9RlGsgBR6aoO8Qsm3qvkSJ+3rAymr+TnV8EDMrIrwuFJ4kruzMWM/OpYzPoow=="],
 
     "unist-util-is": ["unist-util-is@6.0.1", "", { "dependencies": { "@types/unist": "^3.0.0" } }, "sha512-LsiILbtBETkDz8I9p1dQ0uyRUWuaQzd/cuEeS1hoRSyW5E5XGmTzlwY1OrNzzakGowI9Dr/I8HVaw4hTtnxy8g=="],
 

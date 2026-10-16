@@ -38,6 +38,7 @@ if (process.env.ROAMGATE_FILE_EXPLORER_DOM_TEST !== "1") {
     expect(code).toBe(0);
   }, 15_000);
 } else {
+  // Real filesystem and DOM work needs headroom under parallel suite load.
   test("creates folders, selects files, moves batches and preserves failed selections", async () => {
     const browser = new Window({ url: "http://localhost" });
     const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -669,5 +670,5 @@ if (process.env.ROAMGATE_FILE_EXPLORER_DOM_TEST !== "1") {
       }
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 10_000);
 }

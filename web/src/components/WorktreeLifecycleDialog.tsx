@@ -123,7 +123,6 @@ export function WorktreeLifecycleDialog({
   const [error, setError] = useState("");
   const [operation, setOperation] = useState<LifecycleOperation | null>(null);
   const [newWorktreeOpen, setNewWorktreeOpen] = useState(false);
-  const [newWorktreeBranch, setNewWorktreeBranch] = useState("");
   const [openWorktreeOpen, setOpenWorktreeOpen] = useState(false);
   const [hooksOpen, setHooksOpen] = useState(false);
   const [removeRow, setRemoveRow] = useState<WorktreeLifecycleRow | null>(null);
@@ -512,7 +511,6 @@ export function WorktreeLifecycleDialog({
               }
               disabled={!actionSourceWorkspaceId || operationRunning}
               onClick={() => {
-                setNewWorktreeBranch(luckyWorktreeBranchName());
                 setNewWorktreeOpen(true);
               }}
             >
@@ -674,7 +672,7 @@ export function WorktreeLifecycleDialog({
         open={newWorktreeOpen}
         title="New Worktree"
         label="Branch"
-        initialValue={newWorktreeBranch}
+        initialValue={luckyWorktreeBranchName}
         placeholder="Branch name"
         submitLabel="Create"
         onClose={() => setNewWorktreeOpen(false)}

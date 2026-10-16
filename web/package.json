@@ -55,7 +55,8 @@
     "minimatch": "10.2.6",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "shiki": "^4.5.0"
+    "shiki": "^4.5.0",
+    "unique-names-generator": "^4.7.1"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",

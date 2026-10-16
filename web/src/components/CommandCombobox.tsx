@@ -62,7 +62,7 @@ import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
 type TextAction =
   | { type: "rename-workspace"; workspace: Workspace }
   | { type: "rename-tab"; tab: Tab }
-  | { type: "create-worktree"; workspace: Workspace; branch: string };
+  | { type: "create-worktree"; workspace: Workspace };
 
 type ActionDefinition = {
   key: string;
@@ -403,7 +403,7 @@ export function CommandCombobox({
           ? {
               title: "New Worktree",
               label: "Branch",
-              initialValue: textAction.branch,
+              initialValue: luckyWorktreeBranchName,
               placeholder: "my-branch",
               submitLabel: "Create",
             }
@@ -437,7 +437,6 @@ export function CommandCombobox({
         setTextAction({
           type: "create-worktree",
           workspace: focusedWorktreeSource,
-          branch: luckyWorktreeBranchName(),
         }),
     });
   }
@@ -666,7 +665,6 @@ export function CommandCombobox({
         setTextAction({
           type: "create-worktree",
           workspace,
-          branch: luckyWorktreeBranchName(),
         }),
     });
   }
