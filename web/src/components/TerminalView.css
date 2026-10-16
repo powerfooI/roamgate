@@ -444,6 +444,68 @@
   }
 }
 
+.terminal-mobile-input-bar {
+  display: none;
+}
+
+/* Phones: a messaging-style input bar in flow below the output, so it never
+   covers terminal text. */
+:where(html[data-layout="mobile"]) {
+  .terminal-main:has(> .terminal-mobile-input-bar) {
+    flex-direction: column;
+  }
+
+  .terminal-mobile-input-bar {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 8px;
+    padding: 6px calc(8px + env(safe-area-inset-right, 0px))
+      calc(8px + env(safe-area-inset-bottom, 0px))
+      calc(8px + env(safe-area-inset-left, 0px));
+    background: var(--terminal-bg);
+  }
+
+  /* Hidden for a touch selection, still holding its height. */
+  .terminal-mobile-input-bar[data-reserved] {
+    visibility: hidden;
+  }
+
+  .terminal-mobile-input-bar button {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    min-width: max(48px, calc(48px / var(--ui-scale, 1)));
+    min-height: max(48px, calc(48px / var(--ui-scale, 1)));
+    padding: 0;
+    color: var(--text-strong);
+    border: 1px solid transparent;
+    border-radius: 24px;
+    background: color-mix(in srgb, var(--text-strong) 8%, var(--terminal-bg));
+    touch-action: manipulation;
+  }
+
+  .terminal-mobile-input-bar .terminal-mobile-message {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: flex-start;
+    padding: 0 18px;
+    color: var(--muted);
+    font-size: 16px;
+  }
+
+  .terminal-mobile-message-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .terminal-mobile-input-bar button:disabled {
+    opacity: 0.5;
+  }
+}
+
 .terminal-touch-selection-ui {
   zoom: calc(1 / var(--ui-scale, 1));
   user-select: none;

@@ -1,4 +1,4 @@
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import {
   createReviewAnnotation,
   MAX_QUOTE_LENGTH,
@@ -34,6 +34,7 @@ import { installTerminalCompositionRepair } from "../terminalComposition";
 import {
   Columns2,
   Keyboard,
+  SquareTerminal,
   Maximize2,
   Minimize2,
   Rows2,
@@ -47,6 +48,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import "@xterm/xterm/css/xterm.css";
 import { bridge, type ConnectionClient } from "../api";
@@ -77,6 +79,8 @@ import {
   terminalComposerDraftKey,
   terminalComposerDraftPaneIds,
   terminalComposerRequest,
+  readTerminalComposerDraft,
+  subscribeTerminalComposerDraft,
 } from "../terminalComposer";
 import {
   registerTerminalConnectionDisposer,
@@ -512,6 +516,24 @@ export function TerminalView({
   const activePaneId =
     selectedPaneInLayout ?? s.layout?.focused_pane_id ?? null;
   const isActivePane = !!pane && (!paneId || pane.pane_id === activePaneId);
+  // The phone input bar names an unsent Composer draft.
+  const inputBarDraftKey = pane
+    ? terminalComposerDraftKey(
+        s.activeConnectionId,
+        s.connectionGeneration,
+        pane.pane_id,
+      )
+    : null;
+  const composerHasDraft = useSyncExternalStore(
+    (listener) =>
+      inputBarDraftKey
+        ? subscribeTerminalComposerDraft(inputBarDraftKey, listener)
+        : () => {},
+    () =>
+      inputBarDraftKey
+        ? readTerminalComposerDraft(inputBarDraftKey) !== ""
+        : false,
+  );
   const canShowAgentHistory = isActivePane && paneHasAgentHistory(pane);
   const canClosePane = !!pane && paneCanClose(s.panes, pane.pane_id);
   const paneZoomed =
@@ -3498,6 +3520,72 @@ export function TerminalView({
               if (event.target === event.currentTarget) focusTerminalInput();
             }}
           />
+          {isMobileLayout() && !composerOpen && isActivePane ? (
+            // On phones, a messaging-style input bar in flow below the
+            // output. A touch selection hides it but keeps its height, so
+            // the terminal does not resize and drop the selection.
+            <div
+              className="terminal-mobile-input-bar"
+              aria-label="Terminal input"
+              data-reserved={touchHandles.length > 0 || undefined}
+            >
+              <button
+                type="button"
+                className="terminal-mobile-message"
+                aria-label={`Open terminal input${composerHasDraft ? ", unsent draft" : ""}`}
+                title="Open terminal input"
+                aria-haspopup="dialog"
+                disabled={
+                  s.status !== "connected" ||
+                  s.connectionPaused ||
+                  !!terminalAttachError
+                }
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  rememberTerminalInputMode("composer");
+                  flushSync(() => setComposerOpen(true));
+                  // The tap is the request to type: focus the draft within
+                  // this gesture so phones raise the keyboard in one tap.
+                  container
+                    ?.closest(".terminal-shell")
+                    ?.querySelector<HTMLElement>(".terminal-composer-input")
+                    ?.focus({ preventScroll: true });
+                }}
+              >
+                <span className="terminal-mobile-message-label">
+                  {composerHasDraft
+                    ? "Continue draft…"
+                    : pane.agent?.trim()
+                      ? `Message ${pane.agent.trim()}…`
+                      : "Type into the terminal…"}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="terminal-mobile-direct"
+                aria-label="Type directly into the terminal"
+                title="Type directly into the terminal"
+                disabled={
+                  directDisabled ||
+                  s.status !== "connected" ||
+                  s.connectionPaused ||
+                  !!terminalAttachError
+                }
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  rememberTerminalInputMode("direct");
+                  flushSync(() => setComposerOpen(true));
+                  // The dock's focus handler hands the keyboard to Direct.
+                  container
+                    ?.closest(".terminal-shell")
+                    ?.querySelector<HTMLElement>(".terminal-composer")
+                    ?.focus({ preventScroll: true });
+                }}
+              >
+                <SquareTerminal size={19} aria-hidden="true" />
+              </button>
+            </div>
+          ) : null}
           {!isMobileLayout() && touchHandles.length === 0 && isActivePane ? (
             <div
               className="terminal-mobile-input-actions"

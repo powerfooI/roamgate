@@ -1,4 +1,4 @@
-import { createPortal, flushSync } from "react-dom";
+import { createPortal } from "react-dom";
 import { bridge } from "./api";
 import {
   listenForTaskNotificationActivation,
@@ -55,7 +55,6 @@ import {
   EllipsisVertical,
   MoreHorizontal,
   PanelTop,
-  SquarePen,
   SquareStack,
   SquareTerminal,
   X,
@@ -170,8 +169,6 @@ import { copyTextFromUserGesture } from "./terminalClipboard";
 import { terminalPasteRequest } from "./terminalPaste";
 import {
   activateTerminalComposerDraftScope,
-  readTerminalComposerDraft,
-  subscribeTerminalComposerDraft,
   terminalComposerDraftKey,
 } from "./terminalComposer";
 import { terminalMountKey } from "./terminalConnection";
@@ -1407,8 +1404,6 @@ export default function App() {
   ]);
   const [openTerminalComposerScopeKey, setOpenTerminalComposerScopeKey] =
     useState<string | null>(null);
-  const [terminalComposerHasDraft, setTerminalComposerHasDraft] =
-    useState(false);
   const [paneJumpOpen, setPaneJumpOpen] = useState(false);
   const [paneJumpIndex, setPaneJumpIndex] = useState(0);
   // null keeps the most-recently-used list; a string switches to typed search.
@@ -1559,18 +1554,6 @@ export default function App() {
     },
     [terminalComposerScopeKey],
   );
-  useEffect(() => {
-    if (!activeTerminalComposerDraftKey) {
-      setTerminalComposerHasDraft(false);
-      return;
-    }
-    const update = (draft: string) => setTerminalComposerHasDraft(draft !== "");
-    update(readTerminalComposerDraft(activeTerminalComposerDraftKey));
-    return subscribeTerminalComposerDraft(
-      activeTerminalComposerDraftKey,
-      update,
-    );
-  }, [activeTerminalComposerDraftKey]);
   const paneJumpOptions = useMemo(() => {
     const snapshot = {
       layout: s.layout,
@@ -4168,41 +4151,6 @@ export default function App() {
           </button>
         </div>
       </div>
-
-      {activeTerminalComposerDraftKey && !terminalComposerOpen ? (
-        <button
-          type="button"
-          className="mobile-composer-shortcut"
-          title="Open terminal input"
-          aria-label={`Open terminal input${terminalComposerHasDraft ? ", unsent draft" : ""}`}
-          aria-haspopup="dialog"
-          onPointerDown={blurActiveInput}
-          onClick={() => {
-            flushSync(() => {
-              setMobileTabSheetOpen(false);
-              activateTerminalSurface();
-              setTerminalComposerOpen(true);
-            });
-            // The tap is the request to type. The dock routes Direct to the
-            // terminal; in Composer, focus the draft within this gesture so
-            // phones raise the keyboard in one tap. Later dock focus (sends,
-            // commands, uploads) stays neutral.
-            const dock =
-              document.querySelector<HTMLElement>(".terminal-composer");
-            dock?.focus({ preventScroll: true });
-            if (dock?.dataset.inputMode === "composer")
-              dock
-                .querySelector<HTMLElement>(".terminal-composer-input")
-                ?.focus({ preventScroll: true });
-          }}
-        >
-          <SquarePen size={20} />
-          {terminalComposerHasDraft ? (
-            <span className="mobile-composer-draft-dot" aria-hidden="true" />
-          ) : null}
-          <span className="mobile-nav-label">Type</span>
-        </button>
-      ) : null}
 
       {s.updateInfo?.update_available || s.notice
         ? createPortal(

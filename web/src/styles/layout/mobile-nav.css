@@ -6,7 +6,7 @@
 
 :where(html[data-layout="mobile"])
   .app.assistant-view
-  :is(.mobile-nav, .mobile-terminal-controls, .mobile-composer-shortcut) {
+  :is(.mobile-nav, .mobile-terminal-controls) {
   display: none;
 }
 
@@ -133,37 +133,12 @@
   }
 }
 
-.mobile-terminal-controls,
-.mobile-composer-shortcut {
+.mobile-terminal-controls {
   display: none;
 }
 
 /* Keep mobile styling in sync with the saved layout and URL override. */
 :where(html[data-layout="mobile"]) {
-  .mobile-composer-shortcut {
-    position: fixed;
-    right: calc(10px + env(safe-area-inset-right, 0px));
-    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-    z-index: 74;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--panel);
-    color: var(--text-strong);
-    box-shadow: var(--shadow-lg);
-    touch-action: manipulation;
-  }
-
-  .mobile-composer-shortcut:active {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-  }
-
   .mobile-terminal-controls {
     position: fixed;
     right: calc(10px + env(safe-area-inset-right, 0px));
@@ -212,25 +187,6 @@
       transform 180ms ease;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
-  }
-
-  .mobile-composer-draft-dot {
-    position: absolute;
-    top: 1px;
-    right: 1px;
-    width: 7px;
-    height: 7px;
-    border: 1px solid var(--panel);
-    border-radius: 999px;
-    background: var(--accent);
-    pointer-events: none;
-  }
-
-  /* The Type shortcut has no role while direct typing owns the keyboard. */
-  .keyboard-open .mobile-composer-shortcut {
-    opacity: 0;
-    pointer-events: none;
-    transform: translate3d(0, 12px, 0) scale(0.85);
   }
 
   .mobile-controls-collapsed .mobile-terminal-controls {

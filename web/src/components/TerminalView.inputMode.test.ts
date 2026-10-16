@@ -379,9 +379,9 @@ async function registerDomTests() {
     ).toHaveLength(before);
   }
   async function typeGesture() {
-    // Match App's Type click: open+commit, then synchronously focus the dock
-    // root, whose handler routes Direct focus, and in Composer the draft,
-    // all in one gesture.
+    // Match a tap that opens the dock: open+commit, then synchronously focus
+    // the dock root, whose handler routes Direct focus, and in Composer the
+    // draft, all in one gesture.
     await act(async () => {
       flushSync(() => {
         open = true;
@@ -990,6 +990,33 @@ async function registerDomTests() {
     expect(savedMode()).toBeNull();
     expectInputBlocked();
     expect(currentTerminal().focusCount).toBe(0);
+  });
+
+  test("the phone input bar opens Composer with its draft focused, or Direct", async () => {
+    await mount();
+    const label = () =>
+      container.querySelector(".terminal-mobile-message-label")?.textContent;
+    expect(label()).toBe("Message claude…");
+    await click(".terminal-mobile-message");
+    expect(container.querySelector(".terminal-mobile-input-bar")).toBeNull();
+    expect(selectedMode()).toBe("composer");
+    expect(savedMode()).toBe("composer");
+    expect(document.activeElement).toBe(
+      container.querySelector('[aria-label="Terminal input draft"]'),
+    );
+    expectInputBlocked();
+    await click('[aria-label="Close terminal input"]');
+    await act(async () => writeTerminalComposerDraft(draftKey, "draft"));
+    expect(label()).toBe("Continue draft…");
+    expect(
+      container
+        .querySelector(".terminal-mobile-message")
+        ?.getAttribute("aria-label"),
+    ).toBe("Open terminal input, unsent draft");
+    await click(".terminal-mobile-direct");
+    expect(selectedMode()).toBe("direct");
+    expect(savedMode()).toBe("direct");
+    expect(document.activeElement).toBe(currentTerminal().textarea);
   });
 
   test("manual mode choices survive close and reopen without opening stdin", async () => {
