@@ -6,7 +6,7 @@
 
 :where(html[data-layout="mobile"])
   .app.assistant-view
-  :is(.mobile-nav, .mobile-terminal-controls, .mobile-composer-shortcut) {
+  :is(.mobile-nav, .mobile-terminal-controls) {
   display: none;
 }
 
@@ -133,37 +133,12 @@
   }
 }
 
-.mobile-terminal-controls,
-.mobile-composer-shortcut {
+.mobile-terminal-controls {
   display: none;
 }
 
 /* Keep mobile styling in sync with the saved layout and URL override. */
 :where(html[data-layout="mobile"]) {
-  .mobile-composer-shortcut {
-    position: fixed;
-    right: calc(10px + env(safe-area-inset-right, 0px));
-    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-    z-index: 74;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--panel);
-    color: var(--text-strong);
-    box-shadow: var(--shadow-lg);
-    touch-action: manipulation;
-  }
-
-  .mobile-composer-shortcut:active {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-  }
-
   .mobile-terminal-controls {
     position: fixed;
     right: calc(10px + env(safe-area-inset-right, 0px));
@@ -212,25 +187,6 @@
       transform 180ms ease;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
-  }
-
-  .mobile-composer-draft-dot {
-    position: absolute;
-    top: 1px;
-    right: 1px;
-    width: 7px;
-    height: 7px;
-    border: 1px solid var(--panel);
-    border-radius: 999px;
-    background: var(--accent);
-    pointer-events: none;
-  }
-
-  /* The Type shortcut has no role while direct typing owns the keyboard. */
-  .keyboard-open .mobile-composer-shortcut {
-    opacity: 0;
-    pointer-events: none;
-    transform: translate3d(0, 12px, 0) scale(0.85);
   }
 
   .mobile-controls-collapsed .mobile-terminal-controls {
@@ -350,6 +306,207 @@
   }
 
   &.assistant-view .mobile-controls-stack {
+    display: none;
+  }
+}
+
+/* ===== phone app bar: Tabs and the ⋮ menu ===== */
+.mobile-appbar,
+.mobile-more-backdrop,
+.mobile-more-head {
+  display: none;
+}
+
+:where(html[data-layout="mobile"]) {
+  .mobile-appbar {
+    display: flex;
+    align-items: center;
+  }
+
+  /* The brand mark stays; its name and version make room for the app bar. */
+  .topbar .brand-title,
+  .topbar .brand-version {
+    display: none;
+  }
+
+  .mobile-appbar button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: max(44px, calc(44px / var(--ui-scale, 1)));
+    height: max(44px, calc(44px / var(--ui-scale, 1)));
+    padding: 0;
+    border: 0;
+    border-radius: 22px;
+    background: transparent;
+    color: var(--text-strong);
+    touch-action: manipulation;
+  }
+
+  .mobile-appbar button:disabled {
+    opacity: 0.4;
+  }
+
+  .mobile-appbar button[aria-pressed="true"],
+  .mobile-appbar button[aria-expanded="true"] {
+    background: var(--accent-soft);
+  }
+
+  .mobile-appbar-count {
+    position: absolute;
+    left: 24px;
+    top: 5px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border-radius: 9px;
+    background: var(--text-strong);
+    color: var(--panel);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 17px;
+    text-align: center;
+  }
+
+  /* Blocked agents use the same red as their status. */
+  .mobile-appbar-count[data-attention] {
+    background: var(--red);
+    color: #fff;
+  }
+
+  /* The floating view and tool controls live in the ⋮ menu. */
+  .app:not([data-mobile-more]) .mobile-controls-stack {
+    display: none;
+  }
+
+  .mobile-more-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 79;
+    padding: 0;
+    border: 0;
+    background: rgb(0 0 0 / 0.35);
+  }
+
+  /* ⋮ menu anchored below the app bar, one labelled row per control.
+     `body` outranks the floating, collapsed and compact rules it restyles. */
+  body .app[data-mobile-more] .mobile-controls-stack {
+    position: fixed;
+    top: calc(60px + env(safe-area-inset-top, 0px));
+    right: calc(8px + env(safe-area-inset-right, 0px));
+    bottom: auto;
+    left: auto;
+    z-index: 80;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: min(272px, calc(100vw - 32px));
+    max-width: none;
+    max-height: calc(100dvh - 72px);
+    overflow-x: hidden;
+    overflow-y: auto;
+    direction: ltr;
+    translate: 0 0;
+    padding: 4px 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--panel);
+    box-shadow: var(--shadow-lg);
+  }
+
+  body .app[data-mobile-more] .mobile-more-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 4px 0 16px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  body .app[data-mobile-more] .mobile-controls-stack .mobile-nav,
+  body .app[data-mobile-more] .mobile-controls-stack .mobile-terminal-controls {
+    position: static;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    transform: none;
+    translate: 0 0;
+    opacity: 1;
+    pointer-events: auto;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  body .app[data-mobile-more] .mobile-controls-stack .mobile-terminal-controls {
+    order: -1;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+  }
+
+  body .app[data-mobile-more] .mobile-controls-stack .mobile-more-head {
+    order: -2;
+  }
+
+  body .app[data-mobile-more] .mobile-controls-stack .mobile-nav button {
+    position: relative;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 14px;
+    width: 100%;
+    min-width: 0;
+    height: 48px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-strong);
+    font-size: 15px;
+    box-shadow: none;
+    inset: auto;
+    translate: 0 0;
+    transform: none;
+  }
+
+  body .app[data-mobile-more] .mobile-controls-stack .mobile-nav button.active {
+    background: var(--accent-soft);
+  }
+
+  body .app[data-mobile-more] .mobile-controls-stack .mobile-nav-label {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    white-space: nowrap;
+  }
+
+  body .app[data-mobile-more] .mobile-controls-stack .assistant-entry-running {
+    position: static;
+    margin-left: auto;
+  }
+
+  /* Tabs sits in the app bar; collapsing and dragging have no role here. */
+  body
+    .app[data-mobile-more]
+    .mobile-controls-stack
+    .mobile-nav
+    button[aria-label="Show tabs"],
+  body .app[data-mobile-more] .mobile-controls-stack .mobile-controls-toggle,
+  body .app[data-mobile-more] .mobile-controls-stack .mobile-nav-badge {
     display: none;
   }
 }

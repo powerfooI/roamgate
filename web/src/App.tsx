@@ -1,4 +1,4 @@
-import { createPortal, flushSync } from "react-dom";
+import { createPortal } from "react-dom";
 import { bridge } from "./api";
 import {
   listenForTaskNotificationActivation,
@@ -52,9 +52,9 @@ import {
   LoaderCircle,
   MessageSquareText,
   Minimize2,
+  EllipsisVertical,
   MoreHorizontal,
   PanelTop,
-  SquarePen,
   SquareStack,
   SquareTerminal,
   X,
@@ -88,7 +88,7 @@ import {
   type ThemePreference,
 } from "./appearance";
 import { AgentIcon } from "./components/AgentIcon";
-import { paneHasAgentHistory } from "./components/agentSession";
+import { agentStateKind, paneHasAgentHistory } from "./components/agentSession";
 import { CloseButton } from "./components/CloseButton";
 import { focusIfUnchanged } from "./components/dialogFocus";
 import { CommandCombobox } from "./components/CommandCombobox";
@@ -169,8 +169,6 @@ import { copyTextFromUserGesture } from "./terminalClipboard";
 import { terminalPasteRequest } from "./terminalPaste";
 import {
   activateTerminalComposerDraftScope,
-  readTerminalComposerDraft,
-  subscribeTerminalComposerDraft,
   terminalComposerDraftKey,
 } from "./terminalComposer";
 import { terminalMountKey } from "./terminalConnection";
@@ -1399,14 +1397,13 @@ export default function App() {
     },
   });
   const [mobileTabSheetOpen, setMobileTabSheetOpen] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const terminalComposerScopeKey = JSON.stringify([
     s.activeConnectionId,
     s.connectionGeneration,
   ]);
   const [openTerminalComposerScopeKey, setOpenTerminalComposerScopeKey] =
     useState<string | null>(null);
-  const [terminalComposerHasDraft, setTerminalComposerHasDraft] =
-    useState(false);
   const [paneJumpOpen, setPaneJumpOpen] = useState(false);
   const [paneJumpIndex, setPaneJumpIndex] = useState(0);
   // null keeps the most-recently-used list; a string switches to typed search.
@@ -1515,10 +1512,20 @@ export default function App() {
     ? s.tabs.filter((tab) => tab.workspace_id === focusedWorkspace.workspace_id)
         .length
     : 0;
+  // Another pane in the focused workspace has an agent blocked on the user.
+  const focusedWorkspaceAttention = focusedWorkspace
+    ? s.panes.some(
+        (pane) =>
+          pane.workspace_id === focusedWorkspace.workspace_id &&
+          !pane.focused &&
+          agentStateKind(pane.agent_status) === "blocked",
+      )
+    : false;
   useEffect(() => {
     // Drop mobile-only controls when their context disappears so they cannot
     // stay active invisibly or resurface when the mobile layout returns.
     if (!mobile || !focusedWorkspace) setMobileTabSheetOpen(false);
+    if (!mobile) setMobileMoreOpen(false);
     if (!mobile) setOpenTerminalComposerScopeKey(null);
   }, [mobile, focusedWorkspace]);
   useEffect(() => {
@@ -1547,18 +1554,6 @@ export default function App() {
     },
     [terminalComposerScopeKey],
   );
-  useEffect(() => {
-    if (!activeTerminalComposerDraftKey) {
-      setTerminalComposerHasDraft(false);
-      return;
-    }
-    const update = (draft: string) => setTerminalComposerHasDraft(draft !== "");
-    update(readTerminalComposerDraft(activeTerminalComposerDraftKey));
-    return subscribeTerminalComposerDraft(
-      activeTerminalComposerDraftKey,
-      update,
-    );
-  }, [activeTerminalComposerDraftKey]);
   const paneJumpOptions = useMemo(() => {
     const snapshot = {
       layout: s.layout,
@@ -3806,6 +3801,7 @@ export default function App() {
       } ${mobile && assistantVisible ? "assistant-view" : ""} ${mobileControlsCollapsed ? "mobile-controls-collapsed" : ""} ${
         mobileControlsPlacement.side === "left" ? "mobile-controls-left" : ""
       }`}
+      data-mobile-more={mobile && mobileMoreOpen ? "open" : undefined}
       style={
         {
           "--mobile-controls-offset-y": `${mobileControlsOffset}px`,
@@ -3829,6 +3825,59 @@ export default function App() {
           <ConnectionSwitcher />
         </div>
         <div className="topbar-actions">
+          {mobile ? (
+            // Phones: Tabs and the ⋮ menu of view and tool controls sit in
+            // the app bar instead of floating over the terminal.
+            <div className="mobile-appbar">
+              <button
+                type="button"
+                className="mobile-appbar-tabs"
+                aria-label="Show tabs"
+                aria-description={
+                  [
+                    focusedWorkspaceTabCount > 0
+                      ? `${focusedWorkspaceTabCount} open`
+                      : "",
+                    focusedWorkspaceAttention ? "an agent needs you" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(", ") || undefined
+                }
+                aria-pressed={mobileTabSheetOpen}
+                disabled={!focusedWorkspace}
+                onPointerDown={blurActiveInput}
+                onClick={() => {
+                  setMobileMoreOpen(false);
+                  setMobileTabSheetOpen((open) => !open);
+                }}
+              >
+                <SquareStack size={21} aria-hidden="true" />
+                {focusedWorkspaceTabCount > 0 ? (
+                  <span
+                    className="mobile-appbar-count"
+                    data-attention={focusedWorkspaceAttention || undefined}
+                    aria-hidden="true"
+                  >
+                    {focusedWorkspaceTabCount}
+                  </span>
+                ) : null}
+              </button>
+              <button
+                type="button"
+                className="mobile-appbar-more"
+                aria-label="More options"
+                aria-haspopup="menu"
+                aria-expanded={mobileMoreOpen}
+                onPointerDown={blurActiveInput}
+                onClick={() => {
+                  setMobileTabSheetOpen(false);
+                  setMobileMoreOpen((open) => !open);
+                }}
+              >
+                <EllipsisVertical size={21} aria-hidden="true" />
+              </button>
+            </div>
+          ) : null}
           {mobile ? null : (
             <div className="topbar-command-group">
               <button
@@ -3899,7 +3948,34 @@ export default function App() {
         </button>
       ) : null}
 
-      <div className="mobile-controls-stack">
+      {mobile && mobileMoreOpen ? (
+        <button
+          type="button"
+          className="mobile-more-backdrop"
+          aria-label="Close more options"
+          onClick={() => setMobileMoreOpen(false)}
+        />
+      ) : null}
+      <div
+        className="mobile-controls-stack"
+        onClick={(event) => {
+          // Choosing a view or tool from the ⋮ menu dismisses it.
+          if (
+            mobileMoreOpen &&
+            (event.target as Element).closest?.("button:not(:disabled)")
+          )
+            setMobileMoreOpen(false);
+        }}
+      >
+        {mobile && mobileMoreOpen ? (
+          <div className="mobile-more-head">
+            <span>More options</span>
+            <CloseButton
+              label="Close more options"
+              onClick={() => setMobileMoreOpen(false)}
+            />
+          </div>
+        ) : null}
         <nav
           className="mobile-nav"
           aria-label="Workspace view switcher"
@@ -4075,41 +4151,6 @@ export default function App() {
           </button>
         </div>
       </div>
-
-      {activeTerminalComposerDraftKey && !terminalComposerOpen ? (
-        <button
-          type="button"
-          className="mobile-composer-shortcut"
-          title="Open terminal input"
-          aria-label={`Open terminal input${terminalComposerHasDraft ? ", unsent draft" : ""}`}
-          aria-haspopup="dialog"
-          onPointerDown={blurActiveInput}
-          onClick={() => {
-            flushSync(() => {
-              setMobileTabSheetOpen(false);
-              activateTerminalSurface();
-              setTerminalComposerOpen(true);
-            });
-            // The tap is the request to type. The dock routes Direct to the
-            // terminal; in Composer, focus the draft within this gesture so
-            // phones raise the keyboard in one tap. Later dock focus (sends,
-            // commands, uploads) stays neutral.
-            const dock =
-              document.querySelector<HTMLElement>(".terminal-composer");
-            dock?.focus({ preventScroll: true });
-            if (dock?.dataset.inputMode === "composer")
-              dock
-                .querySelector<HTMLElement>(".terminal-composer-input")
-                ?.focus({ preventScroll: true });
-          }}
-        >
-          <SquarePen size={20} />
-          {terminalComposerHasDraft ? (
-            <span className="mobile-composer-draft-dot" aria-hidden="true" />
-          ) : null}
-          <span className="mobile-nav-label">Type</span>
-        </button>
-      ) : null}
 
       {s.updateInfo?.update_available || s.notice
         ? createPortal(
