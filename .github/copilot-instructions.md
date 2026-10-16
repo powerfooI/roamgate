@@ -6,9 +6,9 @@ Roamgate is an independent community Web and PWA client for Herdr. It has two pa
 
 - `server/src`: Bun-powered local bridge server (HTTP + WebSocket) that talks
   to the local Herdr socket.
-- `web/src`: React + Vite frontend dashboard. Reusable UI lives in
-  `web/src/components`, assets in `web/src/assets`, global styling in
-  `web/src/styles.css`.
+- `web/src`: React + Vite frontend. Reusable UI lives in `web/src/components`,
+  assets in `web/src/assets`, and styles in `web/src/styles` plus co-located
+  `web/src/components/*.css` files.
 - `scripts/`: release and packaging helpers.
 
 Generated build output lives in `server/public`,

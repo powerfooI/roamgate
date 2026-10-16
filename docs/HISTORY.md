@@ -1,72 +1,56 @@
 # History synchronization
 
-`createAgentSessionHandlers` shares a per-connection projection cache across
+`createAgentSessionHandlers` shares one projection cache per connection across
 History, summary, transcript preview, and ATIF export. Concurrent requests share
-in-flight reads/projection; raw preview prefix reads/downloads stay separate.
+reads; raw preview and download reads stay separate.
 
 ## Cache and consistency
 
-The cache retains at most 16 sessions, four recent History revisions per session,
-and an estimated 32 MiB of values. Admission counts UTF-16 strings and structural
-overhead without serialization, conservatively recounting shared values.
-Oversized/deep projections are served but not retained; transient parsing memory
-is not included in the estimate.
+The cache keeps at most 16 sessions, four recent revisions per session, and about
+32 MiB of data (an estimate, not a heap bound). Oversized projections are served
+but not cached.
 
-Refresh resolves/stats the session. Path, provider, session, file identity,
-size/mtime, change metadata, and provider descriptors invalidate projections.
-A post-read stat triggers up to three retries on change. Errors invalidate data;
-incomplete JSONL records wait for later changes. This is not a filesystem
-transaction: later writes appear on the next refresh, and coarse metadata may
-miss same-size in-place rewrites.
+Each refresh stats the session file. Changes to path, provider, session, file
+identity, size, or mtime invalidate the projection; a change during the read
+triggers up to three retries. Incomplete JSONL lines wait for the next change.
+This is not a filesystem transaction: same-size in-place rewrites may be missed
+until the next change.
 
 ## Version 2 protocol
 
-Send `history_version: 2` to `agent_history.get`, optionally with the last accepted
-`cursor: { epoch, revision }`. Legacy callers receive conversation-only `messages`.
+Send `history_version: 2` to `agent_history.get`, optionally with the last
+accepted `cursor: { epoch, revision }`. Legacy callers get conversation-only
+`messages`.
 
 | Mode | Response |
 | --- | --- |
-| `snapshot` | `entries` replaces the window. Missing files/sessions yield empty snapshots. Invalid/expired cursors, connection replacement, eviction, file replacement, or truncation reset this way. |
-| `delta` | `base_revision`, `upserts`, `removed`, plus complete ID `order` only when membership/order changes. No `messages`, `entries`, or trajectory. No-change replies keep revision with empty changes. |
+| `snapshot` | `entries` replaces the window. Returned for a missing session, an invalid or expired cursor, a replaced connection, eviction, or file replacement/truncation. |
+| `delta` | `base_revision`, `upserts`, `removed`, and the full ID `order` only when membership or order changed. An unchanged reply keeps the revision with empty changes. |
 
-The window holds the latest **200 conversation entries**, including errors;
-associated tools do not count toward the limit. Eviction emits removals; raw/ATIF
-exports remain complete. IDs identify projected occurrences/tool calls, **not
-durable source records or ATIF step numbers**. Full-window comparisons handle
-provider representation changes; synthetic timestamps remain stable within a
-cached file generation. Clients accept replies only against the request cursor
-and current pane/connection lease.
+The window holds the latest **200 conversation entries** (including errors);
+associated tool calls do not count. Raw and ATIF exports stay complete. Entry IDs
+identify projected entries, **not durable source records or ATIF step numbers**.
+Clients accept a reply only against their request cursor and current
+pane/connection lease.
 
-History refreshes every four seconds only while open and visible, without
-overlapping requests. Cards cap default DOM content at 4,000 characters; full
-tool details open as escaped text. Names/call IDs associate results without
-moving them from their transcript positions.
+History refreshes every four seconds while open and visible, never overlapping.
+Cards show up to 4,000 characters; full tool details open on demand.
 
 ## Message filters
 
-The Session header offers counts, details, transcript preview, raw export, and
-refresh. Info toggles metadata/messages in wide and compact layouts, preserving
-filters/selection; session changes return to messages.
+User and Agent start enabled; Tool starts disabled. Agent includes assistant
+errors; Tool includes calls, outputs, and errors. Counts reflect the unfiltered
+window, and the header shows visible/total when filtered. Filters persist while
+the panel is mounted, not across reloads. **Show all types** restores them.
 
-User/Agent start enabled; Tool starts disabled. Agent includes assistant errors;
-Tool includes calls, outputs, and errors. Button counts reflect the unfiltered
-window; the header shows visible/total when filtered. Minimap/numbering follow
-visible entries, but hidden entries still update and exports remain complete.
-Type filters survive pane switches/reopening while mounted, not reloads;
-**Show all types** restores all message types.
-
-Search combines type filters with case-insensitive literal matching across full
-loaded text, not just card previews. Redacted tools become searchable only after
-explicit loading; search never fetches older messages or tool payloads. **Reset
-filters** clears search and enables all types. Search resets on pane/connection changes.
-
-Click a card's header/text/background for details; Copy stays separate. Timestamps
-use local `MM-DD HH:mm`, prefixed with `YYYY-` outside the current year.
+Search is a case-insensitive literal match over all loaded text and combines
+with the type filters. It never fetches older messages or hidden tool payloads.
+**Reset filters** clears search and type filters. Timestamps use local
+`MM-DD HH:mm`, with the year outside the current year.
 
 ![History filtered to tool calls and outputs using synthetic data](screenshots/history-tool-filter.png)
 
-## Consistency and resource limits
+## Resource limits
 
-Changed files still require **full JSONL reads and provider projection**: no
-incremental parser, byte cursor, database, or new transport. Raw previews/full
-ATIF exports can remain large; cache limits are not exact JavaScript heap bounds.
+Changed files are re-read and re-projected in full: there is no incremental
+parser or database. Raw previews and ATIF exports can be large.

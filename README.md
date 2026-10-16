@@ -109,44 +109,41 @@ Click any screenshot to open the full-resolution image.
 
 [handoff-demo]: ./docs/images/roamgate-handoff.gif
 
-> **Moving from Herdr Studio / herdr-gui?** Automatic upgrades are not supported.
-> Follow the [migration guide](./docs/DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui)
-> to install Roamgate manually.
+> **Moving from Herdr Studio / herdr-gui?** Follow the
+> [migration guide](./docs/DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui);
+> automatic upgrades are not supported.
 
 ## Quick start
 
-1. Install and start [Herdr](https://herdr.dev), or let Roamgate install and
-   start it later with `roamgate herdr setup`.
-2. On Linux or macOS, install Roamgate:
+1. Install and start [Herdr](https://herdr.dev), or let Roamgate do it later
+   with `roamgate herdr setup`.
+2. Install Roamgate on Linux or macOS (to pin a version, end the command with
+   `| ROAMGATE_VERSION=X.Y.Z sh`):
 
    ```bash
-   # Empty selects latest; use X.Y.Z (no v prefix) to pin a Roamgate version.
    curl -fsSL \
      https://github.com/powerfooI/roamgate/releases/latest/download/install-roamgate.sh \
-     | ROAMGATE_VERSION= sh
+     | sh
    ```
 
-   On Windows, download the matching x64 or ARM64 archive from the
+   On Windows, download the x64 or ARM64 archive from the
    [latest release](https://github.com/powerfooI/roamgate/releases/latest).
-3. On Linux/macOS, add `~/.local/bin` to `PATH` and run `roamgate`.
-   On Windows, extract the archive and run `roamgate.exe`. Open the printed URL.
-   `roamgate url --qr` shows a QR code for a phone, and `roamgate doctor`
-   checks the setup when something does not work.
+3. Run `roamgate` (`roamgate.exe` on Windows; on Linux/macOS make sure
+   `~/.local/bin` is on `PATH`) and open the printed URL. `roamgate url --qr`
+   shows a QR code for your phone, and `roamgate doctor` diagnoses problems.
 
-See [deployment](./docs/DEPLOYMENT.md) for checksums, configuration, updates,
-and services, or [historical installation](./docs/DEPLOYMENT.md#install-historical-herdr-studio)
-for `herdr-gui` 0.6.2.
+See [deployment](./docs/DEPLOYMENT.md) for configuration, services, and updates.
 
 ## Install as a PWA
 
-**PWA installation is recommended for daily use:** a separate app window without
-browser tabs or the address bar. Open and authenticate with Roamgate, then install:
+**Recommended for daily use:** a separate app window without browser tabs or
+the address bar. Log in to Roamgate, then install:
 
 - **iPhone/iPad Safari:** Share -> Add to Home Screen.
 - **macOS Safari 17+:** File -> Add to Dock.
 - **Chrome/Edge:** browser menu -> Install app.
 
-The process must stay running and reachable. **PWA mode is not offline access.**
+**A PWA is not offline access:** Roamgate must stay running and reachable.
 
 ## Documentation
 
@@ -174,9 +171,9 @@ and pull requests.
 
 ## Security
 
-Roamgate controls terminals and modifies real files. Normal runtime requires a
-token or password, including loopback. Keep the default loopback binding; read
-[SECURITY.md](./SECURITY.md) before allowing another device access.
+Roamgate controls terminals and real files. Login is always required, even on
+loopback. Keep the default loopback binding and read [SECURITY.md](./SECURITY.md)
+before giving another device access.
 
 ## License
 

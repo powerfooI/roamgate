@@ -12,136 +12,74 @@ GitHub-profile contact address.
 
 ## Trust Model
 
-**UI access grants the Roamgate user's authority:** terminals, repository hooks,
-session data, and workspace uploads/deletions. This is privileged administration,
-not a sandbox or multi-user permission system.
+**Anyone who can use the UI has the Roamgate user's full authority:**
+terminals, repository hooks, session data, and file uploads/deletions. Roamgate
+is single-user administration, not a sandbox or multi-user permission system.
 
-The default bind is `127.0.0.1`. **Normal runtime requires login**, including
-loopback. The only exception is `NODE_ENV=development` with the bind address
-exactly `127.0.0.1`, `localhost`, or `::1`: those development listeners bypass
-Roamgate authentication, including access through a reverse proxy or tunnel.
-`dev:server` enables this local development mode; `start:server` and installed
-services do not enable it by default. Do not forward a development listener for
-remote access.
-
-When authentication is enabled, set `ROAMGATE_PASSWORD` to a unique password
-of 8-1024 Unicode characters; there are no required character combinations.
-Configured passwords outside that range stop startup. Passwords shorter than 15
-characters start with a warning: login grants shell access, so use 15 or more
-for any listener reachable beyond a trusted private network. Without a configured password, an authenticated listener uses a
-persistent 256-bit random token and reports its protected file path. Read that
-file to log in, or use `--open` to open a token URL automatically. Service
-installation and URL tools can also provide token URLs; keep them private.
-
-Session cookies are signed by a separate, randomly generated 256-bit secret with
-owner-only permissions in the Roamgate data directory. The default file is
-`session-secret.json`. A nonempty `ROAMGATE_SETTINGS_PATH` (or its legacy alias)
-selects `session-secret-<sha256>.json` in that directory, using the full SHA-256
-digest of the normalized absolute settings path. Separate settings paths isolate
-signing keys; changing that path requires logging in again. Keep custom paths
-absolute and stable.
-
-The login password/token is never the cookie signing key. Ordinary restarts keep
-sessions valid for their original 30-day lifetime. Changing the effective login
-password/token or adding, changing, or removing the PIN rotates that instance's
-signing secret at startup and invalidates earlier cookies, even if a previous
-credential is later restored. Stop all listeners for the same instance before
-changing credentials; already-running processes retain their in-memory
-configuration. Keep signing state private and persistent, and never copy it into
-a different installation. Corrupt or unsafe secret files stop startup.
-
-Upgrading from password/token-signed cookies requires one new login; legacy
-cookies are deliberately not accepted. Removing the instance's signing state
-while all its listeners are stopped resets its sessions without changing the
-login credential. See [signing state and lock recovery](docs/DEPLOYMENT.md#run-as-a-user-service).
-
-Password login (`POST /api/login`) and token-URL login share limits by the
-connection's source IP: at most 20 attempts per 60-second window, and five
-consecutive failures trigger a five-minute cooldown. Successful login clears
-the failure count, and failures start counting again after cooldown expires.
-Rate-limited attempts return `429` with `Retry-After`. Login JSON bodies are
-limited to 16 KiB of actual streamed bytes; oversized bodies return `413`.
-
-IP records expire after five minutes without an attempt and are removed on the
-next login attempt. Without new attempts, expired records remain within the
-same bounded table. Each source-IP table holds at
-most 4096 active IP records; when full, it returns `429` for new IPs instead of
-evicting active cooldowns. This state belongs to one process and resets when
-the bridge restarts. Forwarded IP headers are not trusted: clients behind a
-reverse proxy or tunnel share its connection-IP limits. Use the proxy's own
-limits when per-client enforcement is needed.
+- The default bind is `127.0.0.1`. **Login is required, including on
+  loopback.** The only exception is `NODE_ENV=development` bound to
+  `127.0.0.1`, `localhost`, or `::1` (what `bun run dev:server` uses). Never
+  forward a development listener.
+- Set `ROAMGATE_PASSWORD` to 8-1024 characters; use 15 or more for anything
+  reachable beyond a trusted private network (shorter passwords print a
+  warning). Without a password, Roamgate generates a persistent 256-bit token
+  and prints the file that holds it. Keep token URLs private.
+- Session cookies last 30 days and are signed by a separate random secret in
+  the data directory (`session-secret.json`). Changing the password, token, or
+  PIN rotates that secret on the next start and signs out every browser. Stop
+  all listeners of an instance before changing credentials. Upgrading from
+  builds that signed cookies with the password/token requires one new login;
+  those legacy cookies are deliberately rejected. See
+  [signing state](docs/DEPLOYMENT.md#run-as-a-user-service).
+- Login request bodies are limited to 16 KiB (`413` beyond that).
+- Login is rate-limited per source IP: 20 attempts per minute, and five
+  consecutive failures trigger a five-minute cooldown (HTTP `429` with
+  `Retry-After`). Limits are per process and reset on restart. Forwarded IP
+  headers are not trusted, so clients behind one proxy share its limit.
 
 ### Optional PIN login
 
-`ROAMGATE_PIN` enables a separate convenience credential only when explicitly
-set to 6-12 ASCII digits (leading zeros are preserved). Unset or empty disables
-it; other values stop startup. PIN login is intended only for a listener behind
-a trusted VPN/private network and firewall. A short PIN is substantially weaker
-than a unique password or random token; enabling it reduces login security.
-Startup emits a warning. Transport still needs HTTPS or a trusted encrypted VPN.
+`ROAMGATE_PIN` (6-12 digits) adds a convenience login for listeners reachable
+**only** through a trusted VPN or private network. It is much weaker than a
+password or token, yet grants the same full access, and startup prints a
+warning. The password/token remains available via **Use password or token
+instead**.
 
-The PIN-first form offers **Use password or token instead** for recovery. The
-existing password (or generated token when no password is configured) remains
-valid. Token URLs keep working in generated-token mode; a configured password
-continues to disable generated-token URL login. A PIN is never a URL credential
-or a cookie signing key. All login methods grant the same full authority.
-
-PIN login uses `POST /api/login/pin` with a `pin` field; it cannot bypass its
-limits through the password endpoint. It has a separate bounded source-IP table
-with the same 20-attempt/minute and five-failure/five-minute limits. In addition,
-ten consecutive failed PINs across **all source IPs** disable PIN login for one
-hour. Requests blocked by that cooldown do not extend it; it expires automatically.
-Successful PIN login resets its global consecutive-failure count. Password and
-token login retain their own source-IP budget and remain available during PIN
-cooldown, but do not reset it. Invalid or oversized PIN bodies count as failures.
-
-These counters are process-local and reset on restart; multiple independent
-listeners multiply the guessing budget. Do not use PIN login across replicas
-without shared outer rate limiting. Forwarded IP headers remain untrusted.
-Distributed attempts can temporarily deny the PIN convenience path, so retain
-access to the strong credential. If attacked, remove `ROAMGATE_PIN` and restart
-all listeners for that instance; changing/removing the PIN also revokes its
-existing session cookies.
+PIN attempts have their own per-IP limits, and ten consecutive failures from
+any source disable PIN login for one hour. Limits are per process, so multiple
+listeners multiply the guessing budget. If attacked, remove `ROAMGATE_PIN` and
+restart **every** listener of the instance; this signs out all browsers,
+including password sessions.
 
 ### Access and session safety
 
 **Do not expose Roamgate directly to the public internet.** For remote access:
 
-- Prefer `ROAMGATE_PASSWORD` to `--password`, which exposes
-  secrets in process arguments.
-- Use [native HTTPS](docs/DEPLOYMENT.md#native-https), an HTTPS proxy, or a trusted
-  VPN; restrict access with a firewall/reverse proxy.
+- Prefer `ROAMGATE_PASSWORD` over `--password`, which is visible in process
+  arguments.
+- Use [native HTTPS](docs/DEPLOYMENT.md#native-https), an HTTPS proxy, or a
+  trusted VPN, and restrict who can reach the listener.
 - Treat worktree hooks as executable code.
 
-The bridge checks neither browser Origin nor request Host. Any request reaching
-it and passing required authentication has full authority. Secure the outer
-access path: native TLS encrypts transport but supplies no multi-user
-authorization or sandboxing. Without TLS configuration, the listener
-uses unencrypted HTTP.
+The bridge does not check `Origin` or `Host`; any authenticated request has full
+authority, so secure the access path itself.
 
-**Menu > Log out** removes this browser's authentication cookie, disconnects its
-active tabs, and returns to login. It does not stop terminals, change the server
-password/token, or log out other browsers. Cookies are stateless signed
-credentials: logout removes the browser's copy, but does not revoke a copied
-cookie before its expiry. Rotate the server credential if it or a session cookie
-has been compromised.
+**Menu > Log out** removes this browser's cookie only. It does not revoke copied
+cookies or log out other browsers. If a credential or cookie leaks, change the
+password (or run `roamgate auth rotate` for a generated token), or run
+`roamgate auth revoke-sessions` to sign out every browser. These commands only
+restart the managed service: also restart any other listener of the instance
+(for example a foreground `roamgate`), and handle each separate
+`ROAMGATE_SETTINGS_PATH` instance on its own.
 
-Updates trust the configured HTTPS release origin (or explicit loopback test
-mirror) and its manifest/checksums. Checksums detect corruption and bind the
-archive, **not independently verify publisher identity**. Custom mirrors are
-trusted executable-code infrastructure.
+Updates trust the configured HTTPS release origin and its checksums. Checksums
+detect corruption, not publisher identity; treat custom mirrors as trusted code.
 
-`HERDR_GUI_*` aliases `ROAMGATE_*`; explicit new values win, even empty ones.
-Auth-token migration preserves the old secret. Protect both copies and backups;
-see [migration and rotation](./docs/DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui).
-Update requests require normal listener authentication plus `x-roamgate-update: 1`.
-Legacy `x-herdr-gui-update: 1` is accepted; the new header wins if both appear.
-Neither header replaces login.
+Legacy `HERDR_GUI_*` variables alias `ROAMGATE_*` (new names win, even when
+empty). Protect migrated token copies and backups; see
+[migration](./docs/DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui).
 
-Web Push subscription mutations require listener authentication, JSON, and
-`x-roamgate-push: 1`; cross-site browser requests are rejected. Push endpoints
-are restricted to supported browser-provider HTTPS hosts and are never followed
-through redirects. Treat the private push registry as credentials. Revoking a
-login password or logging out does not revoke device subscriptions: disable Web Push or remove
-subscriptions separately. Notification payloads can expose agent names and
-routing IDs on lock screens. See [Web Push configuration](docs/DEPLOYMENT.md#web-push-notifications).
+Web Push subscriptions are tied to devices, not logins: changing the password or
+logging out does not revoke them. Disable notifications or remove subscriptions
+separately. Notifications may show agent names on lock screens. See
+[Web Push](docs/DEPLOYMENT.md#web-push-notifications).

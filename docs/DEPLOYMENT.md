@@ -1,70 +1,49 @@
 # Installation and Deployment
 
-Configuration reference for Roamgate. For a guided workflow and private remote
-access, use the [tutorial](./TUTORIAL.md#networking).
+Configuration reference for Roamgate. For a guided walkthrough and private
+remote access, see the [tutorial](./TUTORIAL.md#networking).
 
 ## Requirements
 
-- A running Herdr server, or [managed local setup](#managed-herdr-setup).
-- Default Unix sockets: `~/.config/herdr/herdr.sock` and
-  `~/.config/herdr/herdr-client.sock`; Windows uses corresponding named pipes
-  under `%APPDATA%\herdr\`.
-- [Bun](https://bun.sh) 1.4.3+ for source builds only; standalone needs no Bun/Node.js.
-
-Windows local Git features require [Git for Windows](https://gitforwindows.org/)
-with Git available on PATH. Changes, Commits, and branch auto-sync locate its
-bundled Bash beside Git or in standard system/per-user installation directories;
-`sh.exe` does not need to be on PATH. For a portable or custom installation,
-add its `cmd` or `bin` directory to PATH and restart Roamgate. These commands use
-Git Bash even when Roamgate starts from PowerShell; SSH workspaces continue to
-use the remote host's shell and tools.
+- A running Herdr server, or let Roamgate [set one up](#managed-herdr-setup).
+  Roamgate uses Herdr's default sockets (`~/.config/herdr/herdr.sock` and
+  `herdr-client.sock`; named pipes under `%APPDATA%\herdr\` on Windows).
+- Release binaries need nothing else. Source builds need
+  [Bun](https://bun.sh) 1.4.3+.
+- On Windows, local Git features need [Git for Windows](https://gitforwindows.org/)
+  on PATH.
 
 ### Herdr compatibility
 
-This source build supports verified legacy protocols 14–20 (Herdr 0.7.0–0.8.2)
-and **tagged Herdr 0.9.0 and 0.9.4 / protocol 22**. Protocol 21 and unknown versions
-are rejected at control/binary probes. Use a compatible Roamgate build or separate
-server; **do not downgrade a live server**. Published binaries follow their
-[release notes](https://github.com/powerfooI/roamgate/releases).
-The [plugin](#herdr-plugin) separately requires Herdr 0.7.2+.
-Tab reordering requires Herdr 0.7.2+; Herdr 0.7.0 and 0.7.1 retain their fixed
-tab order. The bridge confirms support before enabling dragging.
-
-Herdr 0.9.0 and 0.9.4 use stable endpoint generation 1, distinct from protocol 22.
-`ROAMGATE_DISABLE_ENDPOINT=1` explicitly selects legacy direct-terminal fallback.
-
-| Area | Behavior / limitation |
+| Herdr | Support |
 | --- | --- |
-| Attachment | Endpoints crop the server-rendered tab per pane. Unknown codecs/generations or missing required `pane.focus` fail without silent fallback. Legacy fallback uses takeover and may disconnect another owner. |
-| Optional methods | Creation/history controls require advertised methods; unavailable controls explain why. Input, mouse, paste, resize, and rendering can work without optional history. |
-| Navigation | Endpoint workspace/tab selection is browser-local across reconnects, not reload/runtime replacement. Same-tab pane focus, topology, and terminal sizes remain shared; size follows Herdr's last-interacting client. Legacy uses shared navigation. |
-| Creation | Requires a connected source terminal, except first-workspace bootstrap. Preserves `terminal.new_cwd` (`follow`, `home`, `current`, fixed path); explicit cwd wins. Shared pane focus means `follow` is not browser-isolated. |
-| Input | Pixel mouse and enhanced Kitty keyboard / modifyOtherKeys parity are unsupported; legacy keyboard-mode messages are decoded but not applied in-browser. |
+| 0.7.0–0.8.2 (protocols 14–20) | Legacy terminal mode |
+| 0.9.0 and 0.9.4 (protocol 22) | Endpoint terminal mode (recommended) |
+| Protocol 21 and unknown versions | Rejected |
 
-**OSC 52 clipboard writes:** only the browser with input in the last 30 seconds
-matching the receiving endpoint session receives them, never passive viewers.
-Herdr supplies no producing-pane/input identity: a delayed write from A after B
-becomes foreground can reach B's recent input owner. This is not source-PTY or
-original-browser isolation. Detach/replacement/disposal invalidates ownership.
-Reads are disabled; permission failures show copy-retry UI. Ordinary copy/paste
-is unchanged. OSC 52 is unavailable on the **protocol 22 legacy fallback**; older
-servers retain their existing relay.
+Do not downgrade a live Herdr server. The [plugin](#herdr-plugin) and tab
+reordering need Herdr 0.7.2+. `ROAMGATE_DISABLE_ENDPOINT=1` forces legacy mode.
 
-Closing one workspace never implicitly closes its linked group. If Herdr requires
-that, inspect all linked workspaces before explicitly running:
+Known limitations:
 
-```bash
-herdr --session <name> workspace close <workspace_id> --group
-```
+- Endpoint mode shares pane focus, layout, and terminal size between clients;
+  only workspace/tab selection is per browser. Legacy mode shares everything and
+  may take over the terminal from another client.
+- Creating tabs or workspaces needs a connected terminal (except the first
+  workspace in an empty session) and keeps Herdr's `terminal.new_cwd` policy.
+- Pixel mouse reporting and enhanced Kitty keyboard modes are not supported.
+- **OSC 52 clipboard writes** go only to the browser that typed into that
+  session in the last 30 seconds. Herdr does not say which pane produced a
+  write, so a late write can reach the wrong recent typist. Clipboard reads are
+  disabled. OSC 52 is unavailable in protocol 22 legacy mode.
+- Closing a workspace never closes its linked group. To do that, inspect the
+  group and run `herdr --session <name> workspace close <workspace_id> --group`.
 
-See [endpoint contracts](./ARCHITECTURE.md#terminal-endpoints) and
-[creation/timeouts](./ARCHITECTURE.md#browser-navigation-and-creation).
+See [endpoint contracts](./ARCHITECTURE.md#terminal-endpoints).
 
 ## Install a release
 
-Roamgate 0.7.0+ releases provide Linux/macOS/Windows x86-64 and ARM64 assets.
-Older releases may lack native Windows ARM64; prefer it when available.
-Unpublished versions require a [source build](#build-a-standalone-executable).
+Releases include Linux, macOS, and Windows binaries for x86-64 and ARM64.
 
 On Linux/macOS, the checksum-verifying installer writes `~/.local/bin/roamgate`:
 
@@ -74,25 +53,21 @@ curl -fsSL \
   | sh
 ```
 
-Add `~/.local/bin` to PATH, run `roamgate --version`, then `roamgate` and open the
-printed URL. Rerun the installer or run `roamgate update` to update;
-`roamgate rollback` restores the previous executable.
+Add `~/.local/bin` to PATH, then run `roamgate` and open the printed URL.
+`roamgate update` updates (or rerun the installer); `roamgate rollback` restores
+the previous binary (`roamgate.previous`).
 
-On Windows, download matching `roamgate-windows-<arch>.tar.xz` and `.sha256`
-files from the [latest release](https://github.com/powerfooI/roamgate/releases/latest),
-verify with `Get-FileHash`, extract with Windows 11's `tar.exe`, and run `roamgate.exe`.
+On Windows, download `roamgate-windows-<arch>.tar.xz` and its `.sha256` from the
+[latest release](https://github.com/powerfooI/roamgate/releases/latest), verify
+with `Get-FileHash`, extract with `tar.exe`, and run `roamgate.exe`.
 
-Installer overrides apply to the `sh` command above:
+Installer settings go on the `sh` side of the pipe (`curl ... | <setting> sh`):
 
-| Setting | Example / behavior |
+| Installer setting | Example / behavior |
 | --- | --- |
 | Pin a version | `ROAMGATE_VERSION=X.Y.Z sh` (no `v`; empty means latest) |
-| System directory | `sudo env ROAMGATE_INSTALL_DIR=/usr/local/bin sh` (empty rejected) |
-| Release mirror | `ROAMGATE_RELEASE_BASE_URL` selects a compatible flat asset directory |
-
-Mirrors require HTTPS except loopback testing; URLs cannot contain credentials,
-queries, or fragments. Installer and in-app updater preserve the old executable
-as `roamgate.previous` for manual recovery.
+| Install directory | `sudo env ROAMGATE_INSTALL_DIR=/usr/local/bin sh` |
+| Release mirror | `ROAMGATE_RELEASE_BASE_URL=<https URL of a flat asset directory> sh` |
 
 ## Managed Herdr setup
 
@@ -101,107 +76,70 @@ roamgate herdr setup
 roamgate herdr status
 ```
 
-If absent, setup downloads **Herdr 0.9.4**, verifies build-pinned SHA-256 hashes,
-and installs to `~/.local/bin/herdr` on Unix or
-`%APPDATA%\roamgate\herdr\0.9.4` on Windows. It never replaces a binary it did not
-install. If already installed, it uses the first binary on PATH or in those
-locations, leaving it in place. Unix's standard location supports `herdr update`;
-Windows uses Roamgate's private versioned directory, not the official junctioned
-store, and needs a newer verified Roamgate install for replacement.
+If Herdr is missing, setup downloads Herdr 0.9.4, verifies its pinned SHA-256,
+and installs it (`~/.local/bin/herdr`, or `%APPDATA%\roamgate\herdr\0.9.4` on
+Windows x64). An existing Herdr on PATH is used as is. Setup then runs
+`herdr server` as a user service: `roamgate-herdr.service` (Linux),
+`dev.roamgate.herdr` (macOS), or a per-user scheduled task (Windows). The web UI
+offers the same **Set up Herdr / Start Herdr** action when the local server is
+unreachable.
 
-The verified Windows asset is x64 only; managed setup has no native Windows
-ARM64 Herdr asset. Windows ARM64 SSH hosts can run Herdr's x64 build under
-emulation on a best-effort basis.
+Only the default local setup is supported; for SSH, named sessions, or custom
+sockets, start Herdr yourself.
 
-Setup installs/starts `herdr server` as a user service: `roamgate-herdr.service`
-(Linux), `dev.roamgate.herdr` (macOS), or a per-user Windows scheduled task.
-Definitions carry a Roamgate marker; unrelated existing definitions are untouched.
-The web UI offers the same confirmed **Set up Herdr / Start Herdr** action when
-the default local server is unreachable, with visible failures/retry.
-
-Only default local configuration is supported. SSH profiles/`--ssh-host`, named
-sessions, and explicit control/render socket flags or environment variables are
-refused; start Herdr yourself for those configurations.
-
-To stop and disable, use native tools:
+To remove the service:
 
 ```bash
 systemctl --user disable --now roamgate-herdr.service  # Linux
 launchctl bootout gui/$(id -u)/dev.roamgate.herdr      # macOS
-# Windows: find dev.roamgate.herdr-<key> in herdr-task.ps1
+# Windows: find the task name (dev.roamgate.herdr-<key>) in herdr-task.ps1
 schtasks /End /TN "<task-name>"
 schtasks /Delete /TN "<task-name>" /F
 ```
 
-Then remove only its generated definition:
-`~/.config/systemd/user/roamgate-herdr.service`,
-`~/Library/LaunchAgents/dev.roamgate.herdr.plist`, or
-`%APPDATA%\roamgate\herdr-task.ps1`. Linux also needs
-`systemctl --user daemon-reload`. Remove an installed binary only if unwanted
-and owned by this setup; never delete the shared `~/.local/bin` directory.
+Then delete its definition (`~/.config/systemd/user/roamgate-herdr.service` plus
+`systemctl --user daemon-reload`, `~/Library/LaunchAgents/dev.roamgate.herdr.plist`,
+or `%APPDATA%\roamgate\herdr-task.ps1`).
 
 ## Transition from Herdr Studio / herdr-gui
 
-**Herdr Studio / herdr-gui 0.6.2 and earlier require manual installation.**
-Roamgate 0.7.0+ publishes only `roamgate-*` assets/manifests and
-`install-roamgate.sh`. Old Latest/update channels no longer deliver fixes and may
-error; historical tagged downloads and running processes remain intact.
-Legacy assets are not republished because old clients can discover archives
-without manifests. Custom mirrors/pinned historical downloads are outside this cutoff.
+**Herdr Studio / herdr-gui 0.6.2 and earlier cannot auto-update to Roamgate.**
+Their update channel no longer receives fixes. Service, data, and plugin
+migration needs Roamgate **0.7.1+**.
 
-**Service, data, and plugin identity migration requires Roamgate 0.7.1+.**
-0.7.0 can update its binary through the new channel, but still uses legacy service
-names, paths, and `herdr.studio` plugin ID. Binary updates never rename services
-or migrate plugin registrations automatically.
+1. Back up the executable, service definition, and config, keeping permissions:
+   `~/.config/herdr-gui/`, plus `%APPDATA%\herdr-gui\` on Windows (Windows
+   also keeps settings and connections in `~/.config/herdr-gui/`).
+2. Stop and uninstall the old service with `herdr-gui service uninstall` (or the
+   old binary's `service uninstall`). Stop any unmanaged processes too. Never
+   leave both services enabled.
+3. Install Roamgate and run `roamgate service install`. It refuses to run while
+   a legacy service exists, even with `--force`.
+4. Check status, login, and connections. To roll back, uninstall with the new
+   binary and restore the old binary and service.
 
-1. Back up executable, service definition, and config with permissions intact.
-   Include `~/.config/herdr-gui/` and Windows `%APPDATA%\herdr-gui\` plus the old
-   `~/.config/herdr-gui/` settings/profile location.
-2. Before replacing the executable, stop/uninstall with `herdr-gui service uninstall`
-   or the previous Roamgate binary's `service uninstall`. For custom wrappers,
-   stop/disable/archive through the native manager and preserve args/environment.
-   Stop unmanaged processes too; never leave both auto-start entries enabled.
-3. Install 0.7.1+ or build source, then explicitly run `roamgate service install`
-   (`./server/roamgate service install` for source). Install rejects existing/loaded
-   legacy services and detection errors, even with `--force`, before changing files.
-4. Verify status, login, and connections. To roll back, uninstall with the new
-   binary, restore the old binary/definition, and enable only that service.
-   New-directory changes are not synchronized back.
+On first use, Roamgate copies missing tokens, settings, and connections into
+`~/.config/roamgate` (`%APPDATA%\roamgate` on Windows), and service install
+copies `herdr-gui.env` to `roamgate.env`. Existing new files always win. The
+copy is one-way; stop old processes first. Files at custom
+`HERDR_GUI_SETTINGS_PATH`/`HERDR_GUI_CONNECTIONS_PATH` locations are not copied.
+Browser preferences carry over only when the URL (host and port) is unchanged.
+Migrate the [plugin](#herdr-plugin) separately.
 
-After an in-place 0.7.0 update, the new CLI can route status/restart/reload/uninstall
-to the **sole unmodified generated legacy definition pointing at this executable**.
-It preserves name/environment/data and installs nothing automatically. Ambiguous
-old/new services, custom/symlinked definitions, loaded services missing definitions,
-or detection errors require the previous binary/native manager; the CLI never guesses.
-
-New data lives in `~/.config/roamgate` or Windows `%APPDATA%\roamgate`:
-
-- Missing tokens/settings/connections copy on first use; service install also
-  copies `herdr-gui.env` to `roamgate.env`. Existing new files win, even empty/invalid.
-- Copies retain originals and restrict permissions to the owner's existing
-  read/write bits. Copy failures stop without replacement credentials; legacy
-  symlinks are rejected. Explicit registry-path overrides are not migrated.
-- Windows reads old settings/profiles from historical `~/.config/herdr-gui`.
-  Stop old writers first: migration is one-way, not synchronization.
-- Browser `roamgate:` keys copy missing legacy values on the **same origin** only.
-  New values win; remembered deletions prevent old drafts reappearing. The website
-  checklist follows the same rule. Host/port changes cannot transfer storage.
-
-[Plugin migration](#herdr-plugin) is explicit. Historical releases retain their contracts.
+After an in-place update from 0.7.0, the new CLI manages an old service only if
+it is the single unmodified generated definition for this executable. Otherwise
+(custom, ambiguous, or missing definitions), use the previous binary or the
+native service manager.
 
 ### Repository and website addresses
 
-Use [powerfooI/roamgate](https://github.com/powerfooI/roamgate) and
-<https://roamgate.dev/> ([tutorial](https://roamgate.dev/tutorial/)). GitHub redirects
-old `powerfooI/herdr-studio` Git/release URLs; **do not reuse the old repo name**,
-which would remove redirects. The `/roamgate/` Pages URL redirects to the new site;
-do not rely on `/herdr-studio/`.
+The project lives at [powerfooI/roamgate](https://github.com/powerfooI/roamgate)
+and <https://roamgate.dev/>. Old `powerfooI/herdr-studio` URLs redirect.
 
 ### Install historical Herdr Studio
 
-The retained [legacy installer](../scripts/install-herdr-gui.sh) installs only
-`herdr-gui`, has no working Latest channel, and is absent from new releases.
-Pin a historical tag, with no future fixes through that channel:
+The [legacy installer](../scripts/install-herdr-gui.sh) installs `herdr-gui`
+only and must be pinned to a historical tag:
 
 ```bash
 curl -fsSL \
@@ -211,26 +149,20 @@ curl -fsSL \
 
 ## Herdr plugin
 
-Requires Herdr 0.7.2+. The native plugin uses the standalone Roamgate executable
-for its actions and panel; users do not need Bun or Node.js. Unix installation
-uses the same system tools as the standalone installer; Windows uses Windows
-PowerShell and `tar.exe`. Bun remains a source-build dependency.
-Herdr's GitHub plugin installation also requires Git.
-Plugin ID is `roamgate` from 0.7.1; 0.7.0 uses `herdr.studio`.
+The plugin (ID `roamgate`; `herdr.studio` in 0.7.0) needs Herdr 0.7.2+ and Git.
+It uses the standalone executable, so Bun is not required.
 
-**Migrating `herdr.studio`:** stop/uninstall its old service first, close old plugin
-panes, finish pending actions, then unregister:
+Install a published release (0.7.1 or newer):
 
 ```bash
-herdr plugin disable herdr.studio
-herdr plugin unlink herdr.studio
+herdr plugin install powerfooI/roamgate --ref vX.Y.Z
 ```
 
-Unlink retains checkout/data, including managed checkouts. Keep them for rollback;
-do not run old and new start actions together. Roamgate never edits Herdr's registry.
+The installer verifies the package checksum, version, and platform before
+replacing the executable. To upgrade, run the same command with the new tag;
+`herdr plugin update` stays on the original tag.
 
-For an **unreleased checkout**, build before linking (existing binaries are not
-validated). Keep the checkout and rebuild after updates:
+For an unreleased checkout, build before linking, and rebuild after updates:
 
 ```bash
 git clone https://github.com/powerfooI/roamgate.git
@@ -239,29 +171,6 @@ bun scripts/studio-plugin.ts build-source
 herdr plugin link .
 ```
 
-`build-source` installs the root workspace with its frozen lockfile and builds
-`server/roamgate` (`roamgate.exe` on Windows). Linking after success skips release
-download; neither step starts the service.
-
-For a **published release**, replace `X.Y.Z` with 0.7.1 or newer:
-
-```bash
-herdr plugin install powerfooI/roamgate --ref vX.Y.Z
-```
-
-The system installer downloads that version's package into a staging directory,
-checks its SHA-256, version and platform, and verifies native plugin commands
-before publishing the executable. Failure preserves an existing executable and
-never falls back to compilation or legacy assets. Tags predating native plugin
-commands still use their own Bun launcher; installing an unreleased checkout
-against one of those older release packages fails with source-build guidance.
-
-To upgrade a version-pinned installation, run the install command with the new
-published tag. Herdr 0.9.4's `herdr plugin update roamgate` follows the original
-ref, so a fixed tag remains pinned. Locally linked checkouts are updated and
-rebuilt by their owner. Neither installation nor plugin update starts Roamgate
-automatically.
-
 Plugin actions manage the same [user service](#run-as-a-user-service):
 
 ```bash
@@ -269,122 +178,87 @@ herdr plugin action invoke roamgate.start      # install/start
 herdr plugin action invoke roamgate.url        # login URL
 herdr plugin action invoke roamgate.status
 herdr plugin action invoke roamgate.restart
-herdr plugin action invoke roamgate.uninstall  # remove service, retain data
+herdr plugin action invoke roamgate.uninstall  # remove service, keep data
 ```
 
-Actions are asynchronous. Inspect `herdr plugin log list --plugin roamgate` or
-open `herdr plugin pane open --plugin roamgate --entrypoint panel` for status,
-URL, version, and start/restart/uninstall controls. Default is a session-modal
-popup; `--placement split`, `tab`, `zoomed`, or `overlay` creates a regular pane
-visible to other Herdr clients.
+Actions run asynchronously; check `herdr plugin log list --plugin roamgate`, or
+open the panel with `herdr plugin pane open --plugin roamgate --entrypoint panel`.
+After updating the plugin, reopen the panel before Start or Restart.
 
-After updating the plugin, close and reopen its panel before choosing Start or
-Restart. Herdr 0.9.4+ keeps already-open plugin panes on their previous files.
-Both controls register the current plugin's binary with the user service and
-restart it, preserving its environment file and credentials. Start retains its
-forced-install behavior; Restart refuses to overwrite a service definition that
-Roamgate did not generate. Use the standalone `roamgate service restart` command
-to restart an existing custom definition without changing it.
-
-The panel and actions invoke `roamgate plugin` directly. The source-only
-`scripts/studio-plugin.ts` entry point remains available for build helpers and
-delegates runtime verbs to the built executable.
+**Migrating from `herdr.studio`:** uninstall its service, close its panes, then
+run `herdr plugin disable herdr.studio` and `herdr plugin unlink herdr.studio`.
 
 ## Basic runtime configuration
 
-Flags override environment variables, then defaults; `roamgate --help` lists all
-options. Standalone ignores cwd `.env`/`bunfig.toml`: export variables, pass flags,
-or edit the service environment file. Source `bun run` retains normal Bun loading.
-
-`ROAMGATE_*` accepts legacy `HERDR_GUI_*` aliases, including installer settings.
-The new name wins **even when empty**. Herdr's `HERDR_*` settings are unchanged;
-explicit connection registry paths remain authoritative, including empty values.
+Flags override environment variables, which override defaults. Release binaries
+ignore `.env` files: export variables, pass flags, or edit the service
+environment file. `roamgate --help` lists everything.
 
 | Flag | Environment variable | Default |
 | --- | --- | --- |
 | `--host <addr>` | `HOST` | `127.0.0.1` |
 | `--port <n>` | `PORT` | `8787` |
-| `--password <pw>` | `ROAMGATE_PASSWORD` | Generated token when authentication is enabled |
-| None | `ROAMGATE_PIN` | Disabled; optional 6-12 digit login for private networks only |
-| `--tls-cert <path>` | `ROAMGATE_TLS_CERT` | Disabled; PEM chain, requires key |
-| `--tls-key <path>` | `ROAMGATE_TLS_KEY` | Disabled; PEM key, requires certificate |
-| `--socket-path <path>` | `HERDR_SOCKET_PATH` | Default control socket/pipe |
-| `--client-socket-path <path>` | `HERDR_CLIENT_SOCKET_PATH` | Default render socket/pipe |
+| `--password <pw>` | `ROAMGATE_PASSWORD` | Generated token |
+| None | `ROAMGATE_PIN` | Disabled; see [PIN login](#optional-pin-login) |
+| `--tls-cert <path>` | `ROAMGATE_TLS_CERT` | Disabled; PEM chain |
+| `--tls-key <path>` | `ROAMGATE_TLS_KEY` | Disabled; PEM key |
+| `--socket-path <path>` | `HERDR_SOCKET_PATH` | Default control socket |
+| `--client-socket-path <path>` | `HERDR_CLIENT_SOCKET_PATH` | Default render socket |
 | `--ssh-host <user@host>` | `HERDR_SSH_HOST` | Disabled; Linux/macOS only |
 | `--session <name>` | `HERDR_SESSION` | Default session |
 | `--public-dir <path>` | `PUBLIC_DIR` | Embedded assets |
 | `--log-level <level>` | `ROAMGATE_LOG_LEVEL` | `info` |
-| `--notification-source <herdr\|status>` | `ROAMGATE_NOTIFICATION_SOURCE` | `herdr`; see [Web Push](#web-push-notifications) |
-| `--profile` | `ROAMGATE_PROFILE=1` | Disabled; bounded server CPU capture |
-| `--profile-duration <seconds>` | `ROAMGATE_PROFILE_DURATION` | `30`; integer 1..300 |
-| `--profile-dir <path>` | `ROAMGATE_PROFILE_DIR` | Roamgate data directory's `profiles/` |
+| `--notification-source <herdr\|status>` | `ROAMGATE_NOTIFICATION_SOURCE` | `herdr` |
+| `--profile` | `ROAMGATE_PROFILE=1` | Disabled; see [profiling](#performance-profiling) |
+| `--profile-duration <seconds>` | `ROAMGATE_PROFILE_DURATION` | `30` (1-300) |
+| `--profile-dir <path>` | `ROAMGATE_PROFILE_DIR` | `<data dir>/profiles` |
 | `--open` | `OPEN_BROWSER=1` | Disabled |
 
-| Additional environment variable | Purpose |
+| Other environment variable | Purpose |
 | --- | --- |
-| `ROAMGATE_UPDATE_BASE_URL` | Latest-release mirror directory |
+| `ROAMGATE_UPDATE_BASE_URL` | HTTPS update mirror directory |
 | `ROAMGATE_DISABLE_UPDATE_CHECK=1` | Disable update checks |
-| `ROAMGATE_RESTART_SUPERVISOR=0\|1` | Override external supervisor detection |
-| `ROAMGATE_DISABLE_ENDPOINT=1` | Legacy terminal fallback; see compatibility |
-| `ROAMGATE_ALLOW_FILE_REVEAL=1` | Opt into [host file reveal](#host-file-reveal); disabled by default |
-| `ROAMGATE_UPLOAD_MAX_BYTES` | Maximum size of a terminal file upload; default 100 MiB |
-| `ROAMGATE_UPLOAD_RETENTION_HOURS` | Staged terminal file retention; default 24 hours |
+| `ROAMGATE_RESTART_SUPERVISOR=0\|1` | Override supervisor detection |
+| `ROAMGATE_DISABLE_ENDPOINT=1` | Force legacy terminal mode |
+| `ROAMGATE_ALLOW_FILE_REVEAL=1` | Enable [host file reveal](#host-file-reveal) |
+| `ROAMGATE_UPLOAD_MAX_BYTES` | Max terminal upload size (default 100 MiB) |
+| `ROAMGATE_UPLOAD_RETENTION_HOURS` | Upload retention (default 24) |
+| `ROAMGATE_SETTINGS_PATH` | GUI settings file (one per bridge) |
+| `ROAMGATE_CONNECTIONS_PATH` | Connection profiles file |
+| `ROAMGATE_ASSISTANT_DIR` | Ranger data directory |
+| `ROAMGATE_WEB_PUSH_PATH` / `ROAMGATE_WEB_PUSH_SUBJECT` | [Web Push](#web-push-notifications) |
 
-Update mirrors need platform archives, `.sha256` files, and
-`roamgate-<platform>.update.json` with `name: "roamgate"`. Missing/legacy manifests
-fail closed without archive discovery. HTTPS is required except loopback tests;
-credentials, queries, and fragments in URLs are rejected.
+Legacy `HERDR_GUI_*` names still work; the `ROAMGATE_*` name wins, even when
+empty.
 
 ```bash
-roamgate                              # loopback, generated token
-roamgate --host 0.0.0.0 --port 8787     # generated token
+roamgate                                # loopback, generated token
+roamgate --host 0.0.0.0 --port 8787     # all interfaces, generated token
 ```
 
-For a fixed password, prefer `ROAMGATE_PASSWORD` over process-visible
-`--password`. It must contain 8-1024 Unicode characters; values outside that
-range stop startup. Startup warns below 15 characters, the recommended length
-for any listener reachable beyond a trusted private network. Normal runtime
-requires login; see [Security](../SECURITY.md#trust-model) for the local development
-exception, login limits, and remote access guidance.
+Prefer `ROAMGATE_PASSWORD` over `--password`. Passwords must be 8-1024
+characters; use 15+ for anything beyond a trusted private network. See
+[Security](../SECURITY.md#trust-model).
 
 ### Optional PIN login
 
-For a server reachable only through a trusted private network or VPN, set
-`ROAMGATE_PIN` to 6-12 ASCII digits in the process environment or protected
-service environment file, then restart. There is deliberately no CLI flag.
-Unset or empty disables it; invalid values stop startup. Keep leading zeros.
-A PIN adds a weaker alternative credential and grants full access, so do not
-use it on a public listener. The server prints a warning when it is enabled.
-
-The form starts in numeric PIN mode and can switch to password/token login.
-`ROAMGATE_PASSWORD` still selects the strong login credential; when it is absent,
-the existing generated token and token URLs remain available. The PIN never
-replaces a signing key. Ten consecutive failures across all sources pause PIN
-login for one hour; per-source limits also apply. Strong-credential login remains
-available during that cooldown. See [PIN security and limits](../SECURITY.md#optional-pin-login).
-
-Adding, changing, or removing the PIN rotates the independent session signing
-secret at the next listener startup, just like changing the strong credential.
-Stop all listeners for the same instance before changing credentials.
+For a server reachable only through a trusted VPN or private network, set
+`ROAMGATE_PIN` to 6-12 digits (environment or service file only; there is no
+flag) and restart. The login form then starts in PIN mode, with the
+password/token still available. Changing the PIN signs out all browsers. See
+[PIN security](../SECURITY.md#optional-pin-login).
 
 ### Host file reveal
 
-Desktop file reveal is **off by default**. To enable it, set
-`ROAMGATE_ALLOW_FILE_REVEAL=1` in the host process environment (or the service
-environment file and restart the service). Only local Herdr profiles and
-loopback TCP peers are eligible; SSH profiles and non-loopback peers are refused.
-The menus open the **Roamgate host's** file manager, which requires a usable
-desktop session. Foreground focus, especially on Windows, is best effort.
-
-**Opt-in also allows loopback-forwarded/tunnel clients to open windows on the
-host.** A loopback peer or browser URL cannot prove the browser runs on that
-machine. Enable only when that is acceptable for every client reaching the
-loopback listener, including reverse proxies and SSH forwards. The browser's
-platform is not used to name the host desktop.
+**Off by default.** With `ROAMGATE_ALLOW_FILE_REVEAL=1`, local profiles accessed
+over loopback get **Reveal on host** and **Open folder on host**, which open the
+file manager on the Roamgate host. SSH profiles and non-loopback clients are
+refused. **Tunnelled or reverse-proxied loopback clients count as local too**,
+so enable it only if every such client may open windows on the host.
 
 ### Native HTTPS
 
-Supply both a PEM chain (leaf first) and matching unencrypted private key:
+Pass a PEM certificate chain (leaf first) and its unencrypted key:
 
 ```bash
 roamgate --host 0.0.0.0 --port 8443 \
@@ -392,13 +266,11 @@ roamgate --host 0.0.0.0 --port 8443 \
   --tls-key /path/to/private-key.pem
 ```
 
-Missing/unreadable/malformed/mismatched files stop startup, never fall back to
-HTTP. Without TLS settings, HTTP is used. HTTPS adds `Secure` cookies and HTTPS
-startup links; it does not change the [authentication rules](../SECURITY.md#trust-model).
-Do not expose directly to the public internet.
+Invalid files stop startup instead of falling back to HTTP. HTTPS only adds
+encryption; it does not change authentication.
 
-For private LAN testing, use your issuer or [mkcert](https://github.com/FiloSottile/mkcert).
-Replace this reserved example IP with the host's actual LAN address:
+For LAN testing with [mkcert](https://github.com/FiloSottile/mkcert) (use your
+host's real LAN IP):
 
 ```bash
 mkcert -install
@@ -407,437 +279,159 @@ roamgate --host 0.0.0.0 --port 8443 \
   --tls-cert "$PWD/cert.pem" --tls-key "$PWD/key.pem"
 ```
 
-- SANs must match each client hostname/IP; `localhost` does not cover LAN addresses.
-- Every device must trust the issuer. Transfer only mkcert's `rootCA.pem` from
-  `mkcert -CAROOT`, **never `rootCA-key.pem`**. On iOS, install the CA profile and
-  enable full trust in Settings > General > About > Certificate Trust Settings.
-- Bypassing warnings does not enable Service Workers/secure APIs. Verify trusted
-  HTTPS before Home Screen installation; remove temporary CA profiles after tests.
-- Protect keys and keep them out of Git. Issuance/renewal is external; restart
-  after replacement. Services need absolute paths in their environment file.
+Every device must trust the CA: copy only `rootCA.pem` (from `mkcert -CAROOT`),
+**never `rootCA-key.pem`**. On iOS, install the profile and enable it under
+Settings > General > About > Certificate Trust Settings. Clicking through
+certificate warnings does not enable PWA features. Restart after renewing
+certificates; services need absolute paths.
 
 ## Ranger model connection
 
-Open the global **Ranger** window and its **Settings** button. Choose
-**Ranger connection** or **Shared Pi credentials**, select a provider in the
-**Provider** picker, and use the available **Sign in** or **Enter API key**
-action. Complete the provider's web/device-code or manual authorization prompt
-in the window, choose a default model, select allowed workspaces under
-**Workspace access**, and **Save settings**. Each question automatically uses saved
-authorized workspaces that are currently available; no workspaces are authorized
-by default.
+Open **Ranger > Settings**, choose a **Provider**, and **Sign in** or **Enter API
+key**. Then pick a model, allow workspaces under **Workspace access**, and
+**Save settings**.
 
-**High-permission mode** is in the permissions menu below the chat input, off by
-default. The button shows **Ask for approval**, **Full access**, or **High permission**
-for older configurations limited to selected workspaces. Enabling it requires an
-explicit confirmation and authorizes all
-currently discoverable workspaces, including new workspaces that appear while
-the mode is enabled,
-without individual selection. Workspace content may be sent to the selected
-model provider. Ranger can then execute its supported workspace,
-worktree, tab, pane, agent and prompt operations, and create schedules, without
-individual approval. Each admitted question and scheduled task retains its
-concrete workspace targets; new workspaces do not widen an already-running turn
-or an existing task. Disabling the mode restores the saved normal-mode workspace
-selection and takes effect before subsequent
-automatic operations, including in running tasks; an operation already dispatched
-may finish.
-Existing tasks retain their saved mode and need an edit to adopt high-permission
-mode. Ranger's built-in write/command tools remain disabled.
+- **Shared Pi credentials** reuses Pi's `auth.json` and `models.json` for the
+  bridge account instead of Ranger's own store.
+- **Custom models** add an OpenAI- or Anthropic-compatible endpoint; use a
+  separate provider ID per endpoint.
+- On a **remote bridge**, use the provider's device-code or manual login; a
+  `localhost` callback would reach the browser's machine, not the bridge.
+- **High-permission mode** grants every workspace and skips confirmations.
+  Workspace content may be sent to the model provider. High-permission settings
+  saved by older versions keep their selected workspaces until you confirm the
+  all-workspaces option once.
+- On Windows SSH hosts, Ranger can read status and terminal output only.
 
-Existing saved high-permission configurations from older versions keep their
-selected-workspace permissions. Confirm the updated all-workspaces option once
-to authorize the broader scope; upgrading alone does not grant it.
+Ranger runs as the bridge's OS account and keeps its data (credentials,
+conversations, and scheduled tasks) in `~/.config/roamgate/assistant/`
+(`%APPDATA%\roamgate\assistant\`, or `ROAMGATE_ASSISTANT_DIR`). It may contain
+secrets: keep it private, use one bridge per directory, and stop the bridge
+before backing it up. **Upgrades can migrate `tasks.sqlite` irreversibly**, so
+older builds cannot open it: back up the directory before upgrading if you may
+roll back.
 
-Deleted workspaces are removed from the list and saved normal-mode selection
-after a successful complete inventory confirms their absence. Temporary
-disconnects, failed listings, and truncated inventories do not erase saved
-permissions. A deleted workspace that later reappears must be selected again in
-normal mode; high-permission mode includes it automatically. Inventories and
-concrete scopes are bounded to 512 workspaces. If an inventory is truncated,
-Ranger will not silently treat the partial result as all workspaces. Large scopes
-can take longer to validate and send more workspace context to the model.
-
-For a compatible endpoint, select **Add** under **Custom models**. The editor
-shows **Models** (model IDs and supported efforts) and **Endpoint** (provider
-ID, API format, API base URL, and API key) together. When a custom provider is
-selected, **Add** keeps its endpoint and starts with no model IDs, so new IDs
-join that provider; enter a different provider ID for a new endpoint. Enter one
-model ID per line or separate IDs with commas, up to 100 IDs of 500 characters
-each.
-Duplicate IDs are saved once. Supported formats are OpenAI Chat Completions,
-OpenAI Responses, and Anthropic Messages. Use a dummy key for an unauthenticated
-local server. **Save custom models** saves the whole batch and selects the first
-ID; then select allowed workspaces and
-**Save settings**. Select a custom provider and model and choose **Edit** to
-change that model.
-**Save custom models** returns to Settings after saving; **Back** or **Cancel**
-abandons unsaved editor changes. A blank key keeps its existing key.
-Stop running tasks before changing a model connection. Existing models outside
-the batch keep their settings.
-Use a separate provider ID for a different endpoint so existing providers keep
-their connection settings.
-
-Under **Supported thinking efforts**, select the levels your endpoint supports:
-Off, Minimal, Low, Medium, High, Extra high, and Maximum. New models start with
-Off selected. Existing models show their saved supported levels; leaving the
-checklist unchanged preserves each model's capabilities and Pi thinking-level
-maps. Changing the checklist applies the selected levels to every entered ID,
-so save separate batches for models with different capabilities. At least one
-level is required. Existing Pi compatibility settings are preserved.
-
-You determine which levels a third-party endpoint supports; saving a selection
-does not verify those capabilities. Pi translates the selected effort into the
-chosen API format. Select the desired **Thinking effort** and **Save settings**,
-or use the chat selector. Existing reasoning models without an explicit level
-list or Pi thinking-level map expose Off, Minimal, Low, Medium, and High.
-
-The **Provider** picker lists providers with saved OAuth logins and API keys
-from the selected credential source first, each with its credential status,
-followed by providers without saved credentials. Type to search by name or ID.
-Select a provider to choose it or log in from the window. The refresh button
-next to **Provider** reads changes made outside the window. These labels report
-stored credentials, not a successful live connection test; credentials are
-checked or refreshed when used.
-
-Ranger runs as the Roamgate bridge's OS account, including when the browser
-is on a phone or a workspace uses SSH. Provider credentials therefore belong on
-the bridge host. Separate Ranger credentials live in
-`~/.config/roamgate/assistant/auth.json` or
-`%APPDATA%\roamgate\assistant\auth.json`; custom endpoints live in `models.json`
-beside them. Configuration, the active conversation,
-model context, and history summaries live beside them in `state.json`. Inactive
-conversations live in private `sessions/<UUID>.json` files. Durable execution
-state and tool results live in `durable/<UUID>/execution.sqlite`. Stop the bridge
-before backing up the whole assistant directory to retain saved chats, database
-files and credentials. These files may contain secrets or workspace content.
-Keep them private and use one bridge
-process per data directory.
-`ROAMGATE_ASSISTANT_DIR` overrides this directory; the legacy
-`HERDR_GUI_ASSISTANT_DIR` alias is also accepted.
-
-An unfinished question resumes when the bridge restarts and its original
-connections become ready, even with the browser closed. Recovery requires the
-same Herdr server boot and workspace identity and a supported endpoint handshake.
-It waits for manually connected profiles until the user reconnects them; it does
-not connect additional profiles itself. If Herdr also restarted or the original
-target, permissions, or provider is unavailable, send a new question. **Stop**
-cancels work; stopping the bridge pauses it. Confirmed management operations are
-never automatically retried. Durable stores have no automatic retention quota.
-
-The Ranger **Tasks** view manages one-time, daily, and interval schedules.
-Task creation requires an endpoint with a stable Herdr boot identity, the chosen
-model, and an explicitly allowed workspace scope. If creation fails, the
-returned error names the unmet requirement, such as an older Herdr server
-that does not expose a boot identity. Tasks keep their original
-model and target identities; after a Herdr restart or target change, edit the
-task to authorize the current targets. The bridge must be running for schedules
-to fire. After downtime, missed occurrences are combined into one run.
-If an original connection is temporarily unavailable, its run stays queued while
-other ready tasks can run. Manual connection profiles still require the user to
-reconnect them; scheduling does not override their `auto_connect` setting.
-Daily times use the task's IANA timezone, independently of the bridge's local
-timezone; daylight-saving gaps are skipped and overlaps fire only once.
-Plans, proposals, deduplication records and run receipts live in `tasks.sqlite`,
-with private per-run state under `tasks/<task UUID>/runs/<run UUID>/`. The task
-database and Pi Durable databases use WAL mode with `synchronous = FULL`.
-The task database upgrades schemas 1 and 2 to schema 3 automatically and
-transactionally to store notification modes, custom-notification receipts, and
-bound workspace/Agent references. Older builds
-cannot open the upgraded task database. If you need rollback, back up the Ranger
-data directory while the bridge is stopped before upgrading.
-An invalid database disables task scheduling instead of discarding saved plans.
-Task runs share the selected bridge credential store; credentials are not copied
-into run directories. Include
-these files when backing up the assistant directory. The latest 20 runs per
-task are retained; cancelling keeps history, while deleting a cancelled task
-removes its saved runs. There is no aggregate byte quota for durable stores.
-
-**Shared Pi credentials** explicitly opts into Pi's existing credential store
-for that bridge account. Signing in or entering an API key in this mode updates
-that store, so Pi can also use the saved credentials. The separate **Ranger connection**
-keeps its own store. Neither mode requires terminal interaction to log in.
-The catalog uses credentials saved in Pi's `auth.json` and compatible endpoints
-in Pi's `models.json`. Custom model changes in shared mode update that file.
-**Refresh** rereads both files. Environment-only credentials for built-in
-providers are not imported. Model-file keys may use Pi's environment or command
-syntax; entering a key in the custom model editor accepts literal keys only.
-Pi's extensions, skills, project instructions, and
-built-in write/command tools are not loaded into Ranger.
-
-Pi SDK 1.1 names its Azure provider `azure`. Ranger also keeps
-`azure-openai-responses` as **Azure OpenAI (legacy ID)**, so existing selections,
-scheduled tasks, and interrupted runs continue using their original credentials
-and model configuration. No file migration is required. When both provider IDs
-are configured, their credentials and custom model overrides stay independent;
-Ranger does not copy or rename either store entry. The Responses model API value
-remains `azure-openai-responses` for both provider IDs.
-
-For remote bridge deployments, follow the provider's displayed device-code or
-manual authorization flow. A browser's localhost callback points to the browser
-machine; it does not automatically reach the bridge host. Cancelling a login
-does not disconnect the bridge or its Herdr profiles. See
-[Ranger behavior](../FEATURES.md#ranger) and
-[tool and session contracts](ARCHITECTURE.md#ranger).
-
-Saved grants for temporarily unavailable workspaces remain visible under
-**Unavailable authorized workspaces**. Remove one permission without clearing
-other grants, then save settings. A complete authoritative listing still removes
-grants for deleted workspaces. High mode must be turned off before restricting
-its all-workspace access with individual manual grants.
-
-On Windows SSH workspaces, Ranger can read workspace status and terminal output.
-Agent history reads, Git diff reads, and worktree creation fail with an error
-stating that they require a Unix SSH host. See
-[Ranger tool contracts](ARCHITECTURE.md#ranger).
+Unfinished questions and task runs resume after a bridge restart if their
+original connections and workspaces are still the same; confirmed actions are
+never repeated. See [Ranger](../FEATURES.md#ranger) and
+[contracts](ARCHITECTURE.md#ranger).
 
 ## Web Push notifications
 
-1. Use trusted HTTPS; on iOS/iPadOS 16.4+, open the installed Home Screen app.
-2. Enable **Task notifications**, grant permission, and choose **Task needs attention**
-   and/or **Task completed**. **Background push** confirms enrollment; existing
-   local-only users should toggle off/on once.
+1. Use trusted HTTPS (or loopback HTTP). On iOS/iPadOS 16.4+, open the installed
+   Home Screen app.
+2. Enable **Task notifications**, grant permission, and choose **Task needs
+   attention** and/or **Task completed**. **Background push** confirms the
+   device is enrolled.
 
-Server push is enabled by default; every device still needs enrollment.
-`roamgate push test` sends a test notification to every enrolled device.
-`ROAMGATE_WEB_PUSH_SUBJECT` optionally sets a `mailto:`/HTTPS operator contact,
-not a delivery destination. Default: `https://github.com/powerfooI/roamgate/issues`.
-An explicitly empty value disables push; restart after changes. Removing the
-variable restores the default and enables delivery.
+`roamgate push test` sends a test notification to every enrolled device. Push is
+on by default; setting `ROAMGATE_WEB_PUSH_SUBJECT` to an empty value disables it
+(otherwise it is an optional `mailto:` or HTTPS contact). After upgrading,
+reload each browser/PWA once so the new notification worker is active.
 
-Private VAPID keys/subscriptions live in `~/.config/roamgate/web-push.json` or
-`%APPDATA%\roamgate\web-push.json`; override with `ROAMGATE_WEB_PUSH_PATH`.
-**Protect/back up this file, never share/commit it, and use one writer per file.**
-Corrupt data is preserved and push disabled rather than silently rotating keys.
-After intentional key replacement, reopen/toggle notifications to re-enroll.
-Browser profiles/subscriptions are device-specific.
+VAPID keys and subscriptions live in `~/.config/roamgate/web-push.json`
+(`%APPDATA%\roamgate\web-push.json`). **Keep it private and backed up**;
+replacing it requires every device to re-enroll.
 
-After upgrading Roamgate, reopen or reload each browser/PWA once to activate the
-current notification worker. Until then, an older worker can show a Ranger alert
-but open only the app instead of its task run when clicked.
+Delivery needs outbound HTTPS to the browser's push service (Apple, Google,
+Mozilla, or Microsoft); no inbound port is needed. The bridge and Herdr must stay
+running. By default (`--notification-source herdr`, Herdr 0.9+), Roamgate relays
+Herdr's own notifications, matching its toasts and suppression rules. With
+`status` (or older Herdr), Roamgate watches agents go from working to
+blocked/done. Delivery is best-effort; messages expire after five minutes.
 
-Delivery needs outbound HTTPS to Apple (`*.push.apple.com`), Google
-(`fcm.googleapis.com`), Mozilla (`*.push.services.mozilla.com`), or Windows
-(`*.notify.windows.com`); other providers are rejected. No public inbound endpoint
-is needed. Devices must reach their provider and Roamgate when opening an alert.
-
-The bridge and relevant Herdr runtimes must stay connected; alerts arrive without
-open browsers. The default `herdr` notification source relays Herdr's own
-notifications (Herdr 0.9+), so Roamgate alerts match Herdr's toasts, including
-`[ui.notifications] external_agents` suppression and alerts sent with
-`herdr notification show`. Roamgate keeps one passive client-shell connection per
-runtime for this; Herdr counts it as a connected client for `notification show`,
-but it never takes focus or tab geometry. `status` (or older Herdr servers) instead
-observes `working -> blocked` and `working -> done/idle`; startup snapshots are
-silent. Herdr 0.9.4 treats Antigravity and Grok as idle once they return to the
-foreground prompt, even while background tasks or subagents continue; Roamgate
-preserves that policy. Delivery is best-effort: OS/Focus settings, outages,
-expired subscriptions, or stopped runtimes can prevent it. Messages expire after
-five minutes, with no durable replay; HTTP 404/410 removes expired subscriptions.
-
-Turning notifications off revokes on the server before browser unsubscribe.
-If revocation fails, reconnect/retry or revoke OS/browser permission immediately;
-already-accepted messages may arrive. Server-wide disable retains the registry
-for reuse when re-enabled. Password changes do not revoke device subscriptions.
-
-**Active page only** is the fallback when push is unavailable; do not rely on it
-while suspended/closed. Encrypted payloads contain notification text and routing
-IDs, including Ranger's custom titles and messages, and may appear on lock
+Turning notifications off revokes the subscription on the server first. Changing
+the password does not revoke devices. Notification text can appear on lock
 screens.
 
 ### Local notification testing
 
-HTTP loopback origins such as `http://localhost` and `http://127.0.0.1` are
-[secure contexts](https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Secure_Contexts)
-and can test browser notifications and Web Push without local TLS. With
-`bun run dev:web`, the Vite origin on port 5173 proxies the bridge on port 8788.
-For a bridge on another port, run `bun run build:web` and open that bridge's URL
-directly. Use an isolated data directory and browser origin for test permissions,
-subscriptions and Ranger tasks.
-
-Enable **Task notifications** in the test browser, then ask Ranger to propose
-a monitoring task using **Let Ranger decide** and confirm it. **Run now** exercises
-the task and its notification; click the alert to verify the exact run opens.
-Repeat the same observed event to check deduplication. To isolate active-page
-system delivery, first turn notifications off to revoke an existing subscription,
-set `ROAMGATE_WEB_PUSH_SUBJECT=''`, restart the bridge and enable notifications.
-To test closed-page delivery, restore the default subject,
-restart and re-enroll until **Background push** appears, then close the test
-origin's pages while leaving the bridge and Herdr running. Browser and OS
-notification permissions and outbound access to the push provider still apply.
-
-The reproducible local-model integration test covers proposal, confirmation,
-scheduled execution, custom text and deduplication across a bridge restart:
+`http://localhost` and `http://127.0.0.1` are secure contexts, so notifications
+work without TLS. Use an isolated data directory and browser profile. To test
+end to end, enable **Task notifications**, ask Ranger for a monitoring task with
+**Let Ranger decide**, confirm it, and use **Run now**. The automated
+integration test covers scheduling and deduplication, but not real browser
+delivery:
 
 ```sh
 bun test server/src/assistant-recovery.integration.test.ts --test-name-pattern 'confirmed Ranger proposals schedule custom notifications'
 ```
 
-It uses the real Pi driver and bridge with a scripted model transport and fixture
-Herdr sockets. It does not establish browser or system notification delivery.
-
 ## Logging
 
-Logs use one line per event: timestamp, severity, scope, bounded key/value context.
-`info` covers lifecycle/failures, not routine RPC/events/frames/successful auto-sync.
-`roamgate service logs -f` follows a managed service's output.
-Use `roamgate --log-level debug` or `ROAMGATE_LOG_LEVEL=debug` temporarily;
-restart services after editing their environment. Debug can expose paths/IDs;
-return to `info` afterwards. Logs omit URL auth tokens, which remain in protected files.
+Logs have one line per event. `info` covers lifecycle events and failures. Use
+`--log-level debug` (or `ROAMGATE_LOG_LEVEL=debug`) temporarily; debug logs can
+include paths and IDs, but never URL tokens. `roamgate service logs -f` follows a
+managed service.
 
 ### Performance profiling
 
-Start a short foreground capture on an unused port, then reproduce the slow
-interaction in that instance's browser page:
+Run a short CPU capture on a spare port, then reproduce the slow interaction in
+that instance:
 
 ```bash
 roamgate --host 127.0.0.1 --port 8788 --profile --profile-duration 30 --open
 ```
 
-Sampling begins during startup and stops automatically after the requested
-interval; the server keeps running. Ctrl+C/SIGTERM attempts to save the partial
-capture before normal shutdown. Force-kill/crash or a forced shutdown deadline
-may lose it. The deadline is event-loop scheduled, so a blocked loop can delay
-completion. Profiling adds CPU/memory overhead and exporting the report can
-briefly pause the server; leave it off for ordinary use. No debugger port or
-profiling HTTP endpoint is opened.
-
-Each run creates a private, uniquely named subdirectory under `--profile-dir`
-(default `~/.config/roamgate/profiles`, or `%APPDATA%\\roamgate\\profiles` on Windows).
-The log reports the output directory. Files are owner-only on POSIX; Windows
-access follows directory ACLs. Keep diagnostic files private and remove them
-when no longer needed; captures accumulate without automatic cleanup.
-
-- `summary.txt`: elapsed time, process CPU time, ending RSS, event-loop-delay
-  statistics, hottest sampled functions and JIT-tier/bytecode breakdown.
-- `cpu.json`: Bun/JSC's raw `functions`, `bytecodes` and `stackTraces` result.
-  This is **not Chrome's `.cpuprofile` format**. It can contain source paths,
-  function names and source-map references; review it before sharing.
-
-Process CPU time sums all process threads and can exceed elapsed time. The
-20 ms event-loop-delay probe includes scheduling delays; it cannot by itself
-separate CPU contention from synchronous JavaScript. CPU samples also do not
-measure browser drawing, network wait or keyboard-to-screen latency. Minified
-standalone builds may have shortened function names; for source-level diagnosis,
-run the matching checkout with `bun server/src/index.ts --profile` after building
-web assets. To investigate browser stalls, separately record its Performance
-panel while reproducing the same interaction.
-
-For a managed service, set `ROAMGATE_PROFILE=1` and optionally
-`ROAMGATE_PROFILE_DURATION`/`ROAMGATE_PROFILE_DIR` in its environment file, then
-restart when appropriate. The capture is once per process start, not an on-demand
-capture of an already running process. Remove the settings afterwards. Do not
-combine `--profile` with Bun's other CPU sampling profilers in the same process.
+The capture stops automatically and writes a private directory under
+`--profile-dir` containing `summary.txt` (CPU, memory, event-loop delay, hottest
+functions) and `cpu.json` (raw Bun/JSC samples, **not** Chrome's `.cpuprofile`
+format). Files may contain source paths; review before sharing and delete when
+done. For readable function names, run from source with
+`bun server/src/index.ts --profile`. For services, set `ROAMGATE_PROFILE=1` in
+the environment file, restart, and remove it afterwards.
 
 ## Multiple and remote Herdr connections
 
-The title's selector adds/tests/connects/disconnects/edits/removes shared profiles;
-each browser selects independently. Local profiles attach to sockets, not start
-Herdr. The first saved profile retains the default as writable `Local`.
-`roamgate connections` lists, tests and edits the same profiles from a terminal.
+The connection selector in the title bar adds, tests, connects, edits, and
+removes profiles shared by all browsers; each browser picks its own.
+`roamgate connections` does the same from a terminal. Disconnecting never stops
+Herdr.
 
 ![Connection selector with local and SSH profiles](./screenshots/multi-connection-selector.png)
 
-Use Enter/Space/Up/Down to open; arrows/Home/End navigate. There is no global
-next/previous-connection shortcut.
+**SSH profiles** need an already-running remote Herdr and an OpenSSH alias or
+`user@host`. Put ports, keys, and jump hosts in `~/.ssh/config`; Roamgate stores
+no SSH secrets. Verify host keys and make sure non-interactive login works. Leave
+socket paths empty to use the remote defaults. SSH profiles need a Linux/macOS
+bridge; a Windows bridge supports local profiles only. File moves need `python3`
+on the remote host.
 
-SSH requires an already-running remote Herdr and accepts an OpenSSH alias or
-`user@host`. Leave socket paths empty to resolve remote home defaults. Put ports,
-jump hosts, keys, and other options in `~/.ssh/config`; Roamgate stores no SSH
-passwords/keys/passphrases/options. Verify host keys and noninteractive service-user
-authentication first. The Roamgate bridge must run on Linux/macOS; a Windows
-bridge supports native local profiles only.
+**Windows SSH hosts:** choose **Windows** as the remote OS, install Herdr 0.9.1+
+(including its `conpty/` directory), and start the session first. The SSH shell
+must be able to run `powershell.exe`. Roamgate looks for `herdr.exe` on PATH and
+in `%LOCALAPPDATA%\Programs\Herdr\bin\`, or you can set its path and session
+name. Terminals and Herdr operations work; file, Git, worktree, and agent-history
+features need a Unix host. Run Herdr and the SSH user at the same privilege
+level: an elevated Herdr 0.9.4 server rejects ordinary clients unless started
+with `--allow-unelevated-clients`.
 
-Moving files on Linux/macOS SSH hosts requires `python3` on the remote user's
-PATH and a filesystem supporting atomic exclusive renames. Unsupported hosts
-or cross-filesystem destinations fail without copying or deleting the source.
+Profiles are stored in `~/.config/roamgate/connections.json`
+(`%APPDATA%\roamgate\connections.json`). `auto_connect` controls whether a
+profile connects at startup. Transient SSH failures retry; authentication and
+host-key failures do not. GUI preferences live in `settings.json` beside it.
+Give each bridge on the same account its own `ROAMGATE_SETTINGS_PATH` (an
+absolute, stable path; changing it requires logging in again).
 
-For a **Windows SSH host**, select **Windows** as the remote host OS. Install
-Herdr 0.9.1 or a later compatible release on that host, including the `conpty/`
-directory from its Windows archive, and start the desired Herdr session first.
-The remote SSH shell must be able to launch `powershell.exe`. Roamgate finds
-`herdr.exe` on the SSH user's PATH, then tries
-`%LOCALAPPDATA%\Programs\Herdr\bin\herdr.exe`; set an absolute executable path
-for another installation. Paths with spaces and Unicode are supported. An empty
-session selects `default`; set the session name to attach to a named server.
-Remote socket fields are unavailable for Windows. Roamgate checks bridge support
-before connecting and never installs or updates remote software on reconnect.
-The Roamgate-managed local Herdr version does not determine the remote version.
-
-Herdr 0.9.4 restricts an elevated Windows server to administrator clients by
-default. Run Herdr and its clients (including the SSH bridge) at matching
-privilege levels; prefer an ordinary server when elevation is unnecessary.
-Roamgate reports this access denial separately from SSH login failure and does
-not retry it automatically. After correcting privileges, reconnect the profile.
-To deliberately share an elevated server with ordinary clients of the same
-account, Herdr supports `allow_unelevated_clients = true` under `[server]` in
-its TOML configuration or `herdr --session <name> server --allow-unelevated-clients`.
-Stop and restart the selected server from an administrator terminal to apply
-this change; stopping it closes its panes. This permits ordinary clients to
-control the elevated server. Roamgate never enables it automatically.
-
-Windows SSH supports Herdr API operations and interactive terminals, including
-PowerShell, resize and reconnect. Remote file, Git, worktree and agent-history
-helpers that require a POSIX shell remain Unix-only. Failed remote operations
-never fall back to Local. macOS ARM64 to Windows 11 ARM64 with Herdr's x64 package
-is exercised by the opt-in end-to-end test; Linux to Windows and native Windows
-x64 are not yet covered by that live test. See [validation](../CONTRIBUTING.md#validation).
-
-Profiles live atomically in `~/.config/roamgate/connections.json` or Windows
-`%APPDATA%\roamgate\connections.json` (`ROAMGATE_CONNECTIONS_PATH` overrides).
-Unix directory/file modes are `0700`/`0600`; registry/direct-parent symlinks are
-rejected. Version 1 migrates on first successful mutation. Invalid files remain
-intact with mutations disabled; repair before retry. Failed durable rollback
-retires routing and blocks edits rather than letting memory/disk disagree.
-
-`auto_connect` controls startup, not browser selection. Disconnect/removal stops
-only the runtime/tunnel, never Herdr/workspaces. SSH retries transient failures,
-not auth/host-key/Herdr permission/permanent protocol errors. There is no idle
-cleanup or aggregate resource budget; disconnect unused profiles.
-
-GUI preferences and worktree source relationships live in
-`~/.config/roamgate/settings.json` (Windows: `%APPDATA%\roamgate\settings.json`).
-Use `ROAMGATE_SETTINGS_PATH` to give another bridge its own settings file;
-`HERDR_GUI_SETTINGS_PATH` remains a supported alias. Separate settings paths also
-isolate session signing keys. Use stable absolute paths; changing the normalized
-absolute path requires logging in again.
-
-Explicit CLI/environment connection settings create a read-only `legacy-default`
-profile. Change those settings to edit it. Old browser preferences migrate once
-into the first real profile without overwriting values.
+Connection flags or variables such as `--ssh-host` create a read-only
+`legacy-default` profile:
 
 ```bash
 roamgate --ssh-host user@host
 ```
 
-CLI SSH forwards both sockets; file, image-paste, Git, and hooks run remotely.
-Explicit socket flags/environment variables override automatic tunnel paths.
-See [isolation](./ARCHITECTURE.md#connection-isolation) and
-[SSH lifecycle](./ARCHITECTURE.md#ssh-transport).
+Explicit socket flags/variables override the SSH tunnel paths. See
+[isolation](./ARCHITECTURE.md#connection-isolation) and
+[SSH transport](./ARCHITECTURE.md#ssh-transport).
 
 ## PWA instance names
 
-Use **Configuration > Instance > Title suffix** to distinguish Roamgate servers
-installed from different addresses. A suffix such as `Home` produces
-`Roamgate · Home` in the page title and PWA installation metadata. The name is
-shared by every viewer of that Roamgate instance, including across devices; it
-is independent of the selected Herdr connection. Use **Reset to default** or save
-an empty suffix to restore `Roamgate`.
-
-Suffixes accept up to 32 Unicode characters after whitespace normalization.
-Keep them short so Android launchers can display the distinguishing part.
-The `title_suffix` setting is saved in the server's GUI settings file and
-survives restarts. When running multiple bridges under one OS account, use a
-separate `ROAMGATE_SETTINGS_PATH` for each, as described in
-[connection setup](#multiple-and-remote-herdr-connections).
-
-Set the suffix before installing the PWA when possible. Saving updates the open
-page immediately; other open pages refresh the name when brought to the
-foreground. Existing installed apps may keep their old launcher name until the
-browser processes the manifest update and asks for confirmation. If it stays
-unchanged, reinstall the PWA from that instance's address. This does not rename
-an installed Android app instantly. See
-[Chrome's Android app update guidance](https://support.google.com/chrome/answer/9658361?co=GENIE.Platform%3DAndroid&hl=en).
+**Configuration > Instance > Title suffix** turns `Roamgate` into, for example,
+`Roamgate · Home` in the page title and PWA name, so several servers are easy to
+tell apart. The suffix (up to 32 characters) is saved on the server and shared by
+all viewers. Set it before installing the PWA; already installed apps (especially
+on Android) may keep the old name until the browser updates the manifest or you
+reinstall.
 
 ## Worktree hooks
 
@@ -854,149 +448,87 @@ Configure hooks in `roamgate.json` at the repository root:
 }
 ```
 
-| Hook | Timing / working directory |
+| Hook | When / working directory |
 | --- | --- |
 | `setup` | After create/open; new worktree |
-| `opened` | After opening an existing worktree; opened worktree |
+| `opened` | After opening an existing worktree; that worktree |
 | `teardown` | Before removal; target worktree |
 | `removed` | After removal; source checkout |
 
-Roamgate selects the first existing file in this order:
-
-1. Target worktree's `roamgate.json`
-2. Source checkout's `roamgate.json`
-3. Target worktree's `paseo.json` (legacy compatibility)
-4. Source checkout's `paseo.json` (legacy compatibility)
-
-One complete configuration is selected; files are never merged and hooks never
-run twice. Missing or blank hook commands are skipped. Valid empty objects (`{}`
-or `{"worktree": {}}`) suppress fallback. Empty files, invalid JSON, non-object
-configuration or `worktree` values, non-string known hook fields, and read
-failures report an error with the selected path, without trying another file.
-Unknown fields are ignored.
-
-After removal, the target is gone and resolution uses the source checkout;
-the `removed` configuration and its scripts must be available there.
-Configuration reads and commands run on the connected local or SSH host.
-Commands use the existing `sh -c` runner and the working directories above.
-
-To migrate, rename `paseo.json` to `roamgate.json`, preserving its `worktree`
-object. Review both checkouts: even a source native file overrides a target
-legacy file. No automatic migration is performed. **Worktree Hooks** and
-**Worktree Lifecycle** show the effective path, errors, and legacy compatibility.
-The settings RPC exposes `config_path` and `config_source` (`roamgate`, `paseo`,
-or `null`); the compatibility field `paseo_path` is set only for a Paseo file.
-
-Prefer the `ROAMGATE_HOOK_*` variables in new scripts:
+Roamgate uses the first file found, in order: target `roamgate.json`, source
+`roamgate.json`, target `paseo.json`, source `paseo.json` (legacy). Files are
+never merged. `{}` disables fallback; invalid files report an error. Hooks run
+with `sh -c` on the connected (local or SSH) host. To migrate, rename
+`paseo.json` to `roamgate.json`.
 
 | Variable | Value |
 | --- | --- |
 | `ROAMGATE_HOOK_EVENT` | `worktree.created`, `worktree.opened`, `worktree.before_remove`, or `worktree.removed` |
-| `ROAMGATE_HOOK_CHECKOUT_PATH` | Target path, including former path after removal |
-| `ROAMGATE_HOOK_SOURCE_CHECKOUT_PATH` | Source checkout when known |
+| `ROAMGATE_HOOK_CHECKOUT_PATH` | Target worktree path |
+| `ROAMGATE_HOOK_SOURCE_CHECKOUT_PATH` | Source checkout, when known |
 
-`HERDR_GUI_HOOK_*` remains an alias for each corresponding Roamgate variable.
-`PASEO_HOOK` contains `setup`, `opened`, `teardown`, or `removed`;
-`PASEO_CHECKOUT_PATH` and `PASEO_SOURCE_CHECKOUT_PATH` retain the same paths.
-All aliases are available for both native and legacy configuration.
-Notices show bounded diagnostics including the actual configuration path.
-**Failed teardown stops removal; other failures do not roll back completed actions.**
-Hooks default on; inspect/disable per repository under **Worktree hooks** or
-**Worktree Lifecycle**. Disabling applies to both formats and skips execution
-even when configuration is invalid. Hooks are trusted, unsandboxed repository
-code executed with the execution user's permissions. A native filename does
-not establish trust: review configuration and scripts before worktree operations.
+`HERDR_GUI_HOOK_*` and `PASEO_HOOK` / `PASEO_CHECKOUT_PATH` /
+`PASEO_SOURCE_CHECKOUT_PATH` are also set.
+
+**Hooks are on by default and run unsandboxed repository code with your
+permissions.** Review them, or disable them per repository under **Worktree
+hooks** or **Worktree Lifecycle**. A failed teardown stops removal; other
+failures do not undo completed steps.
 
 ## Run as a user service
 
 | Command | Behavior |
 | --- | --- |
-| `roamgate service install` | Create/update definition and start |
-| `roamgate service install --force` | Replace a non-Roamgate definition (not a legacy migration bypass) |
-| `roamgate service status` | Native manager status |
-| `roamgate service restart` | Restart after environment changes |
-| `roamgate service reload` | Reload definition, then restart |
-| `roamgate service uninstall` | Stop/remove service; retain configuration/tokens |
-| `roamgate service logs [-f]` | Show recent service output |
+| `roamgate service install` | Create or update the service and start it |
+| `roamgate service install --force` | Replace a non-Roamgate definition |
+| `roamgate service status` | Show status |
+| `roamgate service restart` | Restart after config changes |
+| `roamgate service reload` | Reload the definition, then restart |
+| `roamgate service uninstall` | Stop and remove; keeps config and tokens |
+| `roamgate service logs [-f]` | Show recent output |
 
-| Platform | Definition / behavior |
+| Platform | Definition |
 | --- | --- |
-| Linux | `~/.config/systemd/user/roamgate.service`, `Restart=always` |
-| macOS | `~/Library/LaunchAgents/dev.roamgate.plist`, label `dev.roamgate`, `KeepAlive`; logs `~/Library/Logs/roamgate.stdout.log` / `roamgate.stderr.log` |
-| Windows | Task `dev.roamgate-<user-key>` (config-path hash), `%APPDATA%\roamgate\roamgate-task.ps1`; login start, normal privileges, restart on failure |
+| Linux | `~/.config/systemd/user/roamgate.service` (`Restart=always`) |
+| macOS | `~/Library/LaunchAgents/dev.roamgate.plist` (`KeepAlive`); logs in `~/Library/Logs/roamgate.*.log` |
+| Windows | Scheduled task `dev.roamgate-<key>` running `%APPDATA%\roamgate\roamgate-task.ps1` at login |
 
-Stop/remove legacy services first via the [migration procedure](#transition-from-herdr-studio--herdr-gui).
-**New services bind `0.0.0.0:8787`**, generate a persistent token, and print
-localhost/LAN token URLs. Config lives in `~/.config/roamgate/roamgate.env` or
-`%APPDATA%\roamgate\roamgate.env`, preserved on reinstall/uninstall. Edit HOST,
-PORT, password, and Herdr settings there, then restart, or use
-`roamgate config set NAME=value --restart`. For local-only installation,
-set `HOST=127.0.0.1` first. On Windows, allow Private networks only if prompted;
-on Linux, `sudo loginctl enable-linger "$USER"` keeps services after logout.
-On macOS, installation checks the configured listener before registering the
-launchd job. If another process owns the port, it reports the conflict and leaves
-the preserved config available for choosing a different port.
+**New services listen on `0.0.0.0:8787`** with a generated token and print
+localhost/LAN login URLs. Settings live in `~/.config/roamgate/roamgate.env`
+(`%APPDATA%\roamgate\roamgate.env`); edit it and restart, or run
+`roamgate config set NAME=value --restart`. For local-only access, set
+`HOST=127.0.0.1`. On Linux, `sudo loginctl enable-linger "$USER"` keeps the
+service running after logout. Remove legacy services first
+([migration](#transition-from-herdr-studio--herdr-gui)).
 
-macOS service installation validates effective config values without executing
-the file. Use one `NAME=value` assignment per line, optionally prefixed by
-`export`, with shell single/double quotes, backslash escapes, and comments.
-`$NAME` and `${NAME}` expand variables defined earlier in the file; `HOME` is
-available as the service user's home directory. For example:
-
-```sh
-SECRET='replace-with-a-strong-password'
-ROAMGATE_PASSWORD="$SECRET"
-```
-
-The expanded password must contain 8 to 1024 Unicode characters. An explicitly
-empty `ROAMGATE_PASSWORD` selects generated-token authentication, even when the
-legacy password variable is set. Define other referenced variables in the config:
-the installing terminal's environment is not the launchd environment. References
-to externally defined variables, shell-special assignments, command substitutions,
-standalone commands, and other unsupported shell expressions are rejected before
-config migration or service changes. Keep the config self-contained; resolve
-dynamic values yourself before installing or reinstalling.
+On macOS the env file is parsed, not executed: use `NAME=value` lines (optionally
+prefixed with `export`) with quotes, comments, and `$NAME`/`${NAME}` references
+to `HOME` or variables defined earlier in the file. Command substitution and
+other outside variables are rejected.
 
 ```bash
 curl -fsS http://127.0.0.1:8787/healthz
 ```
 
-Tokens live in `~/.config/roamgate/auth-token` or `%APPDATA%\roamgate\auth-token`.
-Private random cookie signing state lives in the same data directory. With no or
-an empty settings-path override, its file is `session-secret.json`. A nonempty
-`ROAMGATE_SETTINGS_PATH` (or `HERDR_GUI_SETTINGS_PATH`) selects
-`session-secret-<sha256>.json`, where `<sha256>` is the full SHA-256 digest of the
-normalized absolute settings path. The key stays in the data directory even when
-the settings file is elsewhere. Different settings paths isolate signing keys;
-keep custom paths absolute and stable. Changing the normalized path requires
-logging in again. Preserve the signing state across restarts and protect it like
-the login token.
+**Credentials and sessions.** The generated token is in
+`~/.config/roamgate/auth-token` (`%APPDATA%\roamgate\auth-token`). A `?token=`
+URL logs in and sets a cookie. Cookies are signed by a separate secret in the
+same directory (`session-secret.json`, or `session-secret-<sha256>.json` when
+`ROAMGATE_SETTINGS_PATH` is set). Protect both like passwords.
 
-`ROAMGATE_PASSWORD` and the generated token are login credentials only. The first
-upgrade from credential-signed cookies requires logging in again. Changing an
-effective credential rotates that instance's signing secret at startup, so old
-sessions stay revoked even if that credential is later restored. Stop all
-listeners for the same instance before credential changes. To revoke its sessions
-without changing credentials, stop those listeners, remove only its signing
-state file, then restart. Malformed or unsafe signing state fails startup rather
-than silently resetting authentication.
+- `roamgate auth rotate` replaces the token, signs out every browser, and
+  restarts the service. **Do not just delete `auth-token`**: after a migration,
+  the legacy token is copied back on the next start. To rotate by hand, stop
+  the service and write a fresh 64-character lowercase hex secret (mode `0600`).
+- `roamgate auth revoke-sessions` signs out every browser without changing
+  credentials.
+- Changing the password or PIN also signs out every browser on the next start.
+  Stop all listeners of the instance before changing credentials.
+- If startup was killed and a stale `session-secret*.json.lock` directory
+  remains, stop all listeners and delete only that lock directory.
 
-Concurrent startups use a short-lived `<signing-state-file>.lock` directory,
-such as `session-secret.json.lock` or `session-secret-<sha256>.json.lock`. If
-startup was killed while holding it, stop all listeners for that instance,
-confirm no startup is running, and remove only its matching lock directory before
-restarting. A busy lock fails closed after a bounded wait; it is never stolen
-from a potentially live writer.
-
-A `?token=...` visit sets an HttpOnly cookie and removes the URL token. To rotate,
-run `roamgate auth rotate`, which also restarts a running managed service and
-prints the new URLs. Manually, stop the service, replace the file with a fresh
-64-character lowercase hexadecimal secret (mode `0600`), then restart.
-`roamgate auth revoke-sessions` removes the signing state and restarts the
-service to sign out every browser without changing credentials. **Deleting only the new file can restore a
-readable legacy token**, not rotate it.
-
-Manual templates live under `deploy/`. Keep systemd as restart owner for wrappers:
+Manual templates live in `deploy/`. When wrapping the binary, keep systemd as
+the restart owner:
 
 ```ini
 [Service]
@@ -1004,29 +536,26 @@ ExecStart=
 ExecStart=/absolute/path/service-wrapper -- %h/.local/bin/roamgate --host 0.0.0.0
 ```
 
-The updater saves `roamgate.previous`, atomically installs a verified binary, and
-exits; it never starts its replacement. Reinstall preserves custom `ExecStart`
-in a managed unit when it still invokes the same binary.
+The updater installs a verified binary, keeps `roamgate.previous`, and exits so
+the supervisor restarts it.
 
 ## Command-line management
 
-Management commands act on the [user service](#run-as-a-user-service)'s
-environment file and data directory, not on the shell's flags or variables.
-`roamgate --help` lists them; `roamgate <command> --help` describes each.
-They exit 0 on success, 1 on failure and 2 on invalid arguments. Commands with
-`--json` print machine-readable output for scripts.
+These commands act on the [user service](#run-as-a-user-service)'s config and
+data, not on the current shell's flags. They exit 0 on success, 1 on failure,
+and 2 on bad arguments; many accept `--json`.
 
 | Command | Purpose |
 | --- | --- |
-| `roamgate doctor [--offline]` | Check the config, credentials, TLS certificate, service, listener, network exposure, local Herdr, connections, Web Push and updates; print a fix for each problem. Exits 1 on any failure. The output contains no secrets. |
-| `roamgate url [--qr] [--address <host>]` | Print tokenized login URLs; `--qr` draws a terminal QR code for a phone, and `--address` substitutes a VPN or Tailscale name. The code contains the token. |
-| `roamgate config show\|get\|set\|unset\|edit\|path` | Read or change `roamgate.env`. Changes are validated as a whole and written atomically, preserving comments; `--restart` restarts a running service. `KEY=-` reads a secret from standard input. |
-| `roamgate auth show\|rotate\|revoke-sessions` | Show the login method, replace the generated token (which also signs out every browser), or sign out every browser without changing credentials; both restart a running service unless `--no-restart`. |
-| `roamgate connections list\|test\|add\|remove\|set-default` | Manage the profiles the [connection selector](#multiple-and-remote-herdr-connections) edits. A running Roamgate keeps its own copy, so edits are refused while it serves unless `--restart` restarts the managed service. Only the service config's address is checked; stop other processes sharing the registry, such as a foreground run on another port, first. |
-| `roamgate push test` | Send a test notification to every enrolled [Web Push](#web-push-notifications) device and report each provider's answer. |
-| `roamgate update [--check]` / `roamgate rollback` | Install the latest release with the same verification as the in-app updater, or swap back to `roamgate.previous`; a running service using this executable restarts. Linux and macOS only. |
-| `roamgate service logs [-f] [-n <count>]` | Show service output: the user journal on Linux, `~/Library/Logs` on macOS. Windows tasks do not capture output. |
-| `roamgate completion bash\|zsh\|fish` | Print a shell completion script; its help shows where to install it. |
+| `roamgate doctor [--offline]` | Check config, credentials, TLS, service, network exposure, Herdr, connections, Web Push, and updates, with a fix for each problem. Prints no secrets. |
+| `roamgate url [--qr] [--address <host>]` | Print login URLs; `--qr` shows a QR code for a phone (it contains the token); `--address` substitutes a VPN or Tailscale name. |
+| `roamgate config show\|get\|set\|unset\|edit\|path` | Read or change `roamgate.env` atomically. `--restart` restarts the service; `KEY=-` reads a secret from stdin. |
+| `roamgate auth show\|rotate\|revoke-sessions` | Show the login method, replace the token, or sign out every browser. |
+| `roamgate connections list\|test\|add\|remove\|set-default` | Manage [connection profiles](#multiple-and-remote-herdr-connections). Edits are refused while Roamgate runs unless `--restart` is given. |
+| `roamgate push test` | Send a test [Web Push](#web-push-notifications) notification. |
+| `roamgate update [--check]` / `roamgate rollback` | Update to the latest release or restore `roamgate.previous` (Linux/macOS). |
+| `roamgate service logs [-f] [-n <count>]` | Show service output (not available for Windows tasks). |
+| `roamgate completion bash\|zsh\|fish` | Print a shell completion script. |
 
 ## Build a standalone executable
 
@@ -1035,47 +564,32 @@ bun scripts/studio-plugin.ts build-source
 # Output: server/roamgate (server/roamgate.exe on Windows)
 ```
 
-This installs dependencies and embeds frontend/Bun. Afterward, `bun run build`
-rebuilds; targets need no Bun. Cross-build/package with `bun run build:<target>`
-or `bun run package:<target>`:
+Afterwards `bun run build` rebuilds. Cross-compile with `bun run build:<target>`
+or package with `bun run package:<target>`; `bun run build:all` builds every
+target:
 
 | Targets | Architectures |
 | --- | --- |
-| `linux-x64`, `linux-arm64` | Linux x86-64 / ARM64 |
+| `linux-x64`, `linux-arm64` | Linux x86-64 / ARM64 (glibc; musl is unsupported) |
 | `darwin-x64`, `darwin-arm64` | macOS Intel / Apple Silicon |
 | `windows-x64`, `windows-arm64` | Windows x86-64 / ARM64 |
 
-`bun run build:all` builds all targets. Bun downloads runtimes automatically.
-Use glibc Linux x64 for Ubuntu/Debian/Fedora/CentOS; musl is unsupported there
-because Bun's musl binary still dynamically links `libstdc++`/`libgcc_s`.
-Run `./server/roamgate`; `bun run clean` removes generated builds.
-Release packaging/publishing follows [AGENTS.md](../AGENTS.md#release-notes).
+`bun run clean` removes builds. Releases follow
+[AGENTS.md](../AGENTS.md#release-notes).
 
-Standalone builds omit source maps to keep release downloads smaller. Errors
-report positions in the compiled code rather than the original TypeScript.
-The Release workflow retains a separate `debug-roamgate-<tag>-<target>` CI
-artifact for 30 days, containing a tar archive of the same version built with
-embedded source maps and its `.map` file. Extract the tar before running the
-debug executable; this preserves its executable permissions. These debug
-artifacts are not published to GitHub Releases or used by automatic updates.
-Use the matching debug executable to
-reproduce errors with source-level stack traces.
-
-To build a debug executable locally, first run `bun run build:web`, then
-`bun run --cwd server compile --sourcemap`, or use
-`compile:<target> --sourcemap` for another platform. This replaces the local
-executable with a mapped build; run the normal compile command again before
-packaging a production executable. Merely placing a `.map` file beside a
-map-free executable does not restore source-level stack traces.
+Release binaries have no source maps. Each release run keeps a
+`debug-roamgate-<tag>-<target>` CI artifact for 30 days with source maps; extract
+its tar and run it to get readable stack traces. To build one locally, run
+`bun run build:web` and `bun run --cwd server compile --sourcemap`.
 
 ## Troubleshooting
 
 | Symptom | Action |
 | --- | --- |
-| Not sure what is wrong | Run `roamgate doctor`; it checks each part below and prints a fix. |
-| Cannot connect to Herdr | Check server and both socket paths; default local setup can use `roamgate herdr setup`. Override with `--socket-path /path/to/herdr.sock` only deliberately. |
-| Another device cannot open the page | Check bind, token URL, network/firewall, and [private access setup](./TUTORIAL.md#networking). |
-| SSH connects locally | Remove explicit socket flags/`HERDR_SOCKET_PATH`/`HERDR_CLIENT_SOCKET_PATH`; they override tunnel paths. |
-| Want automatic browser launch | Use `roamgate --open` or `OPEN_BROWSER=1`. |
+| Not sure what is wrong | Run `roamgate doctor`. |
+| Cannot connect to Herdr | Check that Herdr runs and both sockets exist; try `roamgate herdr setup`. |
+| Another device cannot open the page | Check the bind address, token URL, firewall, and [private access setup](./TUTORIAL.md#networking). |
+| SSH profile connects locally | Remove socket flags and `HERDR_SOCKET_PATH`/`HERDR_CLIENT_SOCKET_PATH`; they override tunnels. |
+| Want the browser to open automatically | Use `roamgate --open` or `OPEN_BROWSER=1`. |
 
 For step-by-step diagnosis, see [the tutorial](./TUTORIAL.md#troubleshooting).

@@ -1,32 +1,39 @@
 # Reproducible Product Screenshots
 
-Capture the current Roamgate UI against a real Herdr backend using the public
-[Northstar demo](https://github.com/powerfooI/northstar-demo), a fictional six-task
-board maintained in its own repository. Its names, code, tasks, and local SVG are
-public demo content. Use one coherent task across desktop and mobile: add a
-status filter, explain empty results, test it, and review the change.
+Capture the real Roamgate UI against a real Herdr backend using the public
+[Northstar demo](https://github.com/powerfooI/northstar-demo), a fictional task
+board. Every shot tells one story: add a status filter, test it, and review it.
+
+## Isolate the Capture Environment
+
+Use a dedicated OS account (for example `demo`) or a clean VM with only Bun,
+Git, Herdr, Roamgate, and the public repositories. Keep personal projects,
+browser profiles, shell/SSH config, and agent transcripts out of it, and use a
+neutral hostname and a fresh browser profile. The OS account is the privacy
+boundary: Roamgate reads agent history and settings from the user's home
+directory, so a separate Herdr session alone is not enough.
+
+Only include the PR status card if `gh` is already authenticated in that
+environment and PR #1 is open with passing checks; do not copy private
+credentials just for the card. Set an absolute `XDG_STATE_HOME` outside every
+demo checkout.
 
 ## Prepare the Case
 
-Install the root dependencies as described in [Contributing](../CONTRIBUTING.md).
-Create a fresh independent clone outside the Roamgate checkout:
+Install root dependencies ([Contributing](../CONTRIBUTING.md)), then clone the
+demo into a new, empty directory:
 
 ```sh
 mkdir -p /tmp/roamgate-demo
 git clone --branch main https://github.com/powerfooI/northstar-demo.git /tmp/roamgate-demo/northstar
 ```
 
-The public repository is the canonical source; Roamgate does not keep another
-fixture or patch. The project needs Bun and Git, with no extra packages. The
-`main` branch contains the baseline; `codex/status-filter` contains the example
-implementation in [PR #1](https://github.com/powerfooI/northstar-demo/pull/1).
-
 | Scene | Initial state | Use |
 | --- | --- | --- |
-| Baseline | Clean `main` clone | Give a real agent the task in the project README. |
-| Review | Baseline plus the five example implementation files | Repeatable Files, Working tree diff, preview, annotation, and linked PR shots. |
+| Baseline | Clean `main` clone | Give a real agent the task from the README. |
+| Review | `main` plus the example implementation as unstaged changes | Files, diff, preview, annotation, and PR shots. |
 
-For the review scene, run the following only in the clone just created above:
+For the review scene, run this **only in the fresh clone**:
 
 ```sh
 git -C /tmp/roamgate-demo/northstar switch --track -c codex/status-filter origin/codex/status-filter
@@ -34,16 +41,12 @@ git -C /tmp/roamgate-demo/northstar reset --mixed origin/main
 git -C /tmp/roamgate-demo/northstar diff origin/main --stat
 ```
 
-This leaves the feature files as real unstaged changes against `main` while
-preserving the branch's upstream link to PR #1. The diff changes `app.ts`,
-`index.html`, `styles.css`, `tasks.test.ts`, and `tasks.ts`. The PR is a prepared
-example implementation; do not attribute it to an idle agent or a screenshot
-session. Agent history and completed-task status require a matching real run.
-Record both remote commit SHAs with the capture originals so later branch
-updates do not obscure which version was photographed.
+The diff touches `app.ts`, `index.html`, `styles.css`, `tasks.test.ts`, and
+`tasks.ts` from [PR #1](https://github.com/powerfooI/northstar-demo/pull/1).
+That PR is a prepared example; never present it as an agent's work. Record both
+remote commit SHAs with the originals.
 
-For desktop sidebar shots, create three additional independent clones of the
-same public repository:
+For sidebar shots, add three more clones:
 
 ```sh
 git clone --branch main https://github.com/powerfooI/northstar-demo.git /tmp/roamgate-demo/documentation
@@ -51,114 +54,44 @@ git clone --branch main https://github.com/powerfooI/northstar-demo.git /tmp/roa
 git clone --branch main https://github.com/powerfooI/northstar-demo.git /tmp/roamgate-demo/ui-preview
 ```
 
-Run the board and tests from the Northstar clone:
-
-```sh
-cd /tmp/roamgate-demo/northstar
-bun test
-bun run dev
-```
-
-Open <http://127.0.0.1:4317>. `bun run dev 4318` selects another port. On the
-review scene, choose **Done** and search for `navigation` to reach the empty
-state; **Clear filters** restores all six tasks and focuses the search input.
-Roamgate's static HTML preview shows all six cards with local styles/images;
-its script restrictions mean interactive filtering belongs in the live board.
-
-Use an unused capture destination; Git refuses a non-empty directory. To repeat
-a scene, stop its processes and close its Herdr workspace, preserve the old
-clone, and choose a new destination. Do not run the reset step on an existing
-user checkout. Update the workspace commands and paths below to match the new
-capture directories.
-
-## Isolate the Capture Environment
-
-Use a dedicated OS account named `demo` or a clean VM for published screenshots.
-Install Bun, Git, Herdr, and Roamgate there; copy or clone only the public checkout
-and the independent Northstar demo repositories. Keep personal projects, home
-directories, browser profiles, shell configuration, SSH configuration, and agent
-transcripts outside it. Configure only the credentials needed for a real agent,
-without printing them in commands or terminal output. Choose a neutral hostname
-and a fresh browser profile.
-
-The linked PR card is optional. Include it only when GitHub CLI authentication is
-configured on the checkout host; otherwise omit the PR-status scene. Do not copy
-private GitHub credentials solely to add the card. Keep authentication details
-outside the repository and screenshots. If showing the card, verify that PR #1
-is open and its Bun test check succeeded; **Provider not configured**, missing
-CLI, or login-required states are not ready for a PR-status shot.
-When running with a cleaned environment, set an absolute `XDG_STATE_HOME`
-outside every demo checkout so CLI runtime state cannot become a review file.
-
-A separate project, named Herdr session, and clean shell environment protect
-against accidental reuse. They do not prevent the same OS user from accessing
-personal files. Roamgate resolves some agent histories through that user's home
-directory and stores GUI settings there; changing `CODEX_HOME` alone does not
-isolate those lookups. The OS account or VM is the privacy boundary.
+`bun test` and `bun run dev` in the Northstar clone run the tests and the board
+at <http://127.0.0.1:4317>. To repeat a scene, use a new destination directory
+instead of resetting an existing checkout.
 
 ## Start the Real Workspace
 
-The following macOS/Linux commands run from the Roamgate checkout in the capture
-account. `demo:herdr` runs the installed Herdr CLI with an allowlisted environment,
-a `/bin/sh` non-login shell, neutral prompt, and a dedicated `roamgate-demo`
-session under `/tmp/roamgate-demo/config`. Set `ROAMGATE_DEMO_ROOT` to an absolute
-path to change that root; all invocations must use the same value.
+`bun run demo:herdr` runs Herdr with a clean environment and a dedicated
+`roamgate-demo` session under `/tmp/roamgate-demo/config` (override with an
+absolute `ROAMGATE_DEMO_ROOT`, the same in every terminal).
 
-In the first terminal:
+Start the server in one terminal:
 
 ```sh
 bun run demo:herdr server
 ```
 
-In a second terminal:
+In a second terminal, create the workspaces. Note the IDs each command returns:
 
 ```sh
 bun run demo:herdr workspace create --cwd /tmp/roamgate-demo/documentation --label Documentation
-```
-
-Record Documentation's returned `.result.root_pane.pane_id` as
-`demo_docs_pane_id`. Create Release QA:
-
-```sh
+# demo_docs_pane_id = .result.root_pane.pane_id
 bun run demo:herdr workspace create --cwd /tmp/roamgate-demo/release-qa --label "Release QA"
-```
-
-Record its `.result.workspace.workspace_id` as `demo_qa_workspace_id`, then add
-its Tests tab:
-
-```sh
+# demo_qa_workspace_id = .result.workspace.workspace_id
 bun run demo:herdr tab create --workspace "$demo_qa_workspace_id" --cwd /tmp/roamgate-demo/release-qa --label Tests --no-focus
-```
-
-Record that tab's `.result.root_pane.pane_id` as `demo_qa_pane_id`. Create UI
-Preview, then focus Northstar:
-
-```sh
+# demo_qa_pane_id = .result.root_pane.pane_id
 bun run demo:herdr workspace create --cwd /tmp/roamgate-demo/ui-preview --label "UI Preview"
 bun run demo:herdr workspace create --cwd /tmp/roamgate-demo/northstar --label Northstar --focus
-```
-
-Record Northstar's returned `.result.tab.tab_id` and `.result.root_pane.pane_id`
-as `demo_tab_id` and `demo_pane_id` in this terminal. Rename and split the real
-panes:
-
-```sh
+# demo_tab_id = .result.tab.tab_id, demo_pane_id = .result.root_pane.pane_id
 bun run demo:herdr tab rename "$demo_tab_id" Implementation
 bun run demo:herdr pane rename "$demo_pane_id" Implementation
 bun run demo:herdr pane split --pane "$demo_pane_id" --direction down --ratio 0.65 --cwd /tmp/roamgate-demo/northstar --no-focus
-```
-
-Record the split's `.result.pane.pane_id` as `demo_checks_id`, then:
-
-```sh
+# demo_checks_id = .result.pane.pane_id
 bun run demo:herdr pane rename "$demo_checks_id" Checks
 bun run demo:herdr pane run "$demo_checks_id" "bun test"
 ```
 
-For the desktop overview, install Pi normally in the capture account and use its
-official Herdr integration. Keep Pi's standard package entry point so Herdr can
-identify the real process. Use a dedicated writable profile for the integration
-and all three interactive sessions:
+For the desktop overview, install Pi in the capture account with its Herdr
+integration and run idle Pi sessions (no model calls) in three panes:
 
 ```sh
 XDG_CONFIG_HOME=/tmp/roamgate-demo/config \
@@ -169,31 +102,13 @@ bun run demo:herdr pane run "$demo_docs_pane_id" "PI_CODING_AGENT_DIR=/tmp/roamg
 bun run demo:herdr pane run "$demo_qa_pane_id" "PI_CODING_AGENT_DIR=/tmp/roamgate-demo/pi-agent PI_OFFLINE=1 PI_TELEMETRY=0 pi"
 ```
 
-The native install command preserves `PI_CODING_AGENT_DIR`, which the
-`demo:herdr` wrapper's allowlist does not forward. Keep the Pi processes running,
-with the genuine Pi TUI in Implementation and real test output in Checks. Wait
-for Herdr to report `agent=pi` and session source `herdr:pi`; these idle sessions
-are waiting for input without submitting a model prompt or calling a model.
-They do not claim to have produced the review patch, completed a task, or created
-task history. Done/history shots require a matching real completed turn as
-described below. Show the sidebar in **Nested** mode and expand the demo workspaces.
+Wait until Herdr reports `agent=pi`. In the Implementation pane, enter `/new`,
+then `!git --no-pager diff origin/main --stat` to show the real diff summary
+above the passing tests in Checks. For mobile, run
+`git status --short && bun test --dots` in Checks. Rerun commands after changing
+viewport size, and keep only one capture client attached.
 
-In the current Implementation pane, enter `/new`, then
-`!git --no-pager diff origin/main --stat`, pressing Enter after each. Pi remains
-active: `/new` starts a clean session, and its Bash mode runs the genuine Git
-command without a model request. The review clone shows the five example implementation
-files. Keep this Pi TUI and command output above Checks, whose real `bun test`
-run reports four passing tests and no failures. This output describes the public
-review implementation; it does not attribute the implementation to Pi.
-
-For an optional shell overview, show the Status filter demo section and `git --no-pager diff
-origin/main --stat` in Implementation after exiting Pi. For a narrow mobile
-terminal, run `git status --short && bun test --dots` in Checks; the dots reporter
-keeps the genuine test summary compact. Run commands again after switching viewport sizes
-so terminal output uses the current geometry. Keep only one capture client
-attached while doing this.
-
-Build Roamgate's web assets and start its actual bridge in another terminal:
+Build and start the bridge:
 
 ```sh
 bun run build:web
@@ -203,150 +118,72 @@ XDG_STATE_HOME=/tmp/roamgate-demo/runtime-state bun server/src/index.ts --host 1
   --client-socket-path /tmp/roamgate-demo/config/herdr/sessions/roamgate-demo/herdr-client.sock
 ```
 
-Open <http://127.0.0.1:8799> and log in with your configured password or the
-saved token at the file path reported in the startup log. Remove any
-authentication token from the URL before capturing.
-Both socket paths must match a custom `ROAMGATE_DEMO_ROOT`.
-The wrapper's Herdr session directory is selected by its `XDG_CONFIG_HOME`;
-passing a different socket environment variable to a named Herdr session is
-insufficient to change that directory.
-
-For a fresh topology, stop the demo bridge and server, then delete only the
-stopped demo session before starting again:
+Open <http://127.0.0.1:8799>, log in, and remove any token from the URL before
+capturing. To start over, stop the bridge and run:
 
 ```sh
 bun run demo:herdr server stop
 bun run demo:herdr session delete roamgate-demo --json
 ```
 
-Agent transcripts live in the capture account's agent directories. Preserve a
-useful real session before clearing or rebuilding that account/VM.
-
 ## Run the Agent Scene
 
-Use a fresh `main` clone in the isolated environment, skipping the review scene's
-switch/reset steps. Start one supported agent in the Implementation pane with its
-genuine Herdr integration and give it this prompt:
+Agent, history, working-status, and **Last step** shots need a real agent run.
+In a fresh `main` clone, start a supported agent in Implementation and give it:
 
 > Read README.md. Add All, To do, In progress, and Done
 > status filters to Northstar. Combine status with title search. Show an
 > accessible empty result with a Clear filters button. Preserve the static HTML
 > preview, add focused tests, and run them. Leave the changes uncommitted.
 
-Use the resulting real changes, test output, and transcript together for the
-agent/history shots. Keep the accepted session for later captures using the
-agent's supported resume workflow. Re-running a model can change its wording and
-implementation; the public review implementation is for deterministic file/diff
-shots. Do not combine an unrelated transcript with PR #1's implementation as if
-it caused the displayed changes.
-
-For a working-agent shot, start an actual follow-up task such as reviewing keyboard
-behavior. Capture only after the integration reports the real status. **Last
-step** also needs a genuine observed task completion; the review clone provides
-**Working tree**, not an agent-completion snapshot.
+Use that run's own changes, test output, and transcript together; never pair an
+unrelated transcript with PR #1's code. Keep the session for later captures.
 
 ## Shot List and Capture Rules
 
-Use dark theme with the default accent, English UI, and 100% browser zoom.
-Use a desktop viewport of 1600 x 1000 CSS pixels and mobile viewport of
-390 x 844 CSS pixels, both at device pixel ratio (DPR) 2. The PNG originals must
-therefore be 3200 x 2000 desktop pixels and 780 x 1688 mobile pixels. Mobile
-viewport emulation is suitable for layout screenshots; real mobile interaction
-claims require a check on a physical phone. Record viewport, scale, app version,
-scene, and browser with the exported originals.
-After switching from desktop to mobile, enable **Wrap** and reload the page if
-the diff retains its desktop width. Reopen Changes and select `tasks.ts` before
-adjusting the scroll position.
-
-Export through Chrome's native screenshot UI:
-
-1. Open DevTools and toggle the device toolbar. Select **Responsive**.
-2. Use **More options > Add device type** to show the device type control.
-   Choose **Desktop** for 1600 x 1000 or **Mobile** for 390 x 844, with **DPR 2**
-   and browser zoom at 100%. Allow Roamgate and terminal geometry to settle.
-3. Choose **More options > Capture screenshot** in the device toolbar. This
-   exports a native PNG directly. Save the viewport capture, not a full-page shot.
-4. Before accepting it, verify the PNG signature (`89 50 4e 47 0d 0a 1a 0a`) and
-   the required 2x pixel dimensions. Check that the image contains exactly the
-   product viewport, without browser chrome or empty padding.
-
-Tool-returned JPEG captures and JPEGs converted to PNG are not valid originals.
-Changing the file format or upscaling does not recover lost text detail.
+Dark theme, default accent, English UI, 100% browser zoom. Desktop viewport
+1600 x 1000 and mobile 390 x 844, both at DPR 2, so originals are 3200 x 2000 and
+780 x 1688 PNGs. In Chrome DevTools' device toolbar, pick **Responsive**, set the
+size and DPR 2, and use **More options > Capture screenshot** (viewport, not full
+page). Verify it is a real PNG of the right size with no browser chrome. JPEGs,
+converted, or upscaled images are not acceptable.
 
 For the annotation shot, add `Keep the status filter combined with title search.
-Clearing both filters should restore all six tasks.` on new line 27 of `tasks.ts`.
-Pin the review panel and keep the comment as a draft.
+Clearing both filters should restore all six tasks.` on new line 27 of
+`tasks.ts`, pin the review panel, and leave the comment as a draft.
 
 | Asset stem | Layout and selection | Ready condition |
 | --- | --- | --- |
-| `roamgate-desktop-changes` | Sidebar visible in Nested mode, genuine Pi TUI in Implementation/Checks split, Inspector right at about 55%; Working tree, `tasks.ts` | Connected; at least three real workspaces and two real Agent rows visible; Pi process registered and running; five review files loaded; real tests finished. If showing the optional PR card, PR #1 is open with successful CI. |
-| `roamgate-desktop-files` | Sidebar visible in Nested mode; expand Inspector; Files; open `index.html` Preview; scroll to Release checklist | At least three real workspaces and two real Agent rows visible; local styles loaded; checklist heading, filters, and all six cards visible. |
-| `roamgate-desktop-annotations` | Sidebar visible in Nested mode; `tasks.ts` unified diff and the review draft | At least three real workspaces and two real Agent rows visible; correct line anchor and full comment visible. |
-| `roamgate-desktop-history` | Genuine Northstar Agent History, User/Agent/Tool enabled | The matching real task and completed test tool call are visible. |
-| `roamgate-desktop-ranger` | Sidebar visible; Ranger pinned beside the Northstar workspace | Ranger has answered a real question using only authorized demo workspaces; its response and source references are readable. |
-| `roamgate-mobile-changes` | Mobile; Changes, Working tree, `tasks.ts` | Unified diff loaded; key changed function readable. |
-| `roamgate-mobile-terminal` | Mobile; Checks pane; Composer and terminal shortcuts open | Actual Git status and test summary visible; unrelated menus dismissed. |
-| `roamgate-mobile-files` | Mobile; Files, `index.html` static Preview | Checklist heading, filters, and first task card readable. |
-| `roamgate-mobile-ranger` | Mobile; Ranger full chat surface | The same real demo conversation is readable, with input and model controls visible. |
+| `roamgate-desktop-changes` | Nested sidebar; Pi in Implementation above Checks; Inspector right (~55%); Working tree, `tasks.ts` | 3+ workspaces and 2+ agent rows visible; Pi running; five files loaded; tests finished. |
+| `roamgate-desktop-files` | Nested sidebar; expanded Inspector; Files, `index.html` Preview scrolled to Release checklist | Styles loaded; heading, filters, and all six cards visible. |
+| `roamgate-desktop-annotations` | Nested sidebar; `tasks.ts` unified diff with the draft | Correct line and full comment visible. |
+| `roamgate-desktop-history` | Agent History, all types enabled | The real task and its test tool call visible. |
+| `roamgate-desktop-ranger` | Ranger pinned beside Northstar | A real answer with sources, using only demo workspaces. |
+| `roamgate-mobile-changes` | Mobile Changes, Working tree, `tasks.ts` | Key changed function readable. |
+| `roamgate-mobile-terminal` | Mobile Checks pane with Composer and shortcuts | Real Git status and test summary visible. |
+| `roamgate-mobile-files` | Mobile Files, `index.html` Preview | Heading, filters, and first card readable. |
+| `roamgate-mobile-ranger` | Mobile Ranger chat | The same real conversation with input and model controls. |
 
-For Ranger shots, connect a model in the isolated capture environment and
-authorize only the public demo workspaces. Ask it to summarize Northstar's
-uncommitted changes and recent test output, then wait for the real answer and
-source references to finish loading. Preserve that conversation for the mobile shot.
-Do not fabricate messages, tool results, task runs, or completion status. If
-showing scheduled tasks, capture a real run while the Roamgate bridge is running.
-Inspect the conversation, expanded tool details, model settings, and visible
-source paths for credentials or personal information before capturing. Keep
-Ranger's experimental status clear in the accompanying publication copy.
+For Ranger, connect a model in the capture environment, allow only the demo
+workspaces, and ask it to summarize Northstar's uncommitted changes and test
+output. Never fabricate messages, tool results, or task runs.
 
-Wait for connection, fonts, terminal geometry, and requested content to settle;
-use these conditions rather than fixed sleeps. Start each shot with the same file,
-scroll position, panel widths, and dismissed menus. Capture the product viewport
-directly. Keep the interface text and terminal output intact.
-If the exported bounds or dimensions differ, correct the browser settings and
-recapture. Do not trim product controls, upscale, or sharpen screenshots.
+Wait for content to settle rather than sleeping a fixed time. Do not crop,
+upscale, or sharpen; recapture instead.
 
-Before publishing, inspect the full-resolution image and a README-sized preview.
-Text, code, icons, and terminal output must be crisp and readable at their intended
-display sizes. Blur or compression artifacts fail review: recapture a native PNG
-at DPR 2 instead of repairing the image.
-Check visible paths, account/host names, URLs, prompts, Git authors, browser chrome,
-and session metadata against the demo allowlist. Exclude auth URLs, tokens,
-personal workspaces, and unrelated history. Scan the source text/transcript as
-well as inspecting the image; automated scans cannot prove that an image is safe.
-Correct the source scene and recapture when private content appears.
-
-Keep native PNG originals outside the publication assets, such as in a local
-archive. Use local lossless compression for publication copies by default,
-without resizing. Use TinyPNG only when the user explicitly authorizes uploading
-the selected images to that external service; its compression may quantize colors
-and must not be described as lossless. Verify native dimensions and text/icon
-clarity at 100% and intended display sizes before saving the approved PNGs in
-`docs/images/`. The existing `scripts/build-pages.ts`
-copies the shared README shots into the website.
-Set desktop PNG `img` dimensions to `width="3200" height="2000"` and mobile
-dimensions to `width="780" height="1688"`. The homepage hero uses the
-computer-to-phone animation described below.
-Capture outputs and review drafts are not required additions to Git; publish
-only the selected product assets. Run `bun run build:site` after updating consumed
-images and links.
+Before publishing, check full size and README size for crisp text, and inspect
+paths, hostnames, URLs, prompts, authors, and transcripts for anything private.
+Keep originals outside the repo; compress losslessly without resizing (use
+TinyPNG only with explicit permission, and do not call it lossless). Save
+approved PNGs to `docs/images/` with `width="3200" height="2000"` (desktop) or
+`width="780" height="1688"` (mobile) on `img` tags, then run `bun run build:site`.
 
 ## Computer-to-Phone Animation
 
-The README uses `docs/images/roamgate-handoff.gif`; the homepage uses the matching
-`roamgate-handoff.mp4` and a static `roamgate-handoff.webp` poster. The Pages build
-copies all three into `assets/`. The homepage starts playback when the demo is
-visible, leaves playback manual when reduced motion is requested or JavaScript
-is disabled, and exposes native playback controls.
-
-Render the 13-second English sequence at 1920 x 1200 and 15 fps from the original
-desktop Changes, mobile Changes, and mobile Terminal PNG captures. Composite
-them directly at the output size inside the device frames. The animation
-illustrates a handoff using real UI captures; it is not a live recording of a
-cross-device interaction. Keep Herdr and remote-access requirements visible.
-
-Export the GIF with a shared palette and conservative GIF compression. Encode
-the same original frames as H.264 MP4 and export a lossless WebP poster from the
-computer-and-phone scene. Preserve the source captures outside publication
-assets. Check the complete loop, code text, rounded phone corners, and controls
-at native and README display sizes before replacing the three shared files.
+The README uses `docs/images/roamgate-handoff.gif`; the homepage uses
+`roamgate-handoff.mp4` with a `roamgate-handoff.webp` poster. Render a 13-second
+English sequence at 1920 x 1200 and 15 fps from the original desktop Changes,
+mobile Changes, and mobile Terminal captures, composited into device frames. It
+illustrates a handoff; it is not a live recording. Export the GIF with a shared
+palette, the MP4 as H.264, and the poster as lossless WebP, then check the full
+loop at native and README sizes before replacing all three files.
