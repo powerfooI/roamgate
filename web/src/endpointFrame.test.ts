@@ -48,6 +48,41 @@ test.each(["中", "🙂", "👩‍💻", "🇨🇳", "ｶﾞ", "e\u0301"])(
   },
 );
 
+test("keeps the IME anchor at hidden cursor coordinates across repaints", async () => {
+  const term = new Terminal({ cols: 10, rows: 5 });
+  const frame: FrameData = {
+    width: 10,
+    height: 5,
+    cursor: null,
+    hyperlinks: [],
+    cells: Array.from({ length: 50 }, () => ({
+      symbol: " ",
+      fg: 0,
+      bg: 0,
+      modifier: 0,
+      skip: false,
+      hyperlink: null,
+    })),
+  };
+  try {
+    for (const [x, y, visible] of [
+      [2, 1, false],
+      [4, 0, false],
+      [4, 0, true],
+      [0, 2, false],
+    ] as const) {
+      frame.cursor = { x, y, visible, shape: 1 };
+      const ansi = frameToAnsi(frame);
+      await new Promise<void>((resolve) => term.write(ansi, resolve));
+      expect(term.buffer.active.cursorX).toBe(x);
+      expect(term.buffer.active.cursorY).toBe(y);
+      expect(ansi).toEndWith(visible ? "\x1b[?25h" : "\x1b[?25l");
+    }
+  } finally {
+    term.dispose();
+  }
+});
+
 test.each([10, 11, 14])(
   "a %i-column TUI frame never wraps or scrolls a 10-column viewport",
   async (width) => {

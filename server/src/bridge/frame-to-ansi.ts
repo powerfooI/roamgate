@@ -122,9 +122,10 @@ export function frameToAnsi(
   }
   out += "\x1b[?7h";
   const cursor = frame.cursor;
-  if (cursor?.visible && cursor.x < width && cursor.y < height) {
+  if (cursor && cursor.x < width && cursor.y < height) {
+    // Hidden cursors still anchor xterm's IME composition and candidate window.
     out += `${RESET}\x1b[${cursor.y + 1};${cursor.x + 1}H`;
-    out += `\x1b[${cursor.shape} q\x1b[?25h`;
+    out += cursor.visible ? `\x1b[${cursor.shape} q\x1b[?25h` : "\x1b[?25l";
   } else {
     out += "\x1b[?25l";
   }

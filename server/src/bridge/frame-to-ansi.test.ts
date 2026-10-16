@@ -93,19 +93,27 @@ describe("frameToAnsi", () => {
     expect(out).toContain("L\x1b]8;;\x1b\\");
   });
 
-  test("positions and shapes the cursor", () => {
-    const f: FrameData = {
-      ...frame(
-        Array.from({ length: 12 }, () => cell("a")),
-        3,
-        4,
-      ),
-      cursor: { x: 2, y: 3, visible: true, shape: 5 },
-    };
-    const out = frameToAnsi(f);
-    expect(out).toContain("\x1b[4;3H");
-    expect(out).toContain("\x1b[5 q\x1b[?25h");
-  });
+  test.each([true, false])(
+    "positions the cursor when visible=%s",
+    (visible) => {
+      const f: FrameData = {
+        ...frame(
+          Array.from({ length: 12 }, () => cell("a")),
+          3,
+          4,
+        ),
+        cursor: { x: 2, y: 3, visible, shape: 5 },
+      };
+      const out = frameToAnsi(f);
+      expect(out).toContain("\x1b[4;3H");
+      if (visible) {
+        expect(out).toEndWith("\x1b[5 q\x1b[?25h");
+      } else {
+        expect(out).toEndWith("\x1b[?25l");
+        expect(out).not.toContain("\x1b[?25h");
+      }
+    },
+  );
 
   test("positions rows without wrapping the cell grid", () => {
     const out = frameToAnsi(
