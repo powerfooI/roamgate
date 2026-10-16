@@ -45,8 +45,9 @@ closes.
   inserts paths without uploading. Uploads expire after 24 hours by default.
 - `Cmd/Ctrl`-click opens URLs in a browser tab and file paths in the preview.
   On touch, long-press and choose **Open link** or **File actions**.
-- OSC 52 clipboard writes reach the browser that recently typed into that pane;
-  see [clipboard limits](docs/DEPLOYMENT.md#herdr-compatibility).
+- OSC 52 clipboard writes go to the browser that most recently typed into the
+  foreground session, which is not necessarily the pane that produced the
+  write; see [clipboard limits](docs/DEPLOYMENT.md#herdr-compatibility).
 
 Herdr 0.9.1+ resolves URLs that wrap across lines. See
 [link contracts](docs/ARCHITECTURE.md#links).
@@ -204,7 +205,7 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
 - [Command-line tools](docs/DEPLOYMENT.md#command-line-management) such as
   `roamgate doctor`, `url --qr`, `config`, `auth`, and `connections`.
 
-**Login is always required, including on loopback, and grants full
+**Normal runtime requires login, including on loopback, and login grants full
 terminal/file access.** Read [Security](./SECURITY.md#trust-model) before
 sharing access.
 

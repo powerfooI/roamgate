@@ -171,8 +171,9 @@ and pull requests.
 
 ## Security
 
-Roamgate controls terminals and real files. Login is always required, even on
-loopback. Keep the default loopback binding and read [SECURITY.md](./SECURITY.md)
+Roamgate controls terminals and real files. Normal runtime requires login, even
+on loopback; only the loopback development server (`bun run dev:server`) skips
+it. Keep the default loopback binding and read [SECURITY.md](./SECURITY.md)
 before giving another device access.
 
 ## License

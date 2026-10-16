@@ -551,7 +551,7 @@ and 2 on bad arguments; many accept `--json`.
 | `roamgate url [--qr] [--address <host>]` | Print login URLs; `--qr` shows a QR code for a phone (it contains the token); `--address` substitutes a VPN or Tailscale name. |
 | `roamgate config show\|get\|set\|unset\|edit\|path` | Read or change `roamgate.env` atomically. `--restart` restarts the service; `KEY=-` reads a secret from stdin. |
 | `roamgate auth show\|rotate\|revoke-sessions` | Show the login method, replace the token, or sign out every browser. |
-| `roamgate connections list\|test\|add\|remove\|set-default` | Manage [connection profiles](#multiple-and-remote-herdr-connections). Edits are refused while Roamgate runs unless `--restart` is given. |
+| `roamgate connections list\|test\|add\|remove\|set-default` | Manage [connection profiles](#multiple-and-remote-herdr-connections). Edits are refused while the managed service runs unless `--restart` is given. Only the service config's address is checked, so stop other processes sharing the registry (such as a foreground run on another port) first. |
 | `roamgate push test` | Send a test [Web Push](#web-push-notifications) notification. |
 | `roamgate update [--check]` / `roamgate rollback` | Update to the latest release or restore `roamgate.previous` (Linux/macOS). |
 | `roamgate service logs [-f] [-n <count>]` | Show service output (not available for Windows tasks). |

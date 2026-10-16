@@ -31,8 +31,8 @@ terminals running; sleeping or shutting down the host stops them.
 
 **You are done when:** the terminal shows your project directory.
 
-Login is always required, even on `127.0.0.1:8787`; see
-[Security](../SECURITY.md#trust-model). Upgrading from Herdr Studio? Follow the
+Login is required even on `127.0.0.1:8787` (only the loopback development
+server skips it); see [Security](../SECURITY.md#trust-model). Upgrading from Herdr Studio? Follow the
 [migration guide](./DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui)
 first.
 
