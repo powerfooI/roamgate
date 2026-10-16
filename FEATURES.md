@@ -93,8 +93,8 @@ See [History synchronization](docs/HISTORY.md).
 ## Ranger
 
 Ranger is an **experimental** assistant that answers questions about your
-workspaces and can manage them. Open it from the topbar, the mobile navigation
-capsule, or its shortcut.
+workspaces and can manage them. Open it from the topbar, the mobile **⋮** menu,
+or its shortcut.
 
 - **Setup:** connect a model provider in **Settings** and choose which
   workspaces Ranger may access (none by default). See
@@ -174,6 +174,9 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
 
 - **Configuration > Appearance > Layout** selects Automatic, Mobile, or Desktop
   (`?layout=mobile|desktop|auto` overrides it).
+- The app bar holds **Tabs** (with the workspace's tab count, red when another
+  agent needs you) and **⋮**, a menu of views and tools: Terminal, Files,
+  Changes, Commits, Annotations, History, Ranger, and Workspaces.
 - Touch scrolls without opening the keyboard. Long-press selects text for
   **Copy**, **Add comment**, or link actions.
 - Floating terminal shortcuts (a `2×8` grid plus side buttons) are customizable
