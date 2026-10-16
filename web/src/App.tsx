@@ -3010,6 +3010,16 @@ export default function App() {
         document.getElementById(CONFIG_MENU_ID)
       )
         return;
+      // Open but not yet rendered: its chunk is loading, so dismiss it here.
+      if (
+        shortcutCheatSheetOpen &&
+        (e.key === "Escape" || shortcutMatches(e, "shortcuts.show"))
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) setShortcutCheatSheetOpen(false);
+        return;
+      }
       if (paneJumpOpen) {
         const paneJumpNavigationKey =
           e.key === "Tab" ||
@@ -3384,6 +3394,7 @@ export default function App() {
     paneJumpSearch,
     selectPaneJumpIndex,
     setInspectorExpanded,
+    shortcutCheatSheetOpen,
     toggleAnnotations,
     toggleAssistant,
     toggleDiffViewer,
