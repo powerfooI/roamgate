@@ -341,9 +341,10 @@ roamgate --host 0.0.0.0 --port 8787     # generated token
 ```
 
 For a fixed password, prefer `ROAMGATE_PASSWORD` over process-visible
-`--password`. It must contain 15-1024 Unicode characters; values outside that
-range stop startup, including existing short passwords. Normal runtime requires
-login; see [Security](../SECURITY.md#trust-model) for the local development
+`--password`. It must contain 8-1024 Unicode characters; values outside that
+range stop startup. Startup warns below 15 characters, the recommended length
+for any listener reachable beyond a trusted private network. Normal runtime
+requires login; see [Security](../SECURITY.md#trust-model) for the local development
 exception, login limits, and remote access guidance.
 
 ### Optional PIN login
@@ -947,7 +948,7 @@ SECRET='replace-with-a-strong-password'
 ROAMGATE_PASSWORD="$SECRET"
 ```
 
-The expanded password must contain 15 to 1024 Unicode characters. An explicitly
+The expanded password must contain 8 to 1024 Unicode characters. An explicitly
 empty `ROAMGATE_PASSWORD` selects generated-token authentication, even when the
 legacy password variable is set. Define other referenced variables in the config:
 the installing terminal's environment is not the launchd environment. References

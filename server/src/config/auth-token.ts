@@ -16,8 +16,10 @@ import {
 import { randomBytes } from "node:crypto";
 
 const AUTH_TOKEN_PATTERN = /^[a-f0-9]{64}$/;
-export const MIN_PASSWORD_LENGTH = 15;
+export const MIN_PASSWORD_LENGTH = 8;
 export const MAX_PASSWORD_LENGTH = 1024;
+// Shorter passwords are accepted, but startup warns about them.
+export const RECOMMENDED_PASSWORD_LENGTH = 15;
 
 export function assertValidAuthPassword(password: string): void {
   const length = Array.from(password).length;
@@ -26,6 +28,10 @@ export function assertValidAuthPassword(password: string): void {
       `Login password must contain at least ${MIN_PASSWORD_LENGTH} characters and at most ${MAX_PASSWORD_LENGTH} characters (--password or ROAMGATE_PASSWORD).`,
     );
   }
+}
+
+export function isShortAuthPassword(password: string): boolean {
+  return Array.from(password).length < RECOMMENDED_PASSWORD_LENGTH;
 }
 
 export function assertValidAuthPin(pin: string): void {

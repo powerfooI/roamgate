@@ -25,9 +25,10 @@ services do not enable it by default. Do not forward a development listener for
 remote access.
 
 When authentication is enabled, set `ROAMGATE_PASSWORD` to a unique password
-of 15-1024 Unicode characters; there are no required character combinations.
-Configured passwords outside that range stop startup, including existing short
-passwords. Without a configured password, an authenticated listener uses a
+of 8-1024 Unicode characters; there are no required character combinations.
+Configured passwords outside that range stop startup. Passwords shorter than 15
+characters start with a warning: login grants shell access, so use 15 or more
+for any listener reachable beyond a trusted private network. Without a configured password, an authenticated listener uses a
 persistent 256-bit random token and reports its protected file path. Read that
 file to log in, or use `--open` to open a token URL automatically. Service
 installation and URL tools can also provide token URLs; keep them private.

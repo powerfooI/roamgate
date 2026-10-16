@@ -179,8 +179,8 @@ describe("authentication configuration", () => {
     },
   );
 
-  test.each(["too-short", "a".repeat(1025)])(
-    "rejects CLI and environment passwords outside 15..1024 characters",
+  test.each(["short", "a".repeat(1025)])(
+    "rejects CLI and environment passwords outside 8..1024 characters",
     (password) => {
       const dir = mkdtempSync(join(tmpdir(), "roamgate-auth-config-"));
       try {
@@ -210,7 +210,7 @@ describe("authentication configuration", () => {
           );
           expect(result.exitCode).toBe(2);
           expect(result.stderr.toString()).toContain(
-            "at least 15 characters and at most 1024 characters",
+            "at least 8 characters and at most 1024 characters",
           );
           expect(existsSync(join(dir, ".config", "roamgate"))).toBe(false);
           expect(existsSync(join(dir, "roamgate"))).toBe(false);

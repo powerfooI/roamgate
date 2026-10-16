@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   assertValidAuthPassword,
+  isShortAuthPassword,
   defaultAuthTokenPath,
   loadOrCreateAuthToken,
   rotateAuthToken,
@@ -40,26 +41,33 @@ afterEach(() => {
 });
 
 describe("generated authentication token", () => {
-  test("requires 15 to 1024 Unicode characters for login secrets", () => {
+  test("requires 8 to 1024 Unicode characters for login secrets", () => {
     for (const password of [
       "",
-      "a".repeat(14),
-      "\u{1f600}".repeat(8),
+      "a".repeat(7),
+      "\u{1f600}".repeat(7),
       "a".repeat(1025),
       "\u{1f600}".repeat(1025),
     ]) {
       expect(() => assertValidAuthPassword(password)).toThrow(
-        "at least 15 characters and at most 1024 characters",
+        "at least 8 characters and at most 1024 characters",
       );
     }
     for (const password of [
-      "a".repeat(15),
-      "\u{1f600}".repeat(15),
+      "a".repeat(8),
+      "\u{1f600}".repeat(8),
       "a".repeat(1024),
       "\u{1f600}".repeat(1024),
     ]) {
       expect(() => assertValidAuthPassword(password)).not.toThrow();
     }
+  });
+
+  test("flags passwords shorter than the recommended length", () => {
+    expect(isShortAuthPassword("a".repeat(14))).toBe(true);
+    expect(isShortAuthPassword("\u{1f600}".repeat(14))).toBe(true);
+    expect(isShortAuthPassword("a".repeat(15))).toBe(false);
+    expect(isShortAuthPassword("\u{1f600}".repeat(15))).toBe(false);
   });
 
   test("uses APPDATA for the Windows token", () => {

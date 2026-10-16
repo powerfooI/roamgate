@@ -434,9 +434,9 @@ describe("service commands", () => {
   );
 
   test.each([
-    ["roamgate", "too-short"],
+    ["roamgate", "short"],
     ["roamgate", "a".repeat(1025)],
-    ["herdr-gui", "too-short"],
+    ["herdr-gui", "short"],
     ["herdr-gui", "a".repeat(1025)],
   ])(
     "rejects out-of-range passwords in %s config before migrating or changing services",
@@ -469,7 +469,7 @@ describe("service commands", () => {
       ).toBe(1);
       expect(commands).toEqual([]);
       expect(errors.join("\n")).toContain(
-        "at least 15 characters and at most 1024 characters",
+        "at least 8 characters and at most 1024 characters",
       );
       expect(readFileSync(source.config, "utf8")).toBe(contents);
       expect(existsSync(current.definition)).toBe(false);
@@ -574,7 +574,7 @@ describe("service commands", () => {
       ],
       [
         "short Unicode expansion",
-        `SECRET=${"\u{1f680}".repeat(14)}\nROAMGATE_PASSWORD="$SECRET"\n`,
+        `SECRET=${"\u{1f680}".repeat(7)}\nROAMGATE_PASSWORD="$SECRET"\n`,
       ],
       [
         "oversized expansion",
@@ -618,7 +618,7 @@ describe("service commands", () => {
         ).toBe(1);
         expect(commands).toEqual([]);
         expect(errors.join("\n")).toContain(
-          "at least 15 characters and at most 1024 characters",
+          "at least 8 characters and at most 1024 characters",
         );
         expect(errors.join("\n")).not.toContain("short");
         expect(readFileSync(source.config, "utf8")).toBe(config);

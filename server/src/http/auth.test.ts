@@ -785,7 +785,7 @@ describe("generated token login", () => {
   test("rejects an empty authentication secret", () => {
     expect(() =>
       createAuthHandlers({ sessionSecret: "a".repeat(64), password: "" }),
-    ).toThrow("at least 15 characters");
+    ).toThrow("at least 8 characters");
   });
 });
 

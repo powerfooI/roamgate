@@ -19,7 +19,7 @@ export const DEFAULT_SERVICE_ENV_FILE = `# roamgate service environment
 HOST=0.0.0.0
 PORT=8787
 
-# Optional fixed password (15..1024 characters). Otherwise a token is generated.
+# Optional fixed password (8..1024 characters, 15+ recommended). Otherwise a token is generated.
 # ROAMGATE_PASSWORD=replace-with-a-strong-password
 # Optional convenience PIN: 6..12 digits, private networks/VPN only.
 # Keeps password/token login available for recovery.
