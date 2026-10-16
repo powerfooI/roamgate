@@ -24,7 +24,7 @@ export function CreateWorkspaceDialog({
   const createReason = useEndpointCreationReason("workspace.create");
   const client = useConnectionClient();
   const labelRef = useRef<HTMLInputElement>(null);
-  const [label, setLabel] = useSuggestedName(
+  const [label, setLabel, namePending] = useSuggestedName(
     open,
     initialName?.trim() || luckyWorkspaceName,
     labelRef,
@@ -100,6 +100,7 @@ export function CreateWorkspaceDialog({
     e.preventDefault();
     if (
       createReason ||
+      namePending ||
       pendingSubmit.current ||
       checking ||
       pathError ||
@@ -233,7 +234,13 @@ export function CreateWorkspaceDialog({
           </button>
           <button
             type="submit"
-            disabled={!!createReason || creating || checking || !!pathError}
+            disabled={
+              !!createReason ||
+              namePending ||
+              creating ||
+              checking ||
+              !!pathError
+            }
             title={createReason ?? undefined}
           >
             {creating ? "Creating..." : "Create"}

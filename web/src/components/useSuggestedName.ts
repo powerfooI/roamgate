@@ -5,7 +5,7 @@ export function useSuggestedName(
   initialValue: string | (() => Promise<string>),
   input: RefObject<HTMLInputElement | null>,
 ) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState<string | null>(null);
   const pendingName = useRef<symbol | null>(null);
   useEffect(() => {
     if (!open) return;
@@ -13,7 +13,7 @@ export function useSuggestedName(
     pendingName.current = request;
     if (typeof initialValue === "string") setValue(initialValue);
     else {
-      setValue("");
+      setValue(null);
       void initialValue().then(
         (name) => {
           if (request !== pendingName.current) return;
@@ -27,7 +27,9 @@ export function useSuggestedName(
           });
         },
         // A name suggestion is optional; keep manual entry available.
-        () => {},
+        () => {
+          if (request === pendingName.current) setValue("");
+        },
       );
     }
     return () => {
@@ -36,10 +38,11 @@ export function useSuggestedName(
   }, [open, initialValue, input]);
 
   return [
-    value,
+    value ?? "",
     (name: string) => {
       pendingName.current = null;
       setValue(name);
     },
+    value === null,
   ] as const;
 }

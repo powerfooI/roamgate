@@ -175,6 +175,12 @@ async function registerDomTests() {
       document.body.append(container);
       root = createRoot(container);
       let submitted = 0;
+      const create =
+        kind === "workspace"
+          ? spyOn(store, "createWorkspace").mockResolvedValue({
+              type: "workspace_created",
+            })
+          : null;
       const render = (open: boolean) =>
         root!.render(
           kind === "workspace"
@@ -202,11 +208,29 @@ async function registerDomTests() {
         await act(async () => render(true));
         expect(input().value).toBe("");
         expect(pending).toHaveLength(1);
-        if (kind === "worktree") {
+        expect(
+          container.querySelector<HTMLButtonElement>('[type="submit"]')!
+            .disabled,
+        ).toBe(true);
+        await act(async () =>
+          container
+            .querySelector("form")!
+            .dispatchEvent(
+              new Event("submit", { bubbles: true, cancelable: true }),
+            ),
+        );
+        expect(submitted).toBe(0);
+        if (create) expect(create).not.toHaveBeenCalled();
+        await act(async () => pending.shift()!.resolve("calm-otter"));
+        await browser.happyDOM.whenAsyncComplete();
+        expect(input().value).toBe("calm-otter");
+        expect(input().selectionStart).toBe(0);
+        expect(input().selectionEnd).toBe("calm-otter".length);
+        if (create) {
           expect(
             container.querySelector<HTMLButtonElement>('[type="submit"]')!
               .disabled,
-          ).toBe(true);
+          ).toBe(false);
           await act(async () =>
             container
               .querySelector("form")!
@@ -214,17 +238,16 @@ async function registerDomTests() {
                 new Event("submit", { bubbles: true, cancelable: true }),
               ),
           );
-          expect(submitted).toBe(0);
+          expect(create).toHaveBeenLastCalledWith("calm-otter", undefined);
         }
-        await act(async () => pending.shift()!.resolve("calm-otter"));
-        await browser.happyDOM.whenAsyncComplete();
-        expect(input().value).toBe("calm-otter");
-        expect(input().selectionStart).toBe(0);
-        expect(input().selectionEnd).toBe("calm-otter".length);
 
         await act(async () => render(false));
         await act(async () => render(true));
         await act(async () => edit("my-branch"));
+        expect(
+          container.querySelector<HTMLButtonElement>('[type="submit"]')!
+            .disabled,
+        ).toBe(false);
         await act(async () => pending.shift()!.resolve("bright-falcon"));
         expect(input().value).toBe("my-branch");
 
@@ -234,10 +257,19 @@ async function registerDomTests() {
         await act(async () => render(true));
         await act(async () => pending.shift()!.resolve("old-name"));
         expect(input().value).toBe("");
+        expect(
+          container.querySelector<HTMLButtonElement>('[type="submit"]')!
+            .disabled,
+        ).toBe(true);
         await act(async () => edit("temporary"));
         await act(async () => edit(""));
         await act(async () => pending.shift()!.resolve("new-name"));
         expect(input().value).toBe("");
+        if (create)
+          expect(
+            container.querySelector<HTMLButtonElement>('[type="submit"]')!
+              .disabled,
+          ).toBe(false);
 
         await act(async () => render(false));
         await act(async () => render(true));
@@ -245,6 +277,11 @@ async function registerDomTests() {
           pending.shift()!.reject(new Error("Chunk unavailable")),
         );
         expect(input().disabled).toBe(false);
+        if (create)
+          expect(
+            container.querySelector<HTMLButtonElement>('[type="submit"]')!
+              .disabled,
+          ).toBe(false);
         await act(async () => edit("manual-name"));
         expect(input().value).toBe("manual-name");
         if (kind === "worktree") {
@@ -262,6 +299,7 @@ async function registerDomTests() {
           expect(submitted).toBe(1);
         }
       } finally {
+        create?.mockRestore();
         suggestion?.mockRestore();
       }
     });
@@ -635,6 +673,10 @@ async function registerDomTests() {
 
   test("first workspace creation stays pending across an early topology refresh", async () => {
     const previousState = store.get();
+    const suggestion = spyOn(
+      luckyNames,
+      "luckyWorkspaceName",
+    ).mockResolvedValue("calm-otter");
     let finish!: (result: unknown) => void;
     const create = spyOn(store, "createWorkspace").mockImplementation(
       () =>
@@ -699,6 +741,7 @@ async function registerDomTests() {
         container.querySelector('[aria-label="Create workspace"]'),
       ).toBeNull();
     } finally {
+      suggestion.mockRestore();
       create.mockRestore();
       await act(async () => root!.unmount());
       root = null;

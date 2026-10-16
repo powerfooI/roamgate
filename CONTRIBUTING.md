@@ -35,7 +35,7 @@ process tests. Then use focused checks while iterating:
 | Types | `bun run typecheck:quick` checks scripts/web/server without rebuilding assets or checking production bundles. |
 | Lint | `bun run lint` runs Oxlint without a cache. Rule/scope regression checks: `bun test scripts/lint.test.ts`. |
 | Tests | `bun test <path>`, `bun run test` (serial), or `bun run test:quick` (four workers). Both full-suite commands include unit and server integration tests. |
-| Submission | `bun run precommit`: formatting, lint, full typechecks, and `test:quick`. |
+| Submission | The local Git hook runs lint and native Bun checks for scripts/web/server. |
 
 Oxlint's explicit rules live in `.oxlintrc.json`; formatting stays in Biome.
 Existing `eslint-disable` comments are supported, including unused-directive
@@ -43,12 +43,15 @@ warnings. Declare globals in the config rather than inline `/* global */`
 comments. Duplicate parameters remain checked by `no-redeclare` or the parser;
 legacy octal literals in non-module JavaScript have no dedicated lint check.
 
-The installed `.githooks/pre-commit` runs the full gate: let it run when committing
-rather than repeating it manually on the same revision. Without the hook, run
-`bun run precommit` before committing. Further edits require revalidation; never
-bypass the gate.
+The installed `.githooks/pre-commit` runs lint and native Bun type checks: let it
+run when committing rather than repeating it manually on the same revision.
+Without the hook, run `bun run lint` and `bun run typecheck:bun` before committing.
+Further edits require revalidation; never bypass the gate. Run formatting and
+related tests separately.
 
 PR CI runs format/lint/types, site build, and the complete `test:quick` suite.
+Release preparation and publication run `bun run precommit`, retaining formatting,
+lint, full type checks, and the complete test suite.
 After the existing TypeScript checks generate web assets, CI also runs
 `bun run typecheck:bun`. This invokes Bun 1.4.3's standalone `bun check` command
 for the root, web, and server tsconfigs. Running only `bun check` at the root

@@ -76,10 +76,11 @@ Automated tests do not launch browsers; validate affected UI and browser securit
 behavior manually against a real backend using the checklist in `CONTRIBUTING.md`.
 Use Bun's fake timers for timer deadlines and events for socket readiness rather
 than waiting out production timeouts; restore real timers in `finally`.
-Run `bun run precommit` before committing; `test:quick` alone does not replace
-its formatting, lint, and type checks.
-The installed pre-commit hook runs this gate, so do not also run it manually
-immediately before committing an unchanged revision. See the iteration workflow
+The local pre-commit hook runs lint and native Bun type checks. Without the hook,
+run `bun run lint` and `bun run typecheck:bun` before committing. Run formatting
+and related tests separately; CI runs the complete validation suite. Do not also
+run the hook's checks manually immediately before committing an unchanged
+revision. See the iteration workflow
 in [local validation](CONTRIBUTING.md#validation).
 For frontend-facing work, also run `bun run build:web`. Release work must package
 and inspect every supported platform archive and checksum.
