@@ -525,6 +525,92 @@ describe("store browser-local navigation", () => {
     });
   });
 
+  test.each([
+    ["right", "right", false],
+    ["down", "down", false],
+    ["left", "right", true],
+    ["up", "down", true],
+  ] as const)(
+    "a pane placed %s of a pane in another tab splits %s (swap: %s)",
+    async (side, split, swaps) => {
+      await withBrowserStore(async (calls, topology) => {
+        const originalConnection = bridge.connection;
+        bridge.connection = (connectionId, generation) => {
+          const client = originalConnection(connectionId, generation);
+          return {
+            ...client,
+            call: async (method, params) => {
+              const result = await client.call(method, params);
+              return method === "pane.move"
+                ? {
+                    move_result: {
+                      pane: { ...topology.panes[0], tab_id: "a2" },
+                    },
+                  }
+                : result;
+            },
+          };
+        };
+        await store.movePaneBeside("a1p", "a2p", side);
+        expect(
+          calls
+            .filter(
+              (call) =>
+                call.method.startsWith("pane.") &&
+                call.method !== "pane.list" &&
+                call.method !== "pane.layout",
+            )
+            .map(({ method, params }) => [method, params]),
+        ).toEqual([
+          [
+            "pane.move",
+            {
+              pane_id: "a1p",
+              destination: {
+                type: "tab",
+                tab_id: "a2",
+                split,
+                target_pane_id: "a2p",
+              },
+              focus: false,
+            },
+          ],
+          ...(swaps
+            ? [["pane.swap", { source_pane_id: "a1p", target_pane_id: "a2p" }]]
+            : []),
+        ]);
+        expect(store.get().browserNavigation.tabIds.a).toBe("a2");
+      });
+    },
+  );
+
+  test("pane moves ignore same-tab and cross-workspace targets and lone panes", async () => {
+    await withBrowserStore(async (calls) => {
+      for (const [source, target] of [
+        ["a1p", "a1q"],
+        ["a1p", "missing"],
+        ["missing", "a2p"],
+        ["a1p", "b1p"],
+      ])
+        await store.movePaneBeside(source, target, "right");
+      await store.movePaneToNewTab("a2p");
+      await store.movePaneToNewTab("missing");
+      expect(calls.filter((call) => call.method === "pane.move")).toEqual([]);
+      await store.movePaneToNewTab("a1p");
+      expect(
+        calls
+          .filter((call) => call.method === "pane.move")
+          .map((call) => call.params),
+      ).toEqual([
+        {
+          pane_id: "a1p",
+          destination: { type: "new_tab", workspace_id: "a" },
+          focus: false,
+        },
+      ]);
+    });
+  });
+
   test.each(["workspace", "tab", "agent"])(
     "%s selection renders the target pane while its layout is deferred",
     async (route) => {

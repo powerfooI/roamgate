@@ -2400,6 +2400,52 @@ function swapPanePositions(
   });
 }
 
+export type PaneSide = "left" | "right" | "up" | "down";
+
+function movePaneTo(
+  paneId: string,
+  destination:
+    | { type: "new_tab"; workspace_id: string }
+    | {
+        type: "tab";
+        tab_id: string;
+        split: "right" | "down";
+        target_pane_id: string;
+      },
+  swapWithPaneId?: string,
+) {
+  const navigation = state.browserNavigation;
+  return action(
+    async (lease) => {
+      const result = await lease.client.call("pane.move", {
+        pane_id: paneId,
+        destination,
+        focus: state.navigationMode !== "browser-local",
+      });
+      const moved = result?.move_result ?? result;
+      // A move can reissue the pane ID, so follow the one Herdr reports.
+      const movedPaneId =
+        typeof moved?.pane?.pane_id === "string" ? moved.pane.pane_id : paneId;
+      if (swapWithPaneId)
+        await lease.client.call("pane.swap", {
+          source_pane_id: movedPaneId,
+          target_pane_id: swapWithPaneId,
+        });
+      if (browserSelectionIsCurrent(navigation))
+        adoptBrowserTarget(lease, { pane: moved?.pane });
+      return result;
+    },
+    {
+      refresh: "immediate",
+      failureNotice: (error) => ({
+        kind: "error",
+        message: "Pane move failed",
+        detail: error.message,
+      }),
+    },
+  );
+}
+
 export const store = {
   setTerminalEndpoint(
     client: ConnectionClient,
@@ -3864,6 +3910,46 @@ export const store = {
       source_pane_id: sourcePaneId,
       target_pane_id: targetPaneId,
     });
+  },
+
+  /** Break a pane out into a new tab of its workspace (Herdr pane.move). */
+  movePaneToNewTab(paneId: string) {
+    const pane = state.panes.find((pane) => pane.pane_id === paneId);
+    const siblings = state.panes.filter(
+      (other) => other.tab_id === pane?.tab_id,
+    );
+    if (!pane || siblings.length < 2) return Promise.resolve();
+    return movePaneTo(paneId, {
+      type: "new_tab",
+      workspace_id: pane.workspace_id,
+    });
+  },
+
+  /**
+   * Place a pane on one side of a pane in another tab of the same workspace.
+   * Herdr only splits to the right or below, so left and up swap afterwards.
+   */
+  movePaneBeside(sourcePaneId: string, targetPaneId: string, side: PaneSide) {
+    const source = state.panes.find((pane) => pane.pane_id === sourcePaneId);
+    const target = state.panes.find((pane) => pane.pane_id === targetPaneId);
+    if (
+      !source ||
+      !target ||
+      source.tab_id === target.tab_id ||
+      source.workspace_id !== target.workspace_id ||
+      !store.guardPaneClose(sourcePaneId)
+    )
+      return Promise.resolve();
+    return movePaneTo(
+      sourcePaneId,
+      {
+        type: "tab",
+        tab_id: target.tab_id,
+        split: side === "left" || side === "right" ? "right" : "down",
+        target_pane_id: targetPaneId,
+      },
+      side === "left" || side === "up" ? targetPaneId : undefined,
+    );
   },
 
   focusPaneDirection(

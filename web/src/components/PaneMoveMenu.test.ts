@@ -1,10 +1,18 @@
-import { afterAll, afterEach, beforeAll, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  expect,
+  jest,
+  spyOn,
+  test,
+} from "bun:test";
 import { Window } from "happy-dom";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { store } from "../store";
 import { terminalFocusBlockedByOverlay } from "../terminalFocus";
-import type { PaneLayout } from "../types";
+import type { Pane, PaneLayout } from "../types";
 import { PaneDragHandle, PaneMoveMenu } from "./PaneMoveMenu";
 
 // DOM globals must not leak into the other store and terminal tests.
@@ -131,7 +139,7 @@ function registerDomTests() {
         ),
       ),
     );
-    button = source.querySelector('[aria-label="Drag pane to swap"]')!;
+    button = source.querySelector('[aria-label="Drag pane"]')!;
     menuButton = source.querySelector('[aria-label="Move pane"]')!;
     let captured = false;
     button.setPointerCapture = () => {
@@ -146,9 +154,10 @@ function registerDomTests() {
     type: string,
     x: number,
     options: ConstructorParameters<typeof browser.PointerEvent>[1] = {},
+    on: EventTarget = button,
   ) {
     await act(async () =>
-      button.dispatchEvent(
+      on.dispatchEvent(
         new browser.PointerEvent(type, {
           bubbles: true,
           cancelable: true,
@@ -178,7 +187,9 @@ function registerDomTests() {
   function clean() {
     expect(document.querySelector(".pane-move-preview")).toBeNull();
     expect(grid.querySelector(".is-swap-target, .is-swap-source")).toBeNull();
-    expect(grid.classList.contains("is-swapping")).toBe(false);
+    expect(
+      document.documentElement.classList.contains("is-pane-dragging"),
+    ).toBe(false);
     expect(button.hasPointerCapture(1)).toBe(false);
   }
 
@@ -202,7 +213,7 @@ function registerDomTests() {
     expect(preview.classList.contains("is-ready")).toBe(true);
     hit = button;
     await pointer("pointermove", 160);
-    expect(preview.textContent).toBe("Pane 1Drag onto another pane");
+    expect(preview.textContent).toBe("Pane 1Drag onto a pane or tab");
     expect(preview.classList.contains("is-ready")).toBe(false);
     expect(target.classList.contains("is-swap-target")).toBe(false);
     hit = target;
@@ -403,5 +414,151 @@ function registerDomTests() {
     clean();
     await pointer("pointerup", 120);
     expect(swaps).toEqual([]);
+  });
+
+  function pane(pane_id: string, tab_id: string, focused = false) {
+    return { pane_id, tab_id, focused, workspace_id: "workspace" } as Pane;
+  }
+  function tabStrip() {
+    const strip = document.createElement("div");
+    strip.className = "tabbar-tabs";
+    const tab = document.createElement("div");
+    tab.className = "tabbar-tab";
+    tab.dataset.tabId = "other";
+    const name = document.createElement("span");
+    name.className = "tabbar-name";
+    name.textContent = "Tab 2";
+    tab.append(name);
+    const add = document.createElement("button");
+    add.className = "tabbar-add";
+    strip.append(tab, add);
+    document.body.append(strip);
+    restore.push(() => strip.remove());
+    return { tab, add };
+  }
+  function spyMoves() {
+    const moves: unknown[][] = [];
+    const beside = spyOn(store, "movePaneBeside").mockImplementation(
+      async (...args) => {
+        moves.push(["beside", ...args]);
+      },
+    );
+    const newTab = spyOn(store, "movePaneToNewTab").mockImplementation(
+      async (...args) => {
+        moves.push(["new-tab", ...args]);
+      },
+    );
+    const focus = spyOn(store, "focusTab").mockImplementation(
+      async (...args) => {
+        moves.push(["focus", ...args]);
+      },
+    );
+    restore.push(
+      () => beside.mockRestore(),
+      () => newTab.mockRestore(),
+      () => focus.mockRestore(),
+    );
+    return moves;
+  }
+
+  test("dropping on another tab or the new-tab button moves the pane there", async () => {
+    await mount();
+    snapshot = {
+      ...snapshot,
+      panes: [pane("a", "tab"), pane("y", "other"), pane("x", "other", true)],
+    };
+    const moves = spyMoves();
+    const { tab, add } = tabStrip();
+    const preview = () =>
+      document.querySelector<HTMLElement>(".pane-move-preview")!.textContent;
+    await pointer("pointerdown", 10);
+    hit = tab;
+    await pointer("pointermove", 120);
+    expect(tab.classList.contains("is-pane-drop-target")).toBe(true);
+    expect(preview()).toBe(
+      "Pane 1Release to move to Tab 2, or hold to open it",
+    );
+    await pointer("pointerup", 120);
+    expect(tab.classList.contains("is-pane-drop-target")).toBe(false);
+    clean();
+    await pointer("pointerdown", 10);
+    hit = add;
+    await pointer("pointermove", 120);
+    expect(add.classList.contains("is-pane-drop-target")).toBe(true);
+    expect(preview()).toBe("Pane 1Release to move to a new tab");
+    await pointer("pointerup", 120);
+    clean();
+    expect(moves).toEqual([
+      ["beside", "a", "x", "right"],
+      ["new-tab", "a"],
+    ]);
+    expect(swaps).toEqual([]);
+  });
+
+  test("hovering another tab opens it and the pane lands beside a pane there", async () => {
+    await mount();
+    snapshot = {
+      ...snapshot,
+      panes: [pane("a", "tab"), pane("x", "other", true)],
+    };
+    const moves = spyMoves();
+    const { tab } = tabStrip();
+    jest.useFakeTimers();
+    try {
+      await pointer("pointerdown", 10);
+      hit = tab;
+      await pointer("pointermove", 120);
+      jest.advanceTimersByTime(599);
+      expect(moves).toEqual([]);
+      jest.advanceTimersByTime(1);
+      expect(moves).toEqual([["focus", "other"]]);
+      // Opening the tab replaces the layout and unmounts the source handle.
+      snapshot = {
+        ...snapshot,
+        layout: {
+          ...layout,
+          tab_id: "other",
+          panes: [{ ...layout.panes[2], pane_id: "x" }],
+        },
+      };
+      target.dataset.paneId = "x";
+      target.getBoundingClientRect = () =>
+        new browser.DOMRect(0, 0, 100, 100) as unknown as DOMRect;
+      await act(async () => root.unmount());
+      expect(document.querySelector(".pane-move-preview")).not.toBeNull();
+      hit = target;
+      await pointer("pointermove", 90, { clientY: 50 }, document.body);
+      expect(target.classList.contains("is-place-target")).toBe(true);
+      expect(target.dataset.dropSide).toBe("right");
+      await pointer("pointermove", 50, { clientY: 5 }, document.body);
+      expect(target.dataset.dropSide).toBe("up");
+      expect(document.querySelector(".pane-move-preview")!.textContent).toBe(
+        "Pane 1Release to place above",
+      );
+      // A tab's only pane renders without the grid, so its shell is the target.
+      const surface = document.createElement("div");
+      surface.className = "workspace-terminal-surface";
+      const shell = document.createElement("div");
+      shell.className = "terminal-shell";
+      shell.getBoundingClientRect = target.getBoundingClientRect;
+      surface.append(shell);
+      document.body.append(surface);
+      restore.push(() => surface.remove());
+      hit = shell;
+      await pointer("pointermove", 10, { clientY: 50 }, document.body);
+      expect(target.classList.contains("is-place-target")).toBe(false);
+      expect(shell.classList.contains("is-place-target")).toBe(true);
+      expect(shell.dataset.dropSide).toBe("left");
+      await pointer("pointerup", 10, { clientY: 50 }, document.body);
+      expect(shell.classList.contains("is-place-target")).toBe(false);
+      expect(shell.dataset.dropSide).toBeUndefined();
+      expect(document.querySelector(".pane-move-preview")).toBeNull();
+      expect(moves).toEqual([
+        ["focus", "other"],
+        ["beside", "a", "x", "left"],
+      ]);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 }

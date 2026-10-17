@@ -13,6 +13,9 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
   as you type. Leave the field blank to use Herdr's default directory.
 - Split, resize, focus, swap (drag the handle at a pane's top center), zoom, and
   close panes.
+- Drag a pane's handle onto another tab to move the pane there, or onto **+**
+  to give it a tab of its own. Hold it over a tab to open that tab, then drop
+  it on a pane's edge to place it on that side. Running programs keep going.
 - The command menu searches workspaces, worktrees, files, tabs, panes, and
   agents, and opens typed file paths.
 - Desktop **Zen mode** hides app chrome so the terminal fills the window.

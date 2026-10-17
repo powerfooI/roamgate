@@ -269,6 +269,7 @@ export function TabBar({
               return (
                 <div
                   key={t.tab_id}
+                  data-tab-id={t.tab_id}
                   ref={reorder.register(t.tab_id)}
                   {...reorderHandlers}
                   onPointerDown={
