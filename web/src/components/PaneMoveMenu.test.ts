@@ -424,6 +424,8 @@ function registerDomTests() {
     return { pane_id, tab_id, focused, workspace_id: "workspace" } as Pane;
   }
   function tabStrip() {
+    const bar = document.createElement("div");
+    bar.className = "tabbar";
     const strip = document.createElement("div");
     strip.className = "tabbar-tabs";
     const tab = document.createElement("div");
@@ -435,10 +437,15 @@ function registerDomTests() {
     tab.append(name);
     const add = document.createElement("button");
     add.className = "tabbar-add";
-    strip.append(tab, add);
-    document.body.append(strip);
-    restore.push(() => strip.remove());
-    return { tab, add };
+    const utilities = document.createElement("div");
+    utilities.className = "tabbar-utilities";
+    const inspector = document.createElement("button");
+    utilities.append(inspector);
+    strip.append(tab);
+    bar.append(strip, add, utilities);
+    document.body.append(bar);
+    restore.push(() => bar.remove());
+    return { tab, add, strip, inspector };
   }
   function spyMoves() {
     const moves: unknown[][] = [];
@@ -478,7 +485,7 @@ function registerDomTests() {
       panes: [pane("a", "tab"), pane("y", "other"), pane("x", "other", true)],
     };
     const moves = spyMoves();
-    const { tab, add } = tabStrip();
+    const { tab, add, strip, inspector } = tabStrip();
     const preview = () =>
       document.querySelector<HTMLElement>(".pane-move-preview")!.textContent;
     await pointer("pointerdown", 10);
@@ -497,6 +504,16 @@ function registerDomTests() {
     expect(add.classList.contains("is-pane-drop-target")).toBe(true);
     expect(preview()).toBe("Pane 1Release to move to a new tab");
     await pointer("pointerup", 120);
+    clean();
+    // Open strip space targets the + button; the utility buttons do not.
+    await pointer("pointerdown", 10);
+    hit = strip;
+    await pointer("pointermove", 120);
+    expect(add.classList.contains("is-pane-drop-target")).toBe(true);
+    hit = inspector;
+    await pointer("pointermove", 121);
+    expect(add.classList.contains("is-pane-drop-target")).toBe(false);
+    await pointer("pointerup", 121);
     clean();
     expect(moves).toEqual([
       ["to-tab", "a", "other"],

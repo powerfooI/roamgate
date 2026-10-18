@@ -170,8 +170,11 @@ export function PaneDragHandle({
           ? null
           : { kind: "tab", element: tab, tabId: tab.dataset.tabId! };
       }
-      const strip = hit?.closest<HTMLElement>(".tabbar-tabs");
-      const add = strip?.querySelector<HTMLElement>(".tabbar-add");
+      // Open space around the tabs, or the + button itself, means a new tab.
+      const bar = hit?.closest(".tabbar-utilities")
+        ? null
+        : hit?.closest<HTMLElement>(".tabbar");
+      const add = bar?.querySelector<HTMLElement>(".tabbar-add");
       return add && sourceTabPaneCount() > 1
         ? { kind: "new-tab", element: add }
         : null;

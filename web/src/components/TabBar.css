@@ -29,12 +29,39 @@
 }
 
 .tabbar-tabs {
-  flex: 1 1 auto;
+  /* Fade width matches TAB_STRIP_FADE_PX in tabStripScroll.ts. */
+  --tabbar-fade: 24px;
+  --tabbar-fade-start: 0px;
+  --tabbar-fade-end: 0px;
+  /* Offset parent for revealing the active tab. */
+  position: relative;
+  flex: 0 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 4px;
   overflow-x: auto;
+}
+
+/* Scrollbars are hidden app-wide, so fade the edges that hide more tabs. */
+.tabbar-tabs[data-overflow-start] {
+  --tabbar-fade-start: var(--tabbar-fade);
+}
+
+.tabbar-tabs[data-overflow-end] {
+  --tabbar-fade-end: var(--tabbar-fade);
+}
+
+.tabbar-tabs:is([data-overflow-start], [data-overflow-end]) {
+  --tabbar-fade-mask: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--tabbar-fade-start),
+    #000 calc(100% - var(--tabbar-fade-end)),
+    transparent
+  );
+  -webkit-mask-image: var(--tabbar-fade-mask);
+  mask-image: var(--tabbar-fade-mask);
 }
 
 .tabbar-tab {
@@ -178,6 +205,7 @@
 
 .tabbar-utilities {
   flex: 0 0 auto;
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 2px;

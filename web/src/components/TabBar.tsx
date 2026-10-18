@@ -24,6 +24,7 @@ import {
 import { summarizeTabAgents } from "./agentSession";
 import { tabMoveInsertIndex } from "../tabReorder";
 import { useTabReorderDrag } from "./useTabReorderDrag";
+import { useTabStripScroll } from "./useTabStripScroll";
 import "./TabBar.css";
 
 const LONG_PRESS_MS = 550;
@@ -127,6 +128,10 @@ export function TabBar({
       const insertIndex = tabMoveInsertIndex(herdrOrder, tabId, groupOrder);
       if (insertIndex !== null) void store.moveTab(tabId, insertIndex);
     },
+  });
+  const stripScroll = useTabStripScroll({
+    activeTabId: tabs.find((tab) => tab.focused)?.tab_id,
+    tabsKey: tabs.map((tab) => tab.tab_id).join(" "),
   });
   const pendingCloseTab = s.tabs.find((t) => t.tab_id === pendingCloseTabId);
   const pendingCloseTabName = tabName(pendingCloseTab);
@@ -257,7 +262,12 @@ export function TabBar({
     <>
       {showTabStrip ? (
         <div className="tabbar">
-          <div className="tabbar-tabs">
+          <div
+            ref={stripScroll.ref}
+            className="tabbar-tabs"
+            data-overflow-start={stripScroll.overflow.start || undefined}
+            data-overflow-end={stripScroll.overflow.end || undefined}
+          >
             {tabs.map((t) => {
               const name =
                 t.label && t.label !== String(t.number)
@@ -349,17 +359,18 @@ export function TabBar({
                 </div>
               );
             })}
-            <button
-              className="tabbar-add"
-              onClick={() => {
-                store.createTab(focusedWs.workspace_id);
-              }}
-              disabled={!!createReason}
-              title={createReason ?? shortcutTitle("New tab", "tab.create")}
-            >
-              +
-            </button>
           </div>
+          {/* Outside the scrolling strip so it stays reachable with many tabs. */}
+          <button
+            className="tabbar-add"
+            onClick={() => {
+              store.createTab(focusedWs.workspace_id);
+            }}
+            disabled={!!createReason}
+            title={createReason ?? shortcutTitle("New tab", "tab.create")}
+          >
+            +
+          </button>
           <div className="tabbar-utilities">
             <button
               type="button"
