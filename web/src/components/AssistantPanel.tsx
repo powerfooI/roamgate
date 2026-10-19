@@ -2598,10 +2598,8 @@ export function AssistantPanel({
                         id="ranger-high-permission-description"
                       >
                         {highPermission && !allWorkspacesAllowed
-                          ? "High permission currently applies only to your selected workspaces. Enable all-workspace access below to include every current and future workspace."
-                          : "Automatically allow every current and future workspace and skip action and schedule confirmations."}{" "}
-                        New or edited tasks keep this mode; started operations
-                        may finish.
+                          ? "Applies only to your selected workspaces."
+                          : "Skip confirmations and allow every workspace."}
                       </p>
                     </div>
                     <button
