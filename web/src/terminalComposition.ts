@@ -22,7 +22,7 @@
  */
 import { version as xtermVersion } from "@xterm/xterm/package.json";
 
-// Compatibility repair for @xterm/xterm 6.1.0-beta.304. The range/suffix
+// Compatibility repair for @xterm/xterm 6.1.0-beta.315. The range/suffix
 // calculation follows src/browser/input/CompositionHelper.ts (MIT, copyright
 // 2016 The xterm.js authors). Keep the bundled-core regression tests when
 // changing the pin; an incompatible helper is deliberately left untouched.
@@ -73,7 +73,7 @@ export function installTerminalCompositionRepair(terminal: unknown): {
   dispose(): void;
 } {
   const helper = compositionHelper(terminal);
-  if (xtermVersion !== "6.1.0-beta.304" || !helper) {
+  if (xtermVersion !== "6.1.0-beta.315" || !helper) {
     return { installed: false, dispose() {} };
   }
   const originalStart = helper.compositionstart;
