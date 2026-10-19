@@ -49,7 +49,8 @@ export function AssistantMentionComposer({
     inputType?: string,
     edit?: { start: number; end: number; inputType?: string },
   ) => void;
-  onSubmit: () => void;
+  /** `queue` is set for Alt+Enter, which queues while Ranger answers. */
+  onSubmit: (options?: { queue: boolean }) => void;
   onOpenMention: (target: AssistantMentionTarget) => void;
   onCompositionChange: (composing: boolean) => void;
 }) {
@@ -456,7 +457,7 @@ export function AssistantMentionComposer({
             }
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
-              if (!event.repeat) onSubmit();
+              if (!event.repeat) onSubmit({ queue: event.altKey });
             }
           }}
         />

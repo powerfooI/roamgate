@@ -67,7 +67,3 @@
 .assistant-chat-select.is-mobile .command-input {
   font-size: 16px;
 }
-
-.assistant-panel.is-mobile .assistant-chat-controls .themed-select-trigger {
-  min-height: 44px;
-}

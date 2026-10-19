@@ -669,6 +669,47 @@ test("sends identify their chat and delayed acknowledgements only clear the orig
   expect(retryB?.request_id).not.toBe(retryA?.request_id);
 });
 
+test("messages sent while Ranger answers steer or queue only on bridges that accept them", async () => {
+  const server = installBridge();
+  startAssistantClient();
+  await refreshAssistant();
+  const last = () =>
+    server.call.mock.calls[server.call.mock.calls.length - 1]?.[1];
+  server.push({ ...snapshot(1), running: true });
+  const before = server.call.mock.calls.length;
+  await sendAssistant("Older bridge", scope, [], "steer");
+  expect(server.call.mock.calls).toHaveLength(before);
+
+  server.push({ ...snapshot(2), running: true, queue: [] });
+  server.call.mockResolvedValueOnce({
+    ...snapshot(3),
+    running: true,
+    queue: [],
+  });
+  await sendAssistant("Use the other branch", scope, [], "steer");
+  expect(last()).toMatchObject({
+    text: "Use the other branch",
+    when_busy: "steer",
+  });
+  server.call.mockResolvedValueOnce({
+    ...snapshot(4),
+    running: true,
+    queue: [],
+  });
+  await sendAssistant("Then run tests", scope, [], "queue");
+  expect(last()?.when_busy).toBe("queue");
+  // A queued message still needs an explicit mode while Ranger answers.
+  const count = server.call.mock.calls.length;
+  await sendAssistant("No mode", scope);
+  expect(server.call.mock.calls).toHaveLength(count);
+
+  // An idle send queues if a turn started before the bridge received it.
+  server.push({ ...snapshot(5), queue: [] });
+  server.call.mockResolvedValueOnce({ ...snapshot(6), queue: [] });
+  await sendAssistant("Fresh question", scope, [], "steer");
+  expect(last()?.when_busy).toBe("queue");
+});
+
 test("confirmed actions block further mutations and reconnect never confirms again", async () => {
   const server = installBridge();
   startAssistantClient();

@@ -329,6 +329,21 @@ export type AssistantAuthState = {
   };
 };
 
+export const ASSISTANT_MAX_QUEUED = 8;
+
+/**
+ * A message sent while Ranger was answering. A steer joins the current turn
+ * after its next tool round; a follow-up waits for the answer and then starts
+ * the next turn. A steer that misses the turn becomes a follow-up.
+ */
+export type AssistantQueuedMessage = {
+  id: string;
+  mode: "steer" | "follow_up";
+  text: string;
+  mentions?: AssistantMention[];
+  sent_at: string;
+};
+
 export type AssistantSessionSummary = {
   id: string;
   title: string;
@@ -365,6 +380,8 @@ export type AssistantSnapshot = {
     };
   }[];
   messages: AssistantMessage[];
+  /** Messages waiting for the running turn, oldest first. */
+  queue?: AssistantQueuedMessage[];
   running: boolean;
   error: string | null;
   auth: AssistantAuthState | null;
@@ -754,6 +771,30 @@ export function isAssistantMessage(value: unknown): value is AssistantMessage {
   );
 }
 
+export function isAssistantQueue(
+  value: unknown,
+): value is AssistantQueuedMessage[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= ASSISTANT_MAX_QUEUED &&
+    value.every(
+      (item) =>
+        record(item) &&
+        text(item.id) &&
+        item.id.length > 0 &&
+        item.id.length <= 500 &&
+        (item.mode === "steer" || item.mode === "follow_up") &&
+        text(item.text) &&
+        item.text.length > 0 &&
+        item.text.length <= 20_000 &&
+        (item.mentions === undefined ||
+          isAssistantMentions(item.mentions, item.text)) &&
+        timestamp(item.sent_at),
+    ) &&
+    new Set(value.map((item) => item.id)).size === value.length
+  );
+}
+
 export function isAssistantSnapshot(
   value: unknown,
 ): value is AssistantSnapshot {
@@ -857,7 +898,8 @@ export function isAssistantSnapshot(
         new Set(value.tasks.map((task) => task.id)).size !==
           value.tasks.length)) ||
     !Array.isArray(value.messages) ||
-    !value.messages.every(isAssistantMessage)
+    !value.messages.every(isAssistantMessage) ||
+    (value.queue !== undefined && !isAssistantQueue(value.queue))
   )
     return false;
   if (value.auth === null) return true;

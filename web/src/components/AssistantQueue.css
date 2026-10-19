@@ -1,0 +1,72 @@
+.assistant-queue {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.assistant-queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.assistant-queue-head > span {
+  min-width: 0;
+}
+
+.assistant-queue-head > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.assistant-queue ol {
+  display: grid;
+  gap: 4px;
+  max-height: 112px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.assistant-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 4px 3px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+}
+
+.assistant-queue-mode {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.assistant-queue-item.is-steer .assistant-queue-mode {
+  color: var(--accent);
+}
+
+.assistant-queue-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-panel-footer .assistant-queue-item button {
+  flex: 0 0 auto;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+}

@@ -433,14 +433,25 @@ export function useAssistantState() {
   return useSyncExternalStore(subscribeAssistant, readAssistantState);
 }
 
+/** Whether the bridge accepts messages while Ranger is answering. */
+export function assistantQueueSupported(snapshot: AssistantSnapshot | null) {
+  return Array.isArray(snapshot?.queue);
+}
+
+/**
+ * Send a message. While Ranger answers, `whenBusy` steers the running turn
+ * or queues the message for the next one.
+ */
 export async function sendAssistant(
   text: string,
   scope: AssistantWorkspaceRef[],
   mentions: AssistantMention[] = [],
+  whenBusy?: "steer" | "queue",
 ) {
+  const busy = !!state.snapshot?.running;
   if (
     sending ||
-    state.snapshot?.running ||
+    (busy && (!whenBusy || !assistantQueueSupported(state.snapshot))) ||
     assistantActionExecuting(state.snapshot)
   )
     return;
@@ -454,7 +465,21 @@ export async function sendAssistant(
   const expected = state.snapshot?.chat_selection
     ? assistantChatSelection(state.snapshot)
     : undefined;
-  const key = JSON.stringify([sessionId, text, scope, expected, mentions]);
+  // A turn may start between this snapshot and the bridge (a queued message
+  // was just sent), so an idle send asks to queue rather than be rejected.
+  const mode = assistantQueueSupported(state.snapshot)
+    ? busy
+      ? whenBusy
+      : "queue"
+    : undefined;
+  const key = JSON.stringify([
+    sessionId,
+    text,
+    scope,
+    expected,
+    mentions,
+    mode,
+  ]);
   if (submission?.key !== key)
     submission = { key, requestId: crypto.randomUUID() };
   sending = true;
@@ -464,6 +489,7 @@ export async function sendAssistant(
       scope,
       ...(mentions.length ? { mentions } : {}),
       request_id: submission.requestId,
+      ...(mode ? { when_busy: mode } : {}),
       ...(expected ? { expected } : {}),
       ...(sessionId ? { session_id: sessionId } : {}),
     });

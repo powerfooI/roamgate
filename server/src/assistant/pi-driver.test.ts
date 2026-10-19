@@ -413,6 +413,71 @@ test("live replies report visible reasoning per model call and omit redacted rea
   }
 });
 
+test("a steer joins the running turn after its tool round and splits later output", async () => {
+  const f = await durableFixture((index) =>
+    modelReply(
+      index,
+      index === 1
+        ? [
+            ...text("Checking."),
+            ...toolUse(
+              "workspace_status",
+              "status",
+              { connection_id: "local", workspace_id: "workspace" },
+              1,
+            ),
+            ...finish("tool_use"),
+          ]
+        : [...text("Adjusted"), ...finish("end_turn")],
+    ),
+  );
+  const events: string[] = [];
+  const reading = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  try {
+    const driver = f.createDriver();
+    const run = driver.run(
+      f.input({
+        read: async () => {
+          reading.resolve();
+          await release.promise;
+          return { text: "Running" };
+        },
+        replace: (value) => events.push(`text:${value}`),
+        tool: (_id, _name, status) => events.push(`tool:${status}`),
+        steered: (requestId, value) =>
+          events.push(`steered:${requestId}:${value}`),
+      }),
+    );
+    await reading.promise;
+    await driver.steer!({
+      text: "Use the other branch.",
+      requestId: "steer-1",
+    });
+    // A retried steer reuses its identity instead of sending twice.
+    await driver.steer!({
+      text: "Use the other branch.",
+      requestId: "steer-1",
+    });
+    release.resolve();
+    await run;
+    expect(f.requests).toHaveLength(2);
+    const messages = JSON.stringify(f.requests[1]!.messages);
+    expect(messages.split("Use the other branch.")).toHaveLength(2);
+    const steered = events.indexOf("steered:steer-1:Use the other branch.");
+    expect(steered).toBeGreaterThan(events.indexOf("tool:completed"));
+    expect(events.slice(0, steered)).toContain("text:Checking.");
+    expect(events.slice(steered + 1)).toContain("text:Adjusted");
+    expect(events.slice(steered + 1)).not.toContain("text:Checking.");
+    await expect(
+      driver.steer!({ text: "Too late", requestId: "steer-2" }),
+    ).rejects.toThrow("Ranger is not running");
+  } finally {
+    release.resolve();
+    await f.cleanup();
+  }
+});
+
 test("a failed model call keeps the reasoning already streamed", async () => {
   const f = await durableFixture((index) =>
     modelReply(index, [

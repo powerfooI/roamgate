@@ -239,6 +239,9 @@ if (process.env.ROAMGATE_MENTION_DOM_TEST !== "1") {
       await key("Escape");
       await key("Enter");
       expect(submit).toHaveBeenCalledTimes(2);
+      expect(submit).toHaveBeenLastCalledWith({ queue: false });
+      await key("Enter", { altKey: true });
+      expect(submit).toHaveBeenLastCalledWith({ queue: true });
       expect(mentions).toEqual([]);
       draftKey = "bridge:other-chat";
       value = "Another draft";

@@ -53,12 +53,19 @@ type AuthEvent =
       userCode: string;
       verificationUri: string;
     };
+type Steer = {
+  requestId: string;
+  text: string;
+  submission?: import("@earendil-works/pi-durable").Submission;
+  record?: import("@earendil-works/pi-durable").SubmissionRecord;
+};
 type ActiveRun = {
   controller: AbortController;
   stopped: boolean;
   paused: boolean;
   abort?: () => Promise<void>;
   aborting?: Promise<void>;
+  steer?(text: string, requestId: string): Promise<void>;
   done: Promise<void>;
   finish(): void;
 };
@@ -98,6 +105,13 @@ export type AssistantDriver = {
     thinking?(steps: string[]): void;
     sources?(sources: AssistantSource[]): void;
     text: string;
+    /** Steering inputs already sent to this turn, reattached by identity on recovery. */
+    steers?: { requestId: string; text: string }[];
+    /**
+     * A user input joined the turn. Output reported afterwards follows it; the
+     * request identity is absent for an input this run did not send.
+     */
+    steered?(requestId: string | undefined, text: string): void;
     signal: AbortSignal;
     read: WorkspaceToolReader;
     propose?: ActionToolProposer;
@@ -113,6 +127,11 @@ export type AssistantDriver = {
     ): void;
     error(): void;
   }): Promise<unknown[]>;
+  /**
+   * Add user input to the running turn after its current tool round. Throws
+   * when no turn can take it, so the caller can queue it as a follow-up.
+   */
+  steer?(input: { text: string; requestId: string }): Promise<void>;
   stop(): Promise<void>;
   dispose(): Promise<void>;
 };
@@ -673,6 +692,23 @@ export function createPiDriver(
         finish: () => done.resolve(),
       };
       active = running;
+      const steers: Steer[] = (input.steers ?? []).map((steer) => ({
+        ...steer,
+      }));
+      let accepting = true;
+      let steerReady: ((steer: Steer) => Promise<void>) | undefined;
+      running.steer = async (text, requestId) => {
+        if (!accepting) throw new Error("Ranger finished this turn");
+        if (steers.some((steer) => steer.requestId === requestId)) return;
+        const steer = { requestId, text };
+        steers.push(steer);
+        try {
+          await steerReady?.(steer);
+        } catch (error) {
+          steers.splice(steers.indexOf(steer), 1);
+          throw error;
+        }
+      };
       let retained = input.entries;
       let harness: import("@earendil-works/pi-durable").Harness | undefined;
       let watch:
@@ -878,6 +914,20 @@ export function createPiDriver(
           context,
         );
         let record = await submission.status(context);
+        const submitSteer = async (steer: Steer) => {
+          steer.submission = await root.submit(
+            {
+              type: "input",
+              content: steer.text,
+              requestId: steer.requestId,
+              whenBusy: "steer",
+            },
+            context,
+          );
+          steer.record = await steer.submission.status(context);
+        };
+        for (const steer of steers) await submitSteer(steer);
+        steerReady = submitSteer;
         let lastText: string | undefined;
         let lastThinking: string[] = [];
         // Durable entries are immutable, so each one's reasoning is read once.
@@ -894,6 +944,10 @@ export function createPiDriver(
           | import("@earendil-works/pi-durable").EntryId
           | undefined;
         let reportedError = false;
+        // User entries after the first split the turn: each steer starts a
+        // segment, and only the newest segment can still change.
+        let segment = 0;
+        const steerEntries = new Map<number, string>();
         const assistantText = (
           message: import("@earendil-works/pi-ai").Message,
         ) =>
@@ -920,44 +974,25 @@ export function createPiDriver(
                 .filter(Boolean)
                 .join("\n\n")
             : "";
-        const render = async (
-          view: import("@earendil-works/pi-durable").ConversationView,
+        const userText = (
+          entry: import("@earendil-works/pi-durable").EntryRecord,
         ) => {
-          if (record.type !== "input" || record.entry === undefined) return;
-          const first = record.entry;
-          const terminal =
-            record.status === "done" || record.status === "unanswered";
-          const last =
-            record.status === "done"
-              ? record.answer
-              : view.entries.reduce(
-                  (tail, entry) => (entry.id > tail ? entry.id : tail),
-                  first,
-                );
-          // The watch contains only active context after compaction. Read the
-          // immutable submission range so earlier findings and sources survive.
-          if (readThrough === undefined || last > readThrough) {
-            let cursor: import("@earendil-works/pi-durable").Cursor | undefined;
-            do {
-              const page = await root.entries(
-                { minEntryId: readThrough ?? first, maxEntryId: last },
-                100,
-                cursor,
-                context,
-              );
-              for (const entry of page.items) transcript.set(entry.id, entry);
-              cursor = page.next;
-            } while (cursor !== undefined);
-            readThrough = last;
-          }
-          const entries = [...transcript.values()]
-            .filter((entry) => entry.id > first && entry.id <= last)
-            .sort((a, b) => a.id - b.id);
-          const details = projectToolDetails(entries);
-          const live = view.docs["pi.live"] as
-            | import("@earendil-works/pi-durable").LiveState
-            | undefined;
-          const ours = !terminal && live?.run?.inputs.includes(submission.id);
+          const message = entry.model?.[0];
+          if (message?.role !== "user") return "";
+          return typeof message.content === "string"
+            ? message.content
+            : message.content
+                .flatMap((part) => (part.type === "text" ? [part.text] : []))
+                .join("\n");
+        };
+        const settled = (value: Steer["record"]) =>
+          value?.status === "done" || value?.status === "unanswered";
+        const emit = (
+          entries: import("@earendil-works/pi-durable").EntryRecord[],
+          details: Map<string, ToolProjection>,
+          live: import("@earendil-works/pi-durable").LiveState | undefined,
+          ours: boolean,
+        ) => {
           const partial = ours ? live?.generation?.message : undefined;
           const text = entries
             .flatMap((entry) => entry.model ?? [])
@@ -1069,15 +1104,120 @@ export function createPiDriver(
               else if (!toolStates.has(slot.callId))
                 status(slot.callId, slot.name, "failed");
         };
+        const render = async (
+          view: import("@earendil-works/pi-durable").ConversationView,
+        ) => {
+          if (record.type !== "input" || record.entry === undefined) return;
+          const first = record.entry;
+          // A steer that raced the answer starts its own run; the turn ends
+          // only when every input it sent has settled.
+          const terminal =
+            settled(record) &&
+            steers.every((steer) => !steer.submission || settled(steer.record));
+          const answers = [record, ...steers.map((steer) => steer.record)]
+            .flatMap((value) =>
+              value?.type === "input" && value.status === "done"
+                ? [value.answer]
+                : [],
+            )
+            .sort((a, b) => b - a);
+          const tail = view.entries.reduce(
+            (value, entry) => (entry.id > value ? entry.id : value),
+            first,
+          );
+          const last = terminal ? (answers[0] ?? tail) : tail;
+          // The watch contains only active context after compaction. Read the
+          // immutable submission range so earlier findings and sources survive.
+          if (readThrough === undefined || last > readThrough) {
+            let cursor: import("@earendil-works/pi-durable").Cursor | undefined;
+            do {
+              const page = await root.entries(
+                { minEntryId: readThrough ?? first, maxEntryId: last },
+                100,
+                cursor,
+                context,
+              );
+              for (const entry of page.items) transcript.set(entry.id, entry);
+              cursor = page.next;
+            } while (cursor !== undefined);
+            readThrough = last;
+          }
+          const entries = [...transcript.values()]
+            .filter((entry) => entry.id > first && entry.id <= last)
+            .sort((a, b) => a.id - b.id);
+          const details = projectToolDetails(entries);
+          const live = view.docs["pi.live"] as
+            | import("@earendil-works/pi-durable").LiveState
+            | undefined;
+          const inputs = new Set([
+            submission.id,
+            ...steers.flatMap((steer) =>
+              steer.submission ? [steer.submission.id] : [],
+            ),
+          ]);
+          const ours =
+            !terminal && !!live?.run?.inputs.some((id) => inputs.has(id));
+          const segments: (typeof entries)[] = [[]];
+          const boundaries: typeof entries = [];
+          for (const entry of entries)
+            if (entry.model?.[0]?.role === "user") {
+              boundaries.push(entry);
+              segments.push([]);
+            } else segments.at(-1)!.push(entry);
+          if (boundaries.some((entry) => !steerEntries.has(entry.id))) {
+            for (const steer of steers)
+              if (steer.submission && steer.record?.entry === undefined)
+                steer.record = await steer.submission.status(context);
+            for (const steer of steers)
+              if (steer.record?.entry !== undefined)
+                steerEntries.set(steer.record.entry, steer.requestId);
+          }
+          segment = Math.min(segment, segments.length - 1);
+          for (;;) {
+            const newest = segment === segments.length - 1;
+            emit(segments[segment]!, details, live, newest && ours);
+            if (newest) break;
+            const boundary = boundaries[segment]!;
+            segment++;
+            lastText = undefined;
+            lastThinking = [];
+            partialText = "";
+            input.steered?.(steerEntries.get(boundary.id), userText(boundary));
+          }
+        };
         watch = await root.watch(context);
         await render(watch.value);
         watch.start(async (view) => render(view));
-        record = await Promise.race([
-          submission.wait(context),
-          watch.closed.then(() => {
-            throw new Error("Durable observation ended");
-          }),
-        ]);
+        const observe = <T>(value: Promise<T>) =>
+          Promise.race([
+            value,
+            watch!.closed.then(() => {
+              throw new Error("Durable observation ended");
+            }),
+          ]);
+        record = await observe(submission.wait(context));
+        // Later steers would start a new run; the caller queues them instead.
+        steerReady = undefined;
+        accepting = false;
+        for (;;) {
+          for (const steer of steers)
+            if (steer.submission)
+              steer.record = await steer.submission.status(context);
+          const placed = steers.find(
+            (steer) => steer.record?.status === "placed",
+          );
+          if (placed) {
+            placed.record = await observe(placed.submission!.wait(context));
+            continue;
+          }
+          const queued = steers.filter(
+            (steer) => steer.record?.status === "queued",
+          );
+          if (!queued.length) break;
+          // A failed run leaves its inbox for the next submission; withdraw
+          // these so they can never surface in a later question.
+          for (const steer of queued) await steer.submission!.abort(context);
+        }
         // Stop queued snapshots before the final projection; the answer entry
         // may already be durable while the last delivered watch frame lags it.
         await watch.stop();
@@ -1095,9 +1235,20 @@ export function createPiDriver(
         throw error;
       } finally {
         input.signal.removeEventListener("abort", abort);
+        steerReady = undefined;
+        accepting = false;
         try {
           await running.aborting?.catch(() => {});
           await watch?.stop();
+          // A paused turn resumes with its inbox. A stopped one already
+          // withdrew queued inputs, but a failed turn keeps them.
+          if (harness && !running.paused) {
+            const { BACKGROUND_CONTEXT } = await import(
+              "@earendil-works/chord/context"
+            );
+            for (const steer of steers)
+              await steer.submission?.abort(BACKGROUND_CONTEXT).catch(() => {});
+          }
           if (harness) {
             const { BACKGROUND_CONTEXT } = await import(
               "@earendil-works/chord/context"
@@ -1115,6 +1266,12 @@ export function createPiDriver(
           running.finish();
         }
       }
+    },
+    async steer({ text, requestId }) {
+      const running = active;
+      if (!running?.steer || running.stopped || running.paused)
+        throw new Error("Ranger is not running");
+      await running.steer(text, requestId);
     },
     async stop() {
       const running = active;

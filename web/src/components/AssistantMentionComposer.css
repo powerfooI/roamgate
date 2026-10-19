@@ -191,18 +191,6 @@
   overflow-wrap: anywhere;
 }
 
-.assistant-panel.is-mobile .assistant-mention-editor textarea {
-  padding-left: 54px;
-  padding-right: 58px;
-}
-
-.assistant-panel.is-mobile .assistant-mention-trigger {
-  left: 5px;
-  right: auto;
-  min-height: 44px;
-  min-width: 44px;
-}
-
 .assistant-panel.is-mobile .assistant-mention-categories button,
 .assistant-panel.is-mobile .assistant-mention-close,
 .assistant-panel.is-mobile .assistant-mention-chip button {

@@ -1378,10 +1378,16 @@
   padding-bottom: 10px;
 }
 
-.assistant-panel.is-mobile .assistant-compose-actions > button {
-  width: 44px;
-  min-width: 44px;
-  padding: 0;
+/* The composer keeps the desktop panel's compact controls on phones. */
+.assistant-panel.is-mobile
+  .assistant-panel-footer
+  .assistant-compose-options
+  button,
+.assistant-panel.is-mobile
+  .assistant-panel-footer
+  .assistant-queue-head
+  button {
+  min-height: 30px;
 }
 
 .assistant-panel.is-mobile textarea,

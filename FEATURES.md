@@ -106,6 +106,11 @@ or its shortcut.
   output, and cites its sources. Type **@** to point it at a workspace or agent.
   When the model shares its reasoning, a collapsible **Thinking** section shows
   it above the reply.
+- **Steer or queue:** while Ranger answers, **Enter** (or **Steer**) adds your
+  message to the current answer after its next step, and **Alt+Enter**
+  (**Option+Enter** on macOS, or **Queue**) sends it once the answer finishes.
+  Waiting messages show above the message box, where you can edit or remove
+  queued ones. After **Stop** they wait until you choose **Send next**.
 - **Act:** Ranger can create workspaces, worktrees, tabs, and splits, and start,
   prompt, or close agents and panes. You confirm each action unless
   **High-permission mode** is on. Closing never deletes files or history.
