@@ -3306,6 +3306,17 @@ describe("bridge-global assistant", () => {
       skipped: 1,
       truncated: true,
     });
+    // One unit of budget over an older emoji leaves nothing to keep.
+    expect(
+      boundAssistantThinking([
+        "older \u{1F600}",
+        "n".repeat(ASSISTANT_MAX_THINKING - 1),
+      ]),
+    ).toEqual({
+      steps: ["n".repeat(ASSISTANT_MAX_THINKING - 1)],
+      skipped: 1,
+      truncated: true,
+    });
     const many = Array.from(
       { length: ASSISTANT_MAX_THINKING_STEPS + 2 },
       (_, index) => String(index),

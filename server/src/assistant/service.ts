@@ -83,6 +83,8 @@ export function boundAssistantThinking(steps: string[]) {
     // Do not start a cut step with the low half of a surrogate pair.
     if (value !== step && /^[\uDC00-\uDFFF]/.test(value))
       value = value.slice(1);
+    // A step reduced to nothing by that repair counts as skipped.
+    if (!value) break;
     kept.unshift(value);
     // A cut step fills the budget, even after dropping a half pair.
     remaining = value === step ? remaining - value.length : 0;
