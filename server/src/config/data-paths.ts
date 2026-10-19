@@ -12,10 +12,11 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export function dataRoot(
   homeDir = homedir(),
@@ -47,11 +48,34 @@ function statIfPresent(path: string) {
   }
 }
 
+function statFollowingIfPresent(path: string) {
+  try {
+    return statSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+// The platform configuration directories belong to the user, not Roamgate.
+// Dotfile managers and folder redirection commonly make them symlinks or
+// junctions, so they are followed; links inside Roamgate's tree never are.
+function userConfigRoots(): Set<string> {
+  return new Set(
+    [dirname(dataRoot()), join(homedir(), ".config")].map((root) =>
+      resolve(root),
+    ),
+  );
+}
+
 // Check the configuration parent, product directory and file; never follow a
 // legacy symlink, including dangling links. Explicit override paths do not migrate.
 export function assertSafeDataPath(path: string): void {
+  const configRoots = userConfigRoots();
   for (const entry of [dirname(dirname(path)), dirname(path), path]) {
-    const stat = statIfPresent(entry);
+    const stat = configRoots.has(resolve(entry))
+      ? statFollowingIfPresent(entry)
+      : statIfPresent(entry);
     if (stat?.isSymbolicLink())
       throw new Error(`data path contains a symlink: ${entry}`);
     if (stat && (entry === path ? !stat.isFile() : !stat.isDirectory())) {

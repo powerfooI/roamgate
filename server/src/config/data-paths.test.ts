@@ -298,3 +298,43 @@ test("plugin URL reads legacy files without migrating and prefers new paths", as
     "HOST=0.0.0.0\nPORT=8890\n",
   );
 });
+
+test("follows a symlinked user config root but not Roamgate's own links", async () => {
+  if (process.platform === "win32") return;
+  const root = home();
+  const dotfiles = join(root, "dotfiles", "config");
+  mkdirSync(dotfiles, { recursive: true });
+  symlinkSync(dotfiles, join(root, ".config"));
+  const script = `
+    import { defaultAuthTokenPath, loadOrCreateAuthToken } from ${JSON.stringify(join(import.meta.dir, "auth-token.ts"))};
+    import { defaultDataFile } from ${JSON.stringify(join(import.meta.dir, "data-paths.ts"))};
+    console.log(loadOrCreateAuthToken(defaultAuthTokenPath()));
+    defaultDataFile("settings.json");
+  `;
+  const run = async () => {
+    const child = Bun.spawn([process.execPath, "-e", script], {
+      env: { ...process.env, HOME: root, USERPROFILE: root },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    return { stdout: stdout.trim(), stderr, code: await child.exited };
+  };
+  const first = await run();
+  expect(first.stderr).toBe("");
+  expect(first.code).toBe(0);
+  expect(readFileSync(join(dotfiles, "roamgate", "auth-token"), "utf8")).toBe(
+    `${first.stdout}\n`,
+  );
+
+  rmSync(join(dotfiles, "roamgate"), { recursive: true });
+  const elsewhere = join(root, "elsewhere");
+  mkdirSync(elsewhere);
+  symlinkSync(elsewhere, join(dotfiles, "roamgate"));
+  const linked = await run();
+  expect(linked.code).not.toBe(0);
+  expect(linked.stderr).toContain("data path contains a symlink");
+});
