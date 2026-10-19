@@ -1198,6 +1198,7 @@ export function createAssistantService(options: {
         "The approved target is no longer available. Ask Ranger for a fresh preview.";
       persist();
       publish(true);
+      drainQueue();
       return;
     }
     reserveAction(action, true);

@@ -6027,3 +6027,53 @@ test("a queued follow-up waits while an action preview needs review", async () =
   await until(() => prompts.length === 2 && !f.service.peek().running);
   expect(prompts[1]).toContain("User message:\nThen report");
 });
+
+test("a queued follow-up is retried when its blocking preview is cancelled as unavailable", async () => {
+  const gate = Promise.withResolvers<void>();
+  const prompts: string[] = [];
+  const f = setup({
+    run: async (input) => {
+      prompts.push(input.text);
+      if (prompts.length === 1) {
+        await input.propose!(
+          "create_tab",
+          { connection_id: "local", workspace_id: "ws", cwd: "/repo" },
+          input.signal,
+        );
+        await gate.promise;
+      }
+      input.message("Done");
+      return [{ persisted: true }];
+    },
+  });
+  f.context.prepareAction = async () =>
+    permissionAction(async () => ({ status: "succeeded", detail: "Created" }));
+  await f.service.handle("configure", { config: configured });
+  await f.service.handle("send", { text: "Make a tab", request_id: "tab" });
+  await f.service.handle("send", {
+    text: "Then report",
+    request_id: "next",
+    when_busy: "queue",
+  });
+  gate.resolve();
+  await until(() => !f.service.peek().running);
+  await flushTasks();
+  expect(prompts).toHaveLength(1);
+  const action = f.service.peek().messages.at(-1)!.actions![0]!;
+  // The target workspace is gone when the preview is confirmed.
+  f.context.catalog = async () => ({
+    workspaces: [],
+    errors: [],
+    complete_connection_ids: ["local"],
+  });
+  await f.service.handle("action.confirm", { action_id: action.id });
+  expect(
+    f.service.peek().messages.flatMap((message) => message.actions ?? [])[0]!
+      .status,
+  ).toBe("cancelled");
+  // Nothing awaits review now, so the queue tries the follow-up at once; it
+  // is held with a reason because its own scope is gone too.
+  await until(() => !!f.service.peek().error?.includes("queued message"));
+  expect(prompts).toHaveLength(1);
+  expect(f.service.peek().queue).toMatchObject([{ id: "next" }]);
+});

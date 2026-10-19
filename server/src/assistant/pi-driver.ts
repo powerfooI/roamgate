@@ -987,6 +987,14 @@ export function createPiDriver(
         };
         const settled = (value: Steer["record"]) =>
           value?.status === "done" || value?.status === "unanswered";
+        // Steers that Pi ran on their own after the turn settled.
+        const missedSteers = new Set<Steer>();
+        const joined = (steer: Steer) =>
+          !missedSteers.has(steer) &&
+          (record.status === "done"
+            ? steer.record?.status === "done" &&
+              steer.record.answer === record.answer
+            : steer.record?.status === "unanswered");
         const emit = (
           entries: import("@earendil-works/pi-durable").EntryRecord[],
           details: Map<string, ToolProjection>,
@@ -1104,28 +1112,18 @@ export function createPiDriver(
               else if (!toolStates.has(slot.callId))
                 status(slot.callId, slot.name, "failed");
         };
-        const render = async (
+        const draw = async (
           view: import("@earendil-works/pi-durable").ConversationView,
         ) => {
           if (record.type !== "input" || record.entry === undefined) return;
           const first = record.entry;
-          // A steer that raced the answer starts its own run; the turn ends
-          // only when every input it sent has settled.
-          const terminal =
-            settled(record) &&
-            steers.every((steer) => !steer.submission || settled(steer.record));
-          const answers = [record, ...steers.map((steer) => steer.record)]
-            .flatMap((value) =>
-              value?.type === "input" && value.status === "done"
-                ? [value.answer]
-                : [],
-            )
-            .sort((a, b) => b - a);
+          // A run's inputs settle together, so the turn ends with its own.
+          const terminal = settled(record);
           const tail = view.entries.reduce(
             (value, entry) => (entry.id > value ? entry.id : value),
             first,
           );
-          const last = terminal ? (answers[0] ?? tail) : tail;
+          const last = record.status === "done" ? record.answer : tail;
           // The watch contains only active context after compaction. Read the
           // immutable submission range so earlier findings and sources survive.
           if (readThrough === undefined || last > readThrough) {
@@ -1142,36 +1140,53 @@ export function createPiDriver(
             } while (cursor !== undefined);
             readThrough = last;
           }
-          const entries = [...transcript.values()]
+          let entries = [...transcript.values()]
             .filter((entry) => entry.id > first && entry.id <= last)
             .sort((a, b) => a.id - b.id);
-          const details = projectToolDetails(entries);
-          const live = view.docs["pi.live"] as
-            | import("@earendil-works/pi-durable").LiveState
-            | undefined;
-          const inputs = new Set([
-            submission.id,
-            ...steers.flatMap((steer) =>
-              steer.submission ? [steer.submission.id] : [],
-            ),
-          ]);
-          const ours =
-            !terminal && !!live?.run?.inputs.some((id) => inputs.has(id));
-          const segments: (typeof entries)[] = [[]];
-          const boundaries: typeof entries = [];
-          for (const entry of entries)
-            if (entry.model?.[0]?.role === "user") {
-              boundaries.push(entry);
-              segments.push([]);
-            } else segments.at(-1)!.push(entry);
-          if (boundaries.some((entry) => !steerEntries.has(entry.id))) {
+          const user = (entry: (typeof entries)[number]) =>
+            entry.model?.[0]?.role === "user";
+          if (
+            entries.some((entry) => user(entry) && !steerEntries.has(entry.id))
+          ) {
+            // Read the turn first: inputs of one run settle in one commit, so
+            // a steer read afterwards is never behind its own run.
+            const latest = await submission.status(context);
+            if (settled(latest)) record = latest;
             for (const steer of steers)
-              if (steer.submission && steer.record?.entry === undefined)
+              if (steer.submission)
                 steer.record = await steer.submission.status(context);
             for (const steer of steers)
               if (steer.record?.entry !== undefined)
                 steerEntries.set(steer.record.entry, steer.requestId);
           }
+          // A steer read before the turn settled may be behind it.
+          if (settled(record))
+            for (const steer of steers)
+              if (steer.submission && !settled(steer.record))
+                steer.record = await steer.submission.status(context);
+          // Drop a steer that missed the turn, and everything after it; the
+          // caller admits it as a follow-up instead.
+          const missed = settled(record)
+            ? entries.find((entry) => {
+                const steer = steers.find(
+                  (value) => value.record?.entry === entry.id,
+                );
+                return user(entry) && !!steer && !joined(steer);
+              })
+            : undefined;
+          if (missed) entries = entries.filter((entry) => entry.id < missed.id);
+          const details = projectToolDetails(entries);
+          const live = view.docs["pi.live"] as
+            | import("@earendil-works/pi-durable").LiveState
+            | undefined;
+          const ours = !terminal && !!live?.run?.inputs.includes(submission.id);
+          const segments: (typeof entries)[] = [[]];
+          const boundaries: typeof entries = [];
+          for (const entry of entries)
+            if (user(entry)) {
+              boundaries.push(entry);
+              segments.push([]);
+            } else segments.at(-1)!.push(entry);
           segment = Math.min(segment, segments.length - 1);
           for (;;) {
             const newest = segment === segments.length - 1;
@@ -1184,6 +1199,15 @@ export function createPiDriver(
             partialText = "";
             input.steered?.(steerEntries.get(boundary.id), userText(boundary));
           }
+        };
+        // Projections await reads, so run them one at a time and in order:
+        // segments and request identities must never interleave.
+        let drawing = Promise.resolve();
+        const render = (
+          view: import("@earendil-works/pi-durable").ConversationView,
+        ) => {
+          drawing = drawing.then(() => draw(view));
+          return drawing;
         };
         watch = await root.watch(context);
         await render(watch.value);
@@ -1199,25 +1223,28 @@ export function createPiDriver(
         // Later steers would start a new run; the caller queues them instead.
         steerReady = undefined;
         accepting = false;
-        for (;;) {
-          for (const steer of steers)
-            if (steer.submission)
+        for (const steer of steers)
+          if (steer.submission) {
+            steer.record = await steer.submission.status(context);
+            // A failed run leaves its inbox for the next submission; withdraw
+            // these so they can never surface in a later question.
+            if (steer.record.status === "queued") {
+              await steer.submission.abort(context);
               steer.record = await steer.submission.status(context);
-          const placed = steers.find(
-            (steer) => steer.record?.status === "placed",
-          );
-          if (placed) {
-            placed.record = await observe(placed.submission!.wait(context));
-            continue;
+            }
           }
-          const queued = steers.filter(
-            (steer) => steer.record?.status === "queued",
-          );
-          if (!queued.length) break;
-          // A failed run leaves its inbox for the next submission; withdraw
-          // these so they can never surface in a later question.
-          for (const steer of queued) await steer.submission!.abort(context);
-        }
+        // A steer submitted as the turn settled starts its own run with this
+        // turn's model and scope. Stop it; the caller admits it as a follow-up.
+        for (const steer of steers)
+          if (
+            steer.record?.status === "placed" ||
+            (steer.record?.status === "done" && !joined(steer))
+          )
+            missedSteers.add(steer);
+        if (
+          [...missedSteers].some((steer) => steer.record?.status === "placed")
+        )
+          await root.abort(context);
         // Stop queued snapshots before the final projection; the answer entry
         // may already be durable while the last delivered watch frame lags it.
         await watch.stop();

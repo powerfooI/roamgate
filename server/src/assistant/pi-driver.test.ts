@@ -469,11 +469,45 @@ test("a steer joins the running turn after its tool round and splits later outpu
     expect(events.slice(0, steered)).toContain("text:Checking.");
     expect(events.slice(steered + 1)).toContain("text:Adjusted");
     expect(events.slice(steered + 1)).not.toContain("text:Checking.");
+    expect(events.filter((event) => event.startsWith("steered:"))).toHaveLength(
+      1,
+    );
     await expect(
       driver.steer!({ text: "Too late", requestId: "steer-2" }),
     ).rejects.toThrow("Ranger is not running");
   } finally {
     release.resolve();
+    await f.cleanup();
+  }
+});
+
+test("a steer that misses the answer stops its own run instead of joining the turn", async () => {
+  const f = await durableFixture((index) =>
+    index === 1
+      ? modelReply(index, [...text("Answered"), ...finish("end_turn")])
+      : hangingReply(index),
+  );
+  try {
+    const entries = await f.createDriver().run(f.input());
+    const events: string[] = [];
+    // Recovery resubmits a steer saved for the turn after Pi already answered
+    // it, the same placement race as a steer sent just as the turn settles.
+    await f.createDriver().run(
+      f.input({
+        entries,
+        recover: true,
+        steers: [{ requestId: "late", text: "Late steer" }],
+        replace: (value) => events.push(`text:${value}`),
+        steered: (requestId) => events.push(`steered:${requestId}`),
+      }),
+    );
+    expect(events).not.toContain("steered:late");
+    expect(events.at(-1)).toBe("text:Answered");
+    // Pi placed it in a run of its own, which the driver stopped.
+    expect(JSON.stringify(durableEntries(f.directory, entries))).toContain(
+      "Late steer",
+    );
+  } finally {
     await f.cleanup();
   }
 });
