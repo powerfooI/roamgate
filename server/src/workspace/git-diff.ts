@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { selectDiffBase } from "./diff-base";
 import { LARGE_DIFF_PATCH_BYTES } from "../../../shared/gitDiffLimits";
 import { worktreeSnapshotCommand } from "./git-snapshot";
 import { gitShellCommandArgv } from "./git-shell";
@@ -872,26 +873,21 @@ async function collectStats({
   return stats;
 }
 
-async function resolveMainBase({
+async function resolveComparisonBase({
   root,
+  requested,
   host,
   shQuote,
   runProcessWithCodeTimeout,
 }: {
   root: string;
-  host?: string;
-  shQuote: (value: string) => string;
-  runProcessWithCodeTimeout: RunProcessWithCodeTimeout;
-}) {
+  requested?: unknown;
+} & GitCommandContext) {
   const command = `
 set -eu
-for ref in main refs/heads/main origin/main refs/remotes/origin/main; do
-  if git -C ${shQuote(root)} rev-parse --verify --quiet "$ref^{commit}" >/dev/null; then
-    printf '%s' "$ref"
-    exit 0
-  fi
-done
-exit 1
+git -C ${shQuote(root)} for-each-ref --format='%(refname)%09%(symref)' refs/heads/ refs/remotes/
+printf '\n--diff-base-config--\n'
+git -C ${shQuote(root)} config --get init.defaultBranch || test "$?" = 1
 `;
   const result = await runProcessWithCodeTimeout(
     gitShellCommandArgv(command, host),
@@ -899,12 +895,22 @@ exit 1
   );
   if (result.code !== 0) {
     throw new Error(
-      (result.stderr || result.stdout || "main branch was not found")
+      (result.stderr || result.stdout || "Unable to read comparison branches")
         .trim()
         .slice(0, 1000),
     );
   }
-  return result.stdout.trim();
+  const [refOutput = "", configuredDefault = ""] = result.stdout.split(
+    "\n--diff-base-config--\n",
+  );
+  const refs = refOutput
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [name = "", symbolic] = line.split("\t");
+      return { name, symbolic };
+    });
+  return selectDiffBase(refs, configuredDefault.trim(), requested);
 }
 
 async function resolveLastStepRange({
@@ -974,15 +980,39 @@ export async function readDiffSummary({
   lastStepBaselines?: LastStepBaselineStore;
 }) {
   const mode = diffMode(params);
-  const base =
+  const comparison =
     mode === "branch-main"
-      ? await resolveMainBase({
+      ? await resolveComparisonBase({
           root,
+          requested: params.base_branch,
           host,
           shQuote,
           runProcessWithCodeTimeout,
         })
       : undefined;
+  const base = comparison?.base;
+  if (comparison && !base) {
+    return {
+      workspace_id: workspaceId,
+      repo_name: workspace?.worktree?.repo_name ?? workspace?.label ?? "",
+      root,
+      mode,
+      base: undefined,
+      base_branches: comparison.branches,
+      baseline_available: false,
+      snapshot_id: undefined,
+      entries: [] as GitDiffEntry[],
+      counts: {
+        staged: 0,
+        unstaged: 0,
+        untracked: 0,
+        conflicted: 0,
+        branch: 0,
+        "last-step": 0,
+      },
+    };
+  }
+
   const lastStepRange =
     mode === "last-step"
       ? await resolveLastStepRange({
@@ -1142,6 +1172,7 @@ export async function readDiffSummary({
     root,
     mode,
     base: mode === "last-step" ? lastStepRange?.baseline : base,
+    base_branches: comparison?.branches,
     baseline_available: mode !== "last-step" || lastStepRange !== null,
     snapshot_id: lastStepSnapshotId,
     entries: entriesWithStats,
@@ -1194,15 +1225,23 @@ export async function readDiffFile({
   if (mode === "last-step" && !snapshotId) {
     throw new Error("last-step diff requires a fresh summary snapshot");
   }
-  const base =
+  const comparison =
     mode === "branch-main"
-      ? await resolveMainBase({
+      ? await resolveComparisonBase({
           root,
+          requested: params.base_branch,
           host,
           shQuote,
           runProcessWithCodeTimeout,
         })
       : undefined;
+  const base = comparison?.base;
+  if (comparison && !base) {
+    throw new Error(
+      "Default comparison branch was not found; select a comparison branch.",
+    );
+  }
+
   const lastStepRange =
     mode === "last-step"
       ? await resolveLastStepRange({

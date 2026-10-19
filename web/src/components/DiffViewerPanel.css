@@ -242,7 +242,7 @@
   min-height: 0;
   margin-top: 10px;
   overflow: auto;
-  border: 1px solid var(--border);
+  border: 1px solid var(--viewer-border);
   border-radius: 8px;
   background: var(--terminal-bg);
 }
@@ -705,4 +705,28 @@
   .diff-view-toggle {
     display: none;
   }
+}
+
+.diff-base-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.diff-base-selector select {
+  min-width: 0;
+  flex: 1;
+  max-width: 100%;
+  color: inherit;
+  background: var(--viewer-content-bg);
+  border: 1px solid var(--viewer-border);
+  border-radius: 4px;
+  padding: 4px;
+}
+
+.diff-scope-toggle button {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

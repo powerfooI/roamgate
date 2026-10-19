@@ -236,3 +236,64 @@ describe("shared git diff summaries", () => {
     expect(readGitDiffSummary(key).summary).toBe(freshSummary);
   });
 });
+
+test("branch summaries partition in-flight requests and preserve the base on queued refreshes", async () => {
+  const calls: Array<{
+    base: unknown;
+    resolve: (value: GitDiffSummary) => void;
+  }> = [];
+  const client: ConnectionClient = {
+    connectionId: "comparison-summary",
+    generation: 1,
+    serverRuntimeGeneration: 1,
+    isCurrent: () => true,
+    acceptsServerGeneration: () => true,
+    call: (_method, params) =>
+      new Promise<GitDiffSummary>((resolve) => {
+        calls.push({ base: params?.base_branch, resolve });
+      }),
+  };
+  const first = refreshGitDiffSummary(
+    client,
+    "workspace",
+    "branch-main",
+    "repo",
+    { baseBranch: "refs/heads/main" },
+  );
+  const queued = refreshGitDiffSummary(
+    client,
+    "workspace",
+    "branch-main",
+    "repo",
+    { baseBranch: "refs/heads/main", afterCurrent: true },
+  );
+  const second = refreshGitDiffSummary(
+    client,
+    "workspace",
+    "branch-main",
+    "repo",
+    { baseBranch: "refs/heads/develop" },
+  );
+  expect(calls.map((call) => call.base)).toEqual([
+    "refs/heads/main",
+    "refs/heads/develop",
+  ]);
+  calls[1].resolve({ ...summary("workspace"), base: "refs/heads/develop" });
+  await second;
+  calls[0].resolve({ ...summary("workspace"), base: "refs/heads/main" });
+  await first;
+  await Promise.resolve();
+  expect(calls[2].base).toBe("refs/heads/main");
+  calls[2].resolve({ ...summary("workspace"), base: "refs/heads/main" });
+  await queued;
+  const key = gitDiffSummaryKey(
+    client,
+    "workspace",
+    "branch-main",
+    "repo",
+    "refs/heads/develop",
+  );
+  expect(readGitDiffSummary(key).summary?.base).toBe("refs/heads/develop");
+  retireGitDiffSummaryResource(client, "repo");
+  expect(readGitDiffSummary(key).summary).toBeNull();
+});

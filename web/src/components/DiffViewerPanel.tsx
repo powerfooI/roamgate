@@ -149,6 +149,26 @@ const MAX_DIFF_CACHE_CONTEXTS = 8;
 const MAX_TOTAL_CACHED_DIFF_BYTES = 24 * 1024 * 1024;
 const DIFF_SCOPE_KEY = "diffViewerScope";
 
+export function comparisonBranchStorageKey(
+  connectionId: string,
+  resourceKey: string,
+) {
+  return connectionStorageKey(connectionId, `diffViewerBase:${resourceKey}`);
+}
+
+export function comparisonResourceKey(
+  resourceKey: string | undefined,
+  baseBranch: string,
+) {
+  return baseBranch
+    ? JSON.stringify(["diff-comparison", resourceKey, baseBranch])
+    : resourceKey;
+}
+
+export function comparisonBranchLabel(ref: string) {
+  return ref.replace(/^refs\/(heads|remotes)\//, "");
+}
+
 function diffScopeStorageKey(connectionId: string, resourceKey?: string) {
   return connectionStorageKey(
     connectionId,
@@ -375,6 +395,7 @@ function diffFileRequestKey(
   revision: number,
   snapshotId?: string,
   automatic = false,
+  baseBranch?: string,
 ) {
   return connectionClientScopeKey(
     client,
@@ -385,6 +406,7 @@ function diffFileRequestKey(
     revision,
     snapshotId ?? "live",
     automatic,
+    baseBranch,
   );
 }
 
@@ -455,7 +477,26 @@ export function clearDiffViewerResourceCache(
       diffSelectionStorageKey(client.connectionId, resourceKey, scope),
     );
   }
+  for (const key of diffCache.keys()) {
+    try {
+      const parts = JSON.parse(key) as unknown[];
+      if (
+        parts[0] !== client.connectionId ||
+        parts[1] !== client.generation ||
+        typeof parts[3] !== "string"
+      )
+        continue;
+      const resource = JSON.parse(parts[3]) as unknown[];
+      if (resource[0] === "diff-comparison" && resource[1] === resourceKey)
+        retireDiffCache(key);
+    } catch {
+      /* Ordinary resource keys are not JSON. */
+    }
+  }
   retireGitDiffSummaryResource(client, resourceKey);
+  storage.removeItem(
+    comparisonBranchStorageKey(client.connectionId, resourceKey),
+  );
   storage.removeItem(diffScopeStorageKey(client.connectionId, resourceKey));
   diffPrefetches.delete(
     connectionClientScopeKey(client, "diff-prefetch", resourceKey),
@@ -553,6 +594,7 @@ function requestDiffFile(
   wanted: () => boolean = () => true,
   priority = true,
   automatic = false,
+  baseBranch?: string,
 ) {
   if (!client.isCurrent()) {
     return Promise.reject(new Error("connection changed during diff request"));
@@ -570,6 +612,7 @@ function requestDiffFile(
     revision,
     snapshotId,
     automatic,
+    baseBranch,
   );
   const running = diffFileRequests.get(requestKey);
   if (running) {
@@ -586,6 +629,9 @@ function requestDiffFile(
         kind: entry.kind,
         snapshot_id: snapshotId,
         automatic,
+        ...(scope === "branch-main" && baseBranch
+          ? { base_branch: baseBranch }
+          : {}),
       }) as Promise<GitDiffFile>,
     () => client.isCurrent() && wanted(),
     priority,
@@ -657,6 +703,7 @@ export function prefetchDiffFilesInBatches(
           () => diffCacheRevision(key) === revision,
           false,
           true,
+          cached.summary?.base,
         );
         if (!client.isCurrent() || diffCacheRevision(key) !== revision) return;
         cacheDiffFile(
@@ -904,7 +951,53 @@ export function DiffViewerPanel({
     ? workspaces.find((w) => w.workspace_id === workspaceId)
     : focusedWorkspace;
   const cacheWorkspaceId = workspace?.workspace_id;
-  const cacheResourceKey = resourceKey ?? cacheWorkspaceId;
+  const repositoryResourceKey = resourceKey ?? cacheWorkspaceId;
+  const preferenceKey = connectionStorageKey(
+    connectionClient.connectionId,
+    repositoryResourceKey ?? "focused",
+  );
+  const [scopePreference, setScopePreference] = useState<{
+    key: string;
+    value: DiffScope;
+  } | null>(null);
+  const diffScope =
+    scopePreference?.key === preferenceKey
+      ? scopePreference.value
+      : loadDiffScope(connectionClient.connectionId, repositoryResourceKey);
+  const setDiffScope = useCallback(
+    (value: DiffScope) => setScopePreference({ key: preferenceKey, value }),
+    [preferenceKey],
+  );
+  const [basePreference, setBasePreference] = useState<{
+    key: string;
+    value: string;
+  } | null>(null);
+  const baseBranch =
+    basePreference?.key === preferenceKey
+      ? basePreference.value
+      : repositoryResourceKey
+        ? (roamgateLocalStorage.getItem(
+            comparisonBranchStorageKey(
+              connectionClient.connectionId,
+              repositoryResourceKey,
+            ),
+          ) ?? "")
+        : "";
+  const cacheResourceKey =
+    diffScope === "branch-main"
+      ? comparisonResourceKey(repositoryResourceKey, baseBranch)
+      : repositoryResourceKey;
+  const setBaseBranch = (value: string) => {
+    if (repositoryResourceKey)
+      roamgateLocalStorage.setItem(
+        comparisonBranchStorageKey(
+          connectionClient.connectionId,
+          repositoryResourceKey,
+        ),
+        value,
+      );
+    setBasePreference({ key: preferenceKey, value });
+  };
   const completionKey = lastStepCompletionKey(
     connectionClient.connectionId,
     cacheWorkspaceId,
@@ -927,20 +1020,18 @@ export function DiffViewerPanel({
     key: completionKey,
     revision: completionRevision,
   });
-  const [diffScope, setDiffScope] = useState<DiffScope>(() =>
-    loadDiffScope(connectionClient.connectionId, cacheResourceKey),
-  );
   const sharedSummaryState = useGitDiffSummaryState(
     connectionClient,
     cacheWorkspaceId,
     diffScope,
-    cacheResourceKey,
+    repositoryResourceKey,
+    baseBranch || undefined,
   );
   const [cache, setCache] = useState<DiffCache>(() =>
     readDiffCache(
       connectionClient,
       cacheWorkspaceId,
-      loadDiffScope(connectionClient.connectionId, cacheResourceKey),
+      diffScope,
       cacheResourceKey,
     ),
   );
@@ -1072,10 +1163,13 @@ export function DiffViewerPanel({
     setLoadingKeys([]);
     if (previousFilesRef.current.context === runtimeContextKey) {
       previousFilesRef.current.summary = summary;
-      previousFilesRef.current.files = boundedDiffFiles(
-        { ...previousFilesRef.current.files, ...cache.files },
-        selected,
-      );
+      previousFilesRef.current.files =
+        cache.summary?.base === summary.base
+          ? boundedDiffFiles(
+              { ...previousFilesRef.current.files, ...cache.files },
+              selected,
+            )
+          : {};
     }
     updateCache({
       summary,
@@ -1196,8 +1290,8 @@ export function DiffViewerPanel({
         connectionClient,
         workspaceId,
         scope,
-        cacheResourceKey,
-        { afterCurrent },
+        repositoryResourceKey,
+        { afterCurrent, baseBranch: baseBranch || undefined },
       );
     } catch (e) {
       if (isCurrentContext(workspaceId, scope)) {
@@ -1225,7 +1319,7 @@ export function DiffViewerPanel({
         connectionClient,
         cacheWorkspaceId,
         "last-step",
-        cacheResourceKey,
+        repositoryResourceKey,
       );
       void loadSummary(cache.selected, false, true);
       return;
@@ -1235,14 +1329,14 @@ export function DiffViewerPanel({
         connectionClient,
         cacheWorkspaceId,
         "last-step",
-        cacheResourceKey,
+        repositoryResourceKey,
       ),
     );
     retireGitDiffSummary(
       connectionClient,
       cacheWorkspaceId,
       "last-step",
-      cacheResourceKey,
+      repositoryResourceKey,
     );
     // Completion notifications are not debounced with pane-list refreshes, so
     // rapid quiet-to-active edges cannot leave the prior step cached forever.
@@ -1348,6 +1442,7 @@ export function DiffViewerPanel({
         wanted,
         select,
         automatic,
+        cache.summary?.base,
       );
       if (
         !isCurrentContext(workspaceId, scope) ||
@@ -1491,7 +1586,7 @@ export function DiffViewerPanel({
       selectWorkingEntry: (target) => selectWorkingEntries([target]),
       selectWorkingEntries,
     };
-  }, []);
+  }, [setDiffScope]);
 
   const selectedDiffEntryKey = cache.selected
     ? diffEntryKey(cache.selected)
@@ -1502,10 +1597,10 @@ export function DiffViewerPanel({
 
   useEffect(() => {
     roamgateLocalStorage.setItem(
-      diffScopeStorageKey(connectionClient.connectionId, cacheResourceKey),
+      diffScopeStorageKey(connectionClient.connectionId, repositoryResourceKey),
       diffScope,
     );
-  }, [cacheResourceKey, connectionClient.connectionId, diffScope]);
+  }, [repositoryResourceKey, connectionClient.connectionId, diffScope]);
 
   useEffect(() => {
     const cached = readDiffCache(
@@ -1935,6 +2030,17 @@ export function DiffViewerPanel({
     return items;
   };
 
+  const resolvedBase =
+    diffScope === "branch-main" ? sharedSummaryState.summary?.base : undefined;
+  const baseLabel = comparisonBranchLabel(baseBranch || resolvedBase || "");
+  const comparisonLabel = baseLabel ? `Against ${baseLabel}` : "Against branch";
+  const baseBranches = [
+    ...new Set([
+      ...(sharedSummaryState.summary?.base_branches ?? []),
+      ...(baseBranch ? [baseBranch] : []),
+    ]),
+  ];
+
   return (
     <aside className="diff-viewer-side" aria-label="Diff Viewer">
       <div className="diff-panel-toolbar">
@@ -1974,14 +2080,14 @@ export function DiffViewerPanel({
             className={diffScope === "branch-main" ? "is-active" : ""}
             onClick={() => setDiffScope("branch-main")}
             aria-pressed={diffScope === "branch-main"}
-            aria-label="Against main"
-            title="Against main"
+            aria-label={comparisonLabel}
+            title={comparisonLabel}
           >
             <span className="diff-scope-label-full" aria-hidden="true">
-              Against main
+              {comparisonLabel}
             </span>
             <span className="diff-scope-label-short" aria-hidden="true">
-              Main
+              {baseLabel || "Branch"}
             </span>
           </button>
         </div>
@@ -2009,6 +2115,28 @@ export function DiffViewerPanel({
         </div>
       </div>
 
+      {diffScope === "branch-main" ? (
+        <label className="diff-base-selector">
+          <span>Compare against</span>
+          <select
+            aria-label="Comparison branch"
+            value={baseBranch}
+            onChange={(event) => setBaseBranch(event.target.value)}
+          >
+            <option value="">
+              {resolvedBase && !baseBranch
+                ? `Automatic (${comparisonBranchLabel(resolvedBase)})`
+                : "Automatic"}
+            </option>
+            {baseBranches.map((branch) => (
+              <option key={branch} value={branch}>
+                {comparisonBranchLabel(branch)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
       {!workspace ? (
         <p className="modal-error">No workspace is focused.</p>
       ) : null}
@@ -2031,7 +2159,10 @@ export function DiffViewerPanel({
               {diffScope === "last-step" &&
               cache.summary?.baseline_available === false
                 ? "No completed agent step yet"
-                : "No changes"}
+                : diffScope === "branch-main" &&
+                    cache.summary?.baseline_available === false
+                  ? "Choose a comparison branch"
+                  : "No changes"}
             </span>
           </div>
         )}

@@ -166,8 +166,11 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
 
 ## Diff Viewer
 
-- Compare **Working tree**, **Against main**, or **Last step** (the latest
+- Compare **Working tree**, **Against branch**, or **Last step** (the latest
   completed agent turn; not proof of which agent made the change).
+  Branch comparisons detect the recorded repository default (including `master`
+  and custom names), and let you choose a comparison branch per repository.
+  Inspection uses local refs only and never fetches from a remote.
 - Side-by-side or unified view, search, syntax highlighting, and image previews.
   Generated and very large files start collapsed.
 - Stage, unstage, mark resolved, discard, or delete from file/folder menus.

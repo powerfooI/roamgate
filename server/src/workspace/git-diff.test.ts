@@ -63,6 +63,142 @@ function baselineStore() {
   return createLastStepBaselineStore({ shQuote, runProcessWithCodeTimeout });
 }
 
+describe("branch comparison with real Git", () => {
+  test("missing defaults expose choices, including an empty unborn repository", async () => {
+    const root = await initRepository();
+    const args = {
+      workspaceId: "workspace",
+      workspace: {},
+      root,
+      shQuote,
+      runProcessWithCodeTimeout,
+    };
+    try {
+      await git(root, "config", "init.defaultBranch", "unavailable");
+      const empty = await readDiffSummary({
+        ...args,
+        params: { mode: "branch-main" },
+      });
+      expect(empty.base_branches).toEqual([]);
+      expect(empty.baseline_available).toBe(false);
+      await git(root, "symbolic-ref", "HEAD", "refs/heads/custom");
+      await writeFile(join(root, "file.txt"), "initial\n");
+      await git(root, "add", ".");
+      await git(root, "commit", "-m", "initial");
+      const missing = await readDiffSummary({
+        ...args,
+        params: { mode: "branch-main" },
+      });
+      expect(missing.base_branches).toEqual(["refs/heads/custom"]);
+      expect(missing.baseline_available).toBe(false);
+      expect(missing.entries).toEqual([]);
+      const explicit = await readDiffSummary({
+        ...args,
+        params: { mode: "branch-main", base_branch: "custom" },
+      });
+      expect(explicit.base).toBe("refs/heads/custom");
+      await git(root, "update-ref", "refs/remotes/origin/custom", "HEAD");
+      await git(
+        root,
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/custom",
+      );
+      const detected = await readDiffSummary({
+        ...args,
+        params: { mode: "branch-main" },
+      });
+      expect(detected.base).toBe("refs/heads/custom");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("resolves comparison metadata through SSH without fetching", async () => {
+    const commands: string[][] = [];
+    const summary = await readDiffSummary({
+      workspaceId: "workspace",
+      workspace: {},
+      root: "/remote/repo's root",
+      host: "example.test",
+      shQuote,
+      params: { mode: "branch-main" },
+      runProcessWithCodeTimeout: async (argv) => {
+        commands.push(argv);
+        return {
+          code: 0,
+          stderr: "",
+          stdout: "refs/heads/custom\t\n\n--diff-base-config--\n",
+        };
+      },
+    });
+    expect(summary.base_branches).toEqual(["refs/heads/custom"]);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.[0]).toBe("ssh");
+    expect(commands[0]?.join(" ")).not.toContain("fetch");
+  });
+
+  for (const defaultBranch of ["main", "master", "trunk"]) {
+    test(`summary and file use ${defaultBranch} and merge-base semantics`, async () => {
+      const root = await initRepository();
+      const args = {
+        workspaceId: "workspace",
+        workspace: {},
+        root,
+        shQuote,
+        runProcessWithCodeTimeout,
+      };
+      try {
+        await git(root, "symbolic-ref", "HEAD", `refs/heads/${defaultBranch}`);
+        await git(root, "config", "init.defaultBranch", defaultBranch);
+        await writeFile(join(root, "file.txt"), "initial\n");
+        await git(root, "add", ".");
+        await git(root, "commit", "-m", "initial");
+        await git(root, "checkout", "-b", "feature");
+        await writeFile(join(root, "file.txt"), "feature\n");
+        await git(root, "commit", "-am", "feature");
+        await git(root, "checkout", defaultBranch);
+        await writeFile(join(root, "base-only.txt"), "base only\n");
+        await git(root, "add", ".");
+        await git(root, "commit", "-m", "base moves ahead");
+        await git(root, "checkout", "feature");
+        const before = await git(root, "show-ref");
+        const summary = await readDiffSummary({
+          ...args,
+          params: { mode: "branch-main" },
+        });
+        expect(summary.base).toBe(`refs/heads/${defaultBranch}`);
+        expect(summary.entries.map((entry) => entry.path)).toEqual([
+          "file.txt",
+        ]);
+        const file = await readDiffFile({
+          ...args,
+          params: {
+            mode: "branch-main",
+            base_branch: summary.base,
+            path: "file.txt",
+          },
+        });
+        expect(file.diff).toContain("+feature");
+        const explicit = await readDiffSummary({
+          ...args,
+          params: { mode: "branch-main", base_branch: "feature" },
+        });
+        expect(explicit.entries).toEqual([]);
+        await expect(
+          readDiffSummary({
+            ...args,
+            params: { mode: "branch-main", base_branch: "missing" },
+          }),
+        ).rejects.toThrow("Comparison branch was not found");
+        expect(await git(root, "show-ref")).toBe(before);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 describe("git diff summary parsing", () => {
   test("labels git statuses", () => {
     expect(statusLabel("A", "staged")).toBe("added");
