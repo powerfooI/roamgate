@@ -264,7 +264,7 @@
   /* Give the terminal the header's rows while the phone keyboard is up for
      terminal input; only the safe-area inset stays. See the pane switcher. */
   &.keyboard-open .app:has(.xterm-helper-textarea:focus) .topbar,
-  .app:has(.terminal-composer-input:focus) .topbar {
+  &.keyboard-open .app:has(.terminal-composer-input:focus) .topbar {
     min-height: 0;
     padding-block: env(safe-area-inset-top, 0px) 0;
     border-bottom: none;
@@ -272,7 +272,7 @@
   }
 
   &.keyboard-open .app:has(.xterm-helper-textarea:focus) .topbar > *,
-  .app:has(.terminal-composer-input:focus) .topbar > * {
+  &.keyboard-open .app:has(.terminal-composer-input:focus) .topbar > * {
     display: none;
   }
 }

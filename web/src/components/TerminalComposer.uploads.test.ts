@@ -618,4 +618,44 @@ async function registerDomTests() {
     expect(drafts.readTerminalComposerDraft(h.key)).toBe("left /B.png  right");
     expect(h.errors).toEqual(["Upload failed"]);
   });
+
+  test("inverse UI scale min-height and empty placeholders do not falsely expand or retain inline height across mode switches", async () => {
+    const h = await mount("", 0, 0, true);
+    const editor = h.textarea();
+    editor.style.lineHeight = "22px";
+    editor.style.padding = "12px";
+    // Simulate --ui-scale < 1 where CSS min-height is 60px (> 57px threshold)
+    // unless minHeight is temporarily zeroed during content measurement.
+    Object.defineProperty(editor, "scrollHeight", {
+      configurable: true,
+      get: () => {
+        if (editor.value.includes("\n")) return 68;
+        return editor.style.minHeight === "0px" ? 46 : 60;
+      },
+    });
+    await h.select(0);
+    expect(expanded()).toBe(false);
+    expect(editor.style.height).toBe("");
+
+    await h.edit("single line", 11);
+    expect(expanded()).toBe(false);
+    expect(editor.style.height).toBe("46px");
+
+    await h.edit("first\nsecond", 12);
+    expect(expanded()).toBe(true);
+    expect(editor.style.height).toBe("68px");
+
+    await h.setMode("direct");
+    expect(expanded()).toBe(false);
+    expect(editor.style.height).toBe("");
+
+    await h.setMode("composer");
+    expect(expanded()).toBe(false);
+    await h.select(12);
+    expect(expanded()).toBe(true);
+    expect(editor.style.height).toBe("68px");
+
+    await h.edit("", 0);
+    expect(editor.style.height).toBe("");
+  });
 }

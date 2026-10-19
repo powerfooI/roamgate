@@ -675,21 +675,24 @@
 
   /* While the phone keyboard is up for terminal input, the switcher folds to
      one line so the terminal keeps the rows an agent's prompt needs. The
-     focused Composer is the fallback signal for browsers without keyboard
-     geometry; the topbar and tab bar collapse on the same condition. */
+     topbar and tab bar collapse on the same condition across both input modes. */
   &.keyboard-open .app:has(.xterm-helper-textarea:focus) .pane-switcher,
-  .app:has(.terminal-composer-input:focus) .pane-switcher {
+  &.keyboard-open .app:has(.terminal-composer-input:focus) .pane-switcher {
     min-height: 30px;
     padding-block: 2px;
   }
 
   &.keyboard-open .app:has(.xterm-helper-textarea:focus) .pane-switcher-button,
-  .app:has(.terminal-composer-input:focus) .pane-switcher-button {
+  &.keyboard-open
+    .app:has(.terminal-composer-input:focus)
+    .pane-switcher-button {
     height: 26px;
   }
 
   &.keyboard-open .app:has(.xterm-helper-textarea:focus) .pane-switcher-label,
-  .app:has(.terminal-composer-input:focus) .pane-switcher-label {
+  &.keyboard-open
+    .app:has(.terminal-composer-input:focus)
+    .pane-switcher-label {
     flex-direction: row;
     align-items: baseline;
     justify-content: center;

@@ -153,9 +153,7 @@
 
 /* Keep mobile styling in sync with the saved layout and URL override. */
 :where(html[data-layout="mobile"]) {
-  .keyboard-open .terminal-mobile-keys,
   .keyboard-open .terminal-mobile-side-shortcuts,
-  .app:has(.terminal-composer-input:focus) .terminal-mobile-keys,
   .app:has(.terminal-composer-input:focus) .terminal-mobile-side-shortcuts {
     visibility: hidden;
     opacity: 0;

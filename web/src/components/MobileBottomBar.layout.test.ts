@@ -164,3 +164,49 @@ test("More remains anchored above the Message rail with keyboard and safe-area c
     ),
   ).toContain("padding-right: 0;");
 });
+
+test("Composer focus overrides closed bar muted styling and coordinates shortcut capsule and header collapse", async () => {
+  const topbar = await Bun.file(
+    new URL("../styles/layout/topbar.css", import.meta.url),
+  ).text();
+  const tabbar = await Bun.file(
+    new URL("./TabBar.css", import.meta.url),
+  ).text();
+  const app = await Bun.file(
+    new URL("../styles/layout/app.css", import.meta.url),
+  ).text();
+
+  const focusRule = rule(
+    composer,
+    ".terminal-composer .terminal-composer-input:focus",
+  );
+  expect(focusRule).toContain(
+    "border-color: color-mix(in srgb, var(--accent) 70%, var(--border));",
+  );
+  expect(focusRule).toContain("color: var(--text-strong);");
+
+  // Upper-right shortcut capsule stays available when Composer shortcuts are
+  // closed or covered by the command picker, even when keyboard or Composer is focused.
+  expect(terminal).not.toContain(".keyboard-open .terminal-mobile-keys");
+  expect(terminal).not.toContain(
+    ".app:has(.terminal-composer-input:focus) .terminal-mobile-keys",
+  );
+  expect(terminal).toContain(".keyboard-open .terminal-mobile-side-shortcuts");
+  expect(terminal).toContain(
+    ".app:has(.terminal-composer-input:focus) .terminal-mobile-side-shortcuts",
+  );
+
+  // Header, tabbar, and pane-switcher collapse on .keyboard-open in both Direct and Composer modes.
+  expect(topbar).toContain(
+    "&.keyboard-open .app:has(.terminal-composer-input:focus) .topbar",
+  );
+  expect(topbar).toContain(
+    "&.keyboard-open .app:has(.terminal-composer-input:focus) .topbar > *",
+  );
+  expect(tabbar).toContain(
+    "&.keyboard-open .app:has(.terminal-composer-input:focus) .tabbar",
+  );
+  expect(app).toContain(
+    "&.keyboard-open .app:has(.terminal-composer-input:focus) .pane-switcher",
+  );
+});

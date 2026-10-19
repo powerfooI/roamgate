@@ -33,9 +33,10 @@
     overscroll-behavior: contain;
   }
 
-  .terminal-composer-input:focus {
+  .terminal-composer .terminal-composer-input:focus {
     outline: none;
     border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+    color: var(--text-strong);
   }
 
   .terminal-composer [hidden] {

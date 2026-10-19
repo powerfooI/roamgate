@@ -59,6 +59,13 @@ export type { TerminalInputMode } from "../terminalInputMode";
 const SHORTCUTS_OPEN_STORAGE_KEY = "terminalComposerShortcutsOpen.v1";
 let unsavedShortcutsOpen: boolean | undefined;
 
+export function readTerminalComposerShortcutsOpen(): boolean {
+  return (
+    unsavedShortcutsOpen ??
+    roamgateLocalStorage.getItem(SHORTCUTS_OPEN_STORAGE_KEY) !== "false"
+  );
+}
+
 /**
  * Bottom-docked mobile terminal composer. A plain textarea owns all editing
  * (IME, dictation, selection, autocorrect, multiline paste) and text only
@@ -89,6 +96,7 @@ export function TerminalComposer({
   shortcutRows,
   onRunShortcut,
   shortcutDisabledReason,
+  onShortcutsVisibleChange,
   onClose,
   onSubmit,
   onUploadImage,
@@ -110,6 +118,7 @@ export function TerminalComposer({
   shortcutRows: (MobileTerminalShortcut | null)[][];
   onRunShortcut: (shortcut: MobileTerminalShortcut) => void;
   shortcutDisabledReason?: (shortcut: MobileTerminalShortcut) => string | null;
+  onShortcutsVisibleChange?: (visible: boolean) => void;
   onClose: () => void;
   onSubmit: (text: string, submit: boolean) => Promise<void>;
   onUploadImage: (file: File) => Promise<string>;
@@ -133,9 +142,7 @@ export function TerminalComposer({
   const [toolPointerPending, setToolPointerPending] = useState(false);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(
-    () =>
-      unsavedShortcutsOpen ??
-      roamgateLocalStorage.getItem(SHORTCUTS_OPEN_STORAGE_KEY) !== "false",
+    readTerminalComposerShortcutsOpen,
   );
   useEffect(
     () =>
@@ -193,47 +200,68 @@ export function TerminalComposer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composingRef = useRef(false);
+  const temporaryComposerRef = useRef(false);
 
   useEffect(() => {
     if (open) return;
+    temporaryComposerRef.current = false;
     textareaRef.current?.blur();
     setPickerMode(null);
     setReplacement(null);
   }, [open]);
 
   useEffect(() => {
+    let pending = false;
+    let releaseTimer: ReturnType<typeof setTimeout> | undefined;
     const blurOutsideEditor = (event: PointerEvent) => {
       const textarea = textareaRef.current;
       // xterm prevents native focus transfer on terminal touches. End editing
       // explicitly in capture, but never for caret drags, scrolling, IME, or
       // composer tools. Tools keep their DOM/geometry through blur and click;
       // native file pickers may blur without an async completion refocusing.
-      const inside = composerRef.current?.contains(event.target as Node);
-      if (!inside) setToolPointerPending(false);
-      else if (event.target !== textarea) setToolPointerPending(true);
+      const shortcutControl =
+        event.target instanceof Element &&
+        Boolean(
+          event.target.closest(
+            ".terminal-mobile-keys, .terminal-mobile-side-shortcuts",
+          ),
+        );
+      const inside =
+        composerRef.current?.contains(event.target as Node) || shortcutControl;
+      clearTimeout(releaseTimer);
+      if (!inside) {
+        pending = false;
+        setToolPointerPending(false);
+      } else if (event.target !== textarea) {
+        pending = true;
+        setToolPointerPending(true);
+      }
       // Submit must not depend on keyboard geometry: an absent/stale signal
       // would blur in capture, restore the header and move the release target.
-      const submitting =
+      const keepEditorFocus = Boolean(
         event.target instanceof Element &&
-        event.target.closest(".terminal-composer-submit");
+          event.target.closest(".terminal-composer-submit"),
+      );
       if (
         document.activeElement === textarea &&
         (!inside ||
           (event.pointerType === "touch" &&
             event.target !== textarea &&
-            !submitting &&
+            !keepEditorFocus &&
             !document.documentElement.classList.contains("keyboard-open")))
       )
         textarea?.blur();
     };
-    let releaseTimer: ReturnType<typeof setTimeout> | undefined;
     const release = () => {
+      pending = false;
       clearTimeout(releaseTimer);
       setToolPointerPending(false);
     };
     // Native touch blur can precede click. Keep the row's geometry until the
     // pending tool has received that click (including opening a file picker).
     const pointerUp = () => {
+      if (!pending) return;
+      clearTimeout(releaseTimer);
       releaseTimer = setTimeout(release, 500);
     };
     document.addEventListener("pointerdown", blurOutsideEditor, true);
@@ -250,8 +278,10 @@ export function TerminalComposer({
   }, []);
 
   useEffect(() => {
-    if (!editorFocused && !toolPointerPending) setExpanded(false);
-  }, [editorFocused, toolPointerPending]);
+    if (mode !== "composer") temporaryComposerRef.current = false;
+    if ((!editorFocused && !toolPointerPending) || !open || mode !== "composer")
+      setExpanded(false);
+  }, [editorFocused, mode, open, toolPointerPending]);
 
   // Load the incoming pane's draft and subscribe to updates from async work
   // that may outlive an earlier composer mount for this pane.
@@ -275,18 +305,29 @@ export function TerminalComposer({
   // unfocused preview to one row; scrollHeight still reports its full content.
   useEffect(() => {
     const textarea = textareaRef.current;
-    if (!textarea || mode !== "composer") return;
+    if (!textarea) return;
+    if (mode !== "composer") {
+      textarea.style.height = "";
+      return;
+    }
     const measure = () => {
+      if (!text) {
+        textarea.style.height = "";
+        return;
+      }
+      const previousMinHeight = textarea.style.minHeight;
+      textarea.style.minHeight = "0px";
       textarea.style.height = "0px";
-      const height = textarea.scrollHeight;
-      textarea.style.height = `${height}px`;
+      const contentHeight = textarea.scrollHeight;
+      textarea.style.minHeight = previousMinHeight;
+      textarea.style.height = `${contentHeight}px`;
       if (!editorFocused || !open || expanded) return;
       const style = window.getComputedStyle(textarea);
       const oneRow =
         Number.parseFloat(style.lineHeight) +
         Number.parseFloat(style.paddingTop) +
         Number.parseFloat(style.paddingBottom);
-      if (/\r|\n/.test(text) || height > oneRow + 1) setExpanded(true);
+      if (/\r|\n/.test(text) || contentHeight > oneRow + 1) setExpanded(true);
     };
     measure();
     // Keyboard/viewport rotation and UI scaling can introduce a soft wrap
@@ -319,16 +360,19 @@ export function TerminalComposer({
     setText(textarea.value);
     setReplacement(null);
     if (pickerMode !== "browse") {
-      setPickerMode(
+      const nextPickerMode =
         composerCommandPrefix(
           textarea.value,
           textarea.selectionStart,
           textarea.selectionEnd,
         ) !== null
           ? "inline"
-          : null,
-      );
+          : null;
+      setPickerMode(nextPickerMode);
       setActiveCommand(0);
+      onShortcutsVisibleChange?.(
+        shortcutsOpen && !(nextPickerMode !== null && commands.length > 0),
+      );
     }
     writeTerminalComposerDraft(draftKey, textarea.value);
     writeTerminalComposerSelection(
@@ -589,6 +633,7 @@ export function TerminalComposer({
     setPickerMode(null);
     setReplacement(null);
     setActiveCommand(0);
+    onShortcutsVisibleChange?.(shortcutsOpen);
   };
 
   const commandEditorFocused = () =>
@@ -688,6 +733,9 @@ export function TerminalComposer({
     row.some((shortcut) => shortcut !== null),
   );
   const shortcutColumns = Math.max(1, ...shortcutRows.map((row) => row.length));
+  useEffect(() => {
+    onShortcutsVisibleChange?.(shortcutsOpen && !pickerOpen);
+  }, [onShortcutsVisibleChange, pickerOpen, shortcutsOpen]);
   const activateMessage = (remember: boolean) => {
     if (composingRef.current) return;
     flushSync(() => onModeChange("composer", remember));
@@ -757,12 +805,12 @@ export function TerminalComposer({
               type="button"
               className="terminal-composer-shortcuts-toggle"
               aria-label={
-                shortcutsOpen
+                shortcutsOpen && !pickerOpen
                   ? "Hide terminal shortcuts"
                   : "Show terminal shortcuts"
               }
               title={
-                shortcutsOpen
+                shortcutsOpen && !pickerOpen
                   ? "Hide terminal shortcuts"
                   : "Show terminal shortcuts"
               }
@@ -773,6 +821,7 @@ export function TerminalComposer({
                 const open = pickerOpen || !shortcutsOpen;
                 dismissCommands();
                 setShortcutsOpen(open);
+                onShortcutsVisibleChange?.(open);
                 try {
                   roamgateLocalStorage.setItem(
                     SHORTCUTS_OPEN_STORAGE_KEY,
@@ -806,10 +855,14 @@ export function TerminalComposer({
             onMouseDown={keepTextareaFocus}
             onClick={() => {
               flushSync(() => {
-                if (mode === "direct") onModeChange("composer");
+                if (mode === "direct") {
+                  temporaryComposerRef.current = true;
+                  onModeChange("composer");
+                }
                 setPickerMode("browse");
                 setActiveCommand(0);
                 setReplacement(null);
+                onShortcutsVisibleChange?.(false);
               });
               focusPickerWithoutKeyboard();
             }}
@@ -1040,7 +1093,10 @@ export function TerminalComposer({
             }
             onFocus={() => {
               setEditorFocused(true);
-              activateMessage(!open);
+              const remember =
+                !open || mode !== "composer" || temporaryComposerRef.current;
+              temporaryComposerRef.current = false;
+              activateMessage(remember);
             }}
             onBlur={() => {
               setEditorFocused(false);
@@ -1164,8 +1220,12 @@ export function TerminalComposer({
               if (composingRef.current || directDisabled) return;
               flushSync(() => {
                 dismissCommands();
+                setEditorFocused(false);
+                setToolPointerPending(false);
+                setExpanded(false);
                 onModeChange("direct", true);
               });
+              textareaRef.current?.blur?.();
               onFocusDirect();
             }}
           >
