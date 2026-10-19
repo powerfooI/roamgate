@@ -30,6 +30,8 @@ import type {
 import {
   ASSISTANT_MAX_CUSTOM_MODELS,
   ASSISTANT_MAX_MENTIONS,
+  ASSISTANT_MAX_THINKING,
+  ASSISTANT_MAX_THINKING_STEPS,
   ASSISTANT_MAX_WORKSPACES,
   isAssistantModelApi,
   isAssistantModelEndpoint,
@@ -68,6 +70,30 @@ const MAX_CONTEXT_BYTES = 1_000_000;
 const MAX_STATE_BYTES = 3_000_000;
 const jsonBytes = (value: unknown) =>
   Buffer.byteLength(JSON.stringify(value), "utf8");
+
+// Keep the newest reasoning: drop whole early steps, then cut the start of
+// the oldest step that still fits.
+export function boundAssistantThinking(steps: string[]) {
+  const kept: string[] = [];
+  let remaining = ASSISTANT_MAX_THINKING;
+  for (let index = steps.length - 1; index >= 0; index--) {
+    if (remaining <= 0 || kept.length >= ASSISTANT_MAX_THINKING_STEPS) break;
+    const step = steps[index]!;
+    let value = step.length > remaining ? step.slice(-remaining) : step;
+    // Do not start a cut step with the low half of a surrogate pair.
+    if (value !== step && /^[\uDC00-\uDFFF]/.test(value))
+      value = value.slice(1);
+    kept.unshift(value);
+    // A cut step fills the budget, even after dropping a half pair.
+    remaining = value === step ? remaining - value.length : 0;
+  }
+  const skipped = steps.length - kept.length;
+  return {
+    steps: kept,
+    skipped,
+    truncated: skipped > 0 || kept[0] !== steps[skipped],
+  };
+}
 const refKey = (ref: AssistantWorkspaceRef) =>
   `${ref.connection_id}\0${ref.workspace_id}`;
 const SESSION_ID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
@@ -654,11 +680,25 @@ export function createAssistantService(options: {
   }
   function boundMessages() {
     state.messages = state.messages.slice(-MAX_MESSAGES);
+    // Reasoning is display-only, so shed it from older turns before history.
+    let bytes = jsonBytes(state.messages);
+    for (const message of state.messages.slice(0, -1)) {
+      if (bytes <= MAX_CONTEXT_BYTES) break;
+      if (message.thinking === undefined) continue;
+      const { thinking, thinking_skipped, thinking_truncated } = message;
+      bytes -=
+        jsonBytes({ thinking, thinking_skipped, thinking_truncated }) - 1;
+      delete message.thinking;
+      delete message.thinking_skipped;
+      delete message.thinking_truncated;
+    }
+    // Track the size instead of serializing the transcript again per pair:
+    // removing [a, b] from the front drops both items and their commas.
     while (
       state.messages.length > (state.running ? 2 : 0) &&
-      jsonBytes(state.messages) > MAX_CONTEXT_BYTES
+      bytes > MAX_CONTEXT_BYTES
     )
-      state.messages.splice(0, 2);
+      bytes -= jsonBytes(state.messages.splice(0, 2)) - 1;
   }
   function updateSummary() {
     const existing = state.sessions!.find(
@@ -1618,6 +1658,19 @@ export function createAssistantService(options: {
           delta: (value) => {
             streamedText = (streamedText + value).slice(0, MAX_TEXT);
             updateText();
+          },
+          // The driver reports only changed reasoning, so no second dedupe.
+          thinking: (value) => {
+            const next = boundAssistantThinking(value);
+            delete draft.thinking;
+            delete draft.thinking_skipped;
+            delete draft.thinking_truncated;
+            if (next.steps.length) {
+              draft.thinking = next.steps;
+              if (next.skipped) draft.thinking_skipped = next.skipped;
+              if (next.truncated) draft.thinking_truncated = true;
+            }
+            publish();
           },
           message: (value) => {
             if (value)

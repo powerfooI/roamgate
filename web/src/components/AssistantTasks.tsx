@@ -18,6 +18,7 @@ import type { RangerTaskNotificationTarget } from "../taskNotifications";
 import { formatUiDateTime } from "../uiLocale";
 import { ActionCard, AssistantMessageActivity } from "./AssistantPanel";
 import { MarkdownPreview } from "./markdown";
+import { AssistantThinking } from "./AssistantThinking";
 import { ConfirmDialog } from "./ModalDialogs";
 import { ThemedSelect } from "./ThemedSelect";
 import "./AssistantTasks.css";
@@ -1074,6 +1075,20 @@ export function AssistantTasks({
                           {formatUiDateTime(message.sent_at)}
                         </time>
                       </div>
+                      {message.role === "assistant" &&
+                      message.thinking?.length ? (
+                        <AssistantThinking
+                          message={message}
+                          active={
+                            !message.text &&
+                            selectedRun.status === "running" &&
+                            message ===
+                              selectedRun.messages[
+                                selectedRun.messages.length - 1
+                              ]
+                          }
+                        />
+                      ) : null}
                       {message.role === "assistant" ? (
                         message.text ? (
                           <MarkdownPreview
@@ -1082,11 +1097,15 @@ export function AssistantTasks({
                             breaks
                             imageUrlResolver={() => null}
                           />
+                        ) : liveRun(selectedRun.status) ? (
+                          // The open reasoning block already reports progress.
+                          selectedRun.status === "running" &&
+                          message.thinking?.length ? null : (
+                            <span className="assistant-hint">Working...</span>
+                          )
                         ) : (
                           <span className="assistant-hint">
-                            {liveRun(selectedRun.status)
-                              ? "Working..."
-                              : "No response text was received."}
+                            No response text was received.
                           </span>
                         )
                       ) : (

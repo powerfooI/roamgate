@@ -22,11 +22,14 @@
   color: var(--text);
 }
 
+/* Size to the model name so the chevron sits beside it, shrinking only when
+   the row runs out of space. */
 .assistant-chat-model {
-  flex: 1 1 0;
+  flex: 0 1 auto;
 }
 
 .assistant-chat-effort {
+  flex-shrink: 0;
   max-width: 50%;
 }
 

@@ -21,6 +21,8 @@ import type {
 } from "../../../shared/assistant";
 import {
   ASSISTANT_MAX_CUSTOM_MODELS,
+  ASSISTANT_MAX_THINKING,
+  ASSISTANT_MAX_THINKING_STEPS,
   isAssistantSnapshot,
 } from "../../../shared/assistant";
 import {
@@ -28,7 +30,7 @@ import {
   AssistantRecoveryNotReadyError,
 } from "./context";
 import { type AssistantDriver, createPiDriver } from "./pi-driver";
-import { createAssistantService } from "./service";
+import { boundAssistantThinking, createAssistantService } from "./service";
 import type { PreparedAssistantAction } from "./actions";
 
 const workspace: AssistantWorkspace = {
@@ -3260,6 +3262,90 @@ describe("bridge-global assistant", () => {
     expect(
       JSON.parse(readFileSync(join(directory, "state.json"), "utf8")).entries,
     ).toEqual([]);
+  });
+
+  test("reasoning limits keep the newest steps and report what was dropped", () => {
+    expect(boundAssistantThinking([])).toEqual({
+      steps: [],
+      skipped: 0,
+      truncated: false,
+    });
+    expect(boundAssistantThinking(["plan", "check"])).toEqual({
+      steps: ["plan", "check"],
+      skipped: 0,
+      truncated: false,
+    });
+    const half = ASSISTANT_MAX_THINKING / 2;
+    // The oldest kept step loses its start; earlier steps are skipped.
+    expect(
+      boundAssistantThinking([
+        "first",
+        `${"a".repeat(half)}tail`,
+        "b".repeat(half),
+      ]),
+    ).toEqual({
+      steps: [`${"a".repeat(half - 4)}tail`, "b".repeat(half)],
+      skipped: 1,
+      truncated: true,
+    });
+    expect(
+      boundAssistantThinking(["early", "c".repeat(ASSISTANT_MAX_THINKING)]),
+    ).toEqual({
+      steps: ["c".repeat(ASSISTANT_MAX_THINKING)],
+      skipped: 1,
+      truncated: true,
+    });
+    // A cut through an emoji drops its orphaned half and fills the budget.
+    expect(
+      boundAssistantThinking([
+        "earlier",
+        `x\u{1F600}${"b".repeat(ASSISTANT_MAX_THINKING - 1)}`,
+      ]),
+    ).toEqual({
+      steps: ["b".repeat(ASSISTANT_MAX_THINKING - 1)],
+      skipped: 1,
+      truncated: true,
+    });
+    const many = Array.from(
+      { length: ASSISTANT_MAX_THINKING_STEPS + 2 },
+      (_, index) => String(index),
+    );
+    expect(boundAssistantThinking(many)).toEqual({
+      steps: many.slice(2),
+      skipped: 2,
+      truncated: true,
+    });
+  });
+
+  test("keeps bounded reasoning and sheds it from older turns before history", async () => {
+    const { service, snapshots } = setup({
+      run: async (input) => {
+        input.thinking?.(["early", "t".repeat(ASSISTANT_MAX_THINKING)]);
+        input.delta("a".repeat(32_000));
+        input.message("a".repeat(32_000));
+        return [];
+      },
+    });
+    await service.handle("configure", configured);
+    // Each turn holds about 48 KB, so 24 turns exceed the 1 MB message budget
+    // with reasoning and fit without it.
+    for (let turn = 0; turn < 24; turn++) {
+      await service.handle("send", { request_id: `r${turn}`, text: "Go" });
+      await until(() => snapshots.at(-1)?.running === false);
+    }
+    const { messages } = await service.snapshot();
+    expect(messages).toHaveLength(48);
+    expect(messages.at(-1)).toMatchObject({
+      thinking: ["t".repeat(ASSISTANT_MAX_THINKING)],
+      thinking_skipped: 1,
+      thinking_truncated: true,
+    });
+    expect(messages[1]).not.toHaveProperty("thinking");
+    expect(messages[1]).not.toHaveProperty("thinking_skipped");
+    expect(messages[1]).not.toHaveProperty("thinking_truncated");
+    expect(Buffer.byteLength(JSON.stringify(messages))).toBeLessThanOrEqual(
+      1_000_000,
+    );
   });
 
   test("persists the admitted run before execution and resumes its original model with fresh leases", async () => {

@@ -94,6 +94,8 @@ export type AssistantDriver = {
     recover?: boolean;
     checkpoint?(entries: unknown[]): void;
     replace?(text: string): void;
+    /** The turn's visible reasoning so far: one entry per model call that shared any. */
+    thinking?(steps: string[]): void;
     sources?(sources: AssistantSource[]): void;
     text: string;
     signal: AbortSignal;
@@ -877,6 +879,9 @@ export function createPiDriver(
         );
         let record = await submission.status(context);
         let lastText: string | undefined;
+        let lastThinking: string[] = [];
+        // Durable entries are immutable, so each one's reasoning is read once.
+        const entryThinking = new Map<number, string[]>();
         let partialText = "";
         const completed = new Set<number>();
         const sourceIds = new Set<string>();
@@ -899,6 +904,21 @@ export function createPiDriver(
                 .filter((part) => part.type === "text")
                 .map((part) => part.text)
                 .join("\n")
+            : "";
+        // Redacted reasoning only carries an opaque signature for the provider.
+        // Reasoning from a stopped or failed call stays: the user already saw it.
+        const assistantThinking = (
+          message: import("@earendil-works/pi-ai").Message,
+        ) =>
+          message.role === "assistant"
+            ? message.content
+                .flatMap((part) =>
+                  part.type === "thinking" && !part.redacted
+                    ? [part.thinking.trim()]
+                    : [],
+                )
+                .filter(Boolean)
+                .join("\n\n")
             : "";
         const render = async (
           view: import("@earendil-works/pi-durable").ConversationView,
@@ -945,6 +965,26 @@ export function createPiDriver(
             .filter(Boolean);
           const streamed = partial ? assistantText(partial) : "";
           const full = [...text, ...(streamed ? [streamed] : [])].join("\n\n");
+          const thinking = entries.flatMap((entry) => {
+            let steps = entryThinking.get(entry.id);
+            if (!steps) {
+              steps = (entry.model ?? [])
+                .map(assistantThinking)
+                .filter(Boolean);
+              entryThinking.set(entry.id, steps);
+            }
+            return steps;
+          });
+          const partialThinking = partial ? assistantThinking(partial) : "";
+          if (partialThinking) thinking.push(partialThinking);
+          // Cached steps compare by reference; only the streaming step grows.
+          if (
+            thinking.length !== lastThinking.length ||
+            thinking.some((step, index) => step !== lastThinking[index])
+          ) {
+            lastThinking = thinking;
+            input.thinking?.(thinking);
+          }
           if (input.replace) {
             if (full !== lastText) input.replace(full);
           } else {

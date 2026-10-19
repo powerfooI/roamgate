@@ -101,8 +101,10 @@ import {
 } from "../terminalEndpointPresentation";
 import {
   terminalFocusBlockedByOverlay,
+  terminalOutputFocusBlockedBySelection,
   terminalPointerShouldBlurInput,
   terminalTouchInputAction,
+  watchTerminalOverlayPointer,
 } from "../terminalFocus";
 import {
   uploadTerminalFile,
@@ -774,37 +776,47 @@ export function TerminalView({
   };
   const preparePathInsertionRef = useRef(preparePathInsertion);
   preparePathInsertionRef.current = preparePathInsertion;
-  const focusTerminalSoon = useCallback(() => {
-    if (
-      !isActivePaneRef.current ||
-      composerEditingRef.current ||
-      touchSelectionRef.current?.active === true
-    )
-      return;
-    if (shouldAvoidVirtualKeyboard()) return;
-    requestAnimationFrame(() => {
-      window.setTimeout(() => {
-        if (
-          !connectionClient.isCurrent() ||
-          !isActivePaneRef.current ||
-          composerEditingRef.current ||
-          touchSelectionRef.current?.active === true ||
-          shouldAvoidVirtualKeyboard()
-        )
-          return;
-        const term = termRef.current;
-        const active = document.activeElement;
-        const activeElement = active instanceof HTMLElement ? active : null;
-        const activeIsTerminalInput = !!activeElement?.closest(".xterm");
-        if (!term || (isEditableElement(active) && !activeIsTerminalInput))
-          return;
-        // Streaming frames must not steal focus from an open popover, dialog,
-        // or menu: moving focus out of an overlay dismisses it.
-        if (terminalFocusBlockedByOverlay(activeElement, document)) return;
-        term.focus();
-      }, 0);
-    });
-  }, [connectionClient]);
+  // Output frames must not clear text the user is selecting in an overlay;
+  // activating a pane always reclaims keyboard focus.
+  const focusTerminalSoon = useCallback(
+    (reason?: "output") => {
+      if (
+        !isActivePaneRef.current ||
+        composerEditingRef.current ||
+        touchSelectionRef.current?.active === true
+      )
+        return;
+      if (shouldAvoidVirtualKeyboard()) return;
+      requestAnimationFrame(() => {
+        window.setTimeout(() => {
+          if (
+            !connectionClient.isCurrent() ||
+            !isActivePaneRef.current ||
+            composerEditingRef.current ||
+            touchSelectionRef.current?.active === true ||
+            shouldAvoidVirtualKeyboard()
+          )
+            return;
+          const term = termRef.current;
+          const active = document.activeElement;
+          const activeElement = active instanceof HTMLElement ? active : null;
+          const activeIsTerminalInput = !!activeElement?.closest(".xterm");
+          if (!term || (isEditableElement(active) && !activeIsTerminalInput))
+            return;
+          // Streaming frames must not steal focus from an open popover, dialog,
+          // or menu: moving focus out of an overlay dismisses it.
+          if (terminalFocusBlockedByOverlay(activeElement, document)) return;
+          if (
+            reason === "output" &&
+            terminalOutputFocusBlockedBySelection(document)
+          )
+            return;
+          term.focus();
+        }, 0);
+      });
+    },
+    [connectionClient],
+  );
   const focusEndpoint = useCallback(() => {
     focusTerminalEndpoint(connectionClient, paneTerminalIdRef.current);
   }, [connectionClient]);
@@ -862,6 +874,7 @@ export function TerminalView({
   useEffect(() => {
     if (isActivePane) focusTerminalSoon();
   }, [focusTerminalSoon, isActivePane]);
+  useEffect(() => watchTerminalOverlayPointer(document), []);
   useEffect(() => {
     if (!canShowAgentHistory && agentHistoryOpen) setAgentHistoryOpen(false);
   }, [agentHistoryOpen, canShowAgentHistory, setAgentHistoryOpen]);
@@ -1374,7 +1387,7 @@ export function TerminalView({
           });
         });
       }
-      focusTerminalSoon();
+      focusTerminalSoon("output");
     });
     const offClipboard = bridge.onTerminalClipboard((clipboard) => {
       if (

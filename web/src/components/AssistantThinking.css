@@ -1,0 +1,40 @@
+.assistant-thinking {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.assistant-thinking summary {
+  cursor: pointer;
+}
+
+.assistant-thinking-body {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  margin-top: 6px;
+  padding-left: 9px;
+  overflow: auto;
+  border-left: 2px solid var(--border-soft);
+}
+
+.assistant-thinking-body strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.assistant-thinking-body p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.assistant-thinking-body .assistant-thinking-note {
+  font-size: 10px;
+  font-style: italic;
+}

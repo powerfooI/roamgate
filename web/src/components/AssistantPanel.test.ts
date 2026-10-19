@@ -1525,6 +1525,16 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
           (item) => item.querySelector("span")!.textContent,
         ),
       ).toEqual(unknownTools);
+      recorded.tools = ["list_ranger_tasks", "send_user_notification"].map(
+        (name) => ({ id: name, name, status: "completed" }),
+      );
+      await render();
+      expect(
+        Array.from(
+          activity().querySelectorAll("li"),
+          (item) => item.querySelector("span")!.textContent,
+        ),
+      ).toEqual(["Ranger tasks", "Notification"]);
       recorded.tools = originalTools;
       recorded.sources = originalSources;
       await render();
@@ -2442,6 +2452,31 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         document.querySelector(".assistant-permission-popover"),
       ).toBeNull();
       expect(close).toHaveBeenCalledTimes(closesBeforeEscape);
+      // Escape first clears selected panel text instead of closing Ranger.
+      const rangerPanel = document.querySelector<HTMLElement>(
+        "aside.assistant-panel",
+      )!;
+      const escape = () =>
+        React.act(async () =>
+          rangerPanel.dispatchEvent(
+            new window.KeyboardEvent("keydown", {
+              key: "Escape",
+              bubbles: true,
+              cancelable: true,
+            }),
+          ),
+        );
+      document
+        .getSelection()!
+        .selectAllChildren(
+          rangerPanel.querySelector(".assistant-panel-title strong")!,
+        );
+      expect(document.getSelection()!.isCollapsed).toBe(false);
+      await escape();
+      expect(document.getSelection()!.isCollapsed).toBe(true);
+      expect(close).toHaveBeenCalledTimes(closesBeforeEscape);
+      await escape();
+      expect(close).toHaveBeenCalledTimes(closesBeforeEscape + 1);
     } finally {
       await React.act(async () => root.unmount());
       for (const spy of [context, state, readState, send, call])

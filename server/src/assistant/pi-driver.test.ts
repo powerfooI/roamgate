@@ -337,6 +337,119 @@ test("live tool details clear when a model reuses a call ID within the same turn
   }
 });
 
+test("live replies report visible reasoning per model call and omit redacted reasoning", async () => {
+  const reasoning = (index: number, value: string) => [
+    {
+      type: "content_block_start",
+      index,
+      content_block: { type: "thinking", thinking: "", signature: "" },
+    },
+    {
+      type: "content_block_delta",
+      index,
+      delta: { type: "thinking_delta", thinking: value },
+    },
+    {
+      type: "content_block_delta",
+      index,
+      delta: { type: "signature_delta", signature: "signed" },
+    },
+    { type: "content_block_stop", index },
+  ];
+  const f = await durableFixture((index) =>
+    modelReply(
+      index,
+      index === 1
+        ? [
+            ...reasoning(0, "Check status first."),
+            {
+              type: "content_block_start",
+              index: 1,
+              content_block: { type: "redacted_thinking", data: "opaque" },
+            },
+            { type: "content_block_stop", index: 1 },
+            ...toolUse(
+              "workspace_status",
+              "status",
+              { connection_id: "local", workspace_id: "workspace" },
+              2,
+            ),
+            ...finish("tool_use"),
+          ]
+        : [
+            ...reasoning(0, "Status read; answer now."),
+            {
+              type: "content_block_start",
+              index: 1,
+              content_block: { type: "text", text: "" },
+            },
+            {
+              type: "content_block_delta",
+              index: 1,
+              delta: { type: "text_delta", text: "Done" },
+            },
+            { type: "content_block_stop", index: 1 },
+            ...finish("end_turn"),
+          ],
+    ),
+  );
+  const thinking: string[][] = [];
+  const messages: string[] = [];
+  try {
+    await f.createDriver().run(
+      f.input({
+        thinking: (steps) => thinking.push(steps),
+        message: (value) => messages.push(value),
+      }),
+    );
+    expect(thinking.at(-1)).toEqual([
+      "Check status first.",
+      "Status read; answer now.",
+    ]);
+    expect(JSON.stringify(thinking)).not.toContain("redacted");
+    expect(messages.at(-1)).toBe("Done");
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a failed model call keeps the reasoning already streamed", async () => {
+  const f = await durableFixture((index) =>
+    modelReply(index, [
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking", thinking: "", signature: "" },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "Weighing options." },
+      },
+      {
+        type: "error",
+        error: { type: "invalid_request_error", message: "Synthetic failure" },
+      },
+    ]),
+  );
+  const thinking: string[][] = [];
+  let failed = false;
+  try {
+    await f.createDriver().run(
+      f.input({
+        thinking: (steps) => thinking.push(steps),
+        error: () => {
+          failed = true;
+        },
+      }),
+    );
+    expect(failed).toBe(true);
+    expect(thinking.at(-1)).toEqual(["Weighing options."]);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 function start(index: number) {
   return {
     type: "message_start",

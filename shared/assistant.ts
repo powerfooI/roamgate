@@ -3,6 +3,8 @@ export const ASSISTANT_MAX_MENTIONS = 32;
 export const ASSISTANT_MAX_CUSTOM_MODELS = 100;
 export const ASSISTANT_MAX_TOOL_ARGUMENTS = 8_000;
 export const ASSISTANT_MAX_TOOL_OUTPUT = 16_000;
+export const ASSISTANT_MAX_THINKING = 16_000;
+export const ASSISTANT_MAX_THINKING_STEPS = 64;
 export const ASSISTANT_MAX_TOOL_DETAILS = 128_000;
 
 export type AssistantWorkspaceRef = {
@@ -188,6 +190,16 @@ export type AssistantMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
+  /**
+   * Model reasoning shown with an assistant reply, one entry per model call
+   * that shared reasoning, oldest first. Steps are numbered in this order;
+   * older reasoning is dropped first to fit the size limit.
+   */
+  thinking?: string[];
+  /** Earlier steps dropped entirely, so the first entry is step N + 1. */
+  thinking_skipped?: number;
+  /** Set when earlier reasoning was dropped or cut to fit the size limit. */
+  thinking_truncated?: true;
   mentions?: AssistantMention[];
   sent_at: string;
   tools: AssistantToolActivity[];
@@ -687,6 +699,16 @@ export function isAssistantMessage(value: unknown): value is AssistantMessage {
     text(value.id) &&
     (value.role === "user" || value.role === "assistant") &&
     text(value.text) &&
+    (value.thinking === undefined ||
+      (Array.isArray(value.thinking) &&
+        value.thinking.length <= ASSISTANT_MAX_THINKING_STEPS &&
+        value.thinking.every(text) &&
+        value.thinking.join("").length <= ASSISTANT_MAX_THINKING)) &&
+    (value.thinking_skipped === undefined ||
+      (Number.isSafeInteger(value.thinking_skipped) &&
+        Number(value.thinking_skipped) >= 0)) &&
+    (value.thinking_truncated === undefined ||
+      value.thinking_truncated === true) &&
     (value.mentions === undefined ||
       isAssistantMentions(value.mentions, value.text)) &&
     text(value.sent_at) &&

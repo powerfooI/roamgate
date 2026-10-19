@@ -72,6 +72,7 @@ import {
 import { AssistantConversationMap } from "./AssistantConversationMap";
 import { AssistantTasks, TaskProposalCard } from "./AssistantTasks";
 import { AssistantMentionComposer } from "./AssistantMentionComposer";
+import { AssistantThinking } from "./AssistantThinking";
 import { assistantMentionKey } from "../assistantMentions";
 import "./AssistantPanel.css";
 
@@ -175,6 +176,8 @@ const activityLabels = new Map([
   ["workspace_diff", "Workspace changes"],
   ["workspace_terminal", "Terminal output"],
   ["workspace_history", "Agent history"],
+  ["list_ranger_tasks", "Ranger tasks"],
+  ["send_user_notification", "Notification"],
 ]);
 
 export function AssistantMessageActivity({
@@ -1071,13 +1074,19 @@ export function AssistantPanel({
     snapshot?.auth?.status === "waiting" ||
     snapshot?.auth?.status === "working";
   const executing = assistantActionExecuting(snapshot);
-  const headerStatus = !connected
-    ? "Reconnecting"
+  const [headerStatus, headerTone] = !connected
+    ? ["Reconnecting", "warning"]
     : executing
-      ? "Executing action"
+      ? ["Executing action", "busy"]
       : snapshot?.running
-        ? "Working"
-        : "Idle";
+        ? ["Working", "busy"]
+        : ["Idle", "idle"];
+  const modelLabel =
+    snapshot?.models.find(
+      (model) =>
+        model.provider === snapshot.config.provider &&
+        model.id === snapshot.config.model,
+    )?.label ?? snapshot?.config.model;
   const operationBusy = busy || executing;
   const completedActions = (snapshot?.messages ?? [])
     .flatMap((message) => message.actions ?? [])
@@ -1423,6 +1432,16 @@ export function AssistantPanel({
           !confirmApproval
         ) {
           event.preventDefault();
+          // Escape first dismisses a text selection in the panel.
+          const selection = document.getSelection();
+          if (
+            selection &&
+            !selection.isCollapsed &&
+            event.currentTarget.contains(selection.anchorNode)
+          ) {
+            selection.removeAllRanges();
+            return;
+          }
           if (showSettings && modelEditor) {
             if (!operationBusy) closeModelEditor();
           } else if (!showSettings && view === "chat" && historyOpen) {
@@ -1521,7 +1540,11 @@ export function AssistantPanel({
                 </button>
               ))}
             </nav>
-            <span role="status" title={headerStatus}>
+            <span
+              role="status"
+              title={headerStatus}
+              className={`assistant-panel-status is-${headerTone}`}
+            >
               {headerStatus}
             </span>
           </div>
@@ -2237,14 +2260,14 @@ export function AssistantPanel({
                 <span
                   title={`${snapshot.config.provider} / ${snapshot.config.model}`}
                 >
-                  {snapshot.config.model}
+                  {modelLabel}
                 </span>
               </div>
             ) : (
               <span
                 title={`${snapshot.config.provider} / ${snapshot.config.model}`}
               >
-                {snapshot.config.model}
+                {modelLabel}
               </span>
             )}
             {historySupported ? (
@@ -2337,6 +2360,18 @@ export function AssistantPanel({
                         {formatUiDateTime(message.sent_at)}
                       </time>
                     </div>
+                    {message.role === "assistant" &&
+                    message.thinking?.length ? (
+                      <AssistantThinking
+                        message={message}
+                        active={
+                          !message.text &&
+                          snapshot.running &&
+                          message ===
+                            snapshot.messages[snapshot.messages.length - 1]
+                        }
+                      />
+                    ) : null}
                     {message.role === "assistant" ? (
                       message.text ? (
                         <MarkdownPreview
@@ -2345,13 +2380,16 @@ export function AssistantPanel({
                           breaks
                           imageUrlResolver={() => null}
                         />
+                      ) : snapshot.running &&
+                        message ===
+                          snapshot.messages[snapshot.messages.length - 1] ? (
+                        // The open reasoning block already reports progress.
+                        message.thinking?.length ? null : (
+                          <span className="assistant-hint">Working...</span>
+                        )
                       ) : (
                         <span className="assistant-hint">
-                          {snapshot.running &&
-                          message ===
-                            snapshot.messages[snapshot.messages.length - 1]
-                            ? "Working..."
-                            : "No response text was received."}
+                          No response text was received.
                         </span>
                       )
                     ) : (

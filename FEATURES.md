@@ -104,6 +104,8 @@ or its shortcut.
   [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
 - **Ask:** Ranger reads workspace status, agent history, diffs, and terminal
   output, and cites its sources. Type **@** to point it at a workspace or agent.
+  When the model shares its reasoning, a collapsible **Thinking** section shows
+  it above the reply.
 - **Act:** Ranger can create workspaces, worktrees, tabs, and splits, and start,
   prompt, or close agents and panes. You confirm each action unless
   **High-permission mode** is on. Closing never deletes files or history.

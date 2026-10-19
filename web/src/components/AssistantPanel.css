@@ -156,6 +156,49 @@
   color: var(--accent);
 }
 
+/* A divider and dot keep the run state from reading as a third view tab. */
+.assistant-panel-head .assistant-panel-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+
+.assistant-panel-status::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+.assistant-panel-head .assistant-panel-status.is-busy {
+  color: var(--accent);
+}
+
+.assistant-panel-status.is-busy::before {
+  opacity: 1;
+  animation: assistant-status-pulse 1.4s ease-in-out infinite;
+}
+
+.assistant-panel-head .assistant-panel-status.is-warning {
+  color: var(--warning-text);
+}
+
+.assistant-panel-status.is-warning::before {
+  opacity: 1;
+}
+
+@keyframes assistant-status-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
 .assistant-panel-list {
   flex: 1 1 0;
   min-height: 0;
@@ -1276,7 +1319,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .assistant-spinner {
+  .assistant-spinner,
+  .assistant-panel-status.is-busy::before {
     animation: none;
   }
 }

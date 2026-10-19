@@ -4,6 +4,8 @@ import {
   ASSISTANT_MAX_MENTIONS,
   ASSISTANT_MAX_TOOL_ARGUMENTS,
   ASSISTANT_MAX_TOOL_OUTPUT,
+  ASSISTANT_MAX_THINKING,
+  ASSISTANT_MAX_THINKING_STEPS,
   isAssistantMessage,
   isAssistantSnapshot,
   isAssistantMentionTarget,
@@ -46,6 +48,33 @@ test("tool activities accept bounded details and retain legacy summaries", () =>
     expect(
       isAssistantMessage({ ...message, tools: [{ ...tool, ...invalid }] }),
     ).toBe(false);
+});
+
+test("assistant messages accept bounded reasoning steps", () => {
+  const message = {
+    id: "message",
+    role: "assistant",
+    text: "Done",
+    sent_at: "2026-10-06T00:00:00Z",
+    sources: [],
+    tools: [],
+  };
+  for (const valid of [
+    { thinking: ["Plan", "Check"] },
+    { thinking: ["x".repeat(ASSISTANT_MAX_THINKING)] },
+    { thinking: ["Later"], thinking_skipped: 2, thinking_truncated: true },
+  ])
+    expect(isAssistantMessage({ ...message, ...valid })).toBe(true);
+  for (const invalid of [
+    { thinking: "Plan" },
+    { thinking: [1] },
+    { thinking: ["x".repeat(ASSISTANT_MAX_THINKING), "y"] },
+    { thinking: Array(ASSISTANT_MAX_THINKING_STEPS + 1).fill("x") },
+    { thinking: ["Plan"], thinking_skipped: -1 },
+    { thinking: ["Plan"], thinking_skipped: 1.5 },
+    { thinking: ["Plan"], thinking_truncated: false },
+  ])
+    expect(isAssistantMessage({ ...message, ...invalid })).toBe(false);
 });
 
 test("Ranger notification envelopes require a string status and bounded task targets", () => {
