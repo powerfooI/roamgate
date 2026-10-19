@@ -53,8 +53,8 @@
     "lucide-react": "^1.49.0",
     "marked": "^18.0.14",
     "minimatch": "10.2.6",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "shiki": "^4.5.0",
     "unique-names-generator": "^4.7.1"
   },
