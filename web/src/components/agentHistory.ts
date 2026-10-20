@@ -43,6 +43,20 @@ export function isToolContentPending(
   );
 }
 
+// A payload fetched for a redacted tool entry.
+export type ToolTextOverlay = { text: string; bytes: number; hash?: string };
+
+// A fetched payload still belongs to an entry while it matches the entry's
+// content hash, which changes even when a rewrite keeps the byte length.
+// Bridges that predate hashes fall back to the byte length.
+export function toolOverlayMatches(
+  overlay: ToolTextOverlay,
+  entry: Pick<HistoryEntry, "text_bytes" | "text_hash">,
+) {
+  if (entry.text_hash !== undefined) return overlay.hash === entry.text_hash;
+  return entry.text_bytes === undefined || overlay.bytes === entry.text_bytes;
+}
+
 export function historyEntryCategory(entry: HistoryEntry): HistoryCategory {
   return entry.role === "assistant" ? "agent" : entry.role;
 }

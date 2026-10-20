@@ -36,12 +36,22 @@ pane/connection lease.
 History refreshes every four seconds while open and visible, never overlapping.
 Cards show up to 4,000 characters; full tool details open on demand.
 
+Tool entries arrive redacted: empty `text` plus `text_bytes` (UTF-8 length) and
+`text_hash` (content hash) of the withheld payload. `agent_history.entry`
+returns the full `text` with its `text_hash`. Clients keep a fetched payload
+only while its hash matches the entry's, so a payload rewritten under the same
+ID, even at the same length, is fetched again.
+
 ## Message filters
 
 User and Agent start enabled; Tool starts disabled. Agent includes assistant
 errors; Tool includes calls, outputs, and errors. Counts reflect the unfiltered
 window, and the header shows visible/total when filtered. Filters persist while
 the panel is mounted, not across reloads. **Show all types** restores them.
+
+The **Chat view** has no type filters: it shows every entry, with consecutive
+tool entries collapsed into blocks. Its search keeps a tool call and its
+result together, so a match on either shows the whole step.
 
 Search is a case-insensitive literal match over all loaded text and combines
 with the type filters. It never fetches older messages or hidden tool payloads.

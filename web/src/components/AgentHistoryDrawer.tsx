@@ -47,6 +47,8 @@ import {
   mergeAgentHistory,
   isToolContentPending,
   selectHistoryEntries,
+  toolOverlayMatches,
+  type ToolTextOverlay,
   type HistoryFilters,
   type AgentHistory,
   type AgentHistoryResponse,
@@ -413,7 +415,7 @@ export function AgentHistoryDrawer({
     tool: false,
   });
   const [toolEntryTexts, setToolEntryTexts] = useState<
-    ReadonlyMap<string, { text: string; bytes: number }>
+    ReadonlyMap<string, ToolTextOverlay>
   >(() => new Map());
   const [toolEntryLoading, setToolEntryLoading] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -497,16 +499,15 @@ export function AgentHistoryDrawer({
           setHistory(merged);
           if (merged) {
             // Drop on-demand texts for entries that left the window or whose
-            // content changed under the same id (byte-length mismatch).
+            // content changed under the same id (hash or byte-length mismatch).
             setToolEntryTexts((current) => {
               if (current.size === 0) return current;
-              const kept = new Map<string, { text: string; bytes: number }>();
+              const kept = new Map<string, ToolTextOverlay>();
               for (const message of merged.messages) {
                 const overlay = current.get(message.id);
                 if (
                   overlay !== undefined &&
-                  (message.text_bytes === undefined ||
-                    overlay.bytes === message.text_bytes)
+                  toolOverlayMatches(overlay, message)
                 ) {
                   kept.set(message.id, overlay);
                 }
@@ -614,12 +615,16 @@ export function AgentHistoryDrawer({
           if (!connectionClient.isCurrent() || paneIdRef.current !== paneId)
             return;
           toolEntryFailedRef.current.delete(entry.id);
-          const text = (result as { text?: unknown }).text;
+          const { text, text_hash } = result as {
+            text?: unknown;
+            text_hash?: unknown;
+          };
           const value = typeof text === "string" ? text : "";
           setToolEntryTexts((current) =>
             new Map(current).set(entry.id, {
               text: value,
               bytes: new TextEncoder().encode(value).length,
+              hash: typeof text_hash === "string" ? text_hash : undefined,
             }),
           );
         })
@@ -648,12 +653,11 @@ export function AgentHistoryDrawer({
   );
 
   const messages = useMemo(() => history?.messages ?? [], [history?.messages]);
-  // Substitute fetched tool payloads only while their byte lengths still match.
+  // Substitute fetched tool payloads only while they still match the entry.
   const hydrateEntry = useCallback(
     (entry: AgentHistoryEntry): AgentHistoryEntry => {
       const overlay = toolEntryTexts.get(entry.id);
-      return overlay !== undefined &&
-        (entry.text_bytes === undefined || overlay.bytes === entry.text_bytes)
+      return overlay !== undefined && toolOverlayMatches(overlay, entry)
         ? { ...entry, text: overlay.text }
         : entry;
     },
@@ -707,7 +711,7 @@ export function AgentHistoryDrawer({
       return;
     }
     const overlay = toolEntryTexts.get(activeMessage.id);
-    if (overlay !== undefined && overlay.bytes === activeMessage.text_bytes)
+    if (overlay !== undefined && toolOverlayMatches(overlay, activeMessage))
       return;
     loadToolEntry(activeMessage);
   }, [activeMessage, open, toolEntryTexts, toolEntryLoading, loadToolEntry]);

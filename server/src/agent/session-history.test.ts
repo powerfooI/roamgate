@@ -4,6 +4,7 @@ import {
   type HistoryEntry,
   historyEntriesFromTrajectory,
   historyUpdate,
+  historyTextHash,
   redactHistoryUpdate,
 } from "./session-history";
 import { projectAgentTrajectory } from "./session-trajectory";
@@ -360,6 +361,34 @@ test("redaction strips tool payloads but keeps metadata for on-demand fetches", 
   expect(delta.upserts[0].text).toBe("");
   expect(delta.upserts[0].text_bytes).toBe("bulk output".length);
   expect(delta.removed).toEqual([user.id]);
+});
+
+test("redacted tool payloads carry a content hash that tracks rewrites", () => {
+  const tool: HistoryEntry = {
+    id: "t:0",
+    role: "tool",
+    kind: "tool_call",
+    tool_name: "bash",
+    text: '{"command":"a"}',
+    sent_at: "2026-01-01T00:00:00Z",
+  };
+  const redact = (entry: HistoryEntry) => {
+    const update = redactHistoryUpdate({
+      history_version: 2,
+      mode: "snapshot",
+      cursor: { epoch: "e", revision: 1 },
+      window_limit: HISTORY_WINDOW_LIMIT,
+      entries: [entry],
+    });
+    if (update.mode !== "snapshot") throw new Error("Expected snapshot");
+    return update.entries[0];
+  };
+  const before = redact(tool);
+  // Rewritten in place at the same byte length: only the hash changes.
+  const after = redact({ ...tool, text: '{"command":"b"}' });
+  expect(before.text_hash).toBe(historyTextHash(tool.text));
+  expect(after.text_bytes).toBe(before.text_bytes);
+  expect(after.text_hash).not.toBe(before.text_hash);
 });
 
 test("content identities survive early step renumbering and disambiguate repeated messages", () => {

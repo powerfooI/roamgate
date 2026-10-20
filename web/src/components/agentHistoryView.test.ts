@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { HistoryEntry } from "./agentHistory";
+import { toolOverlayMatches, type HistoryEntry } from "./agentHistory";
 import {
   groupHistoryChatItems,
   pairToolSteps,
@@ -225,11 +225,34 @@ test("argument previews share one budget across all fields", () => {
 });
 
 test("payload keys change when an entry is rewritten under the same id", () => {
-  const stub = entry("7", "tool", { text: "", text_bytes: 120 });
+  const stub = entry("7", "tool", {
+    text: "",
+    text_bytes: 120,
+    text_hash: "aaa",
+  });
   expect(toolPayloadKey(stub)).toBe(toolPayloadKey({ ...stub }));
+  // A same-length rewrite still changes the hash, and so the key.
   expect(toolPayloadKey(stub)).not.toBe(
-    toolPayloadKey({ ...stub, text_bytes: 180 }),
+    toolPayloadKey({ ...stub, text_hash: "bbb" }),
   );
+  // Without a hash (older bridges), the byte length versions the payload.
+  const legacy = entry("7", "tool", { text: "", text_bytes: 120 });
+  expect(toolPayloadKey(legacy)).not.toBe(
+    toolPayloadKey({ ...legacy, text_bytes: 180 }),
+  );
+});
+
+test("fetched payloads match entries by hash, or by length without one", () => {
+  const overlay = { text: "x", bytes: 1, hash: "aaa" };
+  expect(toolOverlayMatches(overlay, { text_bytes: 1, text_hash: "aaa" })).toBe(
+    true,
+  );
+  // Same length, different content: the stale payload no longer matches.
+  expect(toolOverlayMatches(overlay, { text_bytes: 1, text_hash: "bbb" })).toBe(
+    false,
+  );
+  expect(toolOverlayMatches(overlay, { text_bytes: 1 })).toBe(true);
+  expect(toolOverlayMatches(overlay, { text_bytes: 2 })).toBe(false);
 });
 
 test("queued tool loads respect the limit and wait behind in-flight versions", () => {

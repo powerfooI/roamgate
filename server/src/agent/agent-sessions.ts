@@ -17,7 +17,11 @@ import {
   readSessionProjection,
   type SessionProjectionCache,
 } from "./session-projection-cache";
-import { HISTORY_WINDOW_LIMIT, redactHistoryUpdate } from "./session-history";
+import {
+  HISTORY_WINDOW_LIMIT,
+  historyTextHash,
+  redactHistoryUpdate,
+} from "./session-history";
 
 const MAX_MESSAGES_PER_AGENT = 200;
 
@@ -94,7 +98,11 @@ export function createAgentSessionHandlers(args: {
           "That history entry is no longer available; refresh the history and try again",
         );
       }
-      return { entry_id: entry.id, text: entry.text };
+      return {
+        entry_id: entry.id,
+        text: entry.text,
+        text_hash: historyTextHash(entry.text),
+      };
     },
     readSummary: (params: Record<string, unknown>) =>
       readAgentSessionSummary(

@@ -15,6 +15,10 @@ export type HistoryEntry = {
   // Set on redacted wire entries: UTF-8 byte length of the withheld text,
   // fetchable via agent_history.entry when the user expands the card.
   text_bytes?: number;
+  // Set with text_bytes: a content hash of the withheld text, so clients can
+  // tell a payload rewritten in place (even at the same length) from the one
+  // they already fetched.
+  text_hash?: string;
 };
 export type HistoryCursor = { epoch: string; revision: number };
 export type HistoryUpdate = {
@@ -106,12 +110,19 @@ export function historyEntriesFromTrajectory(
   return historyWindowEntries(entries, HISTORY_WINDOW_LIMIT);
 }
 
+// Short content hash of a tool payload, shared by redacted entries and
+// agent_history.entry replies.
+export function historyTextHash(text: string) {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
 function redactHistoryEntry(entry: HistoryEntry): HistoryEntry {
   if (entry.role !== "tool" || entry.text.length === 0) return entry;
   return {
     ...entry,
     text: "",
     text_bytes: Buffer.byteLength(entry.text, "utf8"),
+    text_hash: historyTextHash(entry.text),
   };
 }
 
