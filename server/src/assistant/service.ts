@@ -1389,6 +1389,10 @@ export function createAssistantService(options: {
       const signal = turnController!.signal;
       if (steerMissed === pending)
         throw new Error("An earlier steer missed this turn");
+      // A message about a workspace this turn did not admit needs its own.
+      const admitted = new Set(captured.map(refKey));
+      if (item.scope?.some((ref) => !admitted.has(refKey(ref))))
+        throw new Error("The steer needs a wider scope than this turn");
       // A steer stays within the turn's admitted scope; anything wider waits
       // for full admission as a follow-up.
       const bound = item.mentions?.length

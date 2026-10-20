@@ -6236,3 +6236,42 @@ test("concurrent steers reach the turn in queue order, and follow a missed one",
   ]);
   second.resolve();
 });
+
+test("a steer that needs a workspace the turn did not admit waits as a follow-up", async () => {
+  const gate = Promise.withResolvers<void>();
+  const steered: string[] = [];
+  let started = false;
+  const f = setup({
+    run: async (input) => {
+      started = true;
+      await gate.promise;
+      input.message("Done");
+      return [{ persisted: true }];
+    },
+    steer: async ({ requestId }) => {
+      steered.push(requestId);
+    },
+  });
+  await f.service.handle("configure", { config: configured });
+  await f.service.handle("send", { text: "First", request_id: "first" });
+  await until(() => started);
+  const admitted = { connection_id: "local", workspace_id: "ws" };
+  await f.service.handle("send", {
+    text: "Same scope",
+    scope: [admitted],
+    request_id: "same",
+    when_busy: "steer",
+  });
+  await f.service.handle("send", {
+    text: "Also check the new workspace",
+    scope: [admitted, { connection_id: "local", workspace_id: "new" }],
+    request_id: "wider",
+    when_busy: "steer",
+  });
+  expect(steered).toEqual(["same"]);
+  expect(f.service.peek().queue).toMatchObject([
+    { id: "same", mode: "steer" },
+    { id: "wider", mode: "follow_up" },
+  ]);
+  gate.resolve();
+});
