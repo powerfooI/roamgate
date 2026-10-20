@@ -38,20 +38,29 @@ export function CodexSessionLink({
     setBusy(true);
     setMessage("");
     try {
+      // Sequential SSH checks can exceed 30s; await the backend result or disconnect.
       if (preview) {
-        await client.call("agent_session.link", {
-          pane_id: paneId,
-          token: preview.token,
-        });
+        await client.call(
+          "agent_session.link",
+          {
+            pane_id: paneId,
+            token: preview.token,
+          },
+          null,
+        );
         if (!mounted.current || !client.isCurrent()) return;
         setPreview(null);
         setMessage("Session linked.");
         onLinked();
       } else {
-        const result = await client.call("agent_session.link_preview", {
-          pane_id: paneId,
-          session_id: sessionId.trim(),
-        });
+        const result = await client.call(
+          "agent_session.link_preview",
+          {
+            pane_id: paneId,
+            session_id: sessionId.trim(),
+          },
+          null,
+        );
         if (!mounted.current || !client.isCurrent()) return;
         setPreview(result as Preview);
       }

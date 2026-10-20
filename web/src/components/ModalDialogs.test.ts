@@ -61,13 +61,14 @@ async function registerDomTests() {
     "./ModalDialogs"
   );
   const { CreateWorkspaceDialog } = await import("./CreateWorkspaceDialog");
+  const { CodexSessionLink } = await import("./CodexSessionLink");
   const luckyNames = await import("../luckyName");
   const { WorktreeOpenDialog } = await import("./WorktreeOpenDialog");
   const { WorktreeLifecycleDialog } = await import("./WorktreeLifecycleDialog");
   const { useWorktreePullRequests, useWorkspacePullRequests } = await import(
     "../useWorktreePullRequests"
   );
-  const { bridge } = await import("../api");
+  const { Bridge, bridge } = await import("../api");
   const { __storeTesting, store } = await import("../store");
   const { WorkspaceTree } = await import("./WorkspaceTree");
   let listCalls = 0;
@@ -103,6 +104,116 @@ async function registerDomTests() {
   afterAll(async () => {
     connection.mockRestore();
     await browser.happyDOM.close();
+  });
+
+  test("Codex session preview and confirmation wait for slow backend replies", async () => {
+    const previousSocket = globalThis.WebSocket;
+    const previousLocation = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "location",
+    );
+    class SessionSocket {
+      static instance: SessionSocket;
+      static OPEN = 1;
+      readyState = 1;
+      bufferedAmount = 0;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      requests: Record<string, unknown>[] = [];
+      constructor() {
+        SessionSocket.instance = this;
+      }
+      receive(message: Record<string, unknown>) {
+        this.onmessage?.({ data: JSON.stringify(message) });
+      }
+      send(raw: string) {
+        const request = JSON.parse(raw);
+        if (request.method === "bridge.ping")
+          this.receive({ id: request.id, result: {} });
+        else this.requests.push(request);
+      }
+      close() {}
+    }
+    globalThis.WebSocket = SessionSocket as unknown as typeof WebSocket;
+    Object.defineProperty(globalThis, "location", {
+      configurable: true,
+      value: browser.location,
+    });
+    const sessionBridge = new Bridge();
+    const sessionId = "00000000-0000-4000-8000-000000000001";
+    let linked = 0;
+    jest.useFakeTimers();
+    try {
+      sessionBridge.connect();
+      const socket = SessionSocket.instance;
+      socket.receive({
+        hello: true,
+        bridge_protocol_version: 2,
+        default_connection_id: "remote",
+        capabilities: { connection_id: true, connection_scoped_http: true },
+      });
+      const container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+      await act(async () =>
+        root!.render(
+          h(CodexSessionLink, {
+            paneId: "p1",
+            client: sessionBridge.connection(),
+            onLinked: () => linked++,
+          }),
+        ),
+      );
+      const input = container.querySelector("input")!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        )!.set!.call(input, sessionId);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const form = container.querySelector("form")!;
+      for (const method of [
+        "agent_session.link_preview",
+        "agent_session.link",
+      ]) {
+        await act(async () => {
+          form.dispatchEvent(
+            new Event("submit", { bubbles: true, cancelable: true }),
+          );
+        });
+        const request = socket.requests[socket.requests.length - 1]!;
+        expect(request.method).toBe(method);
+        await act(async () => jest.advanceTimersByTime(70_000));
+        expect(form.getAttribute("aria-busy")).toBe("true");
+        expect(container.textContent).not.toContain("timeout:");
+        expect(linked).toBe(0);
+        await act(async () => {
+          socket.receive({
+            id: request.id,
+            connection_id: request.connection_id,
+            result: {
+              token: "confirmation",
+              session_id: sessionId,
+              cwd: "/repo",
+              path: "/remote/rollout.jsonl",
+              updated_at: "2026-10-20T00:00:00Z",
+            },
+          });
+        });
+        expect(form.getAttribute("aria-busy")).toBe("false");
+      }
+      expect(linked).toBe(1);
+      expect(container.textContent).toContain("Session linked.");
+    } finally {
+      await act(async () => root?.unmount());
+      root = null;
+      sessionBridge.disconnect();
+      jest.useRealTimers();
+      globalThis.WebSocket = previousSocket;
+      if (previousLocation)
+        Object.defineProperty(globalThis, "location", previousLocation);
+      else Reflect.deleteProperty(globalThis, "location");
+    }
   });
 
   type Callbacks = {
