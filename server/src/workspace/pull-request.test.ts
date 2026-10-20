@@ -241,6 +241,90 @@ describe("PR/MR status", () => {
       expect(ambiguous.state).toBe("select_match");
       expect(ambiguous.request).toBeUndefined();
     });
+    test(`${provider} sidebar summaries choose the newest creation across repositories regardless of state or number`, async () => {
+      for (const state of ["open", "closed", "merged"]) {
+        const f = fixture(provider, {
+          override: (command) => {
+            if (command.includes("'repos/alice/project/pulls?"))
+              return ok([
+                {
+                  ...ghPR,
+                  number: 99,
+                  created_at: "2026-10-02T00:00:00Z",
+                  updated_at: "2026-10-20T00:00:00Z",
+                },
+                {
+                  ...ghPR,
+                  number: 2,
+                  created_at: "2026-10-03T00:00:00Z",
+                  state: state === "merged" ? "closed" : state,
+                  merged_at: state === "merged" ? "2026-10-04T00:00:00Z" : null,
+                  html_url: "https://github.com/alice/project/pull/2",
+                },
+              ]);
+            if (command.includes("'repos/team/project/pulls?"))
+              return ok([{ ...ghPR, created_at: "2026-10-01T00:00:00Z" }]);
+            if (command.includes("'projects/1/merge_requests?"))
+              return ok([
+                {
+                  ...glMR,
+                  iid: 99,
+                  target_project_id: 1,
+                  created_at: "2026-10-02T00:00:00Z",
+                  updated_at: "2026-10-20T00:00:00Z",
+                },
+                {
+                  ...glMR,
+                  iid: 2,
+                  target_project_id: 1,
+                  created_at: "2026-10-03T00:00:00Z",
+                  state: state === "open" ? "opened" : state,
+                  web_url:
+                    "https://gitlab.com/alice/project/-/merge_requests/2",
+                },
+              ]);
+            if (command.includes("'projects/2/merge_requests?"))
+              return ok([{ ...glMR, created_at: "2026-10-01T00:00:00Z" }]);
+          },
+        });
+        const result = await f.read({ summary: true, latest: true });
+        expect(result.state).toBe("ready");
+        expect(result.request).toMatchObject({
+          id: provider === "github" ? "alice/project#2" : "1#2",
+          number: 2,
+          state: provider === "gitlab" && state === "open" ? "opened" : state,
+          draft: true,
+          url:
+            provider === "github"
+              ? "https://github.com/alice/project/pull/2"
+              : "https://gitlab.com/alice/project/-/merge_requests/2",
+        });
+        expect(result.ci).toBeUndefined();
+        expect(result.review).toBeUndefined();
+        expect((await f.read({ summary: true })).state).toBe("select_match");
+        expect((await f.read({ latest: true })).state).toBe("select_match");
+      }
+    });
+    test(`${provider} sidebar summaries do not guess when creation times are missing or invalid`, async () => {
+      for (const created_at of [undefined, "invalid"]) {
+        const result = await fixture(provider, {
+          override: (command) => {
+            if (command.includes("'repos/team/project/pulls?"))
+              return ok([
+                { ...ghPR, created_at: "2026-10-01T00:00:00Z" },
+                { ...ghPR, number: 13, created_at },
+              ]);
+            if (command.includes("'projects/2/merge_requests?"))
+              return ok([
+                { ...glMR, created_at: "2026-10-01T00:00:00Z" },
+                { ...glMR, iid: 8, created_at },
+              ]);
+          },
+        }).read({ summary: true, latest: true });
+        expect(result.state).toBe("error");
+        expect(result.request).toBeUndefined();
+      }
+    });
     test(`${provider} resolves a renamed local branch through its upstream over local and SSH`, async () => {
       for (const ssh of [false, true]) {
         const f = fixture(provider, {

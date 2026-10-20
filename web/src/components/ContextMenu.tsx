@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Workspace } from "../types";
+import type { PullRequestSummary } from "../../../shared/pullRequest";
 import { store, useStoreSelector } from "../store";
 import {
   clearTerminalComposerDrafts,
@@ -14,7 +15,10 @@ import { WorkspaceAutoSyncDialog } from "./WorkspaceAutoSyncDialog";
 import { worktreeCreationSource } from "../worktree";
 import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
 import { isWorkspacePinned } from "../workspacePins";
-import { workspaceDisplayName } from "../workspaceTreeBadges";
+import {
+  workspaceDisplayName,
+  workspacePullRequest,
+} from "../workspaceTreeBadges";
 import { copyTextFromUserGesture } from "../terminalClipboard";
 import { observeClampedContextMenu } from "./contextMenuPosition";
 import "./ContextMenu.css";
@@ -60,6 +64,7 @@ type DialogState =
 
 export function ContextMenu({
   state,
+  reviewStatus,
   pinnedWorkspaceKeys,
   onPinnedChange,
   onBrowseFiles,
@@ -67,6 +72,7 @@ export function ContextMenu({
   onClose,
 }: {
   state: ContextMenuState | null;
+  reviewStatus?: PullRequestSummary;
   pinnedWorkspaceKeys: ReadonlySet<string>;
   onPinnedChange: (workspace: Workspace, pinned: boolean) => void;
   onBrowseFiles?: (workspace: Workspace) => void;
@@ -277,6 +283,14 @@ export function ContextMenu({
       action: () => onReviewChanges?.(w),
     },
   ];
+  const review = workspacePullRequest(reviewStatus);
+  if (review) {
+    inspectItems.push({
+      label: review.openLabel,
+      action: () =>
+        window.open(review.request.url, "_blank", "noopener,noreferrer"),
+    });
+  }
   const organizeItems: Item[] = [
     {
       label: `${pinned ? "Unpin" : "Pin"} ${isLinked ? "worktree" : "workspace"}`,

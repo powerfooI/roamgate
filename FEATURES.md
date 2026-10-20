@@ -9,6 +9,13 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
 - Create, rename, pin, reorder, switch, and close workspaces and tabs. Linked Git
   worktrees group under their repository. Pinned tabs lead the tab strip and
   cannot be closed from Roamgate. Drag-to-reorder needs Herdr 0.7.2+.
+- Linked GitHub PRs and GitLab MRs replace sidebar branch labels with their
+  number (`#N` for GitHub, `!N` for GitLab) and an open, draft, merged, or closed
+  icon. When several requests match, the sidebar shows the most recently created
+  one. The workspace menu opens that request directly. Status refreshes every
+  minute after each check; unresolved requests keep the branch label. This uses
+  the same host-side authentication as the
+  [PR/MR status card](#workspace-inspector).
 - New workspace paths accept absolute paths or `~/` and suggest subdirectories
   as you type. Leave the field blank to use Herdr's default directory.
 - Split, resize, focus, swap (drag the handle at a pane's top center), zoom, and
@@ -66,9 +73,10 @@ Inspector button, shortcuts, or workspace/agent menus.
 - Files search covers names, paths, and file contents across the checkout
   (respecting `.gitignore`, up to 100 results).
 - Commits browses the current branch with per-commit diffs and file previews.
-- The **PR/MR status** card shows the branch's GitHub pull request or GitLab
-  merge request: state, checks, and reviews. It needs `gh` or `glab`
-  authenticated on the checkout host and never changes anything remotely.
+- The **PR/MR status** card in **Changes** and **Commits** shows the branch's
+  GitHub pull request or GitLab merge request: state, checks, and reviews. It
+  needs `gh` or `glab` authenticated on the checkout host and never changes
+  anything remotely.
 
 Inspector state is scoped to each checkout; see
 [resource ownership](docs/ARCHITECTURE.md#workspace-resource-ownership).

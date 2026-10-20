@@ -638,7 +638,10 @@ export function WorkspaceInspectorHost({
         </div>
       </header>
 
-      {visible && state.open && workspace ? (
+      {visible &&
+      state.open &&
+      workspace &&
+      (state.view === "changes" || state.view === "commits") ? (
         <PullRequestCard
           key={connectionClientScopeKey(
             connectionClient,

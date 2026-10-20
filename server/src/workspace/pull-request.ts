@@ -269,6 +269,7 @@ export async function readPullRequestStatus(
     const api = (path: string) =>
       json([cli, "api", "--hostname", selected.host, "--method", "GET", path]);
     const matches: PullRequest[] = [];
+    const createdAt = new Map<string, number>();
     if (provider === "github") {
       const repo = object(await api(`repos/${selected.repository}`));
       // GitHub redirects renamed/transferred repositories; compare canonical
@@ -293,6 +294,10 @@ export async function readPullRequestStatus(
           )
             continue;
           const id = number(pr.number);
+          createdAt.set(
+            `${repository}#${id}`,
+            Date.parse(text(pr.created_at, "")),
+          );
           matches.push({
             id: `${repository}#${id}`,
             number: id,
@@ -331,6 +336,10 @@ export async function readPullRequestStatus(
           )
             continue;
           const id = number(mr.iid);
+          createdAt.set(
+            `${number(mr.target_project_id)}#${id}`,
+            Date.parse(text(mr.created_at, "")),
+          );
           matches.push({
             id: `${number(mr.target_project_id)}#${id}`,
             number: id,
@@ -354,10 +363,23 @@ export async function readPullRequestStatus(
         "no_match",
         "No pull or merge request found for this source repository and branch.",
       );
+    const latest = params.summary === true && params.latest === true;
+    if (latest && uniqueMatches.length > 1) {
+      if (
+        uniqueMatches.some((match) => !Number.isFinite(createdAt.get(match.id)))
+      )
+        throw new Error("Invalid provider creation time");
+      uniqueMatches.sort(
+        (a, b) =>
+          createdAt.get(b.id)! - createdAt.get(a.id)! ||
+          b.number - a.number ||
+          a.id.localeCompare(b.id),
+      );
+    }
     const request =
       typeof params.match === "string"
         ? uniqueMatches.find((m) => m.id === params.match)
-        : uniqueMatches.length === 1
+        : uniqueMatches.length === 1 || latest
           ? uniqueMatches[0]
           : undefined;
     if (!request)

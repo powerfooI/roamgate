@@ -1,5 +1,4 @@
 .pull-request-card {
-  position: relative;
   flex: 0 0 auto;
   min-width: 0;
   border-bottom: 1px solid var(--viewer-border);
@@ -33,7 +32,7 @@
   align-items: center;
   gap: 10px;
   min-height: 58px;
-  padding: 9px 52px 9px 12px;
+  padding: 9px 8px 9px 12px;
 }
 
 .pull-request-card-summary:hover {
@@ -123,9 +122,7 @@
 }
 
 .pull-request-card .pull-request-card-refresh {
-  position: absolute;
-  top: 11px;
-  right: 8px;
+  flex: 0 0 36px;
   display: grid;
   place-items: center;
   width: 36px;
@@ -285,6 +282,49 @@
   padding: 6px 10px;
   border-color: var(--viewer-border);
   background: var(--viewer-content-bg);
+}
+
+:where(.workspace-inspector.is-compact, html[data-layout="mobile"]) {
+  .pull-request-card-summary {
+    gap: 6px;
+    min-height: 44px;
+    padding: 4px 6px 4px 8px;
+  }
+
+  .pull-request-card-icon {
+    flex-basis: 20px;
+    height: 24px;
+    border-radius: 5px;
+  }
+
+  .pull-request-card-heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .pull-request-card-eyebrow {
+    flex-shrink: 0;
+  }
+
+  .pull-request-card-disclosure[open] .pull-request-card-heading {
+    display: grid;
+    gap: 0;
+  }
+
+  .pull-request-card-badge {
+    padding: 1px 5px;
+  }
+
+  .pull-request-card-content {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .pull-request-card-route,
+  .pull-request-card-signals dl > div {
+    padding: 6px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

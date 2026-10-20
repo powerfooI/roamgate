@@ -190,6 +190,19 @@ export function PullRequestCardView({
             size={14}
             aria-hidden="true"
           />
+          <button
+            className="pull-request-card-refresh"
+            type="button"
+            title="Refresh PR/MR status"
+            aria-label="Refresh PR/MR status"
+            disabled={loading}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRefresh();
+            }}
+          >
+            <RefreshCw size={14} aria-hidden="true" />
+          </button>
         </summary>
         <div className="pull-request-card-content">
           {current ? (
@@ -284,16 +297,6 @@ export function PullRequestCardView({
           ) : null}
         </div>
       </details>
-      <button
-        className="pull-request-card-refresh"
-        type="button"
-        title="Refresh PR/MR status"
-        aria-label="Refresh PR/MR status"
-        disabled={loading}
-        onClick={onRefresh}
-      >
-        <RefreshCw size={14} aria-hidden="true" />
-      </button>
     </section>
   );
 }

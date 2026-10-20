@@ -14,6 +14,7 @@ import { FilePreviewTabs } from "./FilePreviewTabs";
 import { AnnotationComposerPopover } from "./AnnotationComposerPopover";
 import {
   closeResourceFileTab,
+  type InspectorView,
   type ResourceFileTabs,
 } from "../workspaceResource";
 
@@ -271,7 +272,7 @@ function registerDomTests() {
     });
   });
 
-  test("Inspector restores Files and preserves a newer selection during deletion", async () => {
+  test("Inspector restores Files, preserves newer selections, and limits PR/MR banners to Git views", async () => {
     let deleteFixture = () => {};
     mock.module("./FileExplorerDialog", () => ({
       FileExplorerPanel: ({
@@ -314,11 +315,15 @@ function registerDomTests() {
     const selections: string[] = [];
     function InspectorHarness({
       initialDirectory,
+      initialView,
+      visible = false,
     }: {
       initialDirectory?: string;
+      initialView?: InspectorView;
+      visible?: boolean;
     }) {
-      const [view, setView] = useState<"files" | "changes">(
-        initialDirectory === undefined ? "changes" : "files",
+      const [view, setView] = useState<InspectorView>(
+        initialView ?? (initialDirectory === undefined ? "changes" : "files"),
       );
       const [selection, setSelection] = useState<
         import("./FilePreviewContent").ActiveFilePreviewSelection
@@ -333,7 +338,7 @@ function registerDomTests() {
           size: 520,
           expanded: false,
         },
-        visible: false,
+        visible,
         workspace: {
           workspace_id: "tabs-test",
           number: 1,
@@ -382,7 +387,7 @@ function registerDomTests() {
           });
         },
         onFileSelectionChange: setSelection,
-        onViewChange: (next) => setView(next === "files" ? "files" : "changes"),
+        onViewChange: setView,
         onDiffSelectionChange: () => {},
         onOpenDocument: () => {},
         onRefreshFile: () => {},
@@ -446,5 +451,20 @@ function registerDomTests() {
         .querySelector(".workspace-inspector")
         ?.classList.contains("has-detail"),
     ).toBe(false);
+
+    for (const view of ["files", "changes", "commits", "history"] as const) {
+      await act(async () =>
+        root.render(
+          createElement(InspectorHarness, {
+            key: view,
+            initialView: view,
+            visible: true,
+          }),
+        ),
+      );
+      expect(container.querySelectorAll(".pull-request-card").length).toBe(
+        view === "changes" || view === "commits" ? 1 : 0,
+      );
+    }
   });
 }

@@ -93,6 +93,35 @@
   min-width: 0;
 }
 
+.workspace-review {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 3px;
+  max-width: none;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.ws-label > .workspace-review {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+}
+
+.workspace-review[data-state="open"] {
+  color: var(--green);
+}
+
+.workspace-review[data-state="merged"] {
+  color: var(--accent);
+}
+
+.workspace-review[data-state="closed"] {
+  color: var(--red);
+}
+
 .tree-row.is-focused > .ws-label {
   color: var(--text-strong);
   font-weight: 700;
