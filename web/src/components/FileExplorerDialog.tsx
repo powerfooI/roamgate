@@ -421,6 +421,7 @@ function FileExplorerContent({
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(
     () => new Set(),
   );
+  const directoryRequests = useRef(new Map<string, symbol>());
   const [uploadingPaths, setUploadingPaths] = useState<Set<string>>(
     () => new Set(),
   );
@@ -570,6 +571,11 @@ function FileExplorerContent({
     if (!workspace?.workspace_id || !connectionClient.isCurrent()) return;
     const requestContext = runtimeContext;
     if (!force && children[path]) return;
+    const request = Symbol();
+    directoryRequests.current.set(path, request);
+    const requestIsCurrent = () =>
+      directoryRequests.current.get(path) === request &&
+      runtimeContextIsCurrent(requestContext);
     setLoadingPaths((current) => new Set(current).add(path));
     updateCache({ error: null });
     try {
@@ -578,12 +584,7 @@ function FileExplorerContent({
         path,
         show_hidden: showHidden,
       })) as FileExplorerList;
-      if (
-        !connectionClient.isCurrent() ||
-        runtimeContextRef.current !== requestContext
-      ) {
-        return;
-      }
+      if (!requestIsCurrent()) return;
       setCache((current) => {
         const next = {
           ...current,
@@ -602,22 +603,19 @@ function FileExplorerContent({
         return next;
       });
     } catch (e) {
-      if (
-        connectionClient.isCurrent() &&
-        runtimeContextRef.current === requestContext
-      ) {
+      if (requestIsCurrent()) {
         updateCache({ error: (e as Error).message });
       }
     } finally {
-      if (
-        connectionClient.isCurrent() &&
-        runtimeContextRef.current === requestContext
-      ) {
+      if (requestIsCurrent()) {
         setLoadingPaths((current) => {
           const next = new Set(current);
           next.delete(path);
           return next;
         });
+      }
+      if (directoryRequests.current.get(path) === request) {
+        directoryRequests.current.delete(path);
       }
     }
   };
