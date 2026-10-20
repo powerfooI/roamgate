@@ -6077,3 +6077,82 @@ test("a queued follow-up is retried when its blocking preview is cancelled as un
   expect(prompts).toHaveLength(1);
   expect(f.service.peek().queue).toMatchObject([{ id: "next" }]);
 });
+
+test("saving settings that cancel a blocking preview sends the waiting follow-up", async () => {
+  const gate = Promise.withResolvers<void>();
+  const prompts: string[] = [];
+  const f = setup({
+    run: async (input) => {
+      prompts.push(input.text);
+      if (prompts.length === 1) {
+        await input.propose!(
+          "create_tab",
+          { connection_id: "local", workspace_id: "ws", cwd: "/repo" },
+          input.signal,
+        );
+        await gate.promise;
+      }
+      input.message("Done");
+      return [{ persisted: true }];
+    },
+  });
+  f.context.prepareAction = async () =>
+    permissionAction(async () => ({ status: "succeeded", detail: "Created" }));
+  await f.service.handle("configure", { config: configured });
+  await f.service.handle("send", { text: "Make a tab", request_id: "tab" });
+  await f.service.handle("send", {
+    text: "Then report",
+    request_id: "next",
+    when_busy: "queue",
+  });
+  gate.resolve();
+  await until(() => !f.service.peek().running);
+  await flushTasks();
+  expect(prompts).toHaveLength(1);
+  await f.service.handle("configure", { config: configured });
+  expect(
+    f.service.peek().messages.flatMap((message) => message.actions ?? [])[0]!
+      .status,
+  ).toBe("cancelled");
+  await until(() => prompts.length === 2 && !f.service.peek().running);
+  expect(prompts[1]).toContain("User message:\nThen report");
+});
+
+test("a follow-up cannot be removed once its admission has started", async () => {
+  const gate = Promise.withResolvers<void>();
+  const admitting = Promise.withResolvers<void>();
+  const prompts: string[] = [];
+  const f = setup({
+    run: async (input) => {
+      prompts.push(input.text);
+      if (prompts.length === 1) await gate.promise;
+      input.message("Done");
+      return [{ persisted: true }];
+    },
+  });
+  const capture = f.context.captureScope;
+  const release = Promise.withResolvers<void>();
+  f.context.captureScope = async (...args) => {
+    if (prompts.length === 1) {
+      admitting.resolve();
+      await release.promise;
+    }
+    return capture(...args);
+  };
+  await f.service.handle("configure", { config: configured });
+  await f.service.handle("send", { text: "First", request_id: "first" });
+  await f.service.handle("send", {
+    text: "Second",
+    request_id: "second",
+    when_busy: "queue",
+  });
+  gate.resolve();
+  await admitting.promise;
+  await expect(
+    f.service.handle("queue.remove", { id: "second" }),
+  ).rejects.toThrow("already sent");
+  release.resolve();
+  await until(() => prompts.length === 2 && !f.service.peek().running);
+  expect(prompts[1]).toContain("User message:\nSecond");
+  expect(f.service.peek().queue).toEqual([]);
+});

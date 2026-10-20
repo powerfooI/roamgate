@@ -2684,6 +2684,8 @@ export function createAssistantService(options: {
             publish(true);
           } finally {
             changing = false;
+            // A turn may have answered while this was saving.
+            drainQueue();
           }
           break;
         }
@@ -2906,6 +2908,8 @@ export function createAssistantService(options: {
             );
           } finally {
             changing = false;
+            // Saving cancels previews a follow-up may be waiting behind.
+            drainQueue();
           }
           break;
         }
@@ -2917,7 +2921,8 @@ export function createAssistantService(options: {
             throw new Error("Removal accepts only the message identifier.");
           const id = string(params.id, "message identifier");
           const item = queue.find((entry) => entry.id === id);
-          if (!item) throw new Error("This message was already sent.");
+          if (!item || pendingRequest === id)
+            throw new Error("This message was already sent.");
           if (item.mode === "steer")
             throw new Error(
               "This message is already steering Ranger and can no longer be removed.",
