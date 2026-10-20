@@ -3,6 +3,7 @@ import type { HistoryEntry } from "./agentHistory";
 import {
   groupHistoryChatItems,
   pairToolSteps,
+  previewToolArgumentFields,
   searchHistoryChatEntries,
   summarizeToolSteps,
   toolArgumentFields,
@@ -194,4 +195,29 @@ test("chat search keeps a tool call and its result together", () => {
   expect(ids("bun run")).toEqual(["2", "3"]);
   expect(ids("done")).toEqual(["6"]);
   expect(ids("  ")).toEqual(["1", "2", "3", "4", "5", "6"]);
+});
+
+test("argument previews share one budget across all fields", () => {
+  const field = (key: string, value: string) => ({ key, value, code: false });
+  // Many short fields: each fits on its own, but together they exceed the
+  // budget, so the preview stops and reports truncation.
+  const many = Array.from({ length: 1000 }, (_, i) => field(`k${i}`, "abcdef"));
+  const clipped = previewToolArgumentFields(many, 100);
+  expect(clipped.truncated).toBe(true);
+  expect(
+    clipped.fields.reduce(
+      (total, item) => total + item.key.length + item.value.length,
+      0,
+    ),
+  ).toBeLessThanOrEqual(100);
+  // One long field is cut to what is left of the budget.
+  expect(previewToolArgumentFields([field("cmd", "x".repeat(50))], 13)).toEqual(
+    { fields: [field("cmd", "x".repeat(10))], truncated: true },
+  );
+  // Fields that fit are returned whole.
+  const fits = [field("a", "1"), field("b", "2")];
+  expect(previewToolArgumentFields(fits, 100)).toEqual({
+    fields: fits,
+    truncated: false,
+  });
 });

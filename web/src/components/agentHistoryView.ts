@@ -184,6 +184,30 @@ export function toolArgumentFields(text: string): ToolArgumentField[] {
   );
 }
 
+// Clip argument fields to one character budget across the whole payload, so
+// many short fields cannot add up to an unbounded preview. Keys count toward
+// the budget (at least one character per field), which also bounds the
+// number of rendered fields.
+export function previewToolArgumentFields(
+  fields: readonly ToolArgumentField[],
+  limit: number,
+): { fields: ToolArgumentField[]; truncated: boolean } {
+  const preview: ToolArgumentField[] = [];
+  let remaining = limit;
+  for (const field of fields) {
+    const cost = Math.max(1, field.key.length);
+    if (remaining < cost) return { fields: preview, truncated: true };
+    remaining -= cost;
+    if (field.value.length > remaining) {
+      preview.push({ ...field, value: field.value.slice(0, remaining) });
+      return { fields: preview, truncated: true };
+    }
+    remaining -= field.value.length;
+    preview.push(field);
+  }
+  return { fields: preview, truncated: false };
+}
+
 export type ToolBlockSummary = {
   calls: number;
   errors: number;

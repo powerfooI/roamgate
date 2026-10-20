@@ -20,6 +20,7 @@ import {
 } from "./agentHistory";
 import {
   pairToolSteps,
+  previewToolArgumentFields,
   summarizeToolSteps,
   toolArgumentFields,
   toolArgumentHeadline,
@@ -141,12 +142,13 @@ function ToolArguments({
   call: HistoryEntry;
   onOpen: (entry: HistoryEntry) => void;
 }) {
-  const fields = toolArgumentFields(call.text);
-  if (fields.length === 0) {
+  const allFields = toolArgumentFields(call.text);
+  if (allFields.length === 0) {
     return <p className="agent-history-chat-step-empty">No arguments</p>;
   }
-  const truncated = fields.some(
-    (field) => field.value.length > HISTORY_PREVIEW_CHARS,
+  const { fields, truncated } = previewToolArgumentFields(
+    allFields,
+    HISTORY_PREVIEW_CHARS,
   );
   return (
     <>
@@ -157,13 +159,7 @@ function ToolArguments({
             className={field.code ? "is-code" : undefined}
           >
             {field.key ? <dt>{field.key}</dt> : null}
-            <dd>
-              {field.code ? (
-                <pre>{field.value.slice(0, HISTORY_PREVIEW_CHARS)}</pre>
-              ) : (
-                field.value.slice(0, HISTORY_PREVIEW_CHARS)
-              )}
-            </dd>
+            <dd>{field.code ? <pre>{field.value}</pre> : field.value}</dd>
           </div>
         ))}
       </dl>
