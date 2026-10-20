@@ -578,6 +578,40 @@ if (process.env.ROAMGATE_FILE_EXPLORER_DOM_TEST !== "1") {
       expect(row("target").querySelector(".row-spinner")).not.toBeNull();
       await releaseListings(pendingListings);
       expect(row("target").querySelector(".row-spinner")).toBeNull();
+
+      await createLocalDirectory(directory, "target", "hydrating");
+      await writeFile(join(directory, "target/hydrating/active.txt"), "active");
+      const hydrationStart = heldListings.length;
+      holdListings = true;
+      try {
+        await act(async () => {
+          root.render(
+            createElement(FileExplorerPanel, {
+              open: true,
+              workspaceId: "w1",
+              activePath: "target/hydrating/active.txt",
+              onClose: () => {},
+            }),
+          );
+        });
+      } finally {
+        holdListings = false;
+      }
+      const hydrationListings = heldListings.slice(hydrationStart);
+      expect(hydrationListings).toHaveLength(1);
+      await Promise.all(hydrationListings.map((listing) => listing.snapshot));
+      await writeFile(join(directory, "target/hydrating/new.txt"), "new");
+      await rm(join(directory, "target/hydrating/active.txt"));
+      const refreshedHydration = await holdStepListings();
+      await releaseListings(refreshedHydration);
+      expect(row("target/hydrating/new.txt")).toBeDefined();
+      await releaseListings(hydrationListings);
+      expect(row("target/hydrating/new.txt")).toBeDefined();
+      expect(
+        container.querySelector(
+          "[data-file-path='target/hydrating/active.txt']",
+        ),
+      ).toBeNull();
       await update(() => {
         transfer = dragStart("a.txt");
       });
