@@ -482,11 +482,23 @@ test("a steer joins the running turn after its tool round and splits later outpu
 });
 
 test("a steer that misses the answer stops its own run instead of joining the turn", async () => {
+  // The missed steer's run asks for a tool straight away.
   const f = await durableFixture((index) =>
     index === 1
       ? modelReply(index, [...text("Answered"), ...finish("end_turn")])
-      : hangingReply(index),
+      : index === 2
+        ? modelReply(index, [
+            ...toolUse(
+              "workspace_status",
+              "stray",
+              { connection_id: "local", workspace_id: "workspace" },
+              0,
+            ),
+            ...finish("tool_use"),
+          ])
+        : hangingReply(index),
   );
+  const reads: unknown[] = [];
   try {
     const entries = await f.createDriver().run(f.input());
     const events: string[] = [];
@@ -497,12 +509,19 @@ test("a steer that misses the answer stops its own run instead of joining the tu
         entries,
         recover: true,
         steers: [{ requestId: "late", text: "Late steer" }],
+        read: async (...args) => {
+          reads.push(args);
+          return { text: "Running" };
+        },
         replace: (value) => events.push(`text:${value}`),
         steered: (requestId) => events.push(`steered:${requestId}`),
       }),
     );
     expect(events).not.toContain("steered:late");
     expect(events.at(-1)).toBe("text:Answered");
+    // Whether the driver stops that run before or after it asks for a tool,
+    // the tool never runs outside the turn.
+    expect(reads).toEqual([]);
     // Pi placed it in a run of its own, which the driver stopped.
     expect(JSON.stringify(durableEntries(f.directory, entries))).toContain(
       "Late steer",

@@ -33,7 +33,7 @@ import {
   type WorkspaceToolReader,
   workspaceTools,
 } from "./tools";
-import { surfaceAssistantUserError } from "./errors";
+import { AssistantUserError, surfaceAssistantUserError } from "./errors";
 import {
   LEGACY_AZURE_PROVIDER,
   registerLegacyAzureProvider,
@@ -696,6 +696,12 @@ export function createPiDriver(
         ...steer,
       }));
       let accepting = true;
+      // The turn's own input. Tools run only inside the run that answers it.
+      const turnInput =
+        Promise.withResolvers<
+          import("@earendil-works/pi-durable").SubmissionId
+        >();
+      turnInput.promise.catch(() => {});
       let steerReady: ((steer: Steer) => Promise<void>) | undefined;
       running.steer = async (text, requestId) => {
         if (!accepting) throw new Error("Ranger finished this turn");
@@ -842,8 +848,24 @@ export function createPiDriver(
             (automatic && tool.name.startsWith("propose_"))
               ? { executionMode: "sequential" as const }
               : {}),
-            execute: async (params, _api, toolContext) => {
+            execute: async (params, api, toolContext) => {
               try {
+                // Pi starts a separate run for a steer that misses the turn.
+                // That run keeps this turn's tools, so refuse any call outside
+                // the turn's own run before it can read or act.
+                const turnId = await chord.awaitWithContext(
+                  turnInput.promise,
+                  toolContext,
+                );
+                const live = await api.snapshot(
+                  durable.LiveDoc,
+                  api.conversationId,
+                  toolContext,
+                );
+                if (!live?.run?.inputs.includes(turnId))
+                  throw new AssistantUserError(
+                    "This request is outside the current Ranger turn.",
+                  );
                 const result = await chord.awaitWithContext(
                   tool.call(params, toolContext.abortSignal),
                   toolContext,
@@ -913,6 +935,7 @@ export function createPiDriver(
           },
           context,
         );
+        turnInput.resolve(submission.id);
         let record = await submission.status(context);
         const submitSteer = async (steer: Steer) => {
           steer.submission = await root.submit(
@@ -1262,6 +1285,7 @@ export function createPiDriver(
         throw error;
       } finally {
         input.signal.removeEventListener("abort", abort);
+        turnInput.reject(new Error("The Ranger turn ended"));
         steerReady = undefined;
         accepting = false;
         try {
