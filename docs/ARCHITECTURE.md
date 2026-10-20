@@ -141,6 +141,11 @@ Last step snapshots the checkout when the workspace goes from active to idle.
 Captures include small untracked files and commits made during the turn, use raw
 on-disk bytes (no Git filters), and never touch the user's index.
 
+`workspace.last_step_completed` notifies browsers after snapshot finalization
+settles, even when capture is unavailable, refused, or fails. It signals a
+completed workspace activity period, not a new Git snapshot, so Files can
+refresh independently of Last step availability.
+
 A capture is refused entirely when a file exceeds 8 MiB, content exceeds 32 MiB
 in total, or there are more than 10,000 files. It is also refused for symlinks,
 special or unreadable files, newline/tab filenames, applicable `filter`

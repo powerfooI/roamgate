@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { silentLogger } from "../utils/logger";
 import { createLastStepBaselineStore } from "../workspace/git-diff";
 import { createLegacyConnectionRuntime } from "./runtime";
 
@@ -50,6 +51,114 @@ test("legacy runtime exposes and reports its configured connection identity", as
   await stopping;
   expect(events).toEqual([{ event, connectionId: "remote-dev" }]);
 });
+
+test.each([
+  "success",
+  "windows",
+  "non-git",
+  "capture-refused",
+  "completion-failed",
+])(
+  "runtime publishes step completion independently of snapshot outcome: %s",
+  async (outcome) => {
+    const tree = "a".repeat(40);
+    let snapshots = 0;
+    const completionGate = Promise.withResolvers<void>();
+    const warnings: string[] = [];
+    const baselines = createLastStepBaselineStore({
+      shQuote: (value) => `'${value}'`,
+      runProcessWithCodeTimeout: async () => {
+        snapshots += 1;
+        if (snapshots === 2) await completionGate.promise;
+        if (
+          outcome === "capture-refused" ||
+          (outcome === "completion-failed" && snapshots === 2)
+        ) {
+          throw new Error("snapshot unavailable");
+        }
+        return { code: 0, stdout: `${tree}\n`, stderr: "" };
+      },
+    });
+    const completions: Array<{ workspaceId: string; connectionId: string }> =
+      [];
+    const runtime = createLegacyConnectionRuntime({
+      identity: { id: "remote", label: "Remote", source: "test" },
+      config: {
+        socketPath: "/tmp/unused-step-completion-control.sock",
+        clientSocketPath: "/tmp/unused-step-completion-client.sock",
+        hasExplicitSocketPath: true,
+        hasExplicitClientSocketPath: true,
+        remotePlatform: outcome === "windows" ? "windows" : undefined,
+      },
+      safeSend: () => true,
+      clientLabel: () => "browser",
+      markRpcError: () => undefined,
+      logger: {
+        ...silentLogger,
+        warn: (message) => warnings.push(message),
+      },
+      onEvent: (event, identity) => {
+        const message = event as {
+          event: string;
+          data: { workspace_id: string };
+        };
+        if (message.event === "workspace.last_step_completed")
+          completions.push({
+            workspaceId: message.data.workspace_id,
+            connectionId: identity.id,
+          });
+      },
+      lastStepBaselines: baselines,
+      resolveLastStepWorkspaceGitRoot: async () => {
+        if (outcome === "non-git") throw new Error("not a Git repository");
+        return "/repo";
+      },
+      lastStepTransitionDebounceMs: 0,
+    });
+    const emitStatus = async (agent_status: string) => {
+      runtime.herdr.emit("event", {
+        event: "pane.agent_status_changed",
+        data: { pane_id: "w1:p1", workspace_id: "w1", agent_status },
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    };
+    try {
+      await emitStatus("idle");
+      await emitStatus("working");
+      expect(completions).toEqual([]);
+      await emitStatus("idle");
+      if (outcome === "success" || outcome === "completion-failed")
+        expect(completions).toEqual([]);
+      completionGate.resolve();
+      await emitStatus("idle");
+      expect(completions).toEqual([
+        { workspaceId: "w1", connectionId: "remote" },
+      ]);
+      expect(await baselines.resolveCompleted("w1", "/repo")).toEqual(
+        outcome === "success" ? { baseline: tree, current: tree } : undefined,
+      );
+      expect(snapshots).toBe(
+        outcome === "windows" || outcome === "non-git"
+          ? 0
+          : outcome === "capture-refused"
+            ? 1
+            : 2,
+      );
+      expect(warnings).toEqual(
+        outcome === "success" || outcome === "windows"
+          ? []
+          : [
+              outcome === "completion-failed"
+                ? "last-step completion failed"
+                : "last-step baseline failed",
+            ],
+      );
+    } finally {
+      completionGate.resolve();
+      await runtime.stop();
+    }
+  },
+);
 
 test("runtime stop drains an in-flight completion and suppresses publication", async () => {
   const tree = "a".repeat(40);
