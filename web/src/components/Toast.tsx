@@ -23,6 +23,9 @@ type SwipeState = {
   startTime: number;
   offset: number;
   swiping: boolean;
+  /** Set when the gesture began on scrollable output: drag scrolls it. */
+  scroller: HTMLElement | null;
+  startScrollTop: number;
 };
 
 const SWIPE_SLOP_PX = 6;
@@ -83,8 +86,10 @@ export function Toast({
       !isMobileLayout()
     )
       return;
-    // Buttons keep their taps; scrollable output keeps its native pan.
-    if ((event.target as Element).closest("button, .toast-output pre")) return;
+    const target = event.target as Element;
+    // Buttons keep their taps.
+    if (target.closest("button")) return;
+    const scroller = target.closest<HTMLElement>(".toast-output pre");
     swipeRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -92,6 +97,8 @@ export function Toast({
       startTime: event.timeStamp,
       offset: 0,
       swiping: false,
+      scroller,
+      startScrollTop: scroller?.scrollTop ?? 0,
     };
   };
 
@@ -109,8 +116,16 @@ export function Toast({
       swipe.swiping = true;
       // A running entry animation overrides the inline transform, so jump it
       // to its end state; finishing (unlike removing it) never replays it.
-      for (const animation of ref.current?.getAnimations() ?? [])
-        animation.finish();
+      if (!swipe.scroller)
+        for (const animation of ref.current?.getAnimations() ?? [])
+          animation.finish();
+    }
+    // The mobile toast's touch-action: none also blocks native panning of
+    // its output (descendants cannot re-enable it in every engine), so drags
+    // that start there scroll the output by hand instead of dismissing.
+    if (swipe.scroller) {
+      swipe.scroller.scrollTop = swipe.startScrollTop - dy;
+      return;
     }
     // Follow upward drags; resist downward or blocked ones like a rubber band.
     swipe.offset = dy < 0 && !dismissDisabled ? dy : dy / 5;
@@ -121,7 +136,7 @@ export function Toast({
     const swipe = swipeRef.current;
     if (!swipe || swipe.pointerId !== event.pointerId) return;
     swipeRef.current = null;
-    if (!swipe.swiping) return;
+    if (!swipe.swiping || swipe.scroller) return;
     const elapsed = Math.max(1, event.timeStamp - swipe.startTime);
     const velocity = swipe.offset / elapsed;
     const dismiss =
