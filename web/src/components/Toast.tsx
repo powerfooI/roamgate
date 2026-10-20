@@ -1,8 +1,10 @@
 import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  useEffect,
   useRef,
 } from "react";
+import { isMobileLayout } from "../layoutPreferences";
 
 type ToastProps = {
   className: string;
@@ -26,8 +28,9 @@ const SWIPE_DISMISS_PX = 36;
 const SWIPE_DISMISS_VELOCITY = 0.45;
 const SWIPE_EXIT_MS = 180;
 
-// Touch-only swipe-up dismissal, matching native notification banners.
-// Mouse and pen keep the explicit close button.
+// Touch-only swipe-up dismissal in the mobile layout, matching native
+// notification banners. Desktop layouts, mouse, and pen keep the explicit
+// close button.
 export function Toast({
   className,
   role,
@@ -37,6 +40,15 @@ export function Toast({
 }: ToastProps) {
   const ref = useRef<HTMLDivElement>(null);
   const swipeRef = useRef<SwipeState | null>(null);
+  const exitTimerRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (exitTimerRef.current !== null)
+        window.clearTimeout(exitTimerRef.current);
+    },
+    [],
+  );
 
   const setOffset = (offset: number, swiping: boolean) => {
     const el = ref.current;
@@ -52,7 +64,13 @@ export function Toast({
   };
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== "touch" || swipeRef.current) return;
+    if (
+      event.pointerType !== "touch" ||
+      swipeRef.current ||
+      exitTimerRef.current !== null ||
+      !isMobileLayout()
+    )
+      return;
     // Buttons keep their taps; scrollable output keeps its native pan.
     if ((event.target as Element).closest("button, .toast-output pre")) return;
     swipeRef.current = {
@@ -102,7 +120,8 @@ export function Toast({
     const el = ref.current;
     const exit = -((el?.offsetHeight ?? 120) + (el?.offsetTop ?? 0) + 24);
     setOffset(exit, false);
-    window.setTimeout(() => {
+    exitTimerRef.current = window.setTimeout(() => {
+      exitTimerRef.current = null;
       onDismiss();
       setOffset(0, false);
     }, SWIPE_EXIT_MS);

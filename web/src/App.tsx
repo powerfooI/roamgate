@@ -4092,7 +4092,12 @@ export default function App() {
                     s.notice.loading ? "toast-loading" : ""
                   }`}
                   role={s.notice.kind === "error" ? "alert" : "status"}
-                  onDismiss={() => store.clearNotice()}
+                  onDismiss={() => {
+                    // Swipes dismiss after their exit animation; keep any
+                    // newer notice that replaced this one meanwhile.
+                    if (store.get().notice?.id === s.notice?.id)
+                      store.clearNotice();
+                  }}
                 >
                   <ToastMark kind={s.notice.kind} loading={s.notice.loading} />
                   <div className="toast-content">
