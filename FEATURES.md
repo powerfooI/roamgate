@@ -79,8 +79,10 @@ Inspector state is scoped to each checkout; see
   sidebar, switcher, command menu, Agent panel, and notifications.
 - Choose nested, **Separate**, or **Compact** agent views with optional
   attention-first ordering and grouping.
-- **Agent History** shows the latest 200 conversation entries with
-  User/Agent/Tool filters, search, a minimap, and tool details. Exports are
+- **Agent History** shows the latest 200 conversation entries with search, a
+  minimap, and tool details. The **Chat view** toggle reads them as
+  conversation bubbles with rendered replies and collapsible tool-call blocks
+  that follow new output; the timeline view adds User/Agent/Tool filters. Exports are
   always complete. **Session Inspector** adds metadata, a timeline, raw/ATIF
   transcripts, and export.
 - **Menu > Configuration > Integrations** installs, updates, or removes Herdr's

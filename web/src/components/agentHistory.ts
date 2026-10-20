@@ -31,6 +31,18 @@ export const ALL_HISTORY_FILTERS: HistoryFilters = {
   tool: true,
 };
 
+// Tool payloads arrive redacted (metadata only) and are fetched on demand;
+// an entry is pending until its text is loaded.
+export function isToolContentPending(
+  entry: Pick<HistoryEntry, "role" | "text" | "text_bytes">,
+) {
+  return (
+    entry.role === "tool" &&
+    entry.text.length === 0 &&
+    (entry.text_bytes ?? 0) > 0
+  );
+}
+
 export function historyEntryCategory(entry: HistoryEntry): HistoryCategory {
   return entry.role === "assistant" ? "agent" : entry.role;
 }

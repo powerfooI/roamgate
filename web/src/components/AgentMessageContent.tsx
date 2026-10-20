@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Copy, X } from "lucide-react";
 import { formatUiDateTime } from "../uiLocale";
 import { copyTextWithFeedback } from "../copyText";
+import { isToolContentPending } from "./agentHistory";
 import { CloseButton } from "./CloseButton";
 import { MarkdownPreview } from "./markdown";
 import "./AgentMessageContent.css";
@@ -48,8 +49,7 @@ export function AgentMessageContent({
     setViewMode(message.role === "assistant" ? "rendered" : "raw");
   }
   // Redacted tool entry whose on-demand content has not arrived (yet).
-  const contentPending =
-    isTool && message.text.length === 0 && (message.text_bytes ?? 0) > 0;
+  const contentPending = isToolContentPending(message);
   const roleLabel = agentMessageRoleLabel(message);
 
   return (

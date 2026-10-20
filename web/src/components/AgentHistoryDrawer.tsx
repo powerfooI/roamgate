@@ -9,7 +9,15 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
-import { Copy, Download, Eye, Info, RefreshCw, X } from "lucide-react";
+import {
+  Copy,
+  Download,
+  Eye,
+  Info,
+  MessagesSquare,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import { useStoreSelector } from "../store";
 import { copyTextWithFeedback } from "../copyText";
 import { useConnectionClient } from "../useConnectionClient";
@@ -24,11 +32,20 @@ import { AgentIcon } from "./AgentIcon";
 import { AgentMessageContent } from "./AgentMessageContent";
 import { AgentMessageDialog } from "./AgentMessageDialog";
 import { AgentHistoryCard } from "./AgentHistoryCard";
+import { AgentHistoryChat } from "./AgentHistoryChat";
 import { AgentHistoryFilters } from "./AgentHistoryFilters";
+import {
+  groupHistoryChatItems,
+  searchHistoryChatEntries,
+  readAgentHistoryView,
+  writeAgentHistoryView,
+  type AgentHistoryView,
+} from "./agentHistoryView";
 import {
   ALL_HISTORY_FILTERS,
   historyEntryLabel,
   mergeAgentHistory,
+  isToolContentPending,
   selectHistoryEntries,
   type HistoryFilters,
   type AgentHistory,
@@ -403,6 +420,8 @@ export function AgentHistoryDrawer({
   );
   const [session, setSession] = useState<AgentSessionSummary | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [view, setView] = useState<AgentHistoryView>(readAgentHistoryView);
+  const chatView = view === "chat";
   const [previewPane, setPreviewPane] = useState<Pane | null>(null);
   const [previewSummary, setPreviewSummary] =
     useState<AgentSessionSummary | null>(null);
@@ -644,14 +663,30 @@ export function AgentHistoryDrawer({
     () => (toolEntryTexts.size === 0 ? messages : messages.map(hydrateEntry)),
     [messages, toolEntryTexts, hydrateEntry],
   );
-  const { visible: visibleMessages, counts } = useMemo(
+  const timelineSelection = useMemo(
     () => selectHistoryEntries(hydratedMessages, filters, query),
     [hydratedMessages, filters, query],
   );
-  const wideSelectedEntry = wide
+  // The chat view has no type filter: it shows every entry, with tool entries
+  // collapsed into blocks between the conversation bubbles. Its search keeps
+  // a tool call and its result together.
+  const chatEntries = useMemo(
+    () => (chatView ? searchHistoryChatEntries(hydratedMessages, query) : null),
+    [chatView, hydratedMessages, query],
+  );
+  const visibleMessages = chatEntries ?? timelineSelection.visible;
+  const counts = timelineSelection.counts;
+  const chatItems = useMemo(
+    () => (chatView ? groupHistoryChatItems(visibleMessages) : []),
+    [chatView, visibleMessages],
+  );
+  // The chat view reads full messages in the modal dialog at any width; only
+  // the wide timeline uses the inline master-detail reader.
+  const masterDetail = wide && !chatView;
+  const wideSelectedEntry = masterDetail
     ? (visibleMessages.find((entry) => entry.id === wideSelectedId) ?? null)
     : null;
-  const activeMessage = wide
+  const activeMessage = masterDetail
     ? !detailsOpen
       ? wideSelectedEntry
       : null
@@ -665,9 +700,7 @@ export function AgentHistoryDrawer({
     if (
       !open ||
       !activeMessage ||
-      activeMessage.role !== "tool" ||
-      activeMessage.text.length > 0 ||
-      (activeMessage.text_bytes ?? 0) === 0 ||
+      !isToolContentPending(activeMessage) ||
       toolEntryLoading.has(activeMessage.id) ||
       toolEntryFailedRef.current.has(activeMessage.id)
     ) {
@@ -762,8 +795,12 @@ export function AgentHistoryDrawer({
     setQuery(nextQuery);
     setExpandedMessage((entry) =>
       entry &&
-      selectHistoryEntries([hydrateEntry(entry)], next, nextQuery).visible
-        .length
+      (chatView
+        ? searchHistoryChatEntries(hydratedMessages, nextQuery).some(
+            (item) => item.id === entry.id,
+          )
+        : selectHistoryEntries([hydrateEntry(entry)], next, nextQuery).visible
+            .length)
         ? entry
         : null,
     );
@@ -774,7 +811,8 @@ export function AgentHistoryDrawer({
     setHighlightedSequence(null);
     visibleRangeKeyRef.current = "";
     setVisibleRange(null);
-    if (contentRef.current) contentRef.current.scrollTop = 0;
+    // The chat jumps back to its newest message itself (followKey).
+    if (!chatView && contentRef.current) contentRef.current.scrollTop = 0;
   };
 
   // Track which messages the timeline viewport contains so the minimap can
@@ -882,20 +920,28 @@ export function AgentHistoryDrawer({
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", schedule);
     };
-  }, [detailsOpen, visibleMessages, wide]);
+  }, [chatView, detailsOpen, visibleMessages, wide]);
 
   // Stable identity so the message dialog's focus effect only re-runs when the
   // message itself changes, not on every drawer re-render.
   const closeExpandedMessage = useCallback(() => setExpandedMessage(null), []);
 
   const usage = tokenUsage(session);
+  // Minimap entries: every visible timeline card, or every chat bubble (tool
+  // chip rows are not indexed).
   const messageEntries = useMemo(
     () =>
-      visibleMessages.map((message, index) => ({
-        message,
-        sequence: index + 1,
-      })),
-    [visibleMessages],
+      chatView
+        ? chatItems.flatMap((item) =>
+            item.type === "message"
+              ? [{ message: item.entry, sequence: item.sequence }]
+              : [],
+          )
+        : visibleMessages.map((message, index) => ({
+            message,
+            sequence: index + 1,
+          })),
+    [chatItems, chatView, visibleMessages],
   );
 
   const scrollToMessage = useCallback(
@@ -904,7 +950,7 @@ export function AgentHistoryDrawer({
         `[data-sequence="${sequence}"]`,
       );
       if (!(card instanceof HTMLElement)) return;
-      if (wide) {
+      if (masterDetail) {
         // Master-detail: the minimap selects the entry in the detail panel
         // and scrolls its row into view instead of flashing a highlight.
         const message = messageEntries[sequence - 1]?.message;
@@ -929,7 +975,7 @@ export function AgentHistoryDrawer({
         setHighlightedSequence(null);
       }, 1200);
     },
-    [messageEntries, wide],
+    [masterDetail, messageEntries],
   );
 
   const updateWideRatioFromPointer = useCallback(
@@ -1012,20 +1058,21 @@ export function AgentHistoryDrawer({
     </>
   ) : null;
 
+  const historySearch = (
+    <div className="agent-history-search">
+      <input
+        type="search"
+        aria-label="Search history messages"
+        placeholder="Search loaded messages"
+        title="Search loaded message text. Tool content is searchable after loading it."
+        value={query}
+        onChange={(event) => changeFilters(filters, event.currentTarget.value)}
+      />
+    </div>
+  );
   const historyFilters = (
     <>
-      <div className="agent-history-search">
-        <input
-          type="search"
-          aria-label="Search history messages"
-          placeholder="Search loaded messages"
-          title="Search loaded message text. Tool content is searchable after loading it."
-          value={query}
-          onChange={(event) =>
-            changeFilters(filters, event.currentTarget.value)
-          }
-        />
-      </div>
+      {historySearch}
       <AgentHistoryFilters
         filters={filters}
         counts={counts}
@@ -1065,37 +1112,75 @@ export function AgentHistoryDrawer({
       ))}
     </div>
   );
-  const historyTimeline = (
-    <div className="agent-history-content" ref={contentRef}>
-      {loading && messages.length === 0 ? (
-        <div className="agent-history-state">
-          <span className="terminal-loading-dot" />
-          Loading messages
-        </div>
-      ) : messageEntries.length === 0 ? (
-        <div className="agent-history-state">
-          {messages.length > 0 ? (
-            <>
-              {query.trim()
+  const historyEmptyState =
+    loading && messages.length === 0 ? (
+      <div className="agent-history-state">
+        <span className="terminal-loading-dot" />
+        Loading messages
+      </div>
+    ) : visibleMessages.length === 0 ? (
+      <div className="agent-history-state">
+        {messages.length > 0 ? (
+          <>
+            {chatView
+              ? "No entries match the search."
+              : query.trim()
                 ? "No entries match the search and selected message types."
                 : "No entries match the selected message types."}
-              <button
-                type="button"
-                className="secondary-btn"
-                onClick={() => changeFilters(ALL_HISTORY_FILTERS, "")}
-              >
-                {query.trim() ? "Reset filters" : "Show all types"}
-              </button>
-            </>
-          ) : (
-            "No history entries were found in this session."
-          )}
-        </div>
-      ) : (
-        historyCards
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() =>
+                // The chat view only clears its search; the timeline's
+                // hidden type filters keep their state.
+                changeFilters(chatView ? filters : ALL_HISTORY_FILTERS, "")
+              }
+            >
+              {chatView
+                ? "Clear search"
+                : query.trim()
+                  ? "Reset filters"
+                  : "Show all types"}
+            </button>
+          </>
+        ) : (
+          "No history entries were found in this session."
+        )}
+      </div>
+    ) : null;
+  const historyTimeline = (
+    <div className="agent-history-content" ref={contentRef}>
+      {historyEmptyState ?? historyCards}
+    </div>
+  );
+  const historyChat = (
+    <div
+      className="agent-history-messages"
+      role="region"
+      aria-label="History messages"
+    >
+      {historySearch}
+      {historyMinimap}
+      {historyEmptyState ?? (
+        <AgentHistoryChat
+          items={chatItems}
+          listRef={contentRef}
+          contentRef={timelineRef}
+          highlightedSequence={highlightedSequence}
+          followKey={query}
+          toolLoading={toolEntryLoading}
+          onLoadTool={loadToolEntry}
+          onOpen={setExpandedMessage}
+        />
       )}
     </div>
   );
+  const changeView = (next: AgentHistoryView) => {
+    setView(next);
+    writeAgentHistoryView(next);
+    setDetailsOpen(false);
+    setExpandedMessage(null);
+  };
 
   // Wide layout: master-detail. The left column is a resizable list of
   // compact entries; the right column reads the selected entry in full.
@@ -1184,12 +1269,12 @@ export function AgentHistoryDrawer({
                 {messages.length > 0 ? (
                   <span
                     className="agent-history-count"
-                    aria-label={`${messageEntries.length} of ${messages.length} history entries`}
+                    aria-label={`${visibleMessages.length} of ${messages.length} history entries`}
                     title="Most recent 200 messages with their tool entries"
                   >
-                    {messageEntries.length === messages.length
+                    {visibleMessages.length === messages.length
                       ? messages.length
-                      : `${messageEntries.length}/${messages.length}`}
+                      : `${visibleMessages.length}/${messages.length}`}
                   </span>
                 ) : null}
               </strong>
@@ -1205,6 +1290,21 @@ export function AgentHistoryDrawer({
             {pane.agent_status}
           </span>
           <div className="agent-history-actions">
+            <button
+              type="button"
+              className="agent-history-icon"
+              aria-label="Chat view"
+              aria-pressed={chatView && !detailsOpen}
+              title={
+                chatView && !detailsOpen ? "Show as timeline" : "Show as chat"
+              }
+              onClick={() =>
+                changeView(chatView && !detailsOpen ? "timeline" : "chat")
+              }
+              disabled={!hasSessionData}
+            >
+              <MessagesSquare size={14} />
+            </button>
             <button
               type="button"
               className="agent-history-icon"
@@ -1272,7 +1372,9 @@ export function AgentHistoryDrawer({
           <>
             {error ? <div className="agent-history-error">{error}</div> : null}
             {!detailsOpen ? (
-              wide ? (
+              chatView ? (
+                historyChat
+              ) : wide ? (
                 wideMessagesPanel
               ) : (
                 <div
@@ -1361,7 +1463,9 @@ export function AgentHistoryDrawer({
       </aside>
       <AgentMessageDialog
         message={
-          !wide && expandedMessage ? hydrateEntry(expandedMessage) : null
+          !masterDetail && expandedMessage
+            ? hydrateEntry(expandedMessage)
+            : null
         }
         onClose={closeExpandedMessage}
       />

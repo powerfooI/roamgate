@@ -1,6 +1,10 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { Copy } from "lucide-react";
-import { historyEntryLabel, type HistoryEntry } from "./agentHistory";
+import {
+  historyEntryLabel,
+  isToolContentPending,
+  type HistoryEntry,
+} from "./agentHistory";
 import { formatBytes } from "./agentSession";
 import { formatUiDateTime } from "../uiLocale";
 import { copyTextWithFeedback } from "../copyText";
@@ -29,11 +33,7 @@ export const AgentHistoryCard = memo(function AgentHistoryCard({
   const [clipped, setClipped] = useState(false);
   const preview = entry.text.slice(0, HISTORY_PREVIEW_CHARS);
   const truncated = clipped || preview.length < entry.text.length;
-  // Tool payloads are redacted on the wire; the user fetches them on demand.
-  const contentPending =
-    entry.role === "tool" &&
-    entry.text.length === 0 &&
-    (entry.text_bytes ?? 0) > 0;
+  const contentPending = isToolContentPending(entry);
   useEffect(() => {
     const content = contentRef.current;
     if (!content) return;
