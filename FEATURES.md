@@ -9,10 +9,11 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
 - Create, rename, pin, reorder, switch, and close workspaces and tabs. Linked Git
   worktrees group under their repository. Pinned tabs lead the tab strip and
   cannot be closed from Roamgate. Drag-to-reorder needs Herdr 0.7.2+.
-- Linked GitHub PRs and GitLab MRs replace sidebar branch labels with their
+- Linked GitHub PRs and GitLab MRs appear in right-side sidebar badges with their
   number (`#N` for GitHub, `!N` for GitLab) and an open, draft, merged, or closed
-  icon. When several requests match, the sidebar shows the most recently created
-  one. The workspace menu opens that request directly. Status refreshes every
+  icon, preserving the workspace name. When several requests match, the sidebar
+  shows the most recently created one. The workspace menu opens that request
+  directly. Status refreshes every
   minute after each check; unresolved requests keep the branch label. This uses
   the same host-side authentication as the
   [PR/MR status card](#workspace-inspector).
@@ -72,6 +73,8 @@ Inspector button, shortcuts, or workspace/agent menus.
   are restored per connection and checkout.
 - Files search covers names, paths, and file contents across the checkout
   (respecting `.gitignore`, up to 100 results).
+- Files refresh automatically after an agent step completes in the workspace,
+  preserving expanded directories and selections.
 - Commits browses the current branch with per-commit diffs and file previews.
 - The **PR/MR status** card in **Changes** and **Commits** shows the branch's
   GitHub pull request or GitLab merge request: state, checks, and reviews. It

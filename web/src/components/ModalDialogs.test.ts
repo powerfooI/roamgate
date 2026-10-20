@@ -370,7 +370,7 @@ async function registerDomTests() {
     },
   };
 
-  test("sidebar replaces branch labels with accessible PR/MR states and opens the selected request", async () => {
+  test("sidebar preserves workspace names beside PR/MR badges and opens the selected request", async () => {
     const previousState = store.get();
     let status = mergedStatus;
     const call = spyOn(client, "call").mockImplementation(
@@ -436,7 +436,15 @@ async function registerDomTests() {
             request: { ...mergedStatus.request!, state, draft, url },
           };
           await render();
-          const badge = container.querySelector(".ws-label .workspace-review")!;
+          expect(container.querySelector(".ws-label")?.textContent).toBe(
+            "topic-0",
+          );
+          expect(
+            container.querySelector(".ws-label .workspace-review"),
+          ).toBeNull();
+          const badge = container.querySelector(
+            ".tree-row > .workspace-review",
+          )!;
           expect(badge.textContent).toBe(github ? "#1" : "!1");
           expect(badge.getAttribute("aria-label")).toContain(label);
           expect(badge.getAttribute("title")).toContain("Merged feature");

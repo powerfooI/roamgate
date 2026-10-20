@@ -19,6 +19,7 @@ import {
 } from "../../../server/src/workspace/local-files";
 import { bridge, type ConnectionClient } from "../api";
 import { __storeTesting, store } from "../store";
+import { publishLastStepCompletion } from "../lastStepCompletionStore";
 import { WORKSPACE_PATH_DRAG_TYPE } from "../workspacePathDrag";
 import { requestFilePreview } from "./fileExplorerResources";
 
@@ -496,6 +497,27 @@ if (process.env.ROAMGATE_FILE_EXPLORER_DOM_TEST !== "1") {
       expect(selected()).toEqual(["a.txt"]);
       await update(() => click(row("c.txt"), { shiftKey: true }));
       expect(selected()).toEqual(["a.txt", "c.txt"]);
+      await writeFile(join(directory, "step.txt"), "new root file");
+      await writeFile(join(directory, "target/step.txt"), "new nested file");
+      await rm(join(directory, "target/b.txt"));
+      const callsBeforeStep = calls.length;
+      await update(() => {
+        publishLastStepCompletion("other-connection", "w1");
+        publishLastStepCompletion("local", "other-workspace");
+      });
+      expect(calls).toHaveLength(callsBeforeStep);
+      await update(() => publishLastStepCompletion("local", "w1"));
+      expect(row("step.txt")).toBeDefined();
+      expect(row("target/step.txt")).toBeDefined();
+      expect(
+        container.querySelector("[data-file-path='target/b.txt']"),
+      ).toBeNull();
+      expect(selected()).toEqual(["a.txt", "c.txt"]);
+      expect(
+        calls
+          .slice(callsBeforeStep)
+          .some((call) => call.method === "git.diff_summary"),
+      ).toBe(true);
       await update(() => {
         transfer = dragStart("a.txt");
       });
@@ -522,6 +544,11 @@ if (process.env.ROAMGATE_FILE_EXPLORER_DOM_TEST !== "1") {
       await update(() => {
         drag(row("target"), "drop", transfer);
       });
+      const callsAfterSwitch = calls.length;
+      await update(() => publishLastStepCompletion("local", "w1"));
+      expect(calls).toHaveLength(callsAfterSwitch);
+      await update(() => publishLastStepCompletion("local", "w2"));
+      expect(calls.length).toBeGreaterThan(callsAfterSwitch);
       expect(calls.filter((call) => call.method === "file.move")).toHaveLength(
         movesBeforeSwitch,
       );

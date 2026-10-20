@@ -103,13 +103,6 @@
   color: var(--muted);
 }
 
-.ws-label > .workspace-review {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font: inherit;
-}
-
 .workspace-review[data-state="open"] {
   color: var(--green);
 }

@@ -235,6 +235,7 @@ if (process.env.ROAMGATE_DIFF_CONTENT_DOM_TEST !== "1") {
             error: null,
             selectionRevision: revision,
             resourceKey: "local-scroll-dom",
+            showFileSelector: false,
             mobile,
             connectionClient: client,
             onNearbyFilesChange: (next) => {
@@ -315,12 +316,12 @@ if (process.env.ROAMGATE_DIFF_CONTENT_DOM_TEST !== "1") {
       await resizeContent();
       expect(scroller.scrollTop).toBe(1_310);
 
-      const index = container.querySelector<HTMLSelectElement>(
-        '[aria-label="Jump to changed file"]',
-      )!;
+      expect(
+        container.querySelector('[aria-label="Jump to changed file"]'),
+      ).toBeNull();
       for (const entry of reviewEntries) {
-        index.value = `${entry.kind}:${entry.path}`;
-        index.dispatchEvent(new Event("change", { bubbles: true }));
+        selected = entry;
+        revision += 1;
         await render();
         expect(scroller.scrollTop).toBe(
           entry === reviewEntries[0] ? 0 : upperHeight,

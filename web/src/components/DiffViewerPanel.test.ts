@@ -12,7 +12,46 @@ import {
   refreshGitDiffSummary,
 } from "../gitDiffSummaryStore";
 import type { GitDiffEntry, GitDiffFile } from "../types";
-import {
+import type {
+  ActiveDiffSelection,
+  DiffViewerPanelHandle,
+} from "./DiffViewerPanel";
+
+const testBrowser =
+  process.env.ROAMGATE_DIFF_PANEL_DOM_TEST === "1"
+    ? new Window({ url: "http://localhost" })
+    : null;
+const originals = new Map<string, PropertyDescriptor | undefined>();
+if (testBrowser) {
+  const browser = testBrowser;
+  for (const [key, value] of Object.entries({
+    window: browser,
+    document: browser.document,
+    navigator: browser.navigator,
+    HTMLElement: browser.HTMLElement,
+    HTMLInputElement: browser.HTMLInputElement,
+    Element: browser.Element,
+    Node: browser.Node,
+    NodeFilter: browser.NodeFilter,
+    CustomEvent: browser.CustomEvent,
+    MutationObserver: browser.MutationObserver,
+    ResizeObserver: browser.ResizeObserver,
+    getComputedStyle: browser.getComputedStyle.bind(browser),
+    requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
+    cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
+    localStorage: browser.localStorage,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  })) {
+    originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, {
+      value,
+      writable: true,
+      configurable: true,
+    });
+  }
+}
+
+const {
   DiffViewerPanel,
   beginDiffFileSelection,
   buildActiveDiffSelection,
@@ -28,9 +67,7 @@ import {
   mergeResolvedDiffFile,
   prefetchDiffFilesInBatches,
   prefetchDiffViewerWorkspace,
-  type ActiveDiffSelection,
-  type DiffViewerPanelHandle,
-} from "./DiffViewerPanel";
+} = await import("./DiffViewerPanel");
 
 if (process.env.ROAMGATE_DIFF_PANEL_DOM_TEST !== "1") {
   test("diff panel refresh regressions in an isolated runtime", async () => {
@@ -49,25 +86,7 @@ if (process.env.ROAMGATE_DIFF_PANEL_DOM_TEST !== "1") {
   }, 15_000);
 } else {
   test("refresh retains bounded display while reloading and retires replaced or removed patches", async () => {
-    const browser = new Window({ url: "http://localhost" });
-    const originals = new Map<string, PropertyDescriptor | undefined>();
-    for (const [key, value] of Object.entries({
-      window: browser,
-      document: browser.document,
-      navigator: browser.navigator,
-      HTMLElement: browser.HTMLElement,
-      Element: browser.Element,
-      Node: browser.Node,
-      localStorage: browser.localStorage,
-      IS_REACT_ACT_ENVIRONMENT: true,
-    })) {
-      originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-      Object.defineProperty(globalThis, key, {
-        value,
-        writable: true,
-        configurable: true,
-      });
-    }
+    const browser = testBrowser!;
     const entry = {
       path: "same.ts",
       kind: "unstaged" as const,
@@ -450,13 +469,17 @@ if (process.env.ROAMGATE_DIFF_PANEL_DOM_TEST !== "1") {
       const oldBaseRequest = requested.length - 1;
       expect(requested[oldBaseRequest].base).toBe("refs/heads/develop");
       await act(async () => {
-        const picker = container.querySelector<HTMLSelectElement>(
+        const picker = container.querySelector<HTMLButtonElement>(
           '[aria-label="Comparison branch"]',
         )!;
-        picker.value = "refs/heads/release";
-        picker.dispatchEvent(
-          new browser.Event("change", { bubbles: true }) as unknown as Event,
-        );
+        picker.click();
+      });
+      await act(async () => {
+        document
+          .querySelector<HTMLElement>(
+            '[cmdk-item][data-value="refs/heads/release"]',
+          )!
+          .click();
       });
       expect(summaryBases[summaryBases.length - 1]).toBe("refs/heads/release");
       expect(
@@ -494,10 +517,10 @@ if (process.env.ROAMGATE_DIFF_PANEL_DOM_TEST !== "1") {
       resourceKey = "workspace";
       await act(async () => render());
       expect(
-        container.querySelector<HTMLSelectElement>(
+        container.querySelector<HTMLButtonElement>(
           '[aria-label="Comparison branch"]',
-        )?.value,
-      ).toBe("refs/heads/release");
+        )?.textContent,
+      ).toBe("release");
       expect(summaryBases[summaryBases.length - 1]).toBe("refs/heads/release");
       await act(async () => {
         await refreshGitDiffSummary(

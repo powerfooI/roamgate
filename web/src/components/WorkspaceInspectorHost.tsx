@@ -881,6 +881,7 @@ export function WorkspaceInspectorHost({
                 >
                   <DiffContentView
                     key={contentResourceKey}
+                    showFileSelector={false}
                     selectionRevision={diffSelection.selectionRevision}
                     entry={diffSelection.entry}
                     file={diffSelection.file}

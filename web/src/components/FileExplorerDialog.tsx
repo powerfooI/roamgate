@@ -32,6 +32,10 @@ import { connectionStorageKey } from "../connectionStorage";
 import { downloadFileFromUrl } from "../downloadFile";
 import { lazyWithReload } from "../lazyWithReload";
 import {
+  lastStepCompletionKey,
+  subscribeLastStepCompletion,
+} from "../lastStepCompletionStore";
+import {
   refreshGitDiffSummary,
   useGitDiffSummaryState,
 } from "../gitDiffSummaryStore";
@@ -1627,6 +1631,15 @@ function FileExplorerContent({
     for (const path of paths) void loadDirectory(path, true);
     void loadGitStatus(true);
   };
+
+  const refreshAfterStep = useEffectEvent(refreshFiles);
+  useEffect(() => {
+    if (!open || !cacheWorkspaceId) return;
+    return subscribeLastStepCompletion(
+      lastStepCompletionKey(connectionClient.connectionId, cacheWorkspaceId),
+      refreshAfterStep,
+    );
+  }, [open, connectionClient, cacheWorkspaceId]);
 
   const handleEntryPointerDown = (
     event: ReactPointerEvent<HTMLElement>,

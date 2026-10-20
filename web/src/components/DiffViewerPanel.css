@@ -715,15 +715,8 @@
   font-size: 12px;
 }
 
-.diff-base-selector select {
-  min-width: 0;
+.diff-base-selector .themed-select-trigger {
   flex: 1;
-  max-width: 100%;
-  color: inherit;
-  background: var(--viewer-content-bg);
-  border: 1px solid var(--viewer-border);
-  border-radius: 4px;
-  padding: 4px;
 }
 
 .diff-scope-toggle button {

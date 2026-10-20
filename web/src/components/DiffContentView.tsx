@@ -824,6 +824,7 @@ export function DiffContentView({
   onReanchorAnnotations,
   onEditAnnotation,
   embedded = false,
+  showFileSelector = true,
   backAction,
 }: {
   selectionRevision?: number;
@@ -854,6 +855,7 @@ export function DiffContentView({
   ) => void;
   onEditAnnotation?: (id: string) => void;
   embedded?: boolean;
+  showFileSelector?: boolean;
   backAction?: { label: string; onClick: () => void };
 }) {
   const sectionRef = useRef<HTMLElement | null>(null);
@@ -1701,7 +1703,7 @@ export function DiffContentView({
             </strong>
           </div>
         )}
-        {!embedded && visibleEntries.length > 1 ? (
+        {!embedded && showFileSelector && visibleEntries.length > 1 ? (
           <label className="diff-file-index">
             <span>File</span>
             <select

@@ -977,7 +977,6 @@ function WorkspaceRow({
 }) {
   const children = childrenByParent.get(w.workspace_id) ?? [];
   const review = workspacePullRequest(reviews[w.workspace_id]);
-  const reviewInLabel = review && !showWorkspaceBranchBadge(w);
   const agents = agentsByWorkspace.get(w.workspace_id) ?? [];
   const tabCount = tabCountsByWorkspace.get(w.workspace_id) ?? 0;
   const tabCountVisible = alwaysShowTabCount || tabCount > 1;
@@ -1189,11 +1188,7 @@ function WorkspaceRow({
           <span className="twisty" aria-hidden="true" />
         )}
         <strong className="ws-label" title={workspaceDisplayName(w)}>
-          {reviewInLabel ? (
-            <PullRequestBadge review={review} />
-          ) : (
-            workspaceDisplayName(w)
-          )}
+          {workspaceDisplayName(w)}
         </strong>
         {tabCountVisible ? (
           <span
@@ -1217,9 +1212,7 @@ function WorkspaceRow({
         ) : null}
         {w.worktree ? (
           <>
-            {review && !reviewInLabel ? (
-              <PullRequestBadge review={review} />
-            ) : null}
+            {review ? <PullRequestBadge review={review} /> : null}
             <GitStatusBadges
               status={w.worktree.git_status}
               showBranch={!review && showWorkspaceBranchBadge(w)}
