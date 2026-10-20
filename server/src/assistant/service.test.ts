@@ -6156,3 +6156,83 @@ test("a follow-up cannot be removed once its admission has started", async () =>
   expect(prompts[1]).toContain("User message:\nSecond");
   expect(f.service.peek().queue).toEqual([]);
 });
+
+test("concurrent steers reach the turn in queue order, and follow a missed one", async () => {
+  const gate = Promise.withResolvers<void>();
+  const binding = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const steered: string[] = [];
+  let failBinding = false;
+  let started = false;
+  const f = setup({
+    run: async (input) => {
+      started = true;
+      await gate.promise;
+      input.message("Done");
+      return [{ persisted: true }];
+    },
+    steer: async ({ requestId }) => {
+      steered.push(requestId);
+    },
+  });
+  f.context.bindMentions = async (_captured, targets) => {
+    binding.resolve();
+    await release.promise;
+    if (failBinding) throw new Error("Unavailable");
+    return targets;
+  };
+  await f.service.handle("configure", { config: configured });
+  await f.service.handle("send", { text: "First", request_id: "first" });
+  await until(() => started);
+  // The earlier steer is slow to bind its mention; the later one waits.
+  const slow = f.service.handle("send", {
+    text: "Check @Codex now",
+    mentions: [agentMarker],
+    request_id: "mentioned",
+    when_busy: "steer",
+  });
+  await binding.promise;
+  const quick = f.service.handle("send", {
+    text: "Then the tests",
+    request_id: "plain",
+    when_busy: "steer",
+  });
+  await flushTasks();
+  expect(steered).toEqual([]);
+  release.resolve();
+  await Promise.all([slow, quick]);
+  expect(steered).toEqual(["mentioned", "plain"]);
+  gate.resolve();
+  await until(() => !f.service.peek().running);
+
+  // A steer that cannot bind its mention misses the turn; a later steer
+  // follows it into the queue rather than overtaking it.
+  const second = Promise.withResolvers<void>();
+  started = false;
+  f.driver.run = async (input) => {
+    started = true;
+    await second.promise;
+    input.message("Done");
+    return [{ persisted: true }];
+  };
+  failBinding = true;
+  await f.service.handle("send", { text: "Again", request_id: "again" });
+  await until(() => started);
+  await f.service.handle("send", {
+    text: "Check @Codex now",
+    mentions: [agentMarker],
+    request_id: "unbound",
+    when_busy: "steer",
+  });
+  await f.service.handle("send", {
+    text: "Then the tests",
+    request_id: "after",
+    when_busy: "steer",
+  });
+  expect(steered).toEqual(["mentioned", "plain"]);
+  expect(f.service.peek().queue).toMatchObject([
+    { id: "unbound", mode: "follow_up" },
+    { id: "after", mode: "follow_up" },
+  ]);
+  second.resolve();
+});

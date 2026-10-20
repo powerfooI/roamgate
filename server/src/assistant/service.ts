@@ -431,6 +431,10 @@ export function createAssistantService(options: {
   let queue: QueuedMessage[] = [];
   // Stopped or failed turns hold the queue until the user sends it on.
   let queueHeld = false;
+  // Steers reach Pi one at a time, in queue order; once one misses a turn,
+  // later ones follow it into the queue so instructions never swap.
+  let steeringQueue: Promise<void> = Promise.resolve();
+  let steerMissed: SavedRun | undefined;
   let recovering = false;
   let awaitingRecovery = false;
   let actionWork: Promise<void> | undefined;
@@ -1363,7 +1367,12 @@ export function createAssistantService(options: {
       queue.push(item);
     });
     publish(true);
-    if (steering) await steer(item, pending!, activeScope!);
+    if (steering) {
+      const turn = activeScope!;
+      const next = steeringQueue.then(() => steer(item, pending!, turn));
+      steeringQueue = next.catch(() => {});
+      await next;
+    }
   }
 
   async function steer(
@@ -1371,11 +1380,15 @@ export function createAssistantService(options: {
     pending: SavedRun,
     captured: AssistantWorkspace[],
   ) {
-    const signal = turnController!.signal;
     const waiting = () =>
       activeRun === pending &&
       queue.some((entry) => entry.id === item.id && entry.mode === "steer");
     try {
+      // An earlier steer may have outlasted the turn this one waited on.
+      if (!waiting()) return;
+      const signal = turnController!.signal;
+      if (steerMissed === pending)
+        throw new Error("An earlier steer missed this turn");
       // A steer stays within the turn's admitted scope; anything wider waits
       // for full admission as a follow-up.
       const bound = item.mentions?.length
@@ -1409,6 +1422,7 @@ export function createAssistantService(options: {
     } catch {
       if (disposed || !waiting()) return;
       // The turn could not take it; keep it for the next one instead.
+      steerMissed = pending;
       try {
         saveChange(() => {
           pending.steers = pending.steers?.filter(
