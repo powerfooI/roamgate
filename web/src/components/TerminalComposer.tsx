@@ -1007,7 +1007,7 @@ export function TerminalComposer({
                 onMouseDown={keepTextareaFocus}
                 onClick={closeCommandPicker}
               >
-                <X size={16} />
+                <X size={14} />
               </button>
             </div>
             {replacement ? (
@@ -1034,6 +1034,7 @@ export function TerminalComposer({
                 </button>
                 <button
                   type="button"
+                  className="is-primary"
                   disabled={busy || composing}
                   tabIndex={0}
                   onMouseDown={keepTextareaFocus}
@@ -1063,10 +1064,18 @@ export function TerminalComposer({
                       onMouseDown={keepTextareaFocus}
                       onClick={() => selectCommand(command)}
                     >
-                      <span>
-                        <strong>{command.name}</strong> {command.arguments}
+                      <span className="terminal-composer-command-usage">
+                        <strong>{command.name}</strong>
+                        {command.arguments ? (
+                          <>
+                            {" "}
+                            <small>{command.arguments}</small>
+                          </>
+                        ) : null}
                       </span>
-                      <span>{command.description}</span>
+                      <span className="terminal-composer-command-description">
+                        {command.description}
+                      </span>
                     </button>
                   ))}
                 </div>
