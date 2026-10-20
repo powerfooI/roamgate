@@ -8,6 +8,7 @@ import {
   summarizeToolSteps,
   toolArgumentFields,
   toolArgumentHeadline,
+  takeQueuedToolLoads,
   toolPayloadKey,
 } from "./agentHistoryView";
 
@@ -229,4 +230,46 @@ test("payload keys change when an entry is rewritten under the same id", () => {
   expect(toolPayloadKey(stub)).not.toBe(
     toolPayloadKey({ ...stub, text_bytes: 180 }),
   );
+});
+
+test("queued tool loads respect the limit and wait behind in-flight versions", () => {
+  const stub = (id: string, bytes: number) =>
+    entry(id, "tool", { text: "", text_bytes: bytes });
+  const take = (
+    queue: HistoryEntry[],
+    options: { inFlight?: number; started?: string[]; loading?: string[] },
+  ) => {
+    const { start, rest } = takeQueuedToolLoads(queue, {
+      inFlight: options.inFlight ?? 0,
+      limit: 2,
+      started: new Set(options.started),
+      loadingIds: new Set(options.loading),
+    });
+    return {
+      start: start.map(toolPayloadKey),
+      rest: rest.map(toolPayloadKey),
+    };
+  };
+  // Starts up to the limit; the rest stays queued in order.
+  expect(take([stub("a", 1), stub("b", 1), stub("c", 1)], {})).toEqual({
+    start: ["a:1", "b:1"],
+    rest: ["c:1"],
+  });
+  // A rewritten payload whose old version is still in flight is kept, not
+  // dropped, and starts on a later pass once that request settles.
+  expect(take([stub("a", 2)], { inFlight: 1, loading: ["a"] })).toEqual({
+    start: [],
+    rest: ["a:2"],
+  });
+  expect(take([stub("a", 2)], { started: ["a:1"] })).toEqual({
+    start: ["a:2"],
+    rest: [],
+  });
+  // Only the newest queued version of an entry is fetched; versions that
+  // already started and duplicates are dropped.
+  expect(
+    take([stub("a", 1), stub("b", 1), stub("a", 2), stub("b", 1)], {
+      started: ["b:1"],
+    }),
+  ).toEqual({ start: ["a:2"], rest: [] });
 });

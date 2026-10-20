@@ -21,6 +21,7 @@ import {
 import {
   pairToolSteps,
   previewToolArgumentFields,
+  takeQueuedToolLoads,
   toolPayloadKey,
   summarizeToolSteps,
   toolArgumentFields,
@@ -433,20 +434,14 @@ export function AgentHistoryChat({
   // Start queued fetches whenever a slot frees up: the loading set shrinks as
   // the drawer's fetches settle, which re-runs this effect.
   useEffect(() => {
-    let inFlight = toolLoading.size;
-    while (
-      inFlight < BACKGROUND_LOADS_IN_FLIGHT &&
-      queueRef.current.length > 0
-    ) {
-      const entry = queueRef.current.shift()!;
-      if (
-        startedRef.current.has(toolPayloadKey(entry)) ||
-        toolLoading.has(entry.id)
-      )
-        continue;
-      load(entry);
-      inFlight += 1;
-    }
+    const { start, rest } = takeQueuedToolLoads(queueRef.current, {
+      inFlight: toolLoading.size,
+      limit: BACKGROUND_LOADS_IN_FLIGHT,
+      started: startedRef.current,
+      loadingIds: toolLoading,
+    });
+    queueRef.current = rest;
+    for (const entry of start) load(entry);
   }, [load, queueVersion, toolLoading]);
   const loader = useMemo(
     () => ({ loading: toolLoading, load, enqueue }),

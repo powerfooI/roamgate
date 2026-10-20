@@ -53,6 +53,42 @@ export function toolPayloadKey(entry: Pick<HistoryEntry, "id" | "text_bytes">) {
   return `${entry.id}:${entry.text_bytes ?? 0}`;
 }
 
+// Picks which queued background fetches to start now, given the requests
+// already in flight. Only the newest queued version of each entry is kept,
+// and versions already started are dropped. An entry whose id has a request
+// in flight (an older version, or a direct load) stays queued and starts once
+// that request settles, so a rewritten payload is never discarded.
+export function takeQueuedToolLoads(
+  queue: readonly HistoryEntry[],
+  {
+    inFlight,
+    limit,
+    started,
+    loadingIds,
+  }: {
+    inFlight: number;
+    limit: number;
+    started: ReadonlySet<string>;
+    loadingIds: ReadonlySet<string>;
+  },
+): { start: HistoryEntry[]; rest: HistoryEntry[] } {
+  const newest = new Map<string, string>();
+  for (const entry of queue) newest.set(entry.id, toolPayloadKey(entry));
+  const start: HistoryEntry[] = [];
+  const rest: HistoryEntry[] = [];
+  const seen = new Set<string>();
+  for (const entry of queue) {
+    const key = toolPayloadKey(entry);
+    if (newest.get(entry.id) !== key || started.has(key) || seen.has(key))
+      continue;
+    seen.add(key);
+    if (inFlight + start.length >= limit || loadingIds.has(entry.id))
+      rest.push(entry);
+    else start.push(entry);
+  }
+  return { start, rest };
+}
+
 export type ToolStep = {
   id: string;
   name: string;
