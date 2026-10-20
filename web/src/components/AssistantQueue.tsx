@@ -5,11 +5,13 @@ import "./AssistantQueue.css";
 /**
  * Messages sent while Ranger answers. Steers join the running turn after its
  * current tool round; queued follow-ups send once the answer finishes. A held
- * queue (after Stop, a failure, or a chat switch) waits for the user.
+ * queue (after Stop, a failure, or a chat switch) waits for the user, as does
+ * one behind a preview awaiting review.
  */
 export function AssistantQueue({
   queue,
   running,
+  held,
   reviewing,
   disabled,
   onEdit,
@@ -18,6 +20,7 @@ export function AssistantQueue({
 }: {
   queue: AssistantQueuedMessage[];
   running: boolean;
+  held: boolean;
   /** An action or task preview from the last answer awaits confirmation. */
   reviewing: boolean;
   disabled: boolean;
@@ -28,7 +31,7 @@ export function AssistantQueue({
   if (!queue.length) return null;
   return (
     <section className="assistant-queue" aria-label="Waiting messages">
-      {running ? null : (
+      {running || !(held || reviewing) ? null : (
         <div className="assistant-queue-head">
           <span>
             {reviewing

@@ -431,9 +431,11 @@ export function createAssistantService(options: {
   let queue: QueuedMessage[] = [];
   // Stopped or failed turns hold the queue until the user sends it on.
   let queueHeld = false;
-  // Steers reach Pi one at a time, in queue order; once one misses a turn,
-  // later ones follow it into the queue so instructions never swap.
-  let steeringQueue: Promise<void> = Promise.resolve();
+  // The queue's one worker: steering, removing, resuming and sending run one
+  // at a time in queue order, so none of them can interleave.
+  let queueWork: Promise<unknown> = Promise.resolve();
+  let drainScheduled = false;
+  // Once a steer misses a turn, later ones follow it so instructions never swap.
   let steerMissed: SavedRun | undefined;
   let recovering = false;
   let awaitingRecovery = false;
@@ -805,6 +807,7 @@ export function createAssistantService(options: {
               ...(mentions ? { mentions } : {}),
               sent_at,
             })),
+            ...(queueHeld && queue.length ? { queue_held: true as const } : {}),
           }
         : {}),
       ...(tasks
@@ -884,6 +887,7 @@ export function createAssistantService(options: {
   function publish(immediate = false) {
     state.revision++;
     if (disposed) return;
+    drainQueue();
     if (immediate) {
       if (timer) clearTimeout(timer);
       timer = undefined;
@@ -1202,7 +1206,6 @@ export function createAssistantService(options: {
         "The approved target is no longer available. Ask Ranger for a fresh preview.";
       persist();
       publish(true);
-      drainQueue();
       return;
     }
     reserveAction(action, true);
@@ -1260,7 +1263,6 @@ export function createAssistantService(options: {
     const work = executeAction(action, prepared, authorized).finally(() => {
       if (actionWork === work) actionWork = undefined;
       publish(true);
-      drainQueue();
     });
     actionWork = work;
     return work;
@@ -1290,21 +1292,38 @@ export function createAssistantService(options: {
     );
   }
 
-  /** Send the oldest follow-up once Ranger is free and nothing awaits review. */
+  function queueTask<T>(task: () => T | Promise<T>): Promise<T> {
+    const next = queueWork.then(task);
+    queueWork = next.catch(() => {});
+    return next;
+  }
+
+  /**
+   * The one place that decides whether the oldest follow-up may go: Ranger is
+   * free, the queue is not held, and nothing awaits review. Every published
+   * change and every request ends by asking it, so no path can forget to.
+   */
   function drainQueue() {
-    const next = queue[0];
-    if (
-      !next ||
-      queueHeld ||
-      disposed ||
-      state.running ||
-      changing ||
-      authController ||
-      actionWork ||
-      pendingReview()
-    )
-      return;
-    void sendQueued(next).catch(() => {});
+    if (drainScheduled || disposed) return;
+    drainScheduled = true;
+    queueMicrotask(() => {
+      drainScheduled = false;
+      void queueTask(async () => {
+        const next = queue[0];
+        if (
+          !next ||
+          queueHeld ||
+          disposed ||
+          state.running ||
+          changing ||
+          authController ||
+          actionWork ||
+          pendingReview()
+        )
+          return;
+        await sendQueued(next).catch(() => {});
+      });
+    });
   }
 
   async function sendQueued(item: QueuedMessage) {
@@ -1369,9 +1388,7 @@ export function createAssistantService(options: {
     publish(true);
     if (steering) {
       const turn = activeScope!;
-      const next = steeringQueue.then(() => steer(item, pending!, turn));
-      steeringQueue = next.catch(() => {});
-      await next;
+      await queueTask(() => steer(item, pending!, turn));
     }
   }
 
@@ -2060,9 +2077,6 @@ export function createAssistantService(options: {
           } catch {
             state.error = "The Ranger session could not be saved.";
           }
-          // Admission marks the next turn running before its first await, so
-          // browsers never see the queue paused between turns.
-          drainQueue();
           publish(true);
         }
       }
@@ -2521,562 +2535,573 @@ export function createAssistantService(options: {
       method: string,
       params: Record<string, unknown>,
     ): Promise<AssistantSnapshot> {
-      if (disposed) throw new Error("Ranger unavailable");
-      method = method.replace(/^bridge\.assistant\./, "");
-      if (method.startsWith("task.")) {
-        if (!tasks) throw new Error("Nested scheduled tasks are unavailable.");
-        const operation = method.slice(5);
-        if (operation === "create") {
-          const { request_id, ...input } = params;
-          await tasks.create(
-            await prepareTask(input),
-            string(request_id, "task request identifier"),
-          );
-        } else if (operation === "update") {
-          const { task_id, ...input } = params;
-          const updated = validateTaskInput(input);
-          const original = tasks.snapshot(task_id);
-          const previous = original.prepared;
-          const retained =
-            updated.mentions?.filter((mention) =>
-              previous.input.mentions?.some(
-                (target) =>
-                  mentionTargetKey(target) === mentionTargetKey(mention),
-              ),
-            ) ?? [];
-          if (retained.length) {
-            await workspaceCatalog();
-            assertScopeAllowed(retained);
-            if (!context.restoreScope || !context.bindMentions)
-              throw new Error("Task references are unavailable.");
-            const parents = new Set(retained.map(refKey));
-            const restored = await context.restoreScope(
-              previous.targets.filter((target) => parents.has(refKey(target))),
+      try {
+        if (disposed) throw new Error("Ranger unavailable");
+        method = method.replace(/^bridge\.assistant\./, "");
+        if (method.startsWith("task.")) {
+          if (!tasks)
+            throw new Error("Nested scheduled tasks are unavailable.");
+          const operation = method.slice(5);
+          if (operation === "create") {
+            const { request_id, ...input } = params;
+            await tasks.create(
+              await prepareTask(input),
+              string(request_id, "task request identifier"),
             );
-            const rebound = await context.bindMentions(
-              restored,
-              restoredMentions(retained, restored),
-            );
-            assertScopeAllowed(restored);
-            updated.mentions = updated.mentions!.map(
-              (mention) =>
-                rebound.find(
+          } else if (operation === "update") {
+            const { task_id, ...input } = params;
+            const updated = validateTaskInput(input);
+            const original = tasks.snapshot(task_id);
+            const previous = original.prepared;
+            const retained =
+              updated.mentions?.filter((mention) =>
+                previous.input.mentions?.some(
                   (target) =>
                     mentionTargetKey(target) === mentionTargetKey(mention),
-                ) ?? mention,
-            );
-          }
-          await tasks.update(task_id, await prepareTask(updated), original);
-        } else if (operation === "delete") {
-          if (Object.keys(params).some((key) => key !== "task_id"))
-            throw new Error("Task deletion accepts only the task identifier.");
-          tasks.delete(params.task_id);
-        } else if (
-          ["pause", "resume", "cancel", "run_now", "stop"].includes(operation)
-        ) {
-          if (Object.keys(params).some((key) => key !== "task_id"))
-            throw new Error("Task control accepts only the task identifier.");
-          await tasks.control(
-            operation as "pause" | "resume" | "cancel" | "run_now" | "stop",
-            params.task_id,
-          );
-        } else if (
-          operation === "confirm_proposal" ||
-          operation === "cancel_proposal"
-        ) {
-          if (Object.keys(params).some((key) => key !== "proposal_id"))
-            throw new Error(
-              "Task confirmation accepts only the proposal identifier.",
-            );
-          const id = string(params.proposal_id, "task proposal identifier");
-          const proposal = state.messages
-            .flatMap((message) => message.task_proposals ?? [])
-            .find((entry) => entry.id === id);
-          if (!proposal)
-            throw new Error("This task proposal is no longer available.");
-          if (proposal.status === "pending") {
-            const sessionId = state.session_id;
-            let failure: unknown;
-            try {
-              if (operation === "confirm_proposal")
-                await confirmTaskProposal(id);
-              else tasks.cancelProposal(id);
-            } catch (error) {
-              failure = error;
+                ),
+              ) ?? [];
+            if (retained.length) {
+              await workspaceCatalog();
+              assertScopeAllowed(retained);
+              if (!context.restoreScope || !context.bindMentions)
+                throw new Error("Task references are unavailable.");
+              const parents = new Set(retained.map(refKey));
+              const restored = await context.restoreScope(
+                previous.targets.filter((target) =>
+                  parents.has(refKey(target)),
+                ),
+              );
+              const rebound = await context.bindMentions(
+                restored,
+                restoredMentions(retained, restored),
+              );
+              assertScopeAllowed(restored);
+              updated.mentions = updated.mentions!.map(
+                (mention) =>
+                  rebound.find(
+                    (target) =>
+                      mentionTargetKey(target) === mentionTargetKey(mention),
+                  ) ?? mention,
+              );
             }
-            Object.assign(proposal, tasks.proposal(id));
-            // Confirmation may happen while this question is still streaming.
-            // Keep its durable pointer until the admitted run has completed.
-            if (state.session_id === sessionId) {
-              if (!state.running) entries = [];
+            await tasks.update(task_id, await prepareTask(updated), original);
+          } else if (operation === "delete") {
+            if (Object.keys(params).some((key) => key !== "task_id"))
+              throw new Error(
+                "Task deletion accepts only the task identifier.",
+              );
+            tasks.delete(params.task_id);
+          } else if (
+            ["pause", "resume", "cancel", "run_now", "stop"].includes(operation)
+          ) {
+            if (Object.keys(params).some((key) => key !== "task_id"))
+              throw new Error("Task control accepts only the task identifier.");
+            await tasks.control(
+              operation as "pause" | "resume" | "cancel" | "run_now" | "stop",
+              params.task_id,
+            );
+          } else if (
+            operation === "confirm_proposal" ||
+            operation === "cancel_proposal"
+          ) {
+            if (Object.keys(params).some((key) => key !== "proposal_id"))
+              throw new Error(
+                "Task confirmation accepts only the proposal identifier.",
+              );
+            const id = string(params.proposal_id, "task proposal identifier");
+            const proposal = state.messages
+              .flatMap((message) => message.task_proposals ?? [])
+              .find((entry) => entry.id === id);
+            if (!proposal)
+              throw new Error("This task proposal is no longer available.");
+            if (proposal.status === "pending") {
+              const sessionId = state.session_id;
+              let failure: unknown;
+              try {
+                if (operation === "confirm_proposal")
+                  await confirmTaskProposal(id);
+                else tasks.cancelProposal(id);
+              } catch (error) {
+                failure = error;
+              }
+              Object.assign(proposal, tasks.proposal(id));
+              // Confirmation may happen while this question is still streaming.
+              // Keep its durable pointer until the admitted run has completed.
+              if (state.session_id === sessionId) {
+                if (!state.running) entries = [];
+                try {
+                  persist();
+                } catch {
+                  state.error =
+                    "The task receipt was saved, but the chat could not be updated.";
+                }
+                publish(true);
+              }
+              if (failure) throw failure;
+            }
+          } else if (
+            operation === "action.confirm" ||
+            operation === "action.cancel"
+          ) {
+            if (
+              Object.keys(params).some(
+                (key) => !["task_id", "run_id", "action_id"].includes(key),
+              )
+            )
+              throw new Error("Task actions accept only target identifiers.");
+            await tasks.action(
+              operation === "action.confirm" ? "confirm" : "cancel",
+              params.task_id,
+              params.run_id,
+              params.action_id,
+            );
+          } else throw new Error("Unknown Ranger task method");
+          return current();
+        }
+        switch (method) {
+          case "configure_chat": {
+            if (changing || authController)
+              throw new Error("Ranger settings are busy");
+            if (
+              Object.keys(params).some(
+                (key) =>
+                  !["provider", "model", "thinking_level", "expected"].includes(
+                    key,
+                  ),
+              ) ||
+              (params.thinking_level !== null &&
+                !isAssistantThinkingLevel(params.thinking_level))
+            )
+              throw new Error("Invalid Ranger chat selection");
+            const provider = string(params.provider, "provider");
+            const model = string(params.model, "model");
+            checkSelection(params.expected);
+            changing = true;
+            try {
+              const available = await driver
+                .catalog(state.config.credential_source)
+                .catch(() => {
+                  throw new Error(
+                    "The model catalog could not be loaded. Try again.",
+                  );
+                });
+              if (disposed) throw new Error("Ranger unavailable");
+              checkSelection(params.expected);
+              if (
+                !available.providers.some(
+                  (entry) => entry.id === provider && entry.configured,
+                ) ||
+                !available.models.some(
+                  (entry) => entry.provider === provider && entry.id === model,
+                )
+              )
+                throw new Error("The selected model is not configured");
+              // Only replace the next-turn selection. Scope, approval, admitted
+              // turns, and pending action previews keep their original authority.
+              const next = { ...state.config, provider, model };
+              delete next.thinking_level;
+              if (params.thinking_level !== null)
+                next.thinking_level = params.thinking_level;
+              checkThinking(next, available.models);
+              const previous = {
+                config: state.config,
+                providers: state.providers,
+                models: state.models,
+              };
+              state.config = next;
+              Object.assign(state, available);
               try {
                 persist();
               } catch {
-                state.error =
-                  "The task receipt was saved, but the chat could not be updated.";
+                // Do not clone/replace live messages or prepared action references:
+                // a failed next-turn save must leave the current stream attached.
+                Object.assign(state, previous);
+                throw new Error(
+                  "The Ranger chat selection could not be saved.",
+                );
               }
               publish(true);
-              drainQueue();
+            } finally {
+              changing = false;
             }
-            if (failure) throw failure;
+            break;
           }
-        } else if (
-          operation === "action.confirm" ||
-          operation === "action.cancel"
-        ) {
-          if (
-            Object.keys(params).some(
-              (key) => !["task_id", "run_id", "action_id"].includes(key),
-            )
-          )
-            throw new Error("Task actions accept only target identifiers.");
-          await tasks.action(
-            operation === "action.confirm" ? "confirm" : "cancel",
-            params.task_id,
-            params.run_id,
-            params.action_id,
-          );
-        } else throw new Error("Unknown Ranger task method");
-        return current();
-      }
-      switch (method) {
-        case "configure_chat": {
-          if (changing || authController)
-            throw new Error("Ranger settings are busy");
-          if (
-            Object.keys(params).some(
-              (key) =>
-                !["provider", "model", "thinking_level", "expected"].includes(
-                  key,
-                ),
-            ) ||
-            (params.thinking_level !== null &&
-              !isAssistantThinkingLevel(params.thinking_level))
-          )
-            throw new Error("Invalid Ranger chat selection");
-          const provider = string(params.provider, "provider");
-          const model = string(params.model, "model");
-          checkSelection(params.expected);
-          changing = true;
-          try {
-            const available = await driver
-              .catalog(state.config.credential_source)
-              .catch(() => {
-                throw new Error(
-                  "The model catalog could not be loaded. Try again.",
-                );
-              });
-            if (disposed) throw new Error("Ranger unavailable");
-            checkSelection(params.expected);
+          case "configure_approval": {
             if (
-              !available.providers.some(
-                (entry) => entry.id === provider && entry.configured,
+              Object.keys(params).some(
+                (key) => !["approval_mode", "workspace_scope"].includes(key),
               ) ||
-              !available.models.some(
-                (entry) => entry.provider === provider && entry.id === model,
-              )
+              (params.approval_mode !== "manual" &&
+                params.approval_mode !== "auto") ||
+              (params.workspace_scope !== undefined &&
+                (params.workspace_scope !== "all" ||
+                  params.approval_mode !== "auto"))
             )
-              throw new Error("The selected model is not configured");
-            // Only replace the next-turn selection. Scope, approval, admitted
-            // turns, and pending action previews keep their original authority.
-            const next = { ...state.config, provider, model };
-            delete next.thinking_level;
-            if (params.thinking_level !== null)
-              next.thinking_level = params.thinking_level;
-            checkThinking(next, available.models);
-            const previous = {
-              config: state.config,
-              providers: state.providers,
-              models: state.models,
-            };
-            state.config = next;
-            Object.assign(state, available);
+              throw new Error("Invalid approval mode");
+            if (params.approval_mode === "auto") idle();
+            const approval_mode = params.approval_mode;
+            const previous = state.config;
+            state.config = { ...previous, approval_mode };
+            delete state.config.workspace_scope;
+            if (params.workspace_scope === "all")
+              state.config.workspace_scope = "all";
             try {
               persist();
             } catch {
-              // Do not clone/replace live messages or prepared action references:
-              // a failed next-turn save must leave the current stream attached.
-              Object.assign(state, previous);
-              throw new Error("The Ranger chat selection could not be saved.");
+              state.config = previous;
+              throw new Error("The approval mode could not be saved.");
             }
             publish(true);
-          } finally {
-            changing = false;
-            // A turn may have answered while this was saving.
-            drainQueue();
+            break;
           }
-          break;
-        }
-        case "configure_approval": {
-          if (
-            Object.keys(params).some(
-              (key) => !["approval_mode", "workspace_scope"].includes(key),
-            ) ||
-            (params.approval_mode !== "manual" &&
-              params.approval_mode !== "auto") ||
-            (params.workspace_scope !== undefined &&
-              (params.workspace_scope !== "all" ||
-                params.approval_mode !== "auto"))
-          )
-            throw new Error("Invalid approval mode");
-          if (params.approval_mode === "auto") idle();
-          const approval_mode = params.approval_mode;
-          const previous = state.config;
-          state.config = { ...previous, approval_mode };
-          delete state.config.workspace_scope;
-          if (params.workspace_scope === "all")
-            state.config.workspace_scope = "all";
-          try {
-            persist();
-          } catch {
-            state.config = previous;
-            throw new Error("The approval mode could not be saved.");
-          }
-          publish(true);
-          break;
-        }
-        case "get":
-          try {
-            await catalog();
-          } catch {
-            state.error = "The provider catalog could not be loaded.";
-          }
-          break;
-        case "configure_model": {
-          idle();
-          if (
-            tasks
-              ?.summaries()
-              .some((task) => task.current_run?.status === "running")
-          )
-            throw new Error(
-              "Stop the running Ranger task before editing a model connection.",
-            );
-          changing = true;
-          modelChanging = true;
-          try {
+          case "get":
+            try {
+              await catalog();
+            } catch {
+              state.error = "The provider catalog could not be loaded.";
+            }
+            break;
+          case "configure_model": {
+            idle();
             if (
-              !driver.configureModel ||
-              params.credential_source !== state.config.credential_source ||
-              Object.keys(params).some(
-                (key) =>
-                  ![
-                    "provider",
-                    "model",
-                    "models",
-                    "reasoning",
-                    "thinking_levels",
-                    "base_url",
-                    "api",
-                    "api_key",
-                    "credential_source",
-                  ].includes(key),
-              )
+              tasks
+                ?.summaries()
+                .some((task) => task.current_run?.status === "running")
             )
-              throw new Error("Invalid model connection");
-            const provider = string(params.provider, "provider", 64).trim();
-            const model = string(params.model, "model").trim();
-            const rawModels = params.models;
-            if (
-              rawModels !== undefined &&
-              (!Array.isArray(rawModels) ||
-                !rawModels.length ||
-                rawModels.length > ASSISTANT_MAX_CUSTOM_MODELS)
-            )
-              throw new Error("Invalid model connection");
-            const models =
-              rawModels === undefined
-                ? undefined
-                : [
-                    ...new Set(
-                      rawModels.map((id) => string(id, "model").trim()),
-                    ),
-                  ];
-            const base_url = string(params.base_url, "base URL", 2000).trim();
-            const thinking_levels = params.thinking_levels;
-            if (
-              !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/.test(provider) ||
-              /[\u0000-\u001f\u007f]/.test(model) ||
-              (models &&
-                (!models.includes(model) ||
-                  models.some((id) => /[\u0000-\u001f\u007f]/.test(id)))) ||
-              !isAssistantModelEndpoint(base_url) ||
-              !isAssistantModelApi(params.api) ||
-              (params.reasoning !== undefined &&
-                typeof params.reasoning !== "boolean") ||
-              (thinking_levels !== undefined &&
-                (!Array.isArray(thinking_levels) ||
-                  !thinking_levels.length ||
-                  !thinking_levels.every(isAssistantThinkingLevel) ||
-                  new Set(thinking_levels).size !== thinking_levels.length ||
-                  (params.reasoning !== undefined &&
-                    params.reasoning !==
-                      thinking_levels.some((level) => level !== "off"))))
-            )
-              throw new Error("Invalid model connection");
-            const api_key =
-              params.api_key === undefined
-                ? undefined
-                : string(params.api_key, "API key", 10_000);
-            if (
-              api_key &&
-              (api_key.trimStart().startsWith("!") || api_key.includes("$"))
-            )
-              throw new Error("Enter a literal API key");
-            await driver.configureModel(
-              {
-                provider,
-                model,
-                ...(models ? { models } : {}),
-                ...(params.reasoning !== undefined
-                  ? { reasoning: params.reasoning }
-                  : {}),
-                ...(thinking_levels !== undefined ? { thinking_levels } : {}),
-                base_url,
-                api: params.api,
-                api_key,
-                credential_source: state.config.credential_source,
-              },
-              writeSaved,
-            );
-            if (disposed) throw new Error("Ranger unavailable");
-            await catalog();
-            state.error = null;
-            modelChanging = false;
-            await tasks?.revalidate();
-            publish(true);
-          } catch {
-            throw new Error(
-              "The model connection could not be saved. Check the custom provider, endpoint, model and API key.",
-            );
-          } finally {
-            changing = false;
-            modelChanging = false;
-          }
-          break;
-        }
-        case "configure": {
-          idle();
-          const next = config(
-            (params.config ?? params) as Record<string, unknown>,
-          );
-          changing = true;
-          try {
-            await workspaceCatalog();
-            const previous = state.config;
-            next.allowed_workspaces = next.allowed_workspaces.filter(
-              (ref) => !workspaceRemoved(ref),
-            );
-            const existing = new Set(previous.allowed_workspaces.map(refKey));
-            const added = next.allowed_workspaces.filter(
-              (ref) => !existing.has(refKey(ref)),
-            );
-            if (added.length) await context.captureScope(added);
-            const nextCatalog = await driver.catalog(next.credential_source);
-            if (disposed) throw new Error("Ranger unavailable");
-            if (
-              next.provider &&
-              !nextCatalog.providers.some(
-                (provider) => provider.id === next.provider,
-              )
-            )
-              throw new Error("Invalid provider");
-            if (
-              next.model &&
-              !nextCatalog.models.some(
-                (model) =>
-                  model.provider === next.provider && model.id === next.model,
-              )
-            )
-              throw new Error("Invalid model");
-            checkThinking(next, nextCatalog.models);
-            saveChange(() => {
-              state.config = config({
-                ...next,
-                allowed_workspaces: next.allowed_workspaces.filter(
-                  (ref) =>
-                    added.some((item) => refKey(item) === refKey(ref)) ||
-                    !workspaceRemoved(ref),
-                ),
-                approval_mode: state.config.approval_mode,
-                workspace_scope: state.config.workspace_scope,
-              });
-              cancelPendingActions(
-                "The Ranger configuration changed. Ask for a fresh preview.",
+              throw new Error(
+                "Stop the running Ranger task before editing a model connection.",
               );
-              Object.assign(state, nextCatalog);
+            changing = true;
+            modelChanging = true;
+            try {
               if (
-                previous.provider !== next.provider ||
-                previous.credential_source !== next.credential_source
+                !driver.configureModel ||
+                params.credential_source !== state.config.credential_source ||
+                Object.keys(params).some(
+                  (key) =>
+                    ![
+                      "provider",
+                      "model",
+                      "models",
+                      "reasoning",
+                      "thinking_levels",
+                      "base_url",
+                      "api",
+                      "api_key",
+                      "credential_source",
+                    ].includes(key),
+                )
               )
-                state.auth = null;
-              // Removed scope must not remain in the model's historical tool context.
+                throw new Error("Invalid model connection");
+              const provider = string(params.provider, "provider", 64).trim();
+              const model = string(params.model, "model").trim();
+              const rawModels = params.models;
               if (
-                JSON.stringify(previous.allowed_workspaces) !==
-                JSON.stringify(next.allowed_workspaces)
+                rawModels !== undefined &&
+                (!Array.isArray(rawModels) ||
+                  !rawModels.length ||
+                  rawModels.length > ASSISTANT_MAX_CUSTOM_MODELS)
               )
+                throw new Error("Invalid model connection");
+              const models =
+                rawModels === undefined
+                  ? undefined
+                  : [
+                      ...new Set(
+                        rawModels.map((id) => string(id, "model").trim()),
+                      ),
+                    ];
+              const base_url = string(params.base_url, "base URL", 2000).trim();
+              const thinking_levels = params.thinking_levels;
+              if (
+                !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/.test(provider) ||
+                /[\u0000-\u001f\u007f]/.test(model) ||
+                (models &&
+                  (!models.includes(model) ||
+                    models.some((id) => /[\u0000-\u001f\u007f]/.test(id)))) ||
+                !isAssistantModelEndpoint(base_url) ||
+                !isAssistantModelApi(params.api) ||
+                (params.reasoning !== undefined &&
+                  typeof params.reasoning !== "boolean") ||
+                (thinking_levels !== undefined &&
+                  (!Array.isArray(thinking_levels) ||
+                    !thinking_levels.length ||
+                    !thinking_levels.every(isAssistantThinkingLevel) ||
+                    new Set(thinking_levels).size !== thinking_levels.length ||
+                    (params.reasoning !== undefined &&
+                      params.reasoning !==
+                        thinking_levels.some((level) => level !== "off"))))
+              )
+                throw new Error("Invalid model connection");
+              const api_key =
+                params.api_key === undefined
+                  ? undefined
+                  : string(params.api_key, "API key", 10_000);
+              if (
+                api_key &&
+                (api_key.trimStart().startsWith("!") || api_key.includes("$"))
+              )
+                throw new Error("Enter a literal API key");
+              await driver.configureModel(
+                {
+                  provider,
+                  model,
+                  ...(models ? { models } : {}),
+                  ...(params.reasoning !== undefined
+                    ? { reasoning: params.reasoning }
+                    : {}),
+                  ...(thinking_levels !== undefined ? { thinking_levels } : {}),
+                  base_url,
+                  api: params.api,
+                  api_key,
+                  credential_source: state.config.credential_source,
+                },
+                writeSaved,
+              );
+              if (disposed) throw new Error("Ranger unavailable");
+              await catalog();
+              state.error = null;
+              modelChanging = false;
+              await tasks?.revalidate();
+              publish(true);
+            } catch {
+              throw new Error(
+                "The model connection could not be saved. Check the custom provider, endpoint, model and API key.",
+              );
+            } finally {
+              changing = false;
+              modelChanging = false;
+            }
+            break;
+          }
+          case "configure": {
+            idle();
+            const next = config(
+              (params.config ?? params) as Record<string, unknown>,
+            );
+            changing = true;
+            try {
+              await workspaceCatalog();
+              const previous = state.config;
+              next.allowed_workspaces = next.allowed_workspaces.filter(
+                (ref) => !workspaceRemoved(ref),
+              );
+              const existing = new Set(previous.allowed_workspaces.map(refKey));
+              const added = next.allowed_workspaces.filter(
+                (ref) => !existing.has(refKey(ref)),
+              );
+              if (added.length) await context.captureScope(added);
+              const nextCatalog = await driver.catalog(next.credential_source);
+              if (disposed) throw new Error("Ranger unavailable");
+              if (
+                next.provider &&
+                !nextCatalog.providers.some(
+                  (provider) => provider.id === next.provider,
+                )
+              )
+                throw new Error("Invalid provider");
+              if (
+                next.model &&
+                !nextCatalog.models.some(
+                  (model) =>
+                    model.provider === next.provider && model.id === next.model,
+                )
+              )
+                throw new Error("Invalid model");
+              checkThinking(next, nextCatalog.models);
+              saveChange(() => {
+                state.config = config({
+                  ...next,
+                  allowed_workspaces: next.allowed_workspaces.filter(
+                    (ref) =>
+                      added.some((item) => refKey(item) === refKey(ref)) ||
+                      !workspaceRemoved(ref),
+                  ),
+                  approval_mode: state.config.approval_mode,
+                  workspace_scope: state.config.workspace_scope,
+                });
+                cancelPendingActions(
+                  "The Ranger configuration changed. Ask for a fresh preview.",
+                );
+                Object.assign(state, nextCatalog);
+                if (
+                  previous.provider !== next.provider ||
+                  previous.credential_source !== next.credential_source
+                )
+                  state.auth = null;
+                // Removed scope must not remain in the model's historical tool context.
+                if (
+                  JSON.stringify(previous.allowed_workspaces) !==
+                  JSON.stringify(next.allowed_workspaces)
+                )
+                  entries = [];
+                state.error = null;
+              });
+              await tasks?.revalidate();
+              publish(true);
+            } catch {
+              throw new Error(
+                "The Ranger configuration could not be saved. Check the provider, model and workspace scope.",
+              );
+            } finally {
+              changing = false;
+            }
+            break;
+          }
+          case "send":
+            await send(params);
+            break;
+          case "queue.remove": {
+            if (Object.keys(params).some((key) => key !== "id"))
+              throw new Error("Removal accepts only the message identifier.");
+            const id = string(params.id, "message identifier");
+            // Behind the worker, a message being sent is gone by the time this
+            // runs, so it can never be removed and still sent.
+            await queueTask(() => {
+              const item = queue.find((entry) => entry.id === id);
+              if (!item) throw new Error("This message was already sent.");
+              if (item.mode === "steer")
+                throw new Error(
+                  "This message is already steering Ranger and can no longer be removed.",
+                );
+              saveChange(() => {
+                queue = queue.filter((entry) => entry.id !== id);
+              });
+              publish(true);
+            });
+            break;
+          }
+          case "queue.resume": {
+            if (Object.keys(params).length)
+              throw new Error("Resuming the queue accepts no parameters.");
+            await queueTask(async () => {
+              const next = queue[0];
+              if (!next) return;
+              idle();
+              await sendQueued(next);
+            });
+            break;
+          }
+          case "stop": {
+            const waiting = awaitingRecovery;
+            queueHeld = true;
+            if (activeRun) {
+              // Persist cancellation intent before touching the running harness.
+              // A crash during abort must not resume a question the user stopped.
+              saveChange(() => {
+                activeRun = undefined;
                 entries = [];
+              });
+            }
+            turnController?.abort();
+            try {
+              await driver.stop();
+            } catch {
+              throw new Error("Ranger could not be stopped.");
+            }
+            await run;
+            if (waiting) {
+              awaitingRecovery = false;
+              state.running = false;
+              state.error = null;
+              turnController = undefined;
+              entries = [];
+              for (const item of queue) item.mode = "follow_up";
+              for (const tool of state.messages.at(-1)?.tools ?? [])
+                if (tool.status === "running") tool.status = "failed";
+              persist();
+              publish(true);
+            }
+            break;
+          }
+          case "new_session":
+            idle();
+            saveChange(() => {
+              archiveCurrent();
+              const next = sessionSummary();
+              state.session_id = next.id;
+              state.sessions!.push(next);
+              state.messages = [];
+              entries = [];
+              entryScope = "";
+              requests = [];
+              queue = [];
+              queueHeld = false;
+              preparedActions.clear();
               state.error = null;
             });
-            await tasks?.revalidate();
             publish(true);
-          } catch {
-            throw new Error(
-              "The Ranger configuration could not be saved. Check the provider, model and workspace scope.",
-            );
-          } finally {
-            changing = false;
-            // Saving cancels previews a follow-up may be waiting behind.
-            drainQueue();
-          }
-          break;
-        }
-        case "send":
-          await send(params);
-          break;
-        case "queue.remove": {
-          if (Object.keys(params).some((key) => key !== "id"))
-            throw new Error("Removal accepts only the message identifier.");
-          const id = string(params.id, "message identifier");
-          const item = queue.find((entry) => entry.id === id);
-          if (!item || pendingRequest === id)
-            throw new Error("This message was already sent.");
-          if (item.mode === "steer")
-            throw new Error(
-              "This message is already steering Ranger and can no longer be removed.",
-            );
-          saveChange(() => {
-            queue = queue.filter((entry) => entry.id !== id);
-          });
-          publish(true);
-          break;
-        }
-        case "queue.resume": {
-          if (Object.keys(params).length)
-            throw new Error("Resuming the queue accepts no parameters.");
-          const next = queue[0];
-          if (!next) break;
-          idle();
-          await sendQueued(next);
-          break;
-        }
-        case "stop": {
-          const waiting = awaitingRecovery;
-          queueHeld = true;
-          if (activeRun) {
-            // Persist cancellation intent before touching the running harness.
-            // A crash during abort must not resume a question the user stopped.
-            saveChange(() => {
-              activeRun = undefined;
+            break;
+          case "select_session":
+            selectSession(params);
+            break;
+          case "action.confirm":
+            await confirmAction(params);
+            break;
+          case "action.cancel": {
+            idle();
+            const id = string(params.action_id, "action identifier");
+            const action = state.messages
+              .flatMap((message) => message.actions ?? [])
+              .find((entry) => entry.id === id);
+            if (!action) throw new Error("This action is no longer available.");
+            if (action.status === "pending") {
+              action.status = "cancelled";
+              action.detail = "Cancelled. Nothing was executed.";
+              preparedActions.delete(id);
               entries = [];
-            });
+              persist();
+              publish(true);
+            }
+            break;
           }
-          turnController?.abort();
-          try {
-            await driver.stop();
-          } catch {
-            throw new Error("Ranger could not be stopped.");
-          }
-          await run;
-          if (waiting) {
-            awaitingRecovery = false;
-            state.running = false;
-            state.error = null;
-            turnController = undefined;
-            entries = [];
-            for (const item of queue) item.mode = "follow_up";
-            for (const tool of state.messages.at(-1)?.tools ?? [])
-              if (tool.status === "running") tool.status = "failed";
-            persist();
+          case "auth.start":
+            await startAuth(params);
+            break;
+          case "auth.respond": {
+            if (
+              !state.auth ||
+              state.auth.id !== params.auth_id ||
+              !answer ||
+              answer.id !== params.prompt_id
+            )
+              throw new Error("This login prompt is no longer active");
+            const value =
+              typeof params.value === "string" && params.value.length <= 20_000
+                ? params.value
+                : undefined;
+            if (value === undefined) throw new Error("Invalid login response");
+            const prompt = state.auth.prompt;
+            if (
+              prompt?.type === "select" &&
+              !prompt.options?.some((option) => option.id === value)
+            )
+              throw new Error("Invalid login choice");
+            const pending = answer;
+            answer = undefined;
+            delete state.auth.prompt;
+            state.auth.status = "working";
+            state.auth.message = "Connecting provider...";
+            pending.resolve(value);
             publish(true);
+            break;
           }
-          break;
+          case "auth.cancel":
+            if (params.auth_id && params.auth_id !== state.auth?.id)
+              throw new Error("This login is no longer active");
+            authController?.abort();
+            await authWork;
+            break;
+          default:
+            throw new Error("Unknown Ranger method");
         }
-        case "new_session":
-          idle();
-          saveChange(() => {
-            archiveCurrent();
-            const next = sessionSummary();
-            state.session_id = next.id;
-            state.sessions!.push(next);
-            state.messages = [];
-            entries = [];
-            entryScope = "";
-            requests = [];
-            queue = [];
-            queueHeld = false;
-            preparedActions.clear();
-            state.error = null;
-          });
-          publish(true);
-          break;
-        case "select_session":
-          selectSession(params);
-          break;
-        case "action.confirm":
-          await confirmAction(params);
-          break;
-        case "action.cancel": {
-          idle();
-          const id = string(params.action_id, "action identifier");
-          const action = state.messages
-            .flatMap((message) => message.actions ?? [])
-            .find((entry) => entry.id === id);
-          if (!action) throw new Error("This action is no longer available.");
-          if (action.status === "pending") {
-            action.status = "cancelled";
-            action.detail = "Cancelled. Nothing was executed.";
-            preparedActions.delete(id);
-            entries = [];
-            persist();
-            publish(true);
-            drainQueue();
-          }
-          break;
-        }
-        case "auth.start":
-          await startAuth(params);
-          break;
-        case "auth.respond": {
-          if (
-            !state.auth ||
-            state.auth.id !== params.auth_id ||
-            !answer ||
-            answer.id !== params.prompt_id
-          )
-            throw new Error("This login prompt is no longer active");
-          const value =
-            typeof params.value === "string" && params.value.length <= 20_000
-              ? params.value
-              : undefined;
-          if (value === undefined) throw new Error("Invalid login response");
-          const prompt = state.auth.prompt;
-          if (
-            prompt?.type === "select" &&
-            !prompt.options?.some((option) => option.id === value)
-          )
-            throw new Error("Invalid login choice");
-          const pending = answer;
-          answer = undefined;
-          delete state.auth.prompt;
-          state.auth.status = "working";
-          state.auth.message = "Connecting provider...";
-          pending.resolve(value);
-          publish(true);
-          break;
-        }
-        case "auth.cancel":
-          if (params.auth_id && params.auth_id !== state.auth?.id)
-            throw new Error("This login is no longer active");
-          authController?.abort();
-          await authWork;
-          break;
-        default:
-          throw new Error("Unknown Ranger method");
+        return method === "get" || method === "select_session"
+          ? detailedSnapshot()
+          : current();
+      } finally {
+        // A request can end a settings change or review without publishing.
+        drainQueue();
       }
-      return method === "get" || method === "select_session"
-        ? detailedSnapshot()
-        : current();
     },
     async dispose(): Promise<void> {
       disposed = true;

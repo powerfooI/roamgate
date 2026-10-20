@@ -221,9 +221,12 @@ state; sends are never replayed.
   starts a new reply after the steer. `queue` waits in the snapshot `queue`
   until the turn answers, then is admitted like a new question. A follow-up
   also waits while an action or task preview awaits review. Steers that miss
-  the turn become follow-ups. Stop, a failed turn, or a chat switch holds the
-  queue until `queue.resume` or the next send; `queue.remove` drops a
-  follow-up.
+  the turn, or need a workspace it did not admit, become follow-ups, and later
+  steers of that turn follow them. Stop, a failed turn, or a chat switch holds
+  the queue (`queue_held`) until `queue.resume` or the next send;
+  `queue.remove` drops a follow-up. One worker runs steering, removal and
+  sending in queue order, and a single check after every published change or
+  request decides when the next follow-up goes.
 - **Persistence:** conversations and execution checkpoints live in the assistant
   directory; one bridge process must own it. After a restart, a turn resumes
   only after its endpoints, Herdr boot IDs, and workspaces are re-verified.

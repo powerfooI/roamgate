@@ -5858,6 +5858,8 @@ test("queued follow-ups wait for the answer and are admitted in order", async ()
     () => !f.service.peek().running && f.service.peek().messages.length === 6,
   );
   expect(f.service.peek().queue).toEqual([]);
+  // Draining between turns never reports the queue as held.
+  expect(f.snapshots.some((snapshot) => snapshot.queue_held)).toBe(false);
   expect(f.service.peek().messages.map((message) => message.text)).toEqual([
     "First",
     "Answer 1",
@@ -5969,6 +5971,7 @@ test("stopping holds unsent messages, keeps them across restarts and resumes on 
     "late",
     "drop",
   ]);
+  expect(f.service.peek().queue_held).toBe(true);
   await f.service.handle("queue.remove", { id: "drop" });
   await f.service.dispose();
   const restored = createAssistantService({
@@ -6148,10 +6151,10 @@ test("a follow-up cannot be removed once its admission has started", async () =>
   });
   gate.resolve();
   await admitting.promise;
-  await expect(
-    f.service.handle("queue.remove", { id: "second" }),
-  ).rejects.toThrow("already sent");
+  // Removal waits behind the send in the queue's worker, then finds it gone.
+  const removal = f.service.handle("queue.remove", { id: "second" });
   release.resolve();
+  await expect(removal).rejects.toThrow("already sent");
   await until(() => prompts.length === 2 && !f.service.peek().running);
   expect(prompts[1]).toContain("User message:\nSecond");
   expect(f.service.peek().queue).toEqual([]);

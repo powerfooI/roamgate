@@ -2502,6 +2502,7 @@ export function AssistantPanel({
             <AssistantQueue
               queue={snapshot.queue ?? []}
               running={snapshot.running}
+              held={snapshot.queue_held === true}
               reviewing={snapshot.messages.some(
                 (message) =>
                   message.actions?.some(

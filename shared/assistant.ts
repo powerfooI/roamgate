@@ -382,6 +382,8 @@ export type AssistantSnapshot = {
   messages: AssistantMessage[];
   /** Messages waiting for the running turn, oldest first. */
   queue?: AssistantQueuedMessage[];
+  /** After Stop, a failure or a chat switch, the queue waits for the user. */
+  queue_held?: true;
   running: boolean;
   error: string | null;
   auth: AssistantAuthState | null;
@@ -899,7 +901,8 @@ export function isAssistantSnapshot(
           value.tasks.length)) ||
     !Array.isArray(value.messages) ||
     !value.messages.every(isAssistantMessage) ||
-    (value.queue !== undefined && !isAssistantQueue(value.queue))
+    (value.queue !== undefined && !isAssistantQueue(value.queue)) ||
+    (value.queue_held !== undefined && value.queue_held !== true)
   )
     return false;
   if (value.auth === null) return true;
