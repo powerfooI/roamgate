@@ -11,6 +11,7 @@ import type {
 } from "./session-types";
 import {
   localAgentSessionFiles,
+  codexHome,
   type AgentSessionFileAccess,
 } from "./session-file-access";
 import {
@@ -98,16 +99,19 @@ async function resolveCachedSessionPath(
 
 async function findCodexSession(
   id: string,
+  files: AgentSessionFileAccess,
   context: AgentSessionResolverContext,
 ) {
-  return resolveCachedSessionPath(context, `codex:${id}`, async () => {
-    const root = join(homedir(), ".codex", "sessions");
-    const files = await walkFiles(
-      root,
-      (path) => path.endsWith(".jsonl") && basename(path).includes(id),
-    );
-    return newestFile(files);
-  });
+  const key = `codex:${files.remote ? "remote" : codexHome()}:${id}`;
+  const cached = context.pathCache.get(key);
+  if (cached) {
+    const file = await files.statFile(cached);
+    if (file) return file;
+    context.pathCache.delete(key);
+  }
+  const file = await files.findCodexSessionById(id);
+  if (file) context.pathCache.set(key, file.path);
+  return file;
 }
 
 async function findClaudeSession(
@@ -198,8 +202,8 @@ async function sessionFileFor(
   if (agent === "pi" && files.remote) {
     return files.findPiSessionById(session.value);
   }
+  if (agent === "codex") return findCodexSession(session.value, files, context);
   let path: string | null = null;
-  if (agent === "codex") path = await findCodexSession(session.value, context);
   if (agent === "claude")
     path = await findClaudeSession(session.value, context);
   if (agent === "kimi") path = await findKimiSession(session.value, context);
@@ -338,9 +342,11 @@ export async function resolveAgentSessionInfo(
               ? cwd
                 ? `No local Antigravity session was found for ${cwd}. Start Antigravity in this directory, then refresh Session Inspect.`
                 : "Herdr did not report a working directory for this Antigravity pane."
-              : "Herdr has not received an agent session id for this pane. Install the Herdr integration for this agent and start a new agent session.",
+              : agent === "codex"
+                ? "This pane is not linked to a Codex session. An installed integration may still fail to report the session when Codex uses a shared background server. Link the current session by ID, or check the integration on the agent's machine."
+                : "Herdr has not received an agent session id for this pane. Install the Herdr integration for this agent and start a new agent session.",
       command:
-        agent === "grok" || agent === "muse"
+        agent === "grok" || agent === "muse" || agent === "codex"
           ? undefined
           : integrationInstallCommand(agent),
       updated_at: new Date(0).toISOString(),

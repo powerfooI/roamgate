@@ -40,6 +40,9 @@ function fixture(agent = "pi") {
     async findPiSessionById() {
       return file;
     },
+    async findCodexSessionById() {
+      return file;
+    },
   };
   const herdrCall = async () => ({
     agent: { agent, agent_session: { kind: "path", value: path } },

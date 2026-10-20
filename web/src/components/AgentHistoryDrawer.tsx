@@ -20,7 +20,10 @@ import {
 } from "lucide-react";
 import { useStoreSelector } from "../store";
 import { copyTextWithFeedback } from "../copyText";
-import { useConnectionClient } from "../useConnectionClient";
+import {
+  connectionClientScopeKey,
+  useConnectionClient,
+} from "../useConnectionClient";
 import type { Pane } from "../types";
 import {
   DEFAULT_INSPECTOR_NAVIGATION_RATIO,
@@ -29,6 +32,7 @@ import {
 import { formatUiDateTime, formatUiRelativeTime } from "../uiLocale";
 import { shortId } from "../utils";
 import { AgentIcon } from "./AgentIcon";
+import { CodexSessionLink } from "./CodexSessionLink";
 import { AgentMessageContent } from "./AgentMessageContent";
 import { AgentMessageDialog } from "./AgentMessageDialog";
 import { AgentHistoryCard } from "./AgentHistoryCard";
@@ -1345,6 +1349,18 @@ export function AgentHistoryDrawer({
           </div>
         </div>
 
+        {pane.agent === "codex" ? (
+          <CodexSessionLink
+            key={connectionClientScopeKey(
+              connectionClient,
+              pane.pane_id,
+              pane.terminal_id,
+            )}
+            paneId={pane.pane_id}
+            client={connectionClient}
+            onLinked={loadHistory}
+          />
+        ) : null}
         {unavailable ? (
           <div className="agent-history-unavailable" role="status">
             <strong>Session unavailable</strong>

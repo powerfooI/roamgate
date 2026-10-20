@@ -4,6 +4,28 @@
 History, summary, transcript preview, and ATIF export. Concurrent requests share
 reads; raw preview and download reads stay separate.
 
+## Codex session association
+
+Codex history requires an explicit association between the pane and the session.
+A shared Codex background server can inherit another pane's environment, so an
+installed Herdr integration does not guarantee that association was reported.
+Roamgate does not infer it from a working directory or the newest transcript.
+
+In Session, expand **Link Codex session**, enter the complete ID of the
+conversation currently displayed in the terminal, and choose **Check session**.
+Review the directory and transcript before confirming. This replaces the
+pane's association in Herdr for all viewers; it does not restart Codex or disable
+its background server. The confirmation expires after five minutes and is
+rejected if the observed foreground process, terminal, existing association, or
+transcript identity changed. This is a recovery operation, not automatic
+tracking of conversation switches inside a shared-server client.
+
+Lookups use exact IDs under `CODEX_HOME` (default `~/.codex`), including
+`sessions` and `archived_sessions`. SSH connections search on the remote host
+using Python 3 and never use local transcripts. Metadata must match the entered
+ID; duplicate transcript matches are rejected. The initial metadata record must
+fit within the 1 MiB preview limit.
+
 ## Cache and consistency
 
 The cache keeps at most 16 sessions, four recent revisions per session, and about

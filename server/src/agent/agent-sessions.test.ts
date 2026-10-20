@@ -104,6 +104,9 @@ function remotePiFiles(text: string): AgentSessionFileAccess {
     async findPiSessionById() {
       return null;
     },
+    async findCodexSessionById() {
+      return null;
+    },
   };
 }
 

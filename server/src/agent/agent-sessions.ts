@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
 import { enrichAgentActivity } from "./agent-activity";
+import { createCodexSessionLinker } from "./codex-session-link";
 import type { HerdrCall, SessionFile } from "./session-types";
 import {
   createAgentSessionResolverContext,
@@ -31,7 +32,10 @@ export function createAgentSessionHandlers(args: {
 }) {
   const resolverContext = createAgentSessionResolverContext();
   const cache = createSessionProjectionCache(args.files);
+  const linker = createCodexSessionLinker(args.herdrCall, args.files);
   return {
+    previewLink: linker.preview,
+    link: linker.link,
     listWithActivity: async (params: Record<string, unknown>) =>
       enrichAgentActivity(
         await args.herdrCall("agent.list", params),

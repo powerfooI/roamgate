@@ -145,7 +145,7 @@ export function createLegacyConnectionRuntime(args: {
     remotePlatform,
     "Agent history",
     createAgentSessionHandlers({
-      herdrCall: (method, params) => herdr.call(method, params),
+      herdrCall: (...args) => herdr.call(...args),
       files: agentSessionFiles,
     }),
   );

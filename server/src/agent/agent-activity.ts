@@ -28,13 +28,13 @@ export async function enrichAgentActivity(
         const session = agent.agent_session;
         if (!isRecord(session)) continue;
         const name = normalizeAgentName(String(agent.agent ?? session.agent));
-        // ID-based resolvers (except Pi) search local directories. Never use
+        // ID-based resolvers (except Pi and Codex) search local directories. Never use
         // this host's sessions as activity evidence for a remote connection.
         if (
           files.remote &&
           (name === "grok" ||
             name === "agy" ||
-            (session.kind !== "path" && name !== "pi"))
+            (session.kind !== "path" && name !== "pi" && name !== "codex"))
         )
           continue;
         try {
