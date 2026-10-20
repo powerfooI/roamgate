@@ -122,6 +122,7 @@ describe("workspace inspector geometry", () => {
     expect(inspectorNavigationRatioAtPosition(100, 1000)).toBe(0.24);
     expect(inspectorNavigationRatioAtPosition(400, 1000)).toBe(0.4);
     expect(inspectorNavigationRatioAtPosition(900, 1000)).toBe(0.692);
+    expect(inspectorNavigationRatioAtPosition(900, 1000, 528)).toBe(0.464);
   });
 });
 

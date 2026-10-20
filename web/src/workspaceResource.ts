@@ -247,15 +247,14 @@ function finiteNavigationRatio(value: unknown): number {
 export function inspectorNavigationRatioAtPosition(
   pointerOffset: number,
   availableWidth: number,
+  detailMinSize = INSPECTOR_DETAIL_MIN_SIZE,
 ): number {
   if (!Number.isFinite(availableWidth) || availableWidth <= 0) {
     return DEFAULT_INSPECTOR_NAVIGATION_RATIO;
   }
   const maximum = Math.max(
     INSPECTOR_NAVIGATION_MIN_SIZE,
-    availableWidth -
-      INSPECTOR_DETAIL_MIN_SIZE -
-      INSPECTOR_INTERNAL_SEPARATOR_SIZE,
+    availableWidth - detailMinSize - INSPECTOR_INTERNAL_SEPARATOR_SIZE,
   );
   const width = Math.min(
     Math.max(pointerOffset, INSPECTOR_NAVIGATION_MIN_SIZE),

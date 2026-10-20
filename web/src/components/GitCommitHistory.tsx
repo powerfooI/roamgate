@@ -1,8 +1,17 @@
-import { ArrowLeft, GitCommitHorizontal, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, Eye, GitCommitHorizontal, RefreshCw } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import type { ConnectionClient } from "../api";
 import type { FilePreview, GitDiffEntry, GitDiffFile } from "../types";
 import { gitDiffCode } from "../gitDiffStatus";
+import { useSystemBack } from "../systemBack";
+import { InspectorSplitResizer } from "./InspectorSplitResizer";
 import { DiffContentView } from "./DiffContentView";
 import "./GitCommitHistory.css";
 
@@ -69,7 +78,45 @@ export function GitCommitHistory({
   const [detailError, setDetailError] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
-  const [mobileDetail, setMobileDetail] = useState(false);
+  const [compactPage, setCompactPage] = useState<"commits" | "files" | "diff">(
+    "commits",
+  );
+  const [navigationRatio, setNavigationRatio] = useState(0.25);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const previousPageRef = useRef(compactPage);
+  useEffect(() => {
+    const changed = previousPageRef.current !== compactPage;
+    previousPageRef.current = compactPage;
+    if (!compact || !active || !changed) return;
+    const selector =
+      compactPage === "commits"
+        ? ".git-commit-row.is-selected"
+        : compactPage === "files"
+          ? ".git-commit-files-pane .git-commit-back"
+          : ".git-commit-content .git-commit-back";
+    rootRef.current
+      ?.querySelector<HTMLElement>(selector)
+      ?.focus({ preventScroll: true });
+  }, [active, compact, compactPage]);
+  const navigationId = useId();
+  const detailId = useId();
+  const backToFiles = () => {
+    setCompactPage("files");
+    setPreviewPath(null);
+  };
+  useSystemBack(
+    active && compact && compactPage !== "commits",
+    () => {
+      setCompactPage("commits");
+      setPreviewPath(null);
+    },
+    "navigation",
+  );
+  useSystemBack(
+    active && compact && compactPage === "diff",
+    backToFiles,
+    "navigation",
+  );
   const loadedDetailRef = useRef<CommitDetail | null>(null);
 
   useEffect(() => {
@@ -81,7 +128,7 @@ export function GitCommitHistory({
     setSelectedSha(null);
     setDetail(null);
     loadedDetailRef.current = null;
-    setMobileDetail(false);
+    setCompactPage("commits");
     void (
       client.call("git.commits", {
         workspace_id: workspaceId,
@@ -206,7 +253,7 @@ export function GitCommitHistory({
   const openPreview = (target: GitDiffEntry) => {
     setSelectedPath(target.path);
     setPreviewPath(target.path);
-    setMobileDetail(true);
+    setCompactPage("diff");
   };
   useEffect(() => {
     if (!detail || !previewPath || !active) return;
@@ -253,14 +300,21 @@ export function GitCommitHistory({
 
   const selectCommit = (sha: string) => {
     setSelectedSha(sha);
-    setMobileDetail(true);
+    setCompactPage("files");
   };
 
   return (
     <div
-      className={`git-commit-history ${compact ? "is-compact" : ""} ${mobileDetail ? "has-detail" : ""}`}
+      ref={rootRef}
+      className={`git-commit-history ${compact ? "is-compact" : ""}`}
+      data-page={compactPage}
+      style={
+        {
+          "--git-commit-navigation-width": `${navigationRatio * 100}%`,
+        } as CSSProperties
+      }
     >
-      <div className="git-commit-navigation">
+      <div id={navigationId} className="git-commit-navigation">
         <div className="git-commit-navigation-head">
           <span>Commit history</span>
           <button
@@ -324,157 +378,193 @@ export function GitCommitHistory({
           </button>
         ) : null}
       </div>
-      <div className="git-commit-detail">
-        {compact && mobileDetail ? (
-          <button
-            type="button"
-            className="git-commit-back"
-            onClick={() => {
-              setMobileDetail(false);
-              setPreviewPath(null);
-            }}
-          >
-            <ArrowLeft size={14} /> Commits
-          </button>
-        ) : null}
-        {detailLoading ? (
-          <div className="git-commit-state">
-            <span className="file-loading-spinner" /> Loading commit
-          </div>
-        ) : null}
-        {detailError ? (
-          <div className="git-commit-state is-error" role="alert">
-            {detailError}
-          </div>
-        ) : null}
-        {!selectedSha && !loading ? (
-          <div className="git-commit-state">
-            Select a commit to inspect its changes.
-          </div>
-        ) : null}
-        {detail && detail.sha === selectedSha ? (
-          <>
-            <div className="git-commit-meta">
-              <div className="git-commit-meta-title">
-                <GitCommitHorizontal size={16} />
-                <strong>{detail.message.split("\n")[0]}</strong>
-              </div>
-              {messageBody ? (
-                <pre className="git-commit-message">{messageBody}</pre>
-              ) : null}
-              <dl>
-                <dt>Commit</dt>
-                <dd>
-                  <code>{detail.sha}</code>
-                </dd>
-                <dt>Author</dt>
-                <dd>
-                  {detail.author.name} &lt;{detail.author.email}&gt;{" "}
-                  <time dateTime={detail.author.date}>
-                    {date(detail.author.date)}
-                  </time>
-                </dd>
-                <dt>Committer</dt>
-                <dd>
-                  {detail.committer.name} &lt;{detail.committer.email}&gt;{" "}
-                  <time dateTime={detail.committer.date}>
-                    {date(detail.committer.date)}
-                  </time>
-                </dd>
-                <dt>{detail.parents.length > 1 ? "First parent" : "Parent"}</dt>
-                <dd>
-                  {detail.base ? (
-                    <code>{detail.base}</code>
-                  ) : (
-                    "Empty tree (root commit)"
-                  )}
-                </dd>
-                {detail.parents.length > 1 ? (
-                  <>
-                    <dt>Other parents</dt>
+      {!compact ? (
+        <InspectorSplitResizer
+          ratio={navigationRatio}
+          resetRatio={0.25}
+          horizontalPadding={0}
+          detailMinSize={528}
+          label="Resize commit list"
+          navigationId={navigationId}
+          detailId={detailId}
+          onChange={setNavigationRatio}
+          onCommit={setNavigationRatio}
+        />
+      ) : null}
+      <div id={detailId} className="git-commit-detail">
+        <div className="git-commit-files-pane">
+          {compact ? (
+            <button
+              type="button"
+              className="git-commit-back"
+              onClick={() => {
+                setCompactPage("commits");
+                setPreviewPath(null);
+              }}
+            >
+              <ArrowLeft size={14} /> Commits
+            </button>
+          ) : null}
+          {detailLoading ? (
+            <div className="git-commit-state">
+              <span className="file-loading-spinner" /> Loading commit
+            </div>
+          ) : null}
+          {detailError ? (
+            <div className="git-commit-state is-error" role="alert">
+              {detailError}
+            </div>
+          ) : null}
+          {!selectedSha && !loading ? (
+            <div className="git-commit-state">
+              Select a commit to inspect its changes.
+            </div>
+          ) : null}
+          {detail && detail.sha === selectedSha ? (
+            <>
+              <div className="git-commit-meta">
+                <div className="git-commit-meta-title">
+                  <GitCommitHorizontal size={16} />
+                  <strong>{detail.message.split("\n")[0]}</strong>
+                </div>
+                <div className="git-commit-meta-summary">
+                  <code>{detail.sha.slice(0, 8)}</code>
+                  <span>{detail.author.name}</span>
+                </div>
+                <details className="git-commit-metadata">
+                  <summary>Commit details</summary>
+                  {messageBody ? (
+                    <pre className="git-commit-message">{messageBody}</pre>
+                  ) : null}
+                  <dl>
+                    <dt>Commit</dt>
                     <dd>
-                      {detail.parents.slice(1).map((parent) => (
-                        <code key={parent}>{parent} </code>
-                      ))}
+                      <code>{detail.sha}</code>
                     </dd>
-                  </>
+                    <dt>Author</dt>
+                    <dd>
+                      {detail.author.name} &lt;{detail.author.email}&gt;{" "}
+                      <time dateTime={detail.author.date}>
+                        {date(detail.author.date)}
+                      </time>
+                    </dd>
+                    <dt>Committer</dt>
+                    <dd>
+                      {detail.committer.name} &lt;{detail.committer.email}&gt;{" "}
+                      <time dateTime={detail.committer.date}>
+                        {date(detail.committer.date)}
+                      </time>
+                    </dd>
+                    <dt>
+                      {detail.parents.length > 1 ? "First parent" : "Parent"}
+                    </dt>
+                    <dd>
+                      {detail.base ? (
+                        <code>{detail.base}</code>
+                      ) : (
+                        "Empty tree (root commit)"
+                      )}
+                    </dd>
+                    {detail.parents.length > 1 ? (
+                      <>
+                        <dt>Other parents</dt>
+                        <dd>
+                          {detail.parents.slice(1).map((parent) => (
+                            <code key={parent}>{parent} </code>
+                          ))}
+                        </dd>
+                      </>
+                    ) : null}
+                  </dl>
+                </details>
+              </div>
+              <div className="git-commit-files-head">
+                <strong>
+                  {detail.entries.length} changed{" "}
+                  {detail.entries.length === 1 ? "file" : "files"}
+                </strong>
+                {detail.parents.length > 1 ? (
+                  <span>Compared with first parent</span>
                 ) : null}
-              </dl>
-            </div>
-            <div className="git-commit-files-head">
-              <strong>
-                {detail.entries.length} changed{" "}
-                {detail.entries.length === 1 ? "file" : "files"}
-              </strong>
-              {detail.parents.length > 1 ? (
-                <span>Compared with first parent</span>
+              </div>
+              {detail.shallow_boundary ? (
+                <div className="git-commit-state">
+                  This commit's parent is outside the shallow history; its
+                  changes are unavailable.
+                </div>
               ) : null}
-            </div>
-            {detail.shallow_boundary ? (
-              <div className="git-commit-state">
-                This commit's parent is outside the shallow history; its changes
-                are unavailable.
-              </div>
-            ) : null}
-            {detail.entries.length ? (
-              <div className="git-commit-files">
-                {detail.entries.map((item) => (
-                  <div
-                    key={item.path}
-                    className={`git-commit-file ${selectedPath === item.path ? "is-selected" : ""}`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedPath(item.path);
-                        setPreviewPath(null);
-                      }}
-                      aria-pressed={selectedPath === item.path}
-                      title={item.path}
+              {detail.entries.length ? (
+                <div className="git-commit-files">
+                  {detail.entries.map((item) => (
+                    <div
+                      key={item.path}
+                      className={`git-commit-file ${selectedPath === item.path ? "is-selected" : ""}`}
                     >
-                      <span
-                        className={`git-status-code git-status-${gitDiffCode(item).toLowerCase()}`}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedPath(item.path);
+                          setPreviewPath(null);
+                          setCompactPage("diff");
+                        }}
+                        aria-pressed={selectedPath === item.path}
+                        title={`${item.path} (${item.status})`}
                       >
-                        {gitDiffCode(item)}
-                      </span>
-                      <span className="git-commit-file-name">
-                        {item.path}
-                        {item.old_path ? (
-                          <small>from {item.old_path}</small>
-                        ) : null}
-                      </span>
-                      <span className="git-commit-file-status">
-                        {item.status}
-                      </span>
-                      <span className="git-commit-file-count">
-                        {item.binary ? (
-                          "Binary"
-                        ) : item.additions === undefined ? (
-                          ""
-                        ) : (
-                          <>
-                            <em>+{item.additions}</em> <i>−{item.deletions}</i>
-                          </>
-                        )}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="git-commit-preview-button"
-                      onClick={() => openPreview(item)}
-                      aria-label={`Preview ${item.path} at this commit`}
-                    >
-                      Preview
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : detail.shallow_boundary ? null : (
-              <div className="git-commit-state">
-                This commit has no changes against its first parent.
-              </div>
-            )}
-            <div className="git-commit-content">
+                        <span
+                          className={`git-status-code git-status-${gitDiffCode(item).toLowerCase()}`}
+                        >
+                          {gitDiffCode(item)}
+                        </span>
+                        <span className="git-commit-file-name">
+                          {item.path}
+                          {item.old_path ? (
+                            <small>from {item.old_path}</small>
+                          ) : null}
+                        </span>
+                        <span className="git-commit-file-count">
+                          {item.binary ? (
+                            "Binary"
+                          ) : item.additions === undefined ? (
+                            ""
+                          ) : (
+                            <>
+                              <em>+{item.additions}</em>{" "}
+                              <i>−{item.deletions}</i>
+                            </>
+                          )}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="git-commit-preview-button"
+                        onClick={() => openPreview(item)}
+                        aria-label={`Preview ${item.path} at this commit`}
+                      >
+                        <Eye size={14} aria-hidden="true" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : detail.shallow_boundary ? null : (
+                <div className="git-commit-state">
+                  This commit has no changes against its first parent.
+                </div>
+              )}
+            </>
+          ) : null}
+        </div>
+        <div className="git-commit-content">
+          {compact ? (
+            <button
+              type="button"
+              className="git-commit-back"
+              onClick={backToFiles}
+            >
+              <ArrowLeft size={14} /> Changed files
+            </button>
+          ) : null}
+          {detail && detail.sha === selectedSha ? (
+            <>
               {previewPath ? (
                 <section
                   className="git-commit-preview"
@@ -530,6 +620,7 @@ export function GitCommitHistory({
                   resourceKey={`${resourceKey}:commit:${detail.sha}`}
                   connectionClient={client}
                   mobile={compact}
+                  showFileSelector={false}
                   onSelectFile={(target) => {
                     setFileErrors((prev) => {
                       const next = { ...prev };
@@ -543,9 +634,13 @@ export function GitCommitHistory({
                   loadImagePreview={loadImagePreview}
                 />
               )}
+            </>
+          ) : (
+            <div className="git-commit-state">
+              Select a commit to inspect its diff.
             </div>
-          </>
-        ) : null}
+          )}
+        </div>
       </div>
     </div>
   );

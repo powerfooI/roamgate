@@ -49,6 +49,16 @@ export function terminalFocusBlockedByOverlay(
   return Boolean(activeElement.closest(TERMINAL_FOCUS_OVERLAY_SELECTOR));
 }
 
+function selectionNodeInOverlay(node: Node | null | undefined): boolean {
+  let element = node?.nodeType === 1 ? (node as Element) : node?.parentElement;
+  while (element) {
+    if (element.closest(TERMINAL_FOCUS_OVERLAY_SELECTOR)) return true;
+    const root = element.getRootNode();
+    element = "host" in root ? (root as ShadowRoot).host : null;
+  }
+  return false;
+}
+
 /**
  * Focusing xterm clears the document selection, and non-editable overlay text
  * never holds focus. Output-driven refocusing therefore waits while the user
@@ -61,10 +71,25 @@ export function terminalOutputFocusBlockedBySelection(
 ): boolean {
   if (pointerDownInOverlay) return true;
   const selection = doc.getSelection();
-  const anchor = selection?.isCollapsed === false ? selection.anchorNode : null;
-  const anchorElement =
-    anchor?.nodeType === 1 ? (anchor as Element) : anchor?.parentElement;
-  return Boolean(anchorElement?.closest(TERMINAL_FOCUS_OVERLAY_SELECTOR));
+  if (!selection) return false;
+  if (
+    !selection.isCollapsed &&
+    [selection.anchorNode, selection.focusNode].some(selectionNodeInOverlay)
+  )
+    return true;
+  // Diff text lives in shadow roots; composed ranges expose its host boundary.
+  return (
+    selection
+      .getComposedRanges?.()
+      .some(
+        (range) =>
+          (range.startContainer !== range.endContainer ||
+            range.startOffset !== range.endOffset) &&
+          [range.startContainer, range.endContainer].some(
+            selectionNodeInOverlay,
+          ),
+      ) ?? false
+  );
 }
 
 let overlayPointerDown = false;

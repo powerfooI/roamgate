@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeEach, expect, mock, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { Window } from "happy-dom";
 import type { Root } from "react-dom/client";
 import type { TerminalPush } from "../api";
@@ -892,6 +900,62 @@ async function registerDomTests() {
     currentTerminal().element.getBoundingClientRect = () =>
       new browser.DOMRect(10, 20, 800, 480) as unknown as DOMRect;
   }
+  test("streaming output preserves selections in every Inspector tab", async () => {
+    const matchMedia = browser.matchMedia;
+    browser.matchMedia = ((query: string) => ({
+      ...matchMedia.call(browser, query),
+      matches: false,
+    })) as typeof browser.matchMedia;
+    mobileLayout = false;
+    let selection: Selection | null = null;
+    const getSelection = spyOn(document, "getSelection").mockImplementation(
+      () => selection,
+    );
+    const flushOutput = async () => {
+      await frame(false);
+      await act(async () => browser.happyDOM.whenAsyncComplete());
+    };
+    try {
+      await mount();
+      await flushOutput();
+      const term = terminals[0]!;
+      expect(term.focusCount).toBeGreaterThan(0);
+      for (const tab of ["files", "changes", "commits", "history"]) {
+        const inspector = document.createElement("section");
+        inspector.className = "workspace-inspector";
+        const content = document.createElement("div");
+        content.className = `inspector-${tab}-resource`;
+        inspector.append(content);
+        document.body.append(inspector);
+        const text = document.createTextNode(`Selected ${tab} text`);
+        if (tab === "changes" || tab === "commits") {
+          const code = document.createElement("span");
+          code.append(text);
+          content.attachShadow({ mode: "open" }).append(code);
+        } else {
+          content.append(text);
+        }
+        selection = {
+          isCollapsed: false,
+          anchorNode: text,
+          focusNode: text,
+        } as unknown as Selection;
+        term.textarea.blur();
+        const before = term.focusCount;
+        await flushOutput();
+        expect(term.focusCount).toBe(before);
+        expect(document.activeElement).not.toBe(term.textarea);
+        selection = null;
+        await flushOutput();
+        expect(term.focusCount).toBeGreaterThan(before);
+        inspector.remove();
+      }
+    } finally {
+      getSelection.mockRestore();
+      browser.matchMedia = matchMedia;
+    }
+  });
+
   function touch(
     target: HTMLElement,
     type: "touchstart" | "touchmove" | "touchend" | "touchcancel",

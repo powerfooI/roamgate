@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Window } from "happy-dom";
 import {
   terminalFocusBlockedByOverlay,
   terminalOutputFocusBlockedBySelection,
@@ -20,6 +21,7 @@ function elementMatching(matching: string[] | null) {
   return {
     closest: (selector: string) =>
       matching?.includes(selector) ? ({} as Element) : null,
+    getRootNode: () => ({}),
   } as Pick<Element, "closest">;
 }
 
@@ -136,6 +138,77 @@ describe("terminalOutputFocusBlockedBySelection", () => {
       ),
     ).toBe(false);
   });
+
+  test.each(["files", "changes", "commits", "history"])(
+    "protects %s selections, including diff shadow roots and reverse selections",
+    async (tab) => {
+      const browser = new Window();
+      const doc = browser.document;
+      const inspector = doc.createElement("section");
+      inspector.className = "workspace-inspector";
+      const content = doc.createElement("div");
+      content.className = `inspector-${tab}-resource`;
+      content.textContent = "Selected inspector text";
+      inspector.append(content);
+      doc.body.append(inspector);
+      const outside = doc.createTextNode("Outside");
+      doc.body.append(outside);
+      const blocked = (anchor: unknown, focus: unknown = anchor) =>
+        terminalOutputFocusBlockedBySelection(
+          {
+            getSelection: () =>
+              ({
+                isCollapsed: false,
+                anchorNode: anchor,
+                focusNode: focus,
+              }) as Selection,
+          },
+          false,
+        );
+      try {
+        expect(blocked(content.firstChild)).toBe(true);
+        expect(blocked(content.firstChild, outside)).toBe(true);
+        expect(blocked(outside, content.firstChild)).toBe(true);
+        expect(blocked(outside)).toBe(false);
+        const host = doc.createElement("diffs-container");
+        content.append(host);
+        const shadow = host.attachShadow({ mode: "open" });
+        const nestedHost = doc.createElement("div");
+        shadow.append(nestedHost);
+        const nested = nestedHost.attachShadow({ mode: "open" });
+        const line = doc.createElement("span");
+        line.textContent = "Selected diff text";
+        nested.append(line);
+        expect(blocked(line.firstChild)).toBe(true);
+        expect(blocked(outside, line.firstChild)).toBe(true);
+        // Use composed endpoints when the light-DOM selection hides shadow text.
+        expect(
+          terminalOutputFocusBlockedBySelection(
+            {
+              getSelection: () =>
+                ({
+                  isCollapsed: true,
+                  anchorNode: doc.body,
+                  getComposedRanges: () => [
+                    {
+                      startContainer: content,
+                      endContainer: content,
+                      startOffset: 1,
+                      endOffset: 2,
+                    },
+                  ],
+                }) as unknown as Selection,
+            },
+            false,
+          ),
+        ).toBe(true);
+        inspector.remove();
+        expect(blocked(outside)).toBe(false);
+      } finally {
+        await browser.happyDOM.close();
+      }
+    },
+  );
 
   test("waits while a press in an overlay may start a selection", () => {
     const listeners = new Map<string, (event: Event) => void>();

@@ -76,6 +76,9 @@ Inspector button, shortcuts, or workspace/agent menus.
 - Files refresh automatically after an agent step completes in the workspace,
   preserving expanded directories and selections.
 - Commits browses the current branch with per-commit diffs and file previews.
+  Wide panels show commits, changed files, and diffs in three columns; drag the
+  commit-list divider to resize it, or double-click to reset. Narrow panels
+  navigate from commits to files to diffs, with Back returning one level.
 - The **PR/MR status** card in **Changes** and **Commits** shows the branch's
   GitHub pull request or GitLab merge request: state, checks, and reviews. It
   needs `gh` or `glab` authenticated on the checkout host and never changes

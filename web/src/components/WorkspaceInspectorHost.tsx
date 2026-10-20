@@ -20,7 +20,6 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { ConnectionClient } from "../api";
 import { connectionClientScopeKey } from "../useConnectionClient";
@@ -64,6 +63,7 @@ import {
 import { FilePreviewTabs } from "./FilePreviewTabs";
 import { workspaceInspectorLayout } from "./workspaceInspectorLayout";
 import { PullRequestCard } from "./PullRequestCard";
+import { InspectorSplitResizer } from "./InspectorSplitResizer";
 import "./WorkspaceInspectorHost.css";
 
 const DiffContentView = lazyWithReload("diff-content-view", () =>
@@ -95,113 +95,6 @@ function checkoutLabel(workspace?: Workspace) {
 }
 
 const INSPECTOR_RESOURCE_HORIZONTAL_PADDING = 16;
-
-function navigationRatioForPointer(
-  event: Pick<ReactPointerEvent<HTMLDivElement>, "clientX" | "currentTarget">,
-) {
-  const resource = event.currentTarget.parentElement;
-  if (!resource) return DEFAULT_INSPECTOR_NAVIGATION_RATIO;
-  const bounds = resource.getBoundingClientRect();
-  return inspectorNavigationRatioAtPosition(
-    event.clientX - bounds.left - INSPECTOR_RESOURCE_HORIZONTAL_PADDING / 2,
-    bounds.width - INSPECTOR_RESOURCE_HORIZONTAL_PADDING,
-  );
-}
-
-function InspectorSplitResizer({
-  ratio,
-  resetRatio = DEFAULT_INSPECTOR_NAVIGATION_RATIO,
-  navigationId,
-  detailId,
-  onChange,
-  onCommit,
-}: {
-  ratio: number;
-  resetRatio?: number;
-  navigationId: string;
-  detailId: string;
-  onChange: (ratio: number) => void;
-  onCommit: (ratio: number) => void;
-}) {
-  const dragRatioRef = useRef(ratio);
-  dragRatioRef.current = ratio;
-
-  const updateFromPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const next = navigationRatioForPointer(event);
-    dragRatioRef.current = next;
-    onChange(next);
-  };
-
-  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (
-      event.key !== "ArrowLeft" &&
-      event.key !== "ArrowRight" &&
-      event.key !== "Home" &&
-      event.key !== "End"
-    ) {
-      return;
-    }
-    event.preventDefault();
-    const resource = event.currentTarget.parentElement;
-    if (!resource) return;
-    const availableWidth =
-      resource.getBoundingClientRect().width -
-      INSPECTOR_RESOURCE_HORIZONTAL_PADDING;
-    const currentOffset = dragRatioRef.current * availableWidth;
-    const next = inspectorNavigationRatioAtPosition(
-      event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? availableWidth
-          : currentOffset + (event.key === "ArrowLeft" ? -16 : 16),
-      availableWidth,
-    );
-    dragRatioRef.current = next;
-    onChange(next);
-    onCommit(next);
-  };
-
-  return (
-    <div
-      className="workspace-inspector-split-resizer"
-      role="separator"
-      tabIndex={0}
-      aria-label="Resize file navigation"
-      aria-orientation="vertical"
-      aria-controls={`${navigationId} ${detailId}`}
-      aria-valuemin={15}
-      aria-valuemax={75}
-      aria-valuenow={Math.round(ratio * 100)}
-      title="Drag to resize; double-click to reset"
-      onPointerDown={(event) => {
-        event.preventDefault();
-        event.currentTarget.setPointerCapture(event.pointerId);
-        updateFromPointer(event);
-      }}
-      onPointerMove={(event) => {
-        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-        updateFromPointer(event);
-      }}
-      onPointerUp={(event) => {
-        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-        event.currentTarget.releasePointerCapture(event.pointerId);
-        onCommit(dragRatioRef.current);
-      }}
-      onPointerCancel={(event) => {
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-          event.currentTarget.releasePointerCapture(event.pointerId);
-        }
-        onCommit(dragRatioRef.current);
-      }}
-      onDoubleClick={() => {
-        dragRatioRef.current = resetRatio;
-        onChange(resetRatio);
-        onCommit(resetRatio);
-      }}
-      onKeyDown={handleKeyDown}
-    />
-  );
-}
 
 export function WorkspaceInspectorHost({
   state,
@@ -953,7 +846,7 @@ export function WorkspaceInspectorHost({
                   client={connectionClient}
                   workspaceId={workspace.workspace_id}
                   resourceKey={contentResourceKey}
-                  compact={compact}
+                  compact={compact || hostWidth < 960}
                   active={visible && state.open && state.view === "commits"}
                 />
               </Suspense>

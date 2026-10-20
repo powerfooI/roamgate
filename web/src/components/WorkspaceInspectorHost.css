@@ -169,37 +169,6 @@
   gap: 0;
 }
 
-.workspace-inspector-split-resizer {
-  position: relative;
-  z-index: 2;
-  width: 8px;
-  min-width: 8px;
-  cursor: col-resize;
-  touch-action: none;
-  user-select: none;
-}
-
-.workspace-inspector-split-resizer::before {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 3px;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--viewer-border);
-  content: "";
-  transition: background 120ms ease;
-}
-
-.workspace-inspector-split-resizer:hover::before,
-.workspace-inspector-split-resizer:focus-visible::before {
-  background: var(--accent);
-}
-
-.workspace-inspector-split-resizer:focus-visible {
-  outline: none;
-}
-
 .workspace-inspector-resource.is-hidden {
   display: none;
 }

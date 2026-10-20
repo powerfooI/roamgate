@@ -1648,7 +1648,9 @@ export default function App() {
   const activateTerminalSurface = useCallback(() => {
     setMobileMoreOpen(false);
     updateInspectorState((current) =>
-      current ? { ...current, open: false } : current,
+      current && (mobile || current.expanded)
+        ? { ...current, open: false }
+        : current,
     );
     setAnnotationsOpen(false);
     setMobileView("session");
