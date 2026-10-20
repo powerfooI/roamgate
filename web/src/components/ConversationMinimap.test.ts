@@ -238,7 +238,8 @@ async function registerDomTests() {
       await key("ArrowUp");
       expect(selected).toEqual([10, 10, 14, 10, 19, 18, 0, 1, 0]);
 
-      // The strip holds still under a press and catches up on release.
+      // The strip holds still under a press, even as the conversation
+      // moves, and releasing does not snap it back.
       await dispatch(pointer("pointerdown", 20));
       scrollerTop = 0;
       await act(async () => {
@@ -248,7 +249,42 @@ async function registerDomTests() {
       expect(visible()).toEqual(["entry-0", "entry-1", "entry-2"]);
       expect(trackLeft).toBe(40);
       await dispatch(pointer("pointerup", 20, 0));
-      expect(trackLeft).toBe(0);
+      expect(trackLeft).toBe(40);
+      await dispatch(click(20));
+      expect(selected[selected.length - 1]).toBe(15);
+
+      // A pan keeps the strip where the user dragged it, away from the
+      // in-view marks, so a distant mark stays reachable by a later tap.
+      await dispatch(pointer("pointerdown", 0));
+      await dispatch(pointer("pointermove", 30));
+      await dispatch(pointer("pointerup", 30, 0));
+      expect(trackLeft).toBe(10);
+      await dispatch(click(30));
+      expect(selected[selected.length - 1]).toBe(15);
+      await dispatch(pointer("pointerdown", 30));
+      await dispatch(pointer("pointerup", 30, 0));
+      expect(trackLeft).toBe(10);
+      await dispatch(click(30));
+      expect(selected[selected.length - 1]).toBe(10);
+      // So does a native touch pan, which ends in pointercancel.
+      await dispatch(
+        new browser.PointerEvent("pointerdown", {
+          clientX: 20,
+          pointerId: 2,
+          pointerType: "touch",
+          isPrimary: true,
+          button: 0,
+          bubbles: true,
+        }) as unknown as Event,
+      );
+      await dispatch(
+        new browser.PointerEvent("pointercancel", {
+          pointerId: 2,
+          pointerType: "touch",
+          bubbles: true,
+        }) as unknown as Event,
+      );
+      expect(trackLeft).toBe(10);
     } finally {
       await act(async () => root.unmount());
       container.remove();

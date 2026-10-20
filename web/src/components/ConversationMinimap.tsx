@@ -396,10 +396,11 @@ export const ConversationMinimap = memo(function ConversationMinimap({
     onSelect(index);
   };
 
-  // The track may have fallen behind the conversation during the press.
+  // Releasing never re-follows the conversation: a pan leaves the track
+  // where the user put it so a distant mark stays reachable, and a tap's
+  // jump moves the conversation, which the follow effect then tracks.
   const release = () => {
     pressRef.current = null;
-    followVisible();
   };
 
   if (!count) return null;
@@ -481,6 +482,7 @@ export const ConversationMinimap = memo(function ConversationMinimap({
           }}
           onPointerUp={release}
           onPointerCancel={() => {
+            // Touch pans natively, which cancels the pointer mid-gesture.
             pannedRef.current = false;
             release();
           }}
