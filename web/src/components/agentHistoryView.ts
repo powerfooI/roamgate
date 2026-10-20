@@ -45,6 +45,14 @@ export function groupHistoryChatItems(
   return items;
 }
 
+// Identifies one version of a redacted tool payload. Polling can rewrite an
+// entry under the same id (e.g. tool arguments updated in place); the byte
+// length changes with it, so fetch guards keyed this way refetch the new
+// payload instead of treating it as already loaded.
+export function toolPayloadKey(entry: Pick<HistoryEntry, "id" | "text_bytes">) {
+  return `${entry.id}:${entry.text_bytes ?? 0}`;
+}
+
 export type ToolStep = {
   id: string;
   name: string;

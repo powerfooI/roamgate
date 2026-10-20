@@ -8,6 +8,7 @@ import {
   summarizeToolSteps,
   toolArgumentFields,
   toolArgumentHeadline,
+  toolPayloadKey,
 } from "./agentHistoryView";
 
 function entry(
@@ -220,4 +221,12 @@ test("argument previews share one budget across all fields", () => {
     fields: fits,
     truncated: false,
   });
+});
+
+test("payload keys change when an entry is rewritten under the same id", () => {
+  const stub = entry("7", "tool", { text: "", text_bytes: 120 });
+  expect(toolPayloadKey(stub)).toBe(toolPayloadKey({ ...stub }));
+  expect(toolPayloadKey(stub)).not.toBe(
+    toolPayloadKey({ ...stub, text_bytes: 180 }),
+  );
 });

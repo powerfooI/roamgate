@@ -21,6 +21,7 @@ import {
 import {
   pairToolSteps,
   previewToolArgumentFields,
+  toolPayloadKey,
   summarizeToolSteps,
   toolArgumentFields,
   toolArgumentHeadline,
@@ -296,10 +297,11 @@ function ToolBlock({
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
   const listId = useId();
   const steps = useMemo(() => pairToolSteps(entries), [entries]);
-  // Each payload is queued and fetched directly at most once per block, so a
-  // failed fetch does not loop on every polling refresh; the Load buttons
-  // still retry. Opening a step fetches directly even if its arguments are
-  // still waiting in the background queue.
+  // Each payload version is queued and fetched directly at most once per
+  // block, so a failed fetch does not loop on every polling refresh; the Load
+  // buttons still retry. A payload rewritten under the same id is a new
+  // version and loads again. Opening a step fetches directly even if its
+  // arguments are still waiting in the background queue.
   const queuedRef = useRef(new Set<string>());
   const fetchedRef = useRef(new Set<string>());
   const { load, enqueue } = loader;
@@ -310,11 +312,11 @@ function ToolBlock({
         !call ||
         !isToolContentPending(call) ||
         (call.text_bytes ?? 0) > AUTO_LOAD_ARGUMENT_BYTES ||
-        queuedRef.current.has(call.id) ||
-        fetchedRef.current.has(call.id)
+        queuedRef.current.has(toolPayloadKey(call)) ||
+        fetchedRef.current.has(toolPayloadKey(call))
       )
         continue;
-      queuedRef.current.add(call.id);
+      queuedRef.current.add(toolPayloadKey(call));
       enqueue(call);
     }
   }, [enqueue, open, steps]);
@@ -325,10 +327,10 @@ function ToolBlock({
       if (
         !entry ||
         !isToolContentPending(entry) ||
-        fetchedRef.current.has(entry.id)
+        fetchedRef.current.has(toolPayloadKey(entry))
       )
         continue;
-      fetchedRef.current.add(entry.id);
+      fetchedRef.current.add(toolPayloadKey(entry));
       load(entry);
     }
   }, [expandedStep, load, steps]);
@@ -419,11 +421,11 @@ export function AgentHistoryChat({
     queueRef.current.push(entry);
     setQueueVersion((version) => version + 1);
   }, []);
-  // Payloads already fetched by any path; the queue skips them.
+  // Payload versions already fetched by any path; the queue skips them.
   const startedRef = useRef(new Set<string>());
   const load = useCallback(
     (entry: HistoryEntry) => {
-      startedRef.current.add(entry.id);
+      startedRef.current.add(toolPayloadKey(entry));
       onLoadTool(entry);
     },
     [onLoadTool],
@@ -437,7 +439,10 @@ export function AgentHistoryChat({
       queueRef.current.length > 0
     ) {
       const entry = queueRef.current.shift()!;
-      if (startedRef.current.has(entry.id) || toolLoading.has(entry.id))
+      if (
+        startedRef.current.has(toolPayloadKey(entry)) ||
+        toolLoading.has(entry.id)
+      )
         continue;
       load(entry);
       inFlight += 1;
