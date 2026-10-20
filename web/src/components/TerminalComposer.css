@@ -273,11 +273,17 @@
   }
 
   .terminal-composer-command-confirm {
+    /* The panel clips overflow, so short viewports scroll the prompt here. */
+    flex: 1 1 auto;
+    min-height: 0;
     display: flex;
     flex-wrap: wrap;
+    align-content: flex-start;
     justify-content: flex-end;
     gap: 6px;
     padding: 10px 12px 12px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .terminal-composer-command-confirm p {
