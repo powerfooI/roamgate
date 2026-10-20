@@ -4040,6 +4040,7 @@ export default function App() {
                   }`}
                   role="status"
                   onDismiss={() => store.dismissUpdate()}
+                  notificationKey={s.updateInfo.latest_version}
                   dismissDisabled={s.updateInstalling}
                 >
                   <ToastMark kind="info" loading={s.updateInstalling} />
@@ -4092,6 +4093,7 @@ export default function App() {
                     s.notice.loading ? "toast-loading" : ""
                   }`}
                   role={s.notice.kind === "error" ? "alert" : "status"}
+                  notificationKey={s.notice.id}
                   onDismiss={() => {
                     // Swipes dismiss after their exit animation; keep any
                     // newer notice that replaced this one meanwhile.

@@ -1,7 +1,7 @@
 import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
-  useEffect,
+  useLayoutEffect,
   useRef,
 } from "react";
 import { isMobileLayout } from "../layoutPreferences";
@@ -10,6 +10,8 @@ type ToastProps = {
   className: string;
   role: "status" | "alert";
   onDismiss: () => void;
+  /** Identifies the displayed notification; changes cancel in-flight swipes. */
+  notificationKey: string | number | undefined;
   dismissDisabled?: boolean;
   children: ReactNode;
 };
@@ -35,6 +37,7 @@ export function Toast({
   className,
   role,
   onDismiss,
+  notificationKey,
   dismissDisabled = false,
   children,
 }: ToastProps) {
@@ -42,13 +45,22 @@ export function Toast({
   const swipeRef = useRef<SwipeState | null>(null);
   const exitTimerRef = useRef<number | null>(null);
 
-  useEffect(
-    () => () => {
-      if (exitTimerRef.current !== null)
+  // A replacement notification reuses this element. Abandon gestures and
+  // exits that began on the previous one before the new one paints, so they
+  // cannot dismiss it; this also cancels a pending exit on unmount.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    return () => {
+      swipeRef.current = null;
+      if (exitTimerRef.current !== null) {
         window.clearTimeout(exitTimerRef.current);
-    },
-    [],
-  );
+        exitTimerRef.current = null;
+      }
+      el?.classList.remove("toast-swiping");
+      el?.style.removeProperty("transform");
+      el?.style.removeProperty("opacity");
+    };
+  }, [notificationKey]);
 
   const setOffset = (offset: number, swiping: boolean) => {
     const el = ref.current;
