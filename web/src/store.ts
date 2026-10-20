@@ -3236,8 +3236,6 @@ export const store = {
             kind: "info",
             message: "Creating worktree",
             detail: `Updating origin's default branch before creating ${branch}.`,
-            detailMode: "output",
-            detailTitle: "Fetch origin's default branch",
             loading: true,
           },
         });
