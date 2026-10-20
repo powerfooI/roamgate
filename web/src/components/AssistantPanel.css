@@ -223,36 +223,48 @@
   gap: 18px;
 }
 
-.assistant-conversation:has(> .assistant-conversation-map)
-  > .assistant-panel-list {
+.assistant-conversation:has(> .conversation-minimap) > .assistant-panel-list {
   padding-right: 52px;
 }
 
 .assistant-panel.is-floating:not(.is-maximized):not(.is-mobile)
-  .assistant-conversation:has(> .assistant-conversation-map:not(.is-horizontal))
+  .assistant-conversation:has(> .conversation-minimap:not(.is-horizontal))
   > .assistant-panel-list {
   padding-right: 36px;
 }
 
 .assistant-panel.is-maximized
-  .assistant-conversation:has(> .assistant-conversation-map)
+  .assistant-conversation:has(> .conversation-minimap)
   > .assistant-panel-list {
   padding-inline: max(52px, calc((100% - 960px) / 2));
 }
 
+.assistant-panel.is-floating:not(.is-maximized):not(.is-mobile)
+  .conversation-minimap:not(.is-horizontal) {
+  width: 20px;
+  padding: 24px 2px;
+}
+
+.assistant-panel.is-floating:not(.is-maximized):not(.is-mobile)
+  .conversation-minimap:not(.is-horizontal)
+  .conversation-minimap-frame {
+  height: min(100%, calc(var(--entry-count) * 6px));
+  max-height: 240px;
+}
+
 .assistant-panel
-  .assistant-conversation:has(> .assistant-conversation-map.is-horizontal) {
+  .assistant-conversation:has(> .conversation-minimap.is-horizontal) {
   flex-direction: column;
   overflow: visible;
 }
 
 .assistant-panel
-  .assistant-conversation:has(> .assistant-conversation-map.is-horizontal)
+  .assistant-conversation:has(> .conversation-minimap.is-horizontal)
   > .assistant-panel-list {
   padding-inline: 12px;
 }
 
-.assistant-panel:has(.assistant-conversation-map.is-horizontal)
+.assistant-panel:has(.conversation-minimap.is-horizontal)
   > .assistant-panel-footer {
   /* Keep input above the map when a short viewport exhausts chat space. */
   position: relative;

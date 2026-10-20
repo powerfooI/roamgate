@@ -1,0 +1,232 @@
+/* The rail floats over the conversation's right edge; hosts make its parent
+   the positioning context and pad the conversation to clear it. */
+.conversation-minimap {
+  position: absolute;
+  inset: 0 12px 0 auto;
+  z-index: 1;
+  width: 32px;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  padding: 32px 5px;
+  pointer-events: none;
+}
+
+.conversation-minimap-frame {
+  position: relative;
+  width: 100%;
+  height: min(100%, calc(var(--entry-count) * 8px));
+  max-height: 400px;
+  pointer-events: auto;
+}
+
+.conversation-minimap-track {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden auto;
+  border-radius: 5px;
+  opacity: 0.6;
+  cursor: pointer;
+  /* Keep gestures at the track's scroll bounds from chaining to the page,
+     where a trackpad swipe could trigger browser back/forward. */
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  /* Drags pan an overflowing track natively; taps jump via click. */
+  touch-action: pan-x pan-y;
+  transition: opacity 120ms ease;
+}
+
+.conversation-minimap-track::-webkit-scrollbar {
+  display: none;
+}
+
+.conversation-minimap-track:hover,
+.conversation-minimap-track:focus {
+  opacity: 1;
+}
+
+.conversation-minimap-track:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Marks keep a minimum stride; past it the track scrolls instead of
+   squeezing marks below a readable size. */
+.conversation-minimap-mark {
+  /* Marks near the previewed one magnify; with no preview the track's
+     --preview-index is far away, so every mark keeps its base size. */
+  --mark-base: 8px;
+  --mark-size: max(
+    var(--mark-base),
+    calc(
+      22px -
+      4px *
+      max(
+        var(--preview-index) -
+        var(--mark-index),
+        var(--mark-index) -
+        var(--preview-index)
+      )
+    )
+  );
+  flex: 1 0 4px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.conversation-minimap-mark::before {
+  content: "";
+  width: min(var(--mark-size), 100%);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--muted);
+  opacity: 0.4;
+  transition:
+    width 120ms ease,
+    height 120ms ease,
+    background 120ms ease,
+    opacity 120ms ease;
+}
+
+.conversation-minimap-mark.is-user {
+  --mark-base: 12px;
+}
+
+.conversation-minimap-mark.is-user::before {
+  opacity: 0.65;
+}
+
+.conversation-minimap-mark.is-tool::before {
+  background: var(--yellow);
+}
+
+.conversation-minimap-mark.is-visible {
+  --mark-base: 16px;
+}
+
+.conversation-minimap-mark.is-visible::before {
+  background: var(--accent);
+  opacity: 1;
+}
+
+/* Stands in for the hidden scrollbar while the track overflows. */
+.conversation-minimap-thumb {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 2px;
+  height: var(--thumb-size);
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0.55;
+  transform: translateY(var(--thumb-offset));
+  pointer-events: none;
+}
+
+.conversation-minimap-preview {
+  position: absolute;
+  top: var(--preview-position);
+  right: calc(100% + 8px);
+  z-index: 1;
+  width: 220px;
+  max-width: calc(100vw - 80px);
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--viewer-border);
+  border-radius: 7px;
+  background: var(--viewer-panel-bg);
+  box-shadow: var(--shadow-tooltip);
+  color: var(--text);
+  font-size: 11px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.conversation-minimap-preview strong {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.conversation-minimap-preview strong > span {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.conversation-minimap-preview > span {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.5;
+}
+
+.conversation-minimap.is-horizontal {
+  position: relative;
+  inset: auto;
+  flex: 0 0 auto;
+  width: 100%;
+  justify-content: center;
+  padding: 2px 12px;
+  border-top: 1px solid var(--viewer-border);
+  /* Lets the preview size itself against the whole map, not the frame. */
+  container-type: inline-size;
+}
+
+.conversation-minimap.is-horizontal .conversation-minimap-frame {
+  width: min(100%, max(28px, calc(var(--entry-count) * 6px)));
+  height: 28px;
+  max-height: none;
+}
+
+.conversation-minimap.is-horizontal .conversation-minimap-track {
+  flex-direction: row;
+  overflow: auto hidden;
+}
+
+.conversation-minimap.is-horizontal .conversation-minimap-track:focus-visible {
+  outline-offset: 1px;
+}
+
+.conversation-minimap.is-horizontal .conversation-minimap-mark {
+  justify-content: center;
+}
+
+.conversation-minimap.is-horizontal .conversation-minimap-mark::before {
+  width: 2px;
+  height: min(var(--mark-size), 100%);
+}
+
+.conversation-minimap.is-horizontal .conversation-minimap-thumb {
+  top: auto;
+  right: auto;
+  bottom: -1px;
+  left: 0;
+  width: var(--thumb-size);
+  height: 2px;
+  transform: translateX(var(--thumb-offset));
+}
+
+.conversation-minimap.is-horizontal .conversation-minimap-preview {
+  top: auto;
+  right: auto;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  max-width: calc(100vw - 24px);
+  max-width: calc(100cqw - 24px);
+  transform: translateX(-50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-minimap-track,
+  .conversation-minimap-mark::before {
+    transition: none;
+  }
+}

@@ -1,9 +1,3 @@
-@media (prefers-reduced-motion: reduce) {
-  .agent-history-minimap-bar {
-    transition: none;
-  }
-}
-
 .workspace-inspector-resource.inspector-history-resource .agent-history-wide {
   gap: 0;
 }
@@ -360,103 +354,16 @@
   font-size: 12px;
 }
 
-.agent-history-minimap-wrap {
-  position: relative;
-  flex: 0 0 auto;
+/* The timeline's strip sits above its cards, so its preview opens downward. */
+.conversation-minimap.is-horizontal.agent-history-minimap {
+  border-top: 0;
   border-bottom: 1px solid var(--border-soft);
 }
 
-.agent-history-minimap {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  /* Fixed height so the wave's taller bars grow into the padding instead of
-     pushing the timeline around. */
-  height: 30px;
-  box-sizing: border-box;
-  padding: 7px 10px 6px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-  /* Keep horizontal gestures at the strip's scroll bounds from chaining to
-     the page, where a trackpad swipe could trigger browser back/forward. */
-  overscroll-behavior-x: contain;
-  /* Horizontal drags pan the strip natively; taps jump via pointer
-     handlers. */
-  touch-action: pan-x pan-y;
-}
-
-.agent-history-minimap:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
-.agent-history-minimap::-webkit-scrollbar {
-  display: none;
-}
-
-/* Keep the strip's position indicator visible independently of the global
-   overlay scrollbar, which fades after scrolling. */
-.agent-history-minimap-scrollbar {
-  position: absolute;
-  right: 10px;
-  bottom: 1px;
-  left: 10px;
-  height: 3px;
-  pointer-events: none;
-}
-
-.agent-history-minimap-scrollbar-thumb {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  border-radius: 1.5px;
-  background: var(--accent);
-  opacity: 0.55;
-}
-
-.agent-history-minimap-bar {
-  /* Bars overflow the strip once they hit the min-width floor, so the strip
-     scrolls horizontally; the stride-based mapping then turns any horizontal
-     position into a message index. */
-  flex: 1 1 0;
-  min-width: 2px;
-  height: 10px;
-  padding: 0;
-  border: none;
-  border-radius: 1.5px;
-  background: var(--muted);
-  opacity: 0.45;
-  /* The wave grows bars via transform (compositor-only) instead of height:
-     no layout thrash while scrolling, and immune to repaint issues on
-     mobile browsers inside transformed/overflow-hidden ancestors. */
-  transform-origin: bottom;
-  transition:
-    transform 140ms ease,
-    opacity 140ms ease;
-}
-
-.agent-history-minimap-bar.is-user {
-  background: var(--blue);
-}
-
-.agent-history-minimap-bar.is-assistant {
-  background: var(--green);
-}
-
-.agent-history-minimap-bar.is-tool {
-  background: var(--yellow);
-}
-
-.agent-history-minimap-bar.is-in-view {
-  transform: scaleY(1.6);
-  opacity: 1;
-}
-
-.agent-history-minimap-bar:hover,
-.agent-history-minimap-bar:focus-visible {
-  opacity: 1;
+.conversation-minimap.is-horizontal.agent-history-minimap
+  .conversation-minimap-preview {
+  top: calc(100% + 8px);
+  bottom: auto;
 }
 
 .agent-history-messages {
@@ -464,6 +371,32 @@
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
+}
+
+/* Positions the chat view's minimap rail beside the bubbles. */
+.agent-history-chat-frame {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.agent-history-chat-frame > .agent-history-chat {
+  min-width: 0;
+}
+
+.agent-history-chat-frame:has(> .conversation-minimap:not(.is-horizontal))
+  > .agent-history-chat {
+  padding-right: 44px;
+}
+
+.agent-history-chat-frame:has(> .conversation-minimap.is-horizontal) {
+  flex-direction: column;
+}
+
+.agent-history-chat-frame > .conversation-minimap.is-horizontal {
+  border-top-color: var(--border-soft);
 }
 
 .agent-history-drawer.is-wide .agent-history-drawer-head {

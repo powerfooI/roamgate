@@ -22,7 +22,9 @@ import {
 import {
   type CSSProperties,
   Fragment,
+  useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -73,10 +75,10 @@ import {
   thinkingLabels,
   thinkingOptions,
 } from "../assistantModels";
-import { AssistantConversationMap } from "./AssistantConversationMap";
 import { AssistantTasks, TaskProposalCard } from "./AssistantTasks";
 import { AssistantMentionComposer } from "./AssistantMentionComposer";
 import { AssistantThinking } from "./AssistantThinking";
+import { ConversationMinimap } from "./ConversationMinimap";
 import { AssistantQueue } from "./AssistantQueue";
 import { assistantMentionKey } from "../assistantMentions";
 import { detectShortcutPlatform } from "../shortcutBindings";
@@ -985,6 +987,37 @@ export function AssistantPanel({
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const followingOutput = useRef(true);
+  const minimapEntries = useMemo(
+    () =>
+      (snapshot?.messages ?? []).map((message) => ({
+        id: message.id,
+        role: message.role,
+        label: message.role === "user" ? "You" : "Ranger",
+        text: message.text,
+      })),
+    [snapshot?.messages],
+  );
+  const pinMinimapLayout = useCallback(() => {
+    if (followingOutput.current && listRef.current)
+      listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, []);
+  const jumpToMinimapEntry = useCallback((index: number) => {
+    const list = listRef.current;
+    const sequence = String(index + 1);
+    const section = Array.from(list?.children ?? []).find(
+      (child): child is HTMLElement =>
+        child instanceof HTMLElement && child.dataset.sequence === sequence,
+    );
+    if (!list || !section) return;
+    followingOutput.current = false;
+    // Jump only this scroll container, in CSS pixels even when the UI is
+    // zoomed. An immediate jump also avoids re-enabling stream following
+    // mid-animation.
+    const viewport = list.getBoundingClientRect();
+    const scale = list.offsetHeight ? viewport.height / list.offsetHeight : 1;
+    list.scrollTop +=
+      (section.getBoundingClientRect().top - viewport.top) / (scale || 1) - 12;
+  }, []);
   const composing = useRef(false);
   const pendingAction = useRef(false);
   const contextSequence = useRef(0);
@@ -2381,10 +2414,11 @@ export function AssistantPanel({
                   </span>
                 </div>
               ) : (
-                snapshot.messages.map((message) => (
+                snapshot.messages.map((message, index) => (
                   <section
                     key={message.id}
                     data-message-id={message.id}
+                    data-sequence={index + 1}
                     className={`assistant-message is-${message.role}`}
                     aria-label={`${message.role === "user" ? "You" : "Ranger"} message`}
                   >
@@ -2477,18 +2511,16 @@ export function AssistantPanel({
               )}
             </div>
             {snapshot.messages.length ? (
-              <AssistantConversationMap
+              <ConversationMinimap
                 key={snapshot.session_id ?? snapshot.instance_id}
-                messages={snapshot.messages}
-                listRef={listRef}
-                mobile={mobile}
-                onLayout={() => {
-                  if (followingOutput.current && listRef.current)
-                    listRef.current.scrollTop = listRef.current.scrollHeight;
-                }}
-                onNavigate={() => {
-                  followingOutput.current = false;
-                }}
+                entries={minimapEntries}
+                scrollerRef={listRef}
+                itemsRef={listRef}
+                orientation={mobile ? "horizontal" : "auto"}
+                label="Ranger conversation navigation"
+                emptyText="No response text yet"
+                onLayout={pinMinimapLayout}
+                onSelect={jumpToMinimapEntry}
               />
             ) : null}
           </div>

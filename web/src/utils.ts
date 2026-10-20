@@ -4,6 +4,12 @@ export function shortId(id: string): string {
   return i === -1 ? id : id.slice(i + 1);
 }
 
+export function prefersReducedMotion(): boolean {
+  return (
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
+  );
+}
+
 export function cn(
   ...classes: Array<string | false | null | undefined>
 ): string {
