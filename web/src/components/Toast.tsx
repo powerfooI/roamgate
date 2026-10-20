@@ -107,6 +107,10 @@ export function Toast({
         return;
       }
       swipe.swiping = true;
+      // A running entry animation overrides the inline transform, so jump it
+      // to its end state; finishing (unlike removing it) never replays it.
+      for (const animation of ref.current?.getAnimations() ?? [])
+        animation.finish();
     }
     // Follow upward drags; resist downward or blocked ones like a rubber band.
     swipe.offset = dy < 0 && !dismissDisabled ? dy : dy / 5;
