@@ -160,7 +160,10 @@
     flex-direction: column;
     min-width: 0;
     max-height: min(248px, calc(var(--app-viewport-height, 100dvh) * 0.24));
-    overflow: hidden;
+    /* The list scrolls itself; the panel scrolls only when short viewports
+       cannot fit the heading plus the list, note, or replacement prompt. */
+    overflow-y: auto;
+    overscroll-behavior: contain;
     border: 1px solid var(--viewer-border);
     border-radius: 10px;
     background: var(--panel);
@@ -175,7 +178,17 @@
       var(--shadow-lg);
   }
 
+  @media (forced-colors: active) {
+    .terminal-composer-commands:focus-visible {
+      outline: 2px solid Highlight;
+      outline-offset: 2px;
+    }
+  }
+
   .terminal-composer-command-heading {
+    position: sticky;
+    top: 0;
+    z-index: 1;
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -183,6 +196,7 @@
     gap: 6px;
     padding: 4px 4px 4px 12px;
     border-bottom: 1px solid var(--viewer-border);
+    background: var(--panel);
     color: var(--muted);
     font-size: 11px;
     font-weight: 700;
@@ -273,17 +287,11 @@
   }
 
   .terminal-composer-command-confirm {
-    /* The panel clips overflow, so short viewports scroll the prompt here. */
-    flex: 1 1 auto;
-    min-height: 0;
     display: flex;
     flex-wrap: wrap;
-    align-content: flex-start;
     justify-content: flex-end;
     gap: 6px;
     padding: 10px 12px 12px;
-    overflow-y: auto;
-    overscroll-behavior: contain;
   }
 
   .terminal-composer-command-confirm p {
