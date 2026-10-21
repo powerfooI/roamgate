@@ -151,8 +151,8 @@ export async function readPullRequestStatus(
     return { ...result, state, message, refreshedAt: new Date().toISOString() };
   }
   // Rebases stop on a detached HEAD, but Git records the branch being rebased.
-  // That ref is trusted only while HEAD still builds on the rebase's base;
-  // other detached checkouts stay unresolved instead of guessing from commits.
+  // That ref is trusted only while the rebase itself last moved HEAD; other
+  // detached checkouts stay unresolved instead of guessing from commits.
   async function readBranch(): Promise<{
     name: string;
     rebasing: boolean;
@@ -189,21 +189,29 @@ export async function readPullRequestStatus(
         ref,
       ]);
       if (exists.code !== 0) return null;
-      // Leftover metadata or a manual detached checkout mid-rebase must not
-      // inherit the rebased branch's request.
-      const onto = (
-        await readGitFile(path.replace(/head-name$/, "onto"))
-      )?.trim();
-      if (!onto || !/^[0-9a-f]{40,64}$/.test(onto)) return null;
-      const builds = await run([
+      // A manual checkout or reset mid-rebase (even to the rebase's own base)
+      // must not inherit the rebased branch's request. Commits and amends
+      // made at a rebase stop keep HEAD on the rebase.
+      const reflog = await run([
         "git",
-        "merge-base",
-        "--is-ancestor",
-        onto,
+        "log",
+        "--walk-reflogs",
+        "--format=%gs",
+        "-n",
+        "50",
         "HEAD",
       ]);
-      if (builds.code === 1) return null;
-      if (builds.code !== 0) throw new Error("Cannot read rebase state");
+      if (reflog.code !== 0) return null;
+      const moved = reflog.stdout
+        .split(/\r?\n/)
+        .find((entry) => entry && !/^commit(?: \([a-z]+\))?: /.test(entry));
+      // `pull --rebase` logs its whole command line before each step; a merge
+      // pull logs no step and never leaves rebase metadata behind.
+      if (
+        !moved ||
+        !/^(?:rebase(?: \([a-z-]+\))?|pull\b.* \([a-z-]+\)): /.test(moved)
+      )
+        return null;
       return { name: ref.slice("refs/heads/".length), rebasing: true };
     }
     return null;

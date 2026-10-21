@@ -359,13 +359,12 @@ describe("PR/MR status", () => {
       try {
         await mkdir(join(gitDir, "rebase-merge"));
         const headName = join(gitDir, "rebase-merge", "head-name");
-        const onto = "a".repeat(40);
-        await writeFile(join(gitDir, "rebase-merge", "onto"), `${onto}\n`);
         // Local reads use headName on disk; SSH reads go through `cat`.
         const rebaseState = (
           ref: string,
           rebasing = () => true,
-          buildsOnBase = true,
+          // HEAD's reflog, newest first.
+          reflog = "commit (amend): Amend\nrebase (edit): Add card\n",
         ) => {
           return (command: string) => {
             if (command.includes("'symbolic-ref'"))
@@ -375,15 +374,10 @@ describe("PR/MR status", () => {
                 `${headName}\n${join(gitDir, "rebase-apply", "head-name")}\n`,
               );
             if (command.includes("'cat' '--'"))
-              return command.includes("rebase-merge/onto")
-                ? ok(`${onto}\n`)
-                : command.includes("rebase-merge")
-                  ? ok(`${ref}\n`)
-                  : { ...fail, stdout: "" };
-            if (command.includes("'--is-ancestor'"))
-              return command.includes(`'${onto}' 'HEAD'`) && buildsOnBase
-                ? ok("")
+              return command.includes("rebase-merge")
+                ? ok(`${ref}\n`)
                 : { ...fail, stdout: "" };
+            if (command.includes("'--walk-reflogs'")) return ok(reflog);
             if (command.includes("'--verify'"))
               return command.includes("'refs/heads/pr-299'")
                 ? ok("abc123\n")
@@ -429,14 +423,29 @@ describe("PR/MR status", () => {
           expect(switched.state).toBe("error");
           expect(switched.retryable).toBeUndefined();
           expect(switched.request).toBeUndefined();
-          // A detached HEAD that no longer builds on the rebase's base (for
-          // example a manual checkout mid-rebase) is not attributed to it.
-          const unrelated = await fixture(provider, {
-            ssh,
-            override: rebaseState("refs/heads/pr-299", () => true, false),
-          }).read({ branch: "detached" });
-          expect(unrelated.state).toBe("detached");
-          expect(unrelated.request).toBeUndefined();
+          // HEAD belongs to the rebase only while a rebase step last moved
+          // it; commits made at a stop keep it there. A manual checkout or
+          // reset mid-rebase, even back to the rebase's base, does not.
+          for (const [reflog, owned] of [
+            ["rebase (start): checkout main\n", true],
+            ["commit: Fix\ncommit (amend): Amend\nrebase (edit): Add\n", true],
+            [
+              "pull --rebase git@host:a/b.git main (start): checkout abc\n",
+              true,
+            ],
+            ["checkout: moving from abc to def\nrebase (edit): Add\n", false],
+            ["reset: moving to HEAD~\nrebase (edit): Add\n", false],
+            ["pull: Fast-forward\n", false],
+            ["commit: Only commits\n", false],
+            ["", false],
+          ] as const) {
+            const result = await fixture(provider, {
+              ssh,
+              override: rebaseState("refs/heads/pr-299", () => true, reflog),
+            }).read({ branch: "detached" });
+            expect(result.state).toBe(owned ? "ready" : "detached");
+            expect(result.request === undefined).toBe(!owned);
+          }
           // A rebase of a detached HEAD or a deleted branch is not guessed.
           for (const ref of ["detached HEAD", "refs/heads/gone"]) {
             await writeFile(headName, `${ref}\n`);
