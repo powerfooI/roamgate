@@ -1,5 +1,12 @@
 import { roamgateLocalStorage } from "./browserStorage";
 
+export function defaultAgentLaunchCommand(agent: string, command: string) {
+  // Codex hooks need the pane's environment, not a shared daemon's startup environment.
+  return agent === "codex" && command === "codex"
+    ? "codex --no-daemon"
+    : command;
+}
+
 function commandStorageKey(connectionId: string, agent: string) {
   return `agentLaunchCommand.v1:${JSON.stringify([connectionId, agent])}`;
 }

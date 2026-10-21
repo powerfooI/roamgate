@@ -6,25 +6,29 @@ reads; raw preview and download reads stay separate.
 
 ## Codex session association
 
-Codex history requires an explicit association between the pane and the session.
-A shared Codex background server can inherit another pane's environment, so an
-installed Herdr integration does not guarantee that association was reported.
-Roamgate does not infer it from a working directory or the newest transcript.
+Codex runs with `--no-daemon` inside Herdr so each pane's session hooks inherit
+that pane's environment. Roamgate's default Codex launch command uses this mode.
+Install the Herdr Codex integration on the agent's machine; the hook reports
+session identity automatically when starting, resuming, or forking a conversation.
+Custom launch commands must also include `--no-daemon` (Codex 0.163.0 or newer).
+For Bash or Zsh terminals, source `scripts/codex-herdr.sh` from the shell startup
+file to apply the same rule to commands typed directly in Herdr, including
+`resume` and `fork`. It preserves arguments, explicit remote connections and
+shared-server management commands; outside Herdr it delegates unchanged. Copy
+the script to a stable location before sourcing it if this checkout is temporary.
 
-In Session, expand **Link Codex session**, enter the complete ID of the
-conversation currently displayed in the terminal, and choose **Check session**.
-Review the directory and transcript before confirming. This replaces the
-pane's association in Herdr for all viewers; it does not restart Codex or disable
-its background server. The confirmation expires after five minutes and is
-rejected if the observed foreground process, terminal, existing association, or
-transcript identity changed. This is a recovery operation, not automatic
-tracking of conversation switches inside a shared-server client.
+Codex's shared background server retains the environment of the terminal that
+started it. Its hooks can therefore report another pane's identity, even when
+the integration is current. Already-running shared-server sessions must be
+closed normally and resumed with `codex --no-daemon resume <session-id>`.
+The transcript remains in the same Codex directory. Herdr should own the terminal
+process lifetime; it does not need a detached Codex background server.
 
 Lookups use exact IDs under `CODEX_HOME` (default `~/.codex`), including
 `sessions` and `archived_sessions`. SSH connections search on the remote host
-using Python 3 and never use local transcripts. Metadata must match the entered
-ID; duplicate transcript matches are rejected. The initial metadata record must
-fit within the 1 MiB preview limit.
+using Python 3 and never use local transcripts. Duplicate transcript matches are
+rejected. Roamgate never guesses an association from a directory or the newest
+transcript, and does not offer manual session linking.
 
 ## Cache and consistency
 

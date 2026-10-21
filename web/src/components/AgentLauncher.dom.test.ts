@@ -281,7 +281,7 @@ async function registerTests() {
     await act(async () => editorButton("Reset").click());
     expect(button("Edit Codex command")).not.toBeNull();
     await act(async () => button("Codex").click());
-    expect(select).toHaveBeenLastCalledWith("codex");
+    expect(select).toHaveBeenLastCalledWith("codex --no-daemon");
   });
 
   test("detection failure can be retried without launching anything", async () => {
