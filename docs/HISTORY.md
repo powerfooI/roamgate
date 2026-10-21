@@ -16,6 +16,9 @@ file to apply the same rule to commands typed directly in Herdr, including
 `resume` and `fork`. It preserves arguments, explicit remote connections and
 shared-server management commands; outside Herdr it delegates unchanged. Copy
 the script to a stable location before sourcing it if this checkout is temporary.
+Existing aliases that invoke `codex`, `command codex`, or an executable path are
+routed through the helper with their original arguments and executable intact.
+Management subcommands are recognized after global options as well.
 
 Codex's shared background server retains the environment of the terminal that
 started it. Its hooks can therefore report another pane's identity, even when

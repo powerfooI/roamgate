@@ -9,9 +9,15 @@ test("Herdr shell launches isolate Codex while preserving arguments and exit sta
     const executable = join(root, "codex");
     await writeFile(executable, '#!/bin/sh\nprintf "%s\\0" "$@"\nexit 23\n');
     await chmod(executable, 0o755);
+    const customExecutable = join(root, "custom codex");
+    await writeFile(
+      customExecutable,
+      '#!/bin/sh\nprintf "%s\\0" "custom binary" "$@"\nexit 23\n',
+    );
+    await chmod(customExecutable, 0o755);
     for (const shell of ["bash", "zsh"]) {
       if (!Bun.which(shell)) continue;
-      for (const [herdr, args, expected, codexAlias = false] of [
+      for (const [herdr, args, expected, codexAlias = ""] of [
         ["1", [], ["--no-daemon"]],
         ["1", ["--yolo"], ["--no-daemon", "--yolo"]],
         ["1", ["resume", "thread-id"], ["--no-daemon", "resume", "thread-id"]],
@@ -32,14 +38,84 @@ test("Herdr shell launches isolate Codex while preserving arguments and exit sta
         ["1", ["remote-control"], ["remote-control"]],
         ["1", ["--remote", "unix:///server"], ["--remote", "unix:///server"]],
         ["1", ["--remote=unix:///server"], ["--remote=unix:///server"]],
-        ["1", [], ["--no-daemon", "--yolo"], true],
+        ["1", [], ["--no-daemon", "--yolo"], "codex --yolo"],
         [
           "1",
           ["resume", "thread-id"],
           ["--no-daemon", "--yolo", "resume", "thread-id"],
-          true,
+          "codex --yolo",
         ],
-        ["", ["resume", "thread-id"], ["--yolo", "resume", "thread-id"], true],
+        [
+          "",
+          ["resume", "thread-id"],
+          ["--yolo", "resume", "thread-id"],
+          "codex --yolo",
+        ],
+        [
+          "1",
+          ["-c", "model=example", "agents"],
+          ["-c", "model=example", "agents"],
+        ],
+        [
+          "1",
+          ["--config=model=example", "agents"],
+          ["--config=model=example", "agents"],
+        ],
+        ["1", ["-cmodel=example", "agents"], ["-cmodel=example", "agents"]],
+        ["1", ["--model", "agents"], ["--no-daemon", "--model", "agents"]],
+        ["1", ["--", "agents"], ["--no-daemon", "--", "agents"]],
+        [
+          "1",
+          ["--model", "example", "app-server", "daemon", "version"],
+          ["--model", "example", "app-server", "daemon", "version"],
+        ],
+        [
+          "1",
+          ["--enable", "example", "remote-control"],
+          ["--enable", "example", "remote-control"],
+        ],
+        [
+          "1",
+          ["--config", "model=example", "resume", "thread-id"],
+          ["--no-daemon", "--config", "model=example", "resume", "thread-id"],
+        ],
+        [
+          "1",
+          ["agents"],
+          ["-c", "model=example", "agents"],
+          "codex -c model=example",
+        ],
+        ["1", [], ["--no-daemon", "--yolo"], "command codex --yolo"],
+        [
+          "1",
+          ["agents"],
+          ["-c", "model=example", "agents"],
+          "command codex -c model=example",
+        ],
+        [
+          "",
+          ["resume", "thread-id"],
+          ["--yolo", "resume", "thread-id"],
+          "command codex --yolo",
+        ],
+        [
+          "1",
+          [],
+          ["custom binary", "--no-daemon", "--yolo"],
+          '"$CODEX_TEST_BIN" --yolo',
+        ],
+        [
+          "1",
+          ["agents"],
+          ["custom binary", "-c", "model=example", "agents"],
+          '"$CODEX_TEST_BIN" -c model=example',
+        ],
+        [
+          "",
+          ["resume", "thread-id"],
+          ["custom binary", "--yolo", "resume", "thread-id"],
+          '"$CODEX_TEST_BIN" --yolo',
+        ],
       ] as const) {
         const proc = Bun.spawn(
           [
@@ -47,7 +123,8 @@ test("Herdr shell launches isolate Codex while preserving arguments and exit sta
             "-c",
             [
               shell === "bash" ? "shopt -s expand_aliases" : "",
-              codexAlias ? "alias codex='codex --yolo'" : "",
+              'if [ -n "$CODEX_TEST_ALIAS" ]; then alias codex="$CODEX_TEST_ALIAS"; fi',
+              '. "$1"',
               '. "$1"',
               "shift",
               // Parse after defining the alias, as an interactive shell does.
@@ -62,6 +139,8 @@ test("Herdr shell launches isolate Codex while preserving arguments and exit sta
               ...process.env,
               PATH: `${root}:${process.env.PATH}`,
               HERDR_ENV: herdr,
+              CODEX_TEST_ALIAS: codexAlias,
+              CODEX_TEST_BIN: customExecutable,
             },
             stdout: "pipe",
             stderr: "pipe",
@@ -80,4 +159,4 @@ test("Herdr shell launches isolate Codex while preserving arguments and exit sta
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 20_000);
