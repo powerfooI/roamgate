@@ -54,13 +54,15 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
       if (fail) throw new Error("pane closed");
     });
     const error = mock<(message: string) => void>(() => {});
-    const render = (status: string) =>
+    let stateSeq = 0;
+    const render = (status: string, sameState = false) =>
       React.act(async () =>
         root.render(
           <AgentHistoryComposer
             draftKey={draftKey}
             agent="codex"
             status={status}
+            stateSeq={sameState ? stateSeq : ++stateSeq}
             onSend={send}
             onError={error}
           />,
@@ -145,6 +147,24 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
       await key("Enter");
       await key("Escape");
       expect(warning()).toBeNull();
+
+      // A dismissed warning stays dismissed when the text is restored.
+      await key("Enter");
+      expect(warning()).not.toBeNull();
+      await fill("next steps!");
+      await fill("next steps");
+      expect(warning()).toBeNull();
+
+      // So does one for a state the agent left and returned to, even when no
+      // render saw the state in between.
+      await key("Enter");
+      expect(warning()).not.toBeNull();
+      stateSeq += 1;
+      await render("working");
+      expect(warning()).toBeNull();
+      await render("working", true);
+      expect(warning()).toBeNull();
+      expect(send).toHaveBeenCalledTimes(2);
 
       // A state change drops a warning given for the previous state.
       await key("Enter");

@@ -839,6 +839,7 @@ export function AgentHistoryDrawer({
         draftKey={composerDraftKey}
         agent={pane.agent}
         status={pane.agent_status}
+        stateSeq={pane.state_change_seq}
         onSend={sendMessage}
         onError={notifySendError}
       />

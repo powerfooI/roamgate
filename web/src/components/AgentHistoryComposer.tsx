@@ -46,12 +46,15 @@ export function AgentHistoryComposer({
   draftKey,
   agent,
   status,
+  stateSeq,
   onSend,
   onError,
 }: {
   draftKey: string;
   agent?: string;
   status?: string;
+  // Herdr's agent state-change sequence; it advances on every transition.
+  stateSeq?: number;
   onSend: (text: string) => Promise<void>;
   onError: (message: string) => void;
 }) {
@@ -65,22 +68,23 @@ export function AgentHistoryComposer({
     terminalComposerUploadCount(draftKey),
   );
   const [composing, setComposing] = useState(false);
-  // The draft and agent state the warning was shown for. A different draft or
-  // state needs a fresh warning before anything is sent.
-  const [confirmation, setConfirmation] = useState<{
-    draft: string;
-    state: string;
-  } | null>(null);
   const composingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const warning = agentPromptWarning(agent, status);
   const agentState = agentStateKind(status);
-  const confirming =
-    warning !== null &&
-    confirmation?.draft === text &&
-    confirmation.state === agentState;
+  // What a warning was shown for: the draft, the agent, and its state.
+  const context = JSON.stringify([text, agent, agentState, stateSeq]);
+  // The context the open warning belongs to. Any change revokes it, even one
+  // that later changes back, so Send anyway never confirms stale context.
+  const [confirmation, setConfirmation] = useState<string | null>(null);
+  const confirming = warning !== null && confirmation === context;
   const enterAddsLine =
     mobile || globalThis.matchMedia?.("(pointer: coarse)")?.matches === true;
+
+  useEffect(() => {
+    if (confirmation !== null && confirmation !== context)
+      setConfirmation(null);
+  }, [confirmation, context]);
 
   useEffect(() => {
     setText(readTerminalComposerDraft(draftKey));
@@ -122,7 +126,7 @@ export function AgentHistoryComposer({
     )
       return;
     if (warning !== null && !confirmed) {
-      setConfirmation({ draft, state: agentState });
+      setConfirmation(context);
       return;
     }
     try {
@@ -142,7 +146,7 @@ export function AgentHistoryComposer({
   // The phone keyboard can move these bottom-anchored buttons before click.
   const touchSubmit = useTouchReleaseSubmit({
     submitKey: draftKey,
-    resetKey: JSON.stringify([draftKey, agentState]),
+    resetKey: JSON.stringify([draftKey, context]),
     canStart: () =>
       !composingRef.current &&
       terminalComposerUploadCount(draftKey) === 0 &&
