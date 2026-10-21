@@ -43,6 +43,10 @@ async function registerDomTests() {
     document: browser.document,
     navigator: browser.navigator,
     HTMLElement: browser.HTMLElement,
+    HTMLInputElement: browser.HTMLInputElement,
+    NodeFilter: browser.NodeFilter,
+    MutationObserver: browser.MutationObserver,
+    getComputedStyle: browser.getComputedStyle.bind(browser),
     Element: browser.Element,
     Node: browser.Node,
     Event: browser.Event,
@@ -130,7 +134,8 @@ async function registerDomTests() {
     terminal_id: string;
     workspace_id: string;
     tab_id: string;
-    agent: string;
+    agent?: string;
+    agent_status?: string;
   };
   const paneA: Pane = {
     pane_id: "pane-a",
@@ -177,6 +182,9 @@ async function registerDomTests() {
   }[] = [];
   const notices: { detail?: string; message: string }[] = [];
   let failPathInput = false;
+  let integrationResult: Promise<unknown> = Promise.resolve({
+    integrations: [],
+  });
   const upload = () =>
     new Promise<string>((resolve, reject) => uploads.push({ resolve, reject }));
   mock.module("../terminalImageUpload", () => ({
@@ -199,6 +207,7 @@ async function registerDomTests() {
       selector(state),
     shallowEqual: Object.is,
     terminalNavigationLoading: () => false,
+    useEndpointCreationReason: () => null,
   }));
   mock.module("../api", () => ({
     bridge: {
@@ -216,6 +225,13 @@ async function registerDomTests() {
             acceptsServerGeneration: () => true,
             call: async (method: string, params: Record<string, unknown>) => {
               calls.push({ method, params });
+              if (method === "integration.list") return integrationResult;
+              if (method === "pane.get")
+                return {
+                  pane: state.panes.find(
+                    (pane) => pane.pane_id === params.pane_id,
+                  ),
+                };
               if (method === "pane.send_input" && failPathInput)
                 throw new Error("uncertain write");
               return {};
@@ -372,6 +388,7 @@ async function registerDomTests() {
     uploads.length = 0;
     notices.length = 0;
     failPathInput = false;
+    integrationResult = Promise.resolve({ integrations: [] });
     terminalListeners.clear();
     scrollDisabledReason = null;
     scrollReason.mockClear();
@@ -547,6 +564,135 @@ async function registerDomTests() {
     state = { ...state, ...values };
     await act(async () => render());
   }
+  async function setLauncherPane(agent?: string, workspaceId = "workspace-a") {
+    const update = <T extends Pane>(pane: T): T =>
+      pane.pane_id === "pane-a"
+        ? { ...pane, agent, agent_status: "unknown", workspace_id: workspaceId }
+        : pane;
+    state = {
+      ...state,
+      panes: state.panes.map(update),
+      layout: { ...state.layout, panes: state.layout.panes.map(update) },
+    };
+    if (root) await act(async () => render());
+  }
+
+  test.each([undefined, "", "   ", "claude", "pi", "pad", "future-agent"])(
+    "launcher is shell-only with agent=%s, regardless of unknown status",
+    async (agent) => {
+      await setLauncherPane(agent);
+      await mount(true);
+      expect(!!container.querySelector(".agent-launcher-trigger")).toBe(
+        !agent?.trim(),
+      );
+      await setLauncherPane(agent, "");
+      expect(container.querySelector(".agent-launcher-trigger")).toBeNull();
+    },
+  );
+
+  test("shell-to-agent updates unmount an open launcher and ignore late detection without replacing the editor", async () => {
+    let finishDetection!: (value: unknown) => void;
+    integrationResult = new Promise((resolve) => {
+      finishDetection = resolve;
+    });
+    await setLauncherPane();
+    await mount(true);
+    await choose("composer");
+    await act(async () => writeTerminalComposerDraft(draftKey, "keep draft"));
+    const editor = container.querySelector<HTMLTextAreaElement>(
+      "textarea.terminal-composer-input",
+    )!;
+    editor.setSelectionRange(1, 4);
+    await click(".agent-launcher-trigger");
+    expect(document.querySelector(".agent-launcher-panel")).not.toBeNull();
+    expect(
+      calls.filter((call) => call.method === "integration.list"),
+    ).toHaveLength(1);
+    await setLauncherPane("pad");
+    expect(container.querySelector(".agent-launcher-trigger")).toBeNull();
+    expect(document.querySelector(".agent-launcher-panel")).toBeNull();
+    expect(container.querySelector("textarea.terminal-composer-input")).toBe(
+      editor,
+    );
+    expect(editor.value).toBe("keep draft");
+    expect(editor.selectionStart).toBe(1);
+    expect(editor.selectionEnd).toBe(4);
+    await act(async () => finishDetection({ integrations: [] }));
+    expect(document.querySelector(".agent-launcher-panel")).toBeNull();
+    expect(
+      calls.some((call) =>
+        ["tab.create", "pane.send_input"].includes(call.method),
+      ),
+    ).toBe(false);
+  });
+
+  test.each(["composer", "direct", "existing-draft"])(
+    "agent selection safely prefills Message from %s",
+    async (initial) => {
+      integrationResult = Promise.resolve({
+        integrations: [
+          {
+            target: "pi",
+            label: "Pi",
+            command: "pi",
+            available: true,
+            state: "current",
+          },
+        ],
+      });
+      await setLauncherPane();
+      await mount(true);
+      await choose(initial === "direct" ? "direct" : "composer");
+      const draft =
+        initial === "existing-draft" ? "keep my draft\nwith another line" : "";
+      await act(async () => writeTerminalComposerDraft(draftKey, draft));
+      const editor = container.querySelector<HTMLTextAreaElement>(
+        "textarea.terminal-composer-input",
+      )!;
+      editor.setSelectionRange(1, 5);
+      const before = calls.length;
+      await click(".agent-launcher-trigger");
+      const pi = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="Pi"]',
+      )!;
+      expect(pi).not.toBeNull();
+      await act(async () => pi.click());
+      expect(calls.slice(before).map((call) => call.method)).toEqual([
+        "integration.list",
+      ]);
+      expect(state.selectedPaneId).toBe("pane-a");
+      expect(state.layout.tab_id).toBe("tab-a");
+      expect(container.querySelector("textarea.terminal-composer-input")).toBe(
+        editor,
+      );
+      const expected = draft || "pi";
+      expect(editor.value).toBe(expected);
+      expect(readTerminalComposerDraft(draftKey)).toBe(expected);
+      expect(editor.selectionStart).toBe(draft ? 1 : 2);
+      expect(editor.selectionEnd).toBe(draft ? 5 : 2);
+      expect(
+        container
+          .querySelector(".terminal-composer")
+          ?.getAttribute("data-input-mode"),
+      ).toBe("composer");
+      if (draft)
+        expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+          "Clear Message",
+        );
+    },
+  );
+
+  test("desktop open shell composer never mounts the mobile launcher", async () => {
+    mobileLayout = false;
+    await setLauncherPane();
+    await mount(true);
+    expect(container.querySelector(".terminal-composer")).not.toBeNull();
+    expect(container.querySelector(".agent-launcher-trigger")).toBeNull();
+    expect(calls.some((call) => call.method === "integration.list")).toBe(
+      false,
+    );
+  });
+
   function expectInputBlocked(term = currentTerminal()) {
     const before = calls.filter(
       (call) => call.method === "terminal.input",

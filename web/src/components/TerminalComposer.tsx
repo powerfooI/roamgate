@@ -52,6 +52,8 @@ import {
   isWorkspacePathDrag,
   workspacePathFromDrag,
 } from "../workspacePathDrag";
+import { isMobileLayout } from "../layoutPreferences";
+import { AgentLauncher } from "./AgentLauncher";
 import "./TerminalComposer.css";
 import type { TerminalInputMode } from "../terminalInputMode";
 export type { TerminalInputMode } from "../terminalInputMode";
@@ -85,6 +87,9 @@ export function readTerminalComposerShortcutsOpen(): boolean {
 export function TerminalComposer({
   draftKey,
   paneId,
+  workspaceId,
+  tabId,
+  terminalId,
   open = true,
   accessoriesVisible = true,
   reserved = false,
@@ -106,6 +111,9 @@ export function TerminalComposer({
 }: {
   draftKey: string;
   paneId?: string;
+  workspaceId?: string;
+  tabId?: string;
+  terminalId?: string;
   open?: boolean;
   // Presentation only: secondary App surfaces keep the editor and input session.
   accessoriesVisible?: boolean;
@@ -1092,6 +1100,33 @@ export function TerminalComposer({
           </section>
         ) : null}
         <div className="terminal-mobile-input-bar">
+          {workspaceId &&
+          paneId &&
+          tabId &&
+          terminalId &&
+          !agent?.trim() &&
+          isMobileLayout() ? (
+            <AgentLauncher
+              workspaceId={workspaceId}
+              paneId={paneId}
+              tabId={tabId}
+              terminalId={terminalId}
+              disabled={busy || composing || reserved}
+              visible={accessoriesVisible}
+              onOpen={dismissCommands}
+              onSelectCommand={(command) => {
+                if (readTerminalComposerDraft(draftKey))
+                  throw new Error("Clear Message before choosing an agent.");
+                writeTerminalComposerDraft(draftKey, command);
+                writeTerminalComposerSelection(
+                  draftKey,
+                  command.length,
+                  command.length,
+                );
+                activateMessage(false);
+              }}
+            />
+          ) : null}
           <textarea
             ref={textareaRef}
             className="terminal-composer-input terminal-mobile-message"

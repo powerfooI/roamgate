@@ -1,0 +1,133 @@
+.popover-content.agent-launcher-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(
+    320px,
+    calc(var(--radix-popover-content-available-height) / var(--ui-scale, 1))
+  );
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+  border-color: var(--viewer-border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.agent-launcher-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 0 12px;
+  border-bottom: 1px solid var(--viewer-border);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.agent-launcher-heading button,
+.agent-launcher-row button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  touch-action: manipulation;
+}
+
+.agent-launcher-heading button,
+.agent-launcher-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.agent-launcher-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+}
+
+.agent-launcher-row {
+  display: flex;
+}
+
+.agent-launcher-agent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  color: var(--text-strong);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.agent-launcher-row button:hover:not(:disabled),
+.agent-launcher-row button:active:not(:disabled),
+.agent-launcher-row button:focus-visible,
+.agent-launcher-heading button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.agent-launcher-panel p {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.agent-launcher-panel [role="alert"] button {
+  margin: 0 12px 10px;
+}
+
+.agent-launcher-editor {
+  padding: 12px;
+}
+
+.agent-launcher-editor label {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.agent-launcher-editor input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  font-family: var(--mono-font);
+}
+
+.agent-launcher-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.agent-launcher-editor-actions button {
+  min-height: 44px;
+  padding: 10px;
+}
+
+.agent-launcher-editor-actions button:first-child {
+  margin-right: auto;
+}
+
+.agent-launcher-trigger[aria-expanded="true"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}

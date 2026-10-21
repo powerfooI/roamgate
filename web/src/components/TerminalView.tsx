@@ -3426,6 +3426,9 @@ export function TerminalView({
       key={composerDraftKey}
       draftKey={composerDraftKey}
       paneId={pane.pane_id}
+      workspaceId={pane.workspace_id}
+      tabId={pane.tab_id}
+      terminalId={pane.terminal_id}
       open={composerOpen}
       accessoriesVisible={visible}
       reserved={visible && touchHandles.length > 0}
