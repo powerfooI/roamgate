@@ -180,6 +180,67 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
       expect(readTerminalComposerDraft(draftKey)).toBe("approve");
       expect(input().value).toBe("approve");
       expect(error.mock.calls[0]?.[0]).toBe("pane closed");
+
+      // A touch submits on release, before the keyboard can move the button,
+      // and its later compatibility click is not a second send.
+      fail = false;
+      let clock = 1000;
+      const touch = (target: HTMLButtonElement, type: string) => {
+        clock += 10;
+        const event = new browser.PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerType: "touch",
+          pointerId: 1,
+          isPrimary: true,
+          clientX: 20,
+          clientY: 20,
+        });
+        Object.defineProperty(event, "timeStamp", { value: clock });
+        target.dispatchEvent(event as unknown as Event);
+      };
+      const button = (label: string) =>
+        Array.from(container.querySelectorAll("button")).find((target) =>
+          target.textContent?.includes(label),
+        )!;
+      // Touch down and release only; WebKit may never deliver the click.
+      const release = (label: string) =>
+        React.act(async () => {
+          const target = button(label);
+          target.getBoundingClientRect = () =>
+            ({ left: 0, right: 100, top: 0, bottom: 40 }) as DOMRect;
+          touch(target, "pointerdown");
+          touch(target, "pointerup");
+          await Promise.resolve();
+        });
+      const compatibilityClick = (label: string) =>
+        React.act(async () => {
+          button(label).dispatchEvent(
+            new browser.PointerEvent("click", {
+              bubbles: true,
+              cancelable: true,
+              pointerType: "touch",
+              pointerId: 1,
+              detail: 1,
+            }) as unknown as Event,
+          );
+        });
+      await fill("tapped");
+      await release("Send");
+      expect(send).toHaveBeenCalledTimes(5);
+      expect(send.mock.calls[4]?.[0]).toBe("tapped");
+      await compatibilityClick("Send");
+      expect(send).toHaveBeenCalledTimes(5);
+
+      await render("working");
+      await fill("tapped anyway");
+      await release("Send");
+      expect(warning()).not.toBeNull();
+      await release("Send anyway");
+      expect(send).toHaveBeenCalledTimes(6);
+      expect(send.mock.calls[5]?.[0]).toBe("tapped anyway");
+      await compatibilityClick("Send");
+      expect(send).toHaveBeenCalledTimes(6);
     } finally {
       await React.act(async () => root.unmount());
       for (const [key, descriptor] of originals) {

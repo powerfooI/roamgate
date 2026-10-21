@@ -52,6 +52,7 @@ import {
 } from "../workspacePathDrag";
 import { isMobileLayout } from "../layoutPreferences";
 import { AgentLauncher } from "./AgentLauncher";
+import { useTouchReleaseSubmit } from "./useTouchReleaseSubmit";
 import "./TerminalComposer.css";
 import type { TerminalInputMode } from "../terminalInputMode";
 export type { TerminalInputMode } from "../terminalInputMode";
@@ -474,150 +475,23 @@ export function TerminalComposer({
     e.preventDefault();
   };
 
-  // Only these two destructive actions need a touch release fallback. Native
-  // focus transfer can close the keyboard and move the button before click;
-  // cancelling pointerdown protects focus but some WebKit versions then omit
-  // click. Never send on down, and consume the later compatibility click even
-  // if the request has already completed (or failed and restored the draft).
-  const submitTouchRef = useRef<{
-    id: number;
-    button: HTMLButtonElement;
-    key: string;
-    x: number;
-    y: number;
-    bounds: DOMRect;
-    time: number;
-    cancelled: boolean;
-  } | null>(null);
-  const submitClickTouchRef = useRef<{
-    id: number;
-    button: HTMLButtonElement;
-    x: number;
-    y: number;
-  } | null>(null);
-  useEffect(() => {
-    const cancelAdditionalPointer = (event: PointerEvent) => {
-      const touch = submitTouchRef.current;
-      if (touch && event.pointerId !== touch.id) touch.cancelled = true;
-    };
-    document.addEventListener("pointerdown", cancelAdditionalPointer, true);
-    return () =>
-      document.removeEventListener(
-        "pointerdown",
-        cancelAdditionalPointer,
-        true,
-      );
-  }, []);
-  useEffect(() => {
-    // Invalidate even an away-and-back transition before the finger lifts.
-    submitTouchRef.current = null;
-  }, [draftKey, paneId, mode, open, accessoriesVisible]);
-  const submitPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-    if (event.pointerType !== "touch") {
-      submitTouchRef.current = null;
-      submitClickTouchRef.current = null;
-      return;
-    }
-    event.preventDefault();
-    // A second finger cannot replace the first press with a fresh tap.
-    if (!event.isPrimary) {
-      cancelSubmitTouch();
-      return;
-    }
-    submitTouchRef.current = null;
-    submitClickTouchRef.current = {
-      id: event.pointerId,
-      button: event.currentTarget,
-      x: event.clientX,
-      y: event.clientY,
-    };
-    // Do not focus the textarea: a keyboard dismissed by Back stays dismissed.
-    if (
-      event.currentTarget.disabled ||
-      composingRef.current ||
-      terminalComposerUploadCount(draftKey) > 0 ||
-      terminalComposerSubmissionPending(draftKey)
-    )
-      return;
-    submitTouchRef.current = {
-      id: event.pointerId,
-      button: event.currentTarget,
-      key: draftKey,
-      x: event.clientX,
-      y: event.clientY,
-      bounds: event.currentTarget.getBoundingClientRect(),
-      time: event.timeStamp,
-      cancelled: false,
-    };
-  };
-  const submitPointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const touch = submitTouchRef.current;
-    if (!touch || touch.id !== event.pointerId) return;
-    const { left, right, top, bottom } = touch.bounds;
-    // Latch cancellation: moving out and back is not a completed tap. Use the
-    // press-time bounds so a viewport resize alone is not mistaken for a drag.
-    if (
-      Math.hypot(event.clientX - touch.x, event.clientY - touch.y) > 10 ||
-      event.clientX < left ||
-      event.clientX > right ||
-      event.clientY < top ||
-      event.clientY > bottom
-    )
-      touch.cancelled = true;
-  };
-  const cancelSubmitTouch = () => {
-    if (submitTouchRef.current) submitTouchRef.current.cancelled = true;
-  };
-  const submitPointerUp = (
-    event: React.PointerEvent<HTMLButtonElement>,
-    sendEnter: boolean,
-  ) => {
-    const touch = submitTouchRef.current;
-    if (!touch || touch.id !== event.pointerId) return;
-    submitPointerMove(event);
-    if (submitClickTouchRef.current) {
-      submitClickTouchRef.current.x = event.clientX;
-      submitClickTouchRef.current.y = event.clientY;
-    }
-    submitTouchRef.current = null;
-    if (
-      touch.cancelled ||
-      event.timeStamp - touch.time >= 500 ||
-      touch.button !== event.currentTarget ||
-      touch.key !== draftKey ||
-      event.currentTarget.disabled ||
-      !accessoriesOpen ||
-      mode !== "composer"
-    )
-      return;
-    void submit(sendEnter);
-  };
-  const submitClick = (
-    event: React.MouseEvent<HTMLButtonElement>,
-    sendEnter: boolean,
-  ) => {
-    const touch = submitClickTouchRef.current;
-    const native = event.nativeEvent;
-    // Modern touch clicks carry their pointer identity. Older WebKit emits a
-    // MouseEvent instead; match its button and coordinates. A known touch ID
-    // is consumed even if layout retargets click to the other submit button.
-    // A fresh mouse/pen pointerdown clears the association.
-    const duplicate =
-      touch &&
-      (("pointerType" in native &&
-        native.pointerType === "touch" &&
-        "pointerId" in native &&
-        native.pointerId === touch.id) ||
-        (!("pointerType" in native) &&
-          touch.button === event.currentTarget &&
-          event.detail > 0 &&
-          Math.hypot(event.clientX - touch.x, event.clientY - touch.y) < 1));
-    if (duplicate) {
-      event.preventDefault();
-      return;
-    }
-    void submit(sendEnter);
-  };
+  // Only the two destructive actions need the touch release fallback.
+  const touchSubmit = useTouchReleaseSubmit({
+    submitKey: draftKey,
+    resetKey: JSON.stringify([
+      draftKey,
+      paneId,
+      mode,
+      open,
+      accessoriesVisible,
+    ]),
+    canStart: () =>
+      !composingRef.current &&
+      terminalComposerUploadCount(draftKey) === 0 &&
+      !terminalComposerSubmissionPending(draftKey),
+    canFinish: () => accessoriesOpen && mode === "composer",
+  });
+  const cancelSubmitTouch = touchSubmit.cancel;
 
   const dismissCommands = () => {
     setPickerMode(null);
@@ -717,7 +591,7 @@ export function TerminalComposer({
   const busy = submissionPending || uploadCount > 0;
   useEffect(() => {
     if (busy || composing) cancelSubmitTouch();
-  }, [busy, composing]);
+  }, [busy, composing, cancelSubmitTouch]);
   const submitDisabled = !text || busy || composing;
   const hasShortcuts = shortcutRows.some((row) =>
     row.some((shortcut) => shortcut !== null),
@@ -877,13 +751,7 @@ export function TerminalComposer({
               aria-label="Insert draft into the terminal"
               disabled={submitDisabled}
               onMouseDown={keepTextareaFocus}
-              onPointerDown={submitPointerDown}
-              onPointerMove={submitPointerMove}
-              onPointerCancel={cancelSubmitTouch}
-              onLostPointerCapture={cancelSubmitTouch}
-              onContextMenu={cancelSubmitTouch}
-              onPointerUp={(event) => submitPointerUp(event, false)}
-              onClick={(event) => submitClick(event, false)}
+              {...touchSubmit.buttonProps(() => void submit(false))}
             >
               <TextCursorInput size={14} />
               Insert
@@ -898,13 +766,7 @@ export function TerminalComposer({
               aria-label="Send draft to the terminal"
               disabled={submitDisabled}
               onMouseDown={keepTextareaFocus}
-              onPointerDown={submitPointerDown}
-              onPointerMove={submitPointerMove}
-              onPointerCancel={cancelSubmitTouch}
-              onLostPointerCapture={cancelSubmitTouch}
-              onContextMenu={cancelSubmitTouch}
-              onPointerUp={(event) => submitPointerUp(event, true)}
-              onClick={(event) => submitClick(event, true)}
+              {...touchSubmit.buttonProps(() => void submit(true))}
             >
               <CornerDownLeft size={14} />
               Send

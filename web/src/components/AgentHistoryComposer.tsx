@@ -24,6 +24,7 @@ import {
   writeTerminalComposerSelection,
 } from "../terminalComposer";
 import { agentPromptWarning, agentStateKind } from "./agentSession";
+import { useTouchReleaseSubmit } from "./useTouchReleaseSubmit";
 import "./AgentHistoryComposer.css";
 
 // Grow with the draft up to this height, then scroll inside the textarea.
@@ -139,6 +140,16 @@ export function AgentHistoryComposer({
   const keepTextareaFocus = (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
   };
+  // The phone keyboard can move these bottom-anchored buttons before click.
+  const touchSubmit = useTouchReleaseSubmit({
+    submitKey: draftKey,
+    resetKey: JSON.stringify([draftKey, agentState]),
+    canStart: () =>
+      !composingRef.current &&
+      terminalComposerUploadCount(draftKey) === 0 &&
+      !terminalComposerSubmissionPending(draftKey),
+    canFinish: () => true,
+  });
   const sendShortcut = shortcutLabel("composer.send");
   const sendTitle = enterAddsLine
     ? `Send to the agent's terminal (${sendShortcut})`
@@ -146,14 +157,7 @@ export function AgentHistoryComposer({
   const name = agent?.trim();
 
   return (
-    <form
-      className="agent-history-composer"
-      onSubmit={(event) => {
-        event.preventDefault();
-        // Submitting again only re-arms the warning; Send anyway confirms.
-        void send(false);
-      }}
-    >
+    <div className="agent-history-composer">
       {confirming ? (
         <div className="agent-history-composer-warning" role="alert">
           <TriangleAlert size={14} aria-hidden="true" />
@@ -171,7 +175,7 @@ export function AgentHistoryComposer({
               type="button"
               disabled={sendDisabled}
               onMouseDown={keepTextareaFocus}
-              onClick={() => void send(true)}
+              {...touchSubmit.buttonProps(() => void send(true))}
             >
               Send anyway
             </button>
@@ -201,6 +205,7 @@ export function AgentHistoryComposer({
             );
           }}
           onCompositionStart={() => {
+            touchSubmit.cancel();
             composingRef.current = true;
             setComposing(true);
           }}
@@ -237,17 +242,18 @@ export function AgentHistoryComposer({
           }}
         />
         <button
-          type="submit"
+          type="button"
           className="agent-history-composer-send"
           aria-label="Send message to the agent"
           title={sendTitle}
           disabled={sendDisabled || confirming}
           onMouseDown={keepTextareaFocus}
+          {...touchSubmit.buttonProps(() => void send(false))}
         >
           <Send size={13} />
           {submissionPending ? "Sending..." : "Send"}
         </button>
       </div>
-    </form>
+    </div>
   );
 }
