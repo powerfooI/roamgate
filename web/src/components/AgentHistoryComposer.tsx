@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -78,6 +79,10 @@ export function AgentHistoryComposer({
   );
   const [composing, setComposing] = useState(false);
   const composingRef = useRef(false);
+  const compositionEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const compositionUploadsRef = useRef<Array<() => void>>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const warning = agentPromptWarning(agent, status);
@@ -90,6 +95,20 @@ export function AgentHistoryComposer({
   const confirming = warning !== null && confirmation === context;
   const enterAddsLine =
     mobile || globalThis.matchMedia?.("(pointer: coarse)")?.matches === true;
+
+  const resumeUploads = useCallback(() => {
+    for (const resume of compositionUploadsRef.current.splice(0)) resume();
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (compositionEndTimerRef.current !== null)
+        clearTimeout(compositionEndTimerRef.current);
+      composingRef.current = false;
+      resumeUploads();
+    },
+    [resumeUploads],
+  );
 
   useEffect(() => {
     if (confirmation !== null && confirmation !== context)
@@ -138,35 +157,43 @@ export function AgentHistoryComposer({
     )
       return;
     const paths: string[] = [];
+    let failed = false;
     try {
       for (const file of files) {
         if (!file.type.startsWith("image/"))
           throw new Error("Choose an image to attach.");
         paths.push(await onUploadImage(file));
       }
-      if (!terminalComposerDraftKeyIsActive(draftKey))
-        throw new Error(
-          "Connection or pane changed; image paths retained in the original draft.",
-        );
-      if (composingRef.current)
-        throw new Error(
-          "Image paths retained in the draft during text composition.",
-        );
-      insertIntoTerminalComposerDraft(
-        draftKey,
-        terminalUploadedPathsText(paths),
-      );
-      paths.length = 0;
     } catch (error) {
-      // Keep earlier successful uploads when a later image fails or the pane closes.
-      if (paths.length)
-        retainTerminalComposerUploadPaths(
-          draftKey,
-          terminalUploadedPathsText(paths),
-        );
+      failed = true;
       onError(error instanceof Error ? error.message : "Image upload failed");
     } finally {
-      finishTerminalComposerUpload(draftKey);
+      try {
+        if (paths.length) {
+          // Recovery also edits the draft; both outcomes must wait for IME input.
+          if (composingRef.current)
+            await new Promise<void>((resolve) =>
+              compositionUploadsRef.current.push(resolve),
+            );
+          const active = terminalComposerDraftKeyIsActive(draftKey);
+          if (failed || !active)
+            retainTerminalComposerUploadPaths(
+              draftKey,
+              terminalUploadedPathsText(paths),
+            );
+          else
+            insertIntoTerminalComposerDraft(
+              draftKey,
+              terminalUploadedPathsText(paths),
+            );
+          if (!active)
+            onError(
+              "Connection or pane changed; image paths retained in the original draft.",
+            );
+        }
+      } finally {
+        finishTerminalComposerUpload(draftKey);
+      }
     }
   };
 
@@ -292,12 +319,21 @@ export function AgentHistoryComposer({
           }}
           onCompositionStart={() => {
             touchSubmit.cancel();
+            if (compositionEndTimerRef.current !== null) {
+              clearTimeout(compositionEndTimerRef.current);
+              compositionEndTimerRef.current = null;
+            }
             composingRef.current = true;
             setComposing(true);
           }}
           onCompositionEnd={() => {
-            composingRef.current = false;
-            setComposing(false);
+            // The final native input can follow compositionend in the same task.
+            compositionEndTimerRef.current = setTimeout(() => {
+              compositionEndTimerRef.current = null;
+              composingRef.current = false;
+              setComposing(false);
+              resumeUploads();
+            }, 0);
           }}
           onKeyDown={(event) => {
             if (

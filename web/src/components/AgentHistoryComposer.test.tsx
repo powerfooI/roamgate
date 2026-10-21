@@ -1,4 +1,4 @@
-import { expect, mock, test } from "bun:test";
+import { expect, jest, mock, test } from "bun:test";
 import * as React from "react";
 import {
   activateTerminalComposerDraftScope,
@@ -369,6 +369,84 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
       );
       expect(terminalComposerUploadCount(draftKey)).toBe(0);
 
+      // A successful upload or a partial failure must leave IME preedit text
+      // and its caret untouched until the final native input event commits it.
+      const composition = (type: string) =>
+        input().dispatchEvent(
+          new browser.CompositionEvent(type, {
+            bubbles: true,
+          }) as unknown as Event,
+        );
+      jest.useFakeTimers();
+      try {
+        for (const partialFailure of [false, true]) {
+          await fill("look ");
+          upload.mockImplementationOnce(
+            () =>
+              new Promise<string>((resolve) => {
+                finishUpload = resolve;
+              }),
+          );
+          if (partialFailure)
+            upload.mockImplementationOnce(async () => {
+              throw new Error("Second image failed");
+            });
+          await paste(partialFailure ? [image, image] : [image]);
+          await React.act(async () => {
+            composition("compositionstart");
+          });
+          await fill("look ni");
+          const caret = input().selectionStart;
+          const errorsBefore = error.mock.calls.length;
+          await React.act(async () => finishUpload("/tmp/ime.png"));
+          expect(input().value).toBe("look ni");
+          expect(input().selectionStart).toBe(caret);
+          expect(readTerminalComposerDraft(draftKey)).toBe("look ni");
+          expect(terminalComposerUploadCount(draftKey)).toBe(1);
+          expect(error.mock.calls.length).toBe(
+            errorsBefore + Number(partialFailure),
+          );
+          await React.act(async () => {
+            composition("compositionend");
+          });
+          // Some browsers deliver the committed input after compositionend.
+          await fill("look \u4f60");
+          await React.act(async () => {
+            jest.advanceTimersByTime(0);
+          });
+          expect(input().value).toBe("look \u4f60 /tmp/ime.png  ");
+          expect(terminalComposerUploadCount(draftKey)).toBe(0);
+        }
+
+        // Closing History must release deferred work, including a network
+        // response that arrives only after the composing editor unmounts.
+        for (const finishBeforeUnmount of [true, false]) {
+          await fill("keep ");
+          upload.mockImplementationOnce(
+            () =>
+              new Promise<string>((resolve) => {
+                finishUpload = resolve;
+              }),
+          );
+          await paste([image]);
+          await React.act(async () => {
+            composition("compositionstart");
+          });
+          if (finishBeforeUnmount)
+            await React.act(async () => finishUpload("/tmp/closed.png"));
+          await React.act(async () => root.render(null));
+          if (!finishBeforeUnmount)
+            await React.act(async () => finishUpload("/tmp/closed.png"));
+          expect(readTerminalComposerDraft(draftKey)).toBe(
+            "keep /tmp/closed.png  ",
+          );
+          expect(terminalComposerUploadCount(draftKey)).toBe(0);
+          await render("idle");
+        }
+      } finally {
+        jest.useRealTimers();
+      }
+
       // An in-flight upload can finish after leaving History. Its path belongs
       // to the original pane, including when the connection is retired.
       upload.mockImplementationOnce(
@@ -399,5 +477,5 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
         else delete (globalThis as Record<string, unknown>)[key];
       }
     }
-  });
+  }, 10_000);
 }
