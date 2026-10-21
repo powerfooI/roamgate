@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Pencil, X } from "lucide-react";
 import {
+  defaultAgentLaunchCommand,
   readAgentLaunchCommand,
   saveAgentLaunchCommand,
   validateAgentLaunchCommand,
@@ -82,7 +83,12 @@ export function AgentLauncher({
       (result) => {
         if (!cancelled && identity.current === target && client.isCurrent()) {
           try {
-            setItems(parseAgentIntegrations(result));
+            setItems(
+              parseAgentIntegrations(result).map((item) => ({
+                ...item,
+                command: defaultAgentLaunchCommand(item.target, item.command),
+              })),
+            );
           } catch (e) {
             setError((e as Error).message);
           }

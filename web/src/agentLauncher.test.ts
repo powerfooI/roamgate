@@ -1,5 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import {
+  defaultAgentLaunchCommand,
   readAgentLaunchCommand,
   saveAgentLaunchCommand,
   validateAgentLaunchCommand,
@@ -8,6 +9,14 @@ import { roamgateLocalStorage } from "./browserStorage";
 
 const storageSpies: Array<{ mockRestore: () => void }> = [];
 afterEach(() => storageSpies.splice(0).forEach((spy) => spy.mockRestore()));
+
+test("Codex launches with the current pane's environment", () => {
+  expect(defaultAgentLaunchCommand("codex", "codex")).toBe("codex --no-daemon");
+  expect(defaultAgentLaunchCommand("claude", "claude")).toBe("claude");
+  expect(defaultAgentLaunchCommand("codex", "codex --no-daemon")).toBe(
+    "codex --no-daemon",
+  );
+});
 
 test("launch commands persist per connection and agent and reset to the detected default", () => {
   const values = new Map<string, string>();
