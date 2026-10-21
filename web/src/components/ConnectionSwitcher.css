@@ -90,9 +90,9 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--shell-border);
-  border-radius: 9px;
-  background: var(--shell-panel);
+  border: 1px solid var(--viewer-border);
+  border-radius: 10px;
+  background: var(--panel);
   box-shadow: var(--shadow-lg);
 }
 
@@ -123,7 +123,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  padding: 5px;
+  padding: 4px;
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -135,7 +135,8 @@
   gap: 7px;
   flex: 1 1 150px;
   padding: 7px 8px;
-  border-color: var(--border-soft);
+  border: 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--text);
   text-align: left;
@@ -144,7 +145,7 @@
 
 .connection-browser-actions button:hover,
 .connection-browser-actions button:focus-visible {
-  background: var(--panel-2);
+  background: var(--accent-soft);
 }
 
 .connection-browser-actions button.is-warning {
@@ -164,7 +165,7 @@
   max-height: min(360px, 55vh);
   flex: 1 1 auto;
   overflow: auto;
-  padding: 5px;
+  padding: 4px;
 }
 
 .connection-switcher-option {
@@ -174,16 +175,19 @@
   grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
-  padding: 8px;
-  border-color: transparent;
+  min-height: 44px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
   background: transparent;
   text-align: left;
 }
 
 .connection-switcher-option:hover,
-.connection-switcher-option:focus-visible {
+.connection-switcher-option:focus-visible,
+.connection-switcher-option[aria-checked="true"] {
   border-color: transparent;
-  background: var(--panel-2);
+  background: var(--accent-soft);
 }
 
 .connection-switcher-option > span:nth-child(2) {
@@ -220,7 +224,7 @@
 
 .connection-switcher-manage:hover,
 .connection-switcher-manage:focus-visible {
-  background: var(--panel-2);
+  background: var(--accent-soft);
 }
 
 .connection-manager-modal {
@@ -390,6 +394,11 @@
 
 /* Keep mobile styling in sync with the saved layout and URL override. */
 :where(html[data-layout="mobile"]) {
+  .connection-browser-actions button,
+  .connection-switcher-manage {
+    min-height: 44px;
+  }
+
   .connection-switcher {
     max-width: min(220px, 42vw);
   }

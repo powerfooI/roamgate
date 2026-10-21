@@ -78,15 +78,18 @@
   gap: 8px;
   width: 100%;
   min-height: 44px;
-  padding: 7px 8px;
+  padding: 7px 10px;
+  border-radius: 7px;
   border: 0;
   text-align: left;
   background: transparent;
   color: var(--text);
 }
 
-.assistant-mention-options button[aria-selected="true"] {
-  background: var(--panel-2);
+.assistant-panel-footer
+  .assistant-mention-options
+  button[aria-selected="true"] {
+  background: var(--accent-soft);
 }
 
 .assistant-mention-options button > span:first-of-type {

@@ -15,9 +15,9 @@
   flex-direction: column;
   overflow: hidden;
   padding: 8px;
-  border: 1px solid var(--shell-border);
-  border-radius: 8px;
-  background: var(--shell-panel);
+  border: 1px solid var(--viewer-border);
+  border-radius: 10px;
+  background: var(--panel);
   box-shadow: var(--shadow-lg);
 }
 
@@ -110,7 +110,7 @@
   justify-content: center;
   flex: 0 0 auto;
   border-radius: 7px;
-  background: var(--border-soft);
+  background: transparent;
   color: var(--muted);
 }
 
@@ -295,15 +295,16 @@
   align-items: center;
   gap: 9px;
   padding: 6px 8px;
-  border-color: transparent;
+  border: 0;
   border-radius: 7px;
   background: transparent;
   color: var(--text);
 }
 
-.config-menu-item:hover:not(:disabled) {
+.config-menu-item:hover:not(:disabled),
+.config-menu-item:focus-visible {
   border-color: transparent;
-  background: var(--border-soft);
+  background: var(--accent-soft);
 }
 
 .config-menu-item > svg {
@@ -342,7 +343,7 @@
   align-items: center;
   gap: 9px;
   padding: 5px 8px;
-  border-color: transparent;
+  border: 0;
   border-radius: 7px;
   background: transparent;
   color: var(--text);
@@ -352,7 +353,7 @@
 
 .config-details-toggle:hover {
   border-color: transparent;
-  background: var(--border-soft);
+  background: var(--accent-soft);
 }
 
 .config-details-toggle > svg {
@@ -411,8 +412,7 @@
 
 /* Keep mobile styling in sync with the saved layout and URL override. */
 :where(html[data-layout="mobile"]) {
-  /* Mobile application menu: a bottom sheet with tile actions instead of
-     the desktop dropdown list. */
+  /* Keep the mobile bottom sheet, with the same action rows as desktop. */
   .config-dropdown {
     position: fixed;
     top: auto;
@@ -443,9 +443,9 @@
 
   .config-section {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-    padding: 8px 0;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding: 4px 0;
   }
 
   .config-title,
@@ -484,82 +484,16 @@
     display: none;
   }
 
-  .config-menu-item {
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 10px 6px;
-    border: 1px solid var(--border-soft);
-    border-radius: 10px;
-    background: var(--input-bg);
-  }
-
-  .config-menu-item > svg {
-    display: none;
+  .config-menu-item,
+  .config-menu-item.config-menu-item-row {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    gap: 8px;
+    min-height: 44px;
+    padding: 7px 10px;
   }
 
   .config-menu-item-desktop-only {
     display: none;
-  }
-
-  .config-section-tiles-3 {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .config-section-tiles-3 .config-menu-item .config-item-copy strong {
-    white-space: normal;
-  }
-
-  .config-menu-item:hover:not(:disabled) {
-    border-color: var(--border-soft);
-  }
-
-  /* Row-style menu actions (e.g. Terminal theme) sit inside preference
-     sections, so they keep the desktop row layout instead of the tile grid. */
-  .config-menu-item.config-menu-item-row {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: 24px minmax(0, 1fr) auto;
-    gap: 8px;
-    min-height: 38px;
-    padding: 4px 6px;
-    border: none;
-    border-radius: 7px;
-    background: transparent;
-  }
-
-  .config-menu-item.config-menu-item-row > svg {
-    display: block;
-  }
-
-  .config-menu-item.config-menu-item-row .config-item-icon {
-    width: 24px;
-    height: 24px;
-  }
-
-  .config-menu-item.config-menu-item-row .config-item-copy {
-    text-align: left;
-  }
-
-  .config-menu-item.config-menu-item-row .config-item-copy strong {
-    font-size: 12px;
-  }
-
-  .config-menu-item .config-item-icon {
-    width: 28px;
-    height: 28px;
-  }
-
-  .config-menu-item .config-item-copy {
-    width: 100%;
-    text-align: center;
-  }
-
-  .config-menu-item .config-item-copy strong {
-    font-size: 11px;
   }
 
   .config-theme-control button {

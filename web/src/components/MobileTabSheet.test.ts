@@ -21,7 +21,7 @@ test("Tabs and More share popup geometry and chrome inside the app stacking cont
     "z-index: 132",
     "272px",
     "100% -",
-    "border-radius: 14px",
+    "border-radius: 10px",
     "background: var(--panel)",
     "box-shadow: var(--shadow-lg)",
     "overflow-y: auto",

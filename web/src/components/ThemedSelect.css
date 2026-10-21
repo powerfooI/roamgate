@@ -31,7 +31,8 @@
   /* Selects also live inside modal dialogs (z-index 5000). */
   z-index: 5010;
   min-width: var(--radix-popover-trigger-width);
-  padding: 4px;
+  padding: 0;
+  overflow: hidden;
 }
 
 .annotation-target-picker .themed-select-trigger {

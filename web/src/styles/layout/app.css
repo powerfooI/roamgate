@@ -184,17 +184,11 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
-  border-radius: 14px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--panel-2) 92%, white 8%),
-    color-mix(in srgb, var(--panel) 96%, black 4%)
-  );
-  box-shadow: var(--shadow-modal);
+  border: 1px solid var(--viewer-border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
   pointer-events: auto;
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
 }
 
 .pane-jump-head {
@@ -207,8 +201,10 @@
 }
 
 .pane-jump-head strong {
-  color: var(--text-strong);
-  font-size: 15px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 .pane-jump-head span {
@@ -242,9 +238,9 @@
 .pane-jump-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
   overflow: auto;
-  padding: 8px;
+  padding: 4px;
 }
 
 .pane-jump-item {
@@ -254,20 +250,20 @@
   align-items: center;
   gap: 10px;
   padding: 10px;
-  border: 1px solid transparent;
-  border-radius: 10px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--text);
   text-align: left;
 }
 
 .pane-jump-item.is-selected {
-  border-color: color-mix(in srgb, var(--accent) 64%, var(--border));
   background: var(--accent-soft);
 }
 
 .pane-jump-item:hover {
-  background: var(--accent-hover);
+  background: var(--accent-soft);
 }
 
 .pane-jump-item.is-current:not(.is-selected) {

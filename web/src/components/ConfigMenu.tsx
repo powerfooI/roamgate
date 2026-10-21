@@ -265,7 +265,7 @@ export function ConfigMenu({
                   </div>
                 )}
               </div>
-              <div className="config-section config-section-tiles-3">
+              <div className="config-section">
                 <div className="config-title">Help & updates</div>
                 <ConfigMenuItem
                   icon={<ExternalLink size={15} />}

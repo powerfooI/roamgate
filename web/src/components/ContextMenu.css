@@ -1,14 +1,14 @@
 /* ===== context menu ===== */
 .context-menu {
   min-width: 180px;
-  background: var(--shell-panel);
-  border: 1px solid var(--shell-border);
+  background: var(--panel);
+  border: 1px solid var(--viewer-border);
   border-radius: 10px;
-  padding: 5px;
+  padding: 4px;
   box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
 }
 
 .context-menu--grouped {
@@ -16,7 +16,7 @@
   min-width: 0;
   max-height: calc(var(--app-viewport-height, 100vh) - 16px);
   overflow-y: auto;
-  padding: 6px;
+  padding: 4px;
   gap: 0;
 }
 
@@ -31,7 +31,7 @@
 .context-menu-header > span,
 .context-menu-group-title {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.55px;
   text-transform: uppercase;
@@ -92,8 +92,9 @@
   cursor: pointer;
 }
 
-.context-menu-item:hover {
-  background: var(--panel-2);
+.context-menu-item:hover:not(:disabled),
+.context-menu-item:focus-visible {
+  background: var(--accent-soft);
 }
 
 .context-menu-item:disabled {
@@ -122,7 +123,14 @@
   color: var(--danger-text);
 }
 
-.context-menu-item.is-danger:hover {
+.context-menu-item.is-danger:hover:not(:disabled),
+.context-menu-item.is-danger:focus-visible {
   background: var(--danger-soft);
   color: var(--danger-text);
+}
+
+:where(html[data-layout="mobile"]) {
+  .context-menu-item {
+    min-height: 44px;
+  }
 }
