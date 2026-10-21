@@ -160,7 +160,7 @@ export function AgentHistoryComposer({
     let failed = false;
     try {
       for (const file of files) {
-        if (!file.type.startsWith("image/"))
+        if (file.type && !file.type.startsWith("image/"))
           throw new Error("Choose an image to attach.");
         paths.push(await onUploadImage(file));
       }

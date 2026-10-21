@@ -356,6 +356,26 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
       expect(picker.value).toBe("");
       expect(send).toHaveBeenCalledTimes(7);
 
+      // Native pickers can return images without MIME metadata. Let the
+      // existing image uploader apply its fallback instead of rejecting them.
+      await fill("");
+      const untypedImage = new File(["image"], "camera.png");
+      await chooseImages([untypedImage]);
+      expect(upload.mock.calls[upload.mock.calls.length - 1]?.[0]).toBe(
+        untypedImage,
+      );
+      expect(input().value).toBe("/tmp/camera.png  ");
+      const uploadedCount = upload.mock.calls.length;
+      await chooseImages([
+        new File(["text"], "notes.txt", { type: "text/plain" }),
+      ]);
+      expect(upload.mock.calls.length).toBe(uploadedCount);
+      expect(error.mock.calls[error.mock.calls.length - 1]?.[0]).toBe(
+        "Choose an image to attach.",
+      );
+      expect(input().value).toBe("/tmp/camera.png  ");
+      expect(terminalComposerUploadCount(draftKey)).toBe(0);
+
       // Partial failure keeps successful paths and unlocks sending.
       await fill("review");
       upload.mockImplementationOnce(async () => "/tmp/first.png");
