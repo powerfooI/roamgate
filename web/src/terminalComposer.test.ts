@@ -10,6 +10,7 @@ import {
   insertIntoTerminalComposerDraft,
   readTerminalComposerDraft,
   readTerminalComposerSelection,
+  submitTerminalComposerDraft,
   subscribeTerminalComposerDraft,
   subscribeTerminalComposerSubmission,
   subscribeTerminalComposerUpload,
@@ -126,6 +127,41 @@ describe("terminal composer drafts", () => {
 
     unsubscribe();
     finishTerminalComposerSubmission(otherPane);
+  });
+
+  test("submits a draft prefix once and restores it ahead of newer text on failure", async () => {
+    const key = terminalComposerDraftKey("submit-helper", 1, "p1");
+    writeTerminalComposerDraft(key, "hello");
+    let release!: () => void;
+    const sent: string[] = [];
+    const pending = submitTerminalComposerDraft(
+      key,
+      "hello",
+      (text) =>
+        new Promise<void>((resolve) => {
+          sent.push(text);
+          release = resolve;
+        }),
+    );
+    // The sent prefix leaves the draft at once; a second submit is refused.
+    expect(readTerminalComposerDraft(key)).toBe("");
+    expect(
+      await submitTerminalComposerDraft(key, "hello", async () => {}),
+    ).toBe(false);
+    release();
+    expect(await pending).toBe(true);
+    expect(sent).toEqual(["hello"]);
+    expect(terminalComposerSubmissionPending(key)).toBe(false);
+
+    writeTerminalComposerDraft(key, "retry");
+    const failed = submitTerminalComposerDraft(key, "retry", async () => {
+      writeTerminalComposerDraft(key, " later");
+      throw new Error("pane closed");
+    });
+    await expect(failed).rejects.toThrow("pane closed");
+    expect(readTerminalComposerDraft(key)).toBe("retry later");
+    expect(terminalComposerSubmissionPending(key)).toBe(false);
+    clearTerminalComposerDraft(key);
   });
 
   test("tracks uploads across composer remounts", () => {

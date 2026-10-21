@@ -83,7 +83,7 @@ import {
   terminalComposerCloseWarning,
   terminalComposerDraftKey,
   terminalComposerDraftPaneIds,
-  terminalComposerRequest,
+  sendTerminalComposerText,
 } from "../terminalComposer";
 import {
   registerTerminalConnectionDisposer,
@@ -3308,8 +3308,12 @@ export function TerminalView({
   const submitTerminalComposer = async (text: string, submit: boolean) => {
     const targetPaneId = paneIdRef.current;
     if (!targetPaneId) throw new Error("No active pane");
-    const request = terminalComposerRequest(targetPaneId, text, submit);
-    await connectionClient.call(request.method, request.params);
+    await sendTerminalComposerText(
+      connectionClient,
+      targetPaneId,
+      text,
+      submit,
+    );
   };
   const uploadComposerImage = (file: File) =>
     uploadTerminalImage(connectionClient, file);

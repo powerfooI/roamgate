@@ -96,8 +96,14 @@ Inspector state is scoped to each checkout; see
 - **Agent History** shows the latest 200 conversation entries with search, a
   minimap, and tool details. The **Chat view** toggle reads them as
   conversation bubbles with rendered replies and collapsible tool-call blocks
-  that follow new output; the timeline view adds User/Agent/Tool filters. Exports are
-  always complete. **Session Inspector** adds metadata, a timeline, raw/ATIF
+  that follow new output, plus a message box that types into the agent's
+  terminal and shares the pane's terminal composer draft. Enter sends and
+  Shift+Enter adds a line; on touch keyboards Enter adds a line and the Send
+  button sends. On phones the box replaces the terminal composer dock while
+  the chat is open. Sending to an agent that is working, blocked, or in an
+  unknown state first shows where the text will land and needs **Send
+  anyway**. The timeline view adds User/Agent/Tool filters. Exports are always
+  complete. **Session Inspector** adds metadata, a timeline, raw/ATIF
   transcripts, and export.
 - **Menu > Configuration > Integrations** installs, updates, or removes Herdr's
   bundled agent integrations (not the agents themselves). See

@@ -19,10 +19,7 @@ import {
   mobileTerminalShortcutOption,
 } from "../mobileTerminalShortcuts";
 import {
-  beginTerminalComposerSubmission,
   beginTerminalComposerUpload,
-  clearTerminalComposerDraft,
-  finishTerminalComposerSubmission,
   finishTerminalComposerUpload,
   insertIntoTerminalComposerDraft,
   readTerminalComposerDraft,
@@ -30,6 +27,7 @@ import {
   readTerminalComposerSelection,
   subscribeTerminalComposerDraft,
   subscribeTerminalComposerSubmission,
+  submitTerminalComposerDraft,
   subscribeTerminalComposerUpload,
   terminalComposerSubmissionPending,
   terminalComposerUploadCount,
@@ -453,36 +451,20 @@ export function TerminalComposer({
       !accessoriesOpen ||
       !draft ||
       terminalComposerUploadCount(submittedDraftKey) > 0 ||
-      composingRef.current ||
-      !beginTerminalComposerSubmission(submittedDraftKey)
+      composingRef.current
     ) {
       return;
     }
 
-    dismissCommands();
-
-    // Remove the submitted prefix before the request so an unmount/remount
-    // cannot expose it as a second send while the first request is pending.
-    // New text remains in the shared draft and is restored with the submitted
-    // text if the request fails.
-    const current = readTerminalComposerDraft(submittedDraftKey);
-    const next = current.startsWith(draft)
-      ? current.slice(draft.length)
-      : current;
-    if (next) {
-      writeTerminalComposerDraft(submittedDraftKey, next);
-    } else {
-      clearTerminalComposerDraft(submittedDraftKey);
-    }
-
     try {
-      await onSubmit(draft, sendEnter);
+      await submitTerminalComposerDraft(
+        submittedDraftKey,
+        draft,
+        (submitted) => onSubmit(submitted, sendEnter),
+        dismissCommands,
+      );
     } catch (error) {
-      const pendingText = readTerminalComposerDraft(submittedDraftKey);
-      writeTerminalComposerDraft(submittedDraftKey, `${draft}${pendingText}`);
       onError(error instanceof Error ? error.message : "Failed to send input");
-    } finally {
-      finishTerminalComposerSubmission(submittedDraftKey);
     }
   };
 

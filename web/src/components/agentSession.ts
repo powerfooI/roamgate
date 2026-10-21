@@ -50,6 +50,32 @@ export function shouldShowAgentStatusLabel(status?: string): boolean {
   return kind !== "idle" && kind !== "unknown";
 }
 
+/**
+ * Explains where a message typed into the agent's terminal will land when the
+ * agent is not waiting at its prompt. Returns null for idle and done agents,
+ * whose terminal input starts a new turn, and for Codex in the unknown state,
+ * which is how Herdr reports it sitting interactive at its prompt.
+ */
+export function agentPromptWarning(
+  agent: string | undefined,
+  status?: string,
+): string | null {
+  const name = agent?.trim() || "The agent";
+  const kind = agentStateKind(status);
+  if (kind === "unknown" && name === "codex") return null;
+  switch (kind) {
+    case "idle":
+    case "done":
+      return null;
+    case "working":
+      return `${name} is still working. The message will be typed into its terminal now, and the agent decides whether to queue it or interrupt.`;
+    case "blocked":
+      return `${name} is waiting on a prompt. The message will be typed into that prompt, not sent as a new turn.`;
+    default:
+      return `${name}'s status is unknown. The message will be typed into whatever its terminal is showing.`;
+  }
+}
+
 const AGENT_STATE_PRIORITY: Record<AgentStateKind, number> = {
   blocked: 5,
   working: 4,

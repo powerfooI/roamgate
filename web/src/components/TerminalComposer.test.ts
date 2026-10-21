@@ -581,7 +581,8 @@ test.each(["claude", "grok-build", "agy"])(
       expect(draft).toBe("");
       changeMode("direct");
       rejectSubmission(new Error("Disconnected"));
-      await Promise.resolve();
+      // Let the rejected submission settle through the shared submit helper.
+      await new Promise((resolve) => setTimeout(resolve, 0));
       render();
       expect(draft).toBe("new upload or edit");
       expect(activeElement).toBe(directInput);

@@ -350,6 +350,14 @@
     min-width: 0;
   }
 
+  /* The open History chat has its own message box on the same shared draft,
+     so the terminal composer would only repeat it. Timeline and details views
+     have no box of their own and keep the terminal composer. */
+  &:has(.agent-history-drawer.is-open .agent-history-composer)
+    .mobile-bottom-input {
+    display: none;
+  }
+
   .mobile-appbar {
     position: absolute;
     right: calc(8px + env(safe-area-inset-right, 0px));

@@ -1,3 +1,4 @@
+import type { ConnectionClient } from "./api";
 import { prepareTerminalPasteText } from "./terminalPaste";
 
 /**
@@ -127,6 +128,43 @@ export function subscribeTerminalComposerDraft(
 
 export function terminalComposerSubmissionPending(key: string): boolean {
   return pendingSubmissions.has(key);
+}
+
+/**
+ * Sends `draft` from the shared pane draft under the composer submission
+ * contract. At most one submission runs per draft key. The submitted prefix
+ * leaves the draft before the request, so an unmount/remount cannot expose it
+ * as a second send while the first is pending; text typed meanwhile stays in
+ * the draft. On failure the submitted text is restored ahead of that newer
+ * text and the error is rethrown. Returns false when another submission for
+ * the key is already pending. `onBegin` runs once the submission is claimed.
+ */
+export async function submitTerminalComposerDraft(
+  key: string,
+  draft: string,
+  send: (text: string) => Promise<void>,
+  onBegin?: () => void,
+): Promise<boolean> {
+  if (!beginTerminalComposerSubmission(key)) return false;
+  try {
+    onBegin?.();
+    const current = readTerminalComposerDraft(key);
+    const next = current.startsWith(draft)
+      ? current.slice(draft.length)
+      : current;
+    if (next) writeTerminalComposerDraft(key, next);
+    else clearTerminalComposerDraft(key);
+    try {
+      await send(draft);
+    } catch (error) {
+      const pendingText = readTerminalComposerDraft(key);
+      writeTerminalComposerDraft(key, `${draft}${pendingText}`);
+      throw error;
+    }
+    return true;
+  } finally {
+    finishTerminalComposerSubmission(key);
+  }
 }
 
 /** Starts at most one submission for a pane draft, even across remounts. */
@@ -335,6 +373,17 @@ export function terminalComposerRequest(
       keys: submit ? ["enter"] : ([] as string[]),
     },
   };
+}
+
+/** Types composer text into a pane, optionally followed by Enter. */
+export async function sendTerminalComposerText(
+  client: Pick<ConnectionClient, "call">,
+  paneId: string,
+  text: string,
+  submit: boolean,
+): Promise<void> {
+  const request = terminalComposerRequest(paneId, text, submit);
+  await client.call(request.method, request.params);
 }
 
 /**

@@ -17,12 +17,16 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
-import { useStoreSelector } from "../store";
+import { store, useStoreSelector } from "../store";
 import { copyTextWithFeedback } from "../copyText";
 import {
   connectionClientScopeKey,
   useConnectionClient,
 } from "../useConnectionClient";
+import {
+  sendTerminalComposerText,
+  terminalComposerDraftKey,
+} from "../terminalComposer";
 import type { Pane } from "../types";
 import {
   DEFAULT_INSPECTOR_NAVIGATION_RATIO,
@@ -36,6 +40,7 @@ import { AgentMessageContent } from "./AgentMessageContent";
 import { AgentMessageDialog } from "./AgentMessageDialog";
 import { AgentHistoryCard } from "./AgentHistoryCard";
 import { AgentHistoryChat } from "./AgentHistoryChat";
+import { AgentHistoryComposer } from "./AgentHistoryComposer";
 import { AgentHistoryFilters } from "./AgentHistoryFilters";
 import { ConversationMinimap } from "./ConversationMinimap";
 import {
@@ -97,6 +102,12 @@ export function AgentHistoryDrawer({
   onOpenChange: (open: boolean) => void;
 }) {
   const workspaces = useStoreSelector((state) => state.workspaces);
+  const activeConnectionId = useStoreSelector(
+    (state) => state.activeConnectionId,
+  );
+  const connectionGeneration = useStoreSelector(
+    (state) => state.connectionGeneration,
+  );
   const connectionClient = useConnectionClient();
   const workspaceLabel =
     workspaces.find((workspace) => workspace.workspace_id === pane.workspace_id)
@@ -140,6 +151,10 @@ export function AgentHistoryDrawer({
   const contentRef = useRef<HTMLDivElement>(null);
   const wideSplitRef = useRef<HTMLDivElement>(null);
   const highlightTimerRef = useRef<number | null>(null);
+  const sentRefreshTimerRef = useRef<number | null>(null);
+  // Advances whenever polling stops (close, pane switch, unmount), so a send
+  // that resolves afterwards does not schedule a refresh for a stale drawer.
+  const pollScopeRef = useRef(0);
   const loadSeqRef = useRef(0);
   const previewSeqRef = useRef(0);
   const historyRef = useRef<AgentHistory | null>(null);
@@ -412,6 +427,11 @@ export function AgentHistoryDrawer({
     }, 4000);
     return () => {
       window.clearInterval(timer);
+      pollScopeRef.current += 1;
+      if (sentRefreshTimerRef.current !== null) {
+        window.clearTimeout(sentRefreshTimerRef.current);
+        sentRefreshTimerRef.current = null;
+      }
       loadSeqRef.current += 1;
       inFlightRef.current = null;
     };
@@ -755,6 +775,36 @@ export function AgentHistoryDrawer({
       {historyEmptyState ?? historyCards}
     </div>
   );
+  const sendMessage = useCallback(
+    async (text: string) => {
+      const scope = pollScopeRef.current;
+      await sendTerminalComposerText(
+        connectionClient,
+        pane.pane_id,
+        text,
+        true,
+      );
+      if (!connectionClient.isCurrent() || pollScopeRef.current !== scope)
+        return;
+      // The agent records the prompt in its transcript once it accepts it;
+      // refresh shortly instead of waiting for the next poll. A poll still in
+      // flight may predate the prompt, so wait for it and load again.
+      const refresh = (delay: number) => {
+        if (sentRefreshTimerRef.current !== null)
+          window.clearTimeout(sentRefreshTimerRef.current);
+        sentRefreshTimerRef.current = window.setTimeout(() => {
+          sentRefreshTimerRef.current = null;
+          if (inFlightRef.current !== null) refresh(500);
+          else loadHistory();
+        }, delay);
+      };
+      refresh(1000);
+    },
+    [connectionClient, loadHistory, pane.pane_id],
+  );
+  const notifySendError = useCallback((detail: string) => {
+    store.notify({ kind: "error", message: "Message not sent", detail });
+  }, []);
   const historyChat = (
     <div
       className="agent-history-messages"
@@ -777,6 +827,17 @@ export function AgentHistoryDrawer({
           {historyMinimap("auto")}
         </div>
       )}
+      <AgentHistoryComposer
+        draftKey={terminalComposerDraftKey(
+          activeConnectionId,
+          connectionGeneration,
+          pane.pane_id,
+        )}
+        agent={pane.agent}
+        status={pane.agent_status}
+        onSend={sendMessage}
+        onError={notifySendError}
+      />
     </div>
   );
   const changeView = (next: AgentHistoryView) => {
@@ -863,6 +924,7 @@ export function AgentHistoryDrawer({
         } ${wide ? "is-wide" : ""}`}
         aria-label="Agent session"
         aria-hidden={!open}
+        inert={!open}
       >
         <div className="agent-history-drawer-head">
           <div className="agent-history-identity">
