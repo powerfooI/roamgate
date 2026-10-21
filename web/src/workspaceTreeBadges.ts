@@ -20,11 +20,15 @@ export function workspacePullRequest(status?: PullRequestSummary) {
     closed: "Closed without merge",
   }[state];
   const github = status.provider === "github";
+  const stale = status.stale
+    ? `\nLast known status from ${new Date(status.refreshedAt).toLocaleString()}; refresh failed.`
+    : "";
   return {
     request,
     state,
+    stale: !!status.stale,
     id: `${github ? "#" : "!"}${request.number}`,
-    title: `${github ? "PR #" : "MR !"}${request.number}: ${label}\n${request.title}`,
+    title: `${github ? "PR #" : "MR !"}${request.number}: ${label}\n${request.title}${stale}`,
     openLabel: github ? "Open PR on GitHub" : "Open MR on GitLab",
   } as const;
 }

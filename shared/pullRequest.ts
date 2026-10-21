@@ -32,6 +32,13 @@ export type PullRequestStatus = {
   message?: string;
   root: string;
   branch: string;
+  /** The branch was recovered from an in-progress rebase on a detached HEAD. */
+  rebasing?: boolean;
+  /**
+   * A transient provider or transport failure. Errors without this flag, such
+   * as a branch change during refresh, invalidate the previous association.
+   */
+  retryable?: boolean;
   refreshedAt: string;
   remotes: ReviewRemote[];
   remote?: string;
@@ -44,5 +51,12 @@ export type PullRequestStatus = {
 
 export type PullRequestSummary = Pick<
   PullRequestStatus,
-  "state" | "message" | "refreshedAt" | "provider" | "request"
->;
+  "state" | "message" | "refreshedAt" | "provider" | "request" | "retryable"
+> & {
+  /**
+   * Set by the browser when a retryable refresh failed and this summary is the
+   * last successful result for the same association. `refreshedAt` remains the
+   * last successful refresh time.
+   */
+  stale?: { failedAt: string; message?: string };
+};

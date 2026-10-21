@@ -139,12 +139,13 @@ describe("workspace file handlers", () => {
       expect(status.state).toBe("detached");
       for (const worktree_path of ["/other/repo", 42]) {
         processes.length = 0;
-        await expect(
-          handlers.readWorkspacePullRequest({
-            workspace_id: "w1",
-            worktree_path,
-          }),
-        ).rejects.toThrow("Worktree is unavailable");
+        const result = await handlers.readWorkspacePullRequest({
+          workspace_id: "w1",
+          worktree_path,
+        });
+        expect(result.state).toBe("error");
+        expect(result.message).toContain("Worktree is unavailable");
+        expect("retryable" in result).toBe(false);
         expect(processes).toHaveLength(1);
       }
       for (const worktree_path of ["/repo/bare", "/repo/gone"]) {

@@ -216,6 +216,7 @@ function PullRequestBadge({
     <span
       className="git-badge workspace-review"
       data-state={review.state}
+      data-stale={review.stale || undefined}
       title={review.title}
       aria-label={review.title}
       role="img"

@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { PullRequestStatus } from "../../../shared/pullRequest";
+import type {
+  PullRequestStatus,
+  PullRequestSummary,
+} from "../../../shared/pullRequest";
 import { WorktreePullRequestBadge } from "./WorktreePullRequestBadge";
 
 const base: PullRequestStatus = {
@@ -11,8 +14,9 @@ const base: PullRequestStatus = {
   remotes: [],
   refreshedAt: "2026-10-01T00:00:00Z",
 };
-const render = (status?: PullRequestStatus) =>
-  renderToStaticMarkup(createElement(WorktreePullRequestBadge, { status }));
+const render = (
+  status?: PullRequestStatus & Pick<PullRequestSummary, "stale">,
+) => renderToStaticMarkup(createElement(WorktreePullRequestBadge, { status }));
 
 test("worktree badges distinguish GitHub/GitLab merge states and expose details with native disclosure controls", () => {
   for (const provider of ["github", "gitlab"] as const) {
@@ -83,4 +87,29 @@ test("unresolved and failed worktree badges never claim a merged request", () =>
     expect(html).toContain("Explicit diagnostic");
   }
   expect(render()).toContain("PR/MR: Loading...");
+});
+
+test("stale worktree badges stay actionable and show the last successful check", () => {
+  const html = render({
+    ...base,
+    provider: "gitlab",
+    stale: { failedAt: "2026-10-02T00:00:00Z" },
+    request: {
+      id: "team/project#3",
+      number: 3,
+      title: "Ship feature",
+      author: "alice",
+      source: "topic",
+      target: "main",
+      state: "opened",
+      draft: false,
+      url: "https://gitlab.com/team/project/-/merge_requests/3",
+    },
+  });
+  expect(html).toContain("MR #3: Open (last known)");
+  expect(html).toContain('data-stale="true"');
+  expect(html).toContain("Open MR #3");
+  expect(html).toContain('dateTime="2026-10-02T00:00:00Z"');
+  expect(html).toContain("Last successful check");
+  expect(html).toContain(`dateTime="${base.refreshedAt}"`);
 });

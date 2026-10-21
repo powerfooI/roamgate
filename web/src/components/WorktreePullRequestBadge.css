@@ -37,6 +37,10 @@
   background: var(--danger-soft);
 }
 
+.worktree-review-badge[data-stale] {
+  opacity: 0.75;
+}
+
 .worktree-review-detail {
   display: grid;
   gap: 4px;

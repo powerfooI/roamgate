@@ -115,3 +115,45 @@ test("status cards keep diagnostics behind disclosure and unavailable checks exp
     expect(ready).toContain('rel="noopener noreferrer"');
   }
 });
+
+test("stale cards keep the request link and show both refresh times", () => {
+  const current: PullRequestStatus = {
+    ...base,
+    state: "ready",
+    branch: "feature/review",
+    rebasing: true,
+    provider: "github",
+    request: {
+      id: "team/project#2",
+      number: 2,
+      title: "A focused request",
+      author: "alice",
+      source: "feature/review",
+      target: "main",
+      state: "open",
+      draft: false,
+      url: "https://github.com/team/project/pull/2",
+    },
+  };
+  const markup = renderToStaticMarkup(
+    createElement(PullRequestCardView, {
+      current,
+      loading: false,
+      stale: { failedAt: "2026-09-30T00:00:00Z", message: "Provider down" },
+      error: "",
+      finishedAt: current.refreshedAt,
+      onRefresh() {},
+      onRemoteChange() {},
+      onMatchChange() {},
+    }),
+  );
+  expect(markup).toContain('data-stale="true"');
+  expect(markup).toContain('class="pull-request-card-link"');
+  expect(markup).toContain(">Last known</span>");
+  expect(markup).toContain("Refresh failed; showing last known status");
+  expect(markup).toContain("Provider down");
+  expect(markup).toContain('dateTime="2026-09-30T00:00:00Z"');
+  expect(markup).toContain("Last successful refresh");
+  expect(markup).toContain(`dateTime="${current.refreshedAt}"`);
+  expect(markup).toContain("feature/review</code> (rebase in progress)");
+});

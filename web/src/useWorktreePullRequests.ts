@@ -4,34 +4,48 @@ import type { ConnectionClient } from "./api";
 import type { Workspace, WorktreeList } from "./types";
 import { connectionClientScopeKey } from "./useConnectionClient";
 
+type SummaryTarget = {
+  id: string;
+  /** Changes whenever a previous summary must not be shown for this target. */
+  association: string;
+  params: Record<string, unknown>;
+};
+
+type SummaryEntry = {
+  association: string;
+  status: PullRequestSummary;
+  lastGood?: PullRequestSummary;
+};
+
 export function useWorktreePullRequests(
   client: ConnectionClient,
   workspaceId: string | null | undefined,
   list: WorktreeList | null,
   refresh: number,
 ) {
-  const key = connectionClientScopeKey(
-    client,
-    workspaceId,
-    list?.source.repo_key,
-    list?.worktrees.map(({ label, open_workspace_id, ...checkout }) => {
-      void label;
-      void open_workspace_id;
-      return checkout;
-    }),
-    refresh,
-  );
   return usePullRequestSummaries(
     client,
-    key,
-    (workspaceId ? (list?.worktrees ?? []) : []).map((worktree) => ({
-      id: worktree.path,
-      params: {
-        workspace_id: workspaceId,
-        worktree_path: worktree.path,
-        branch: worktree.branch,
+    (workspaceId ? (list?.worktrees ?? []) : []).map(
+      ({ label, open_workspace_id, ...checkout }) => {
+        void label;
+        void open_workspace_id;
+        return {
+          id: checkout.path,
+          association: connectionClientScopeKey(
+            client,
+            workspaceId,
+            list?.source.repo_key,
+            checkout,
+          ),
+          params: {
+            workspace_id: workspaceId,
+            worktree_path: checkout.path,
+            branch: checkout.branch,
+          },
+        };
       },
-    })),
+    ),
+    refresh,
   );
 }
 
@@ -47,8 +61,13 @@ export function useWorkspacePullRequests(
         ? [
             {
               id: workspace.workspace_id,
-              repo: worktree.repo_key,
-              path: worktree.checkout_path,
+              association: connectionClientScopeKey(
+                client,
+                workspace.workspace_id,
+                worktree.repo_key,
+                worktree.checkout_path,
+                branch,
+              ),
               params: {
                 workspace_id: workspace.workspace_id,
                 branch,
@@ -59,36 +78,65 @@ export function useWorkspacePullRequests(
         : [];
     })
     .sort((left, right) => left.id.localeCompare(right.id));
-  return usePullRequestSummaries(
-    client,
-    connectionClientScopeKey(client, targets),
-    targets,
-    true,
-  );
+  return usePullRequestSummaries(client, targets, 0, true);
 }
 
+// Summaries are stale-while-revalidate per target: a refresh keeps the last
+// result for an unchanged association visible, and a retryable failure keeps
+// the last successful one marked stale. Any association change hides it.
 function usePullRequestSummaries(
   client: ConnectionClient,
-  key: string,
-  targets: { id: string; params: Record<string, unknown> }[],
+  targets: SummaryTarget[],
+  refresh: number,
   poll = false,
 ) {
-  const [result, setResult] = useState<{
-    key: string;
-    statuses: Record<string, PullRequestSummary>;
-  } | null>(null);
+  const [entries, setEntries] = useState<Record<string, SummaryEntry>>({});
+  const [pollRound, setPollRound] = useState(0);
+  // The poll round whose due targets have all been requested and settled.
+  const [settledRound, setSettledRound] = useState("");
   const readTargets = useEffectEvent(() => targets);
   const pending = useRef<Promise<unknown>>(Promise.resolve());
+  // The association and refresh round each target was last requested for.
+  const requested = useRef(
+    new Map<string, { association: string; round: string }>(),
+  );
+  const targetsKey = JSON.stringify(
+    targets.map((target) => [target.id, target.association]),
+  );
+  const pollKey = connectionClientScopeKey(client, pollRound);
   useEffect(() => {
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    setResult({ key, statuses: {} });
-    const refresh = async () => {
-      const currentTargets = readTargets();
-      const queue = currentTargets.values();
+    const round = JSON.stringify([refresh, pollRound]);
+    // Targets that left (a closed dialog, a Git status error) or changed
+    // association are requested again when they return; their last summary
+    // stays visible meanwhile.
+    for (const [id, last] of requested.current) {
+      if (
+        !readTargets().some(
+          (target) =>
+            target.id === id && target.association === last.association,
+        )
+      )
+        requested.current.delete(id);
+    }
+    const current = (target: SummaryTarget) =>
+      client.isCurrent() &&
+      readTargets().some(
+        (next) =>
+          next.id === target.id && next.association === target.association,
+      );
+    const run = async () => {
+      const due = readTargets().filter((target) => {
+        const last = requested.current.get(target.id);
+        return last?.association !== target.association || last.round !== round;
+      });
+      const queue = due.values();
       const worker = async () => {
         for (const target of queue) {
           if (cancelled || !client.isCurrent()) return;
+          if (!current(target)) continue;
+          const request = { association: target.association, round };
+          requested.current.set(target.id, request);
           const status: PullRequestSummary = await client
             .call(
               "git.pull_request",
@@ -100,29 +148,81 @@ function usePullRequestSummaries(
             )
             .catch(() => ({
               state: "error",
+              message: "PR/MR status request failed. Check the connection.",
+              retryable: true,
               refreshedAt: new Date().toISOString(),
             }));
-          if (cancelled || !client.isCurrent()) return;
-          setResult((current) => ({
-            key,
-            statuses: { ...current?.statuses, [target.id]: status },
+          // A reply stays valid for its association even after this effect
+          // re-ran; it must never land on a newer association or connection.
+          if (!current(target)) {
+            if (requested.current.get(target.id) === request)
+              requested.current.delete(target.id);
+            continue;
+          }
+          setEntries((previous) => ({
+            ...previous,
+            [target.id]: nextEntry(
+              previous[target.id]?.association === target.association
+                ? previous[target.id]
+                : undefined,
+              target.association,
+              status,
+            ),
           }));
         }
       };
       await Promise.all([worker(), worker(), worker(), worker()]);
-      if (poll && currentTargets.length && !cancelled && client.isCurrent()) {
-        timer = setTimeout(() => {
-          pending.current = pending.current.then(refresh);
-        }, 60_000);
-      }
+      // A run superseded by a target change leaves its remaining targets to
+      // the next run of the same round, which settles it instead.
+      if (!cancelled && client.isCurrent()) setSettledRound(pollKey);
     };
     // Obsolete replies still occupy host-side CLI slots until they settle.
-    pending.current = pending.current.then(refresh);
+    pending.current = pending.current.then(run);
     return () => {
       cancelled = true;
-      clearTimeout(timer);
     };
-  }, [client, key, poll]);
+  }, [client, targetsKey, refresh, pollRound, pollKey]);
 
-  return client.isCurrent() && result?.key === key ? result.statuses : {};
+  // Polling waits for each round to settle, but target changes that only
+  // request their own targets never postpone the next round for the others.
+  const hasTargets = targets.length > 0;
+  useEffect(() => {
+    if (!poll || !hasTargets || settledRound !== pollKey) return;
+    const timer = setTimeout(() => setPollRound((value) => value + 1), 60_000);
+    return () => clearTimeout(timer);
+  }, [poll, hasTargets, settledRound, pollKey]);
+
+  const statuses: Record<string, PullRequestSummary> = {};
+  if (!client.isCurrent()) return statuses;
+  for (const target of targets) {
+    const entry = entries[target.id];
+    if (entry?.association === target.association)
+      statuses[target.id] = entry.status;
+  }
+  return statuses;
+}
+
+function nextEntry(
+  previous: SummaryEntry | undefined,
+  association: string,
+  status: PullRequestSummary,
+): SummaryEntry {
+  if (status.state === "ready")
+    return { association, status, lastGood: status };
+  // Authoritative results (no_match, detached, branch changes, ...) replace
+  // the last success; only retryable failures fall back to it.
+  const lastGood =
+    status.state === "error" && status.retryable
+      ? previous?.lastGood
+      : undefined;
+  return {
+    association,
+    lastGood,
+    status: lastGood
+      ? {
+          ...lastGood,
+          stale: { failedAt: status.refreshedAt, message: status.message },
+        }
+      : status,
+  };
 }

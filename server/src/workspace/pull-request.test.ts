@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   shQuote,
   type runProcessWithCodeTimeout,
@@ -76,6 +79,9 @@ function fixture(
     const overridden = options.override?.(command);
     if (overridden) return overridden;
     if (command.includes("'symbolic-ref'")) return ok("feature/card\n");
+    if (command.includes("'--git-path'"))
+      return ok(".git/rebase-merge/head-name\n.git/rebase-apply/head-name\n");
+    if (command.includes("'cat' '--'")) return { ...fail, stdout: "" };
     if (command.includes("'for-each-ref'"))
       return ok("refs/heads/feature/card\0\0\n");
     if (command.includes("'git' 'remote'"))
@@ -346,6 +352,133 @@ describe("PR/MR status", () => {
         expect(queries.every((query) => query.includes("feature%2Fcard"))).toBe(
           true,
         );
+      }
+    });
+    test(`${provider} keeps the rebased branch's request on a detached HEAD over local and SSH`, async () => {
+      const gitDir = await mkdtemp(join(tmpdir(), "roamgate-rebase-"));
+      try {
+        await mkdir(join(gitDir, "rebase-merge"));
+        const headName = join(gitDir, "rebase-merge", "head-name");
+        const onto = "a".repeat(40);
+        await writeFile(join(gitDir, "rebase-merge", "onto"), `${onto}\n`);
+        // Local reads use headName on disk; SSH reads go through `cat`.
+        const rebaseState = (
+          ref: string,
+          rebasing = () => true,
+          buildsOnBase = true,
+        ) => {
+          return (command: string) => {
+            if (command.includes("'symbolic-ref'"))
+              return rebasing() ? fail : ok("pr-299\n");
+            if (command.includes("'--git-path'"))
+              return ok(
+                `${headName}\n${join(gitDir, "rebase-apply", "head-name")}\n`,
+              );
+            if (command.includes("'cat' '--'"))
+              return command.includes("rebase-merge/onto")
+                ? ok(`${onto}\n`)
+                : command.includes("rebase-merge")
+                  ? ok(`${ref}\n`)
+                  : { ...fail, stdout: "" };
+            if (command.includes("'--is-ancestor'"))
+              return command.includes(`'${onto}' 'HEAD'`) && buildsOnBase
+                ? ok("")
+                : { ...fail, stdout: "" };
+            if (command.includes("'--verify'"))
+              return command.includes("'refs/heads/pr-299'")
+                ? ok("abc123\n")
+                : fail;
+            if (command.includes("'for-each-ref'"))
+              return ok("refs/heads/pr-299\0origin\0refs/heads/feature/card\n");
+          };
+        };
+        for (const ssh of [false, true]) {
+          await writeFile(headName, "refs/heads/pr-299\n");
+          // Workspace status reports the rebase as the "detached" sentinel;
+          // the upstream alias still selects the provider-side branch.
+          for (const branch of ["detached", "pr-299", undefined]) {
+            const f = fixture(provider, {
+              ssh,
+              override: rebaseState("refs/heads/pr-299"),
+            });
+            const result = await f.read(branch ? { branch } : {});
+            expect(result.state).toBe("ready");
+            expect(result.branch).toBe("pr-299");
+            expect(result.rebasing).toBe(true);
+            expect(result.request?.number).toBe(provider === "github" ? 12 : 7);
+            const queries = f.commands
+              .flat()
+              .filter((arg) => arg.includes("per_page="));
+            expect(
+              queries.every((query) => query.includes("feature%2Fcard")),
+            ).toBe(true);
+          }
+          // Finishing the rebase mid-request keeps the same association.
+          let reads = 0;
+          const finished = await fixture(provider, {
+            ssh,
+            override: rebaseState("refs/heads/pr-299", () => ++reads < 2),
+          }).read({ branch: "detached", summary: true });
+          expect(finished.state).toBe("ready");
+          expect(finished.request).toBeDefined();
+          // Only an explicit detached sentinel or the same branch is accepted.
+          const switched = await fixture(provider, {
+            ssh,
+            override: rebaseState("refs/heads/pr-299"),
+          }).read({ branch: "other" });
+          expect(switched.state).toBe("error");
+          expect(switched.retryable).toBeUndefined();
+          expect(switched.request).toBeUndefined();
+          // A detached HEAD that no longer builds on the rebase's base (for
+          // example a manual checkout mid-rebase) is not attributed to it.
+          const unrelated = await fixture(provider, {
+            ssh,
+            override: rebaseState("refs/heads/pr-299", () => true, false),
+          }).read({ branch: "detached" });
+          expect(unrelated.state).toBe("detached");
+          expect(unrelated.request).toBeUndefined();
+          // A rebase of a detached HEAD or a deleted branch is not guessed.
+          for (const ref of ["detached HEAD", "refs/heads/gone"]) {
+            await writeFile(headName, `${ref}\n`);
+            const detached = await fixture(provider, {
+              ssh,
+              override: rebaseState(ref),
+            }).read({ branch: "detached" });
+            expect(detached.state).toBe("detached");
+            expect(detached.request).toBeUndefined();
+          }
+        }
+        // Without rebase metadata a detached checkout stays unresolved.
+        await rm(headName);
+        for (const ssh of [false, true]) {
+          const detached = await fixture(provider, {
+            ssh,
+            override: (command) => {
+              if (command.includes("'symbolic-ref'")) return fail;
+              if (command.includes("'--git-path'"))
+                return ok(
+                  `${headName}\n${join(gitDir, "rebase-apply", "head-name")}\n`,
+                );
+              if (command.includes("'cat' '--'"))
+                return { ...fail, stdout: "" };
+            },
+          }).read({ branch: "detached" });
+          expect(detached.state).toBe("detached");
+        }
+        // Aborting into a different branch mid-request invalidates the reply.
+        await writeFile(headName, "refs/heads/pr-299\n");
+        let reads = 0;
+        const aborted = await fixture(provider, {
+          override: (command) =>
+            command.includes("'symbolic-ref'") && ++reads > 1
+              ? ok("main\n")
+              : rebaseState("refs/heads/pr-299")(command),
+        }).read({ branch: "detached" });
+        expect(aborted.state).toBe("error");
+        expect(aborted.retryable).toBeUndefined();
+        expect(aborted.request).toBeUndefined();
+      } finally {
+        await rm(gitDir, { recursive: true, force: true });
       }
     });
     test(`${provider} never uses a different remote or local upstream's branch`, async () => {
@@ -634,6 +767,12 @@ describe("PR/MR status", () => {
         ).state,
       ).toBe("error");
     }
+    const failed = await fixture("github", {
+      override: (command) =>
+        command.includes("'repos/team/project/pulls?") ? fail : undefined,
+    }).read();
+    expect(failed.state).toBe("error");
+    expect(failed.retryable).toBe(true);
   });
   test("missing, skipped and pending checks retain their meaning", () => {
     expect(githubChecks(null)).toBe("Unavailable");

@@ -37,14 +37,28 @@ export function WorktreePullRequestBadge({
       ? "PR"
       : "MR"
     : "PR/MR";
-  const text = `${provider}${request ? ` #${request.number}` : ""}: ${label}`;
+  const stale = request ? status?.stale : undefined;
+  const text = `${provider}${request ? ` #${request.number}` : ""}: ${label}${stale ? " (last known)" : ""}`;
   return (
     <details className="worktree-review">
-      <summary className="badge worktree-review-badge" data-state={state}>
+      <summary
+        className="badge worktree-review-badge"
+        data-state={state}
+        data-stale={stale ? true : undefined}
+      >
         {text}
       </summary>
       <div className="worktree-review-detail">
         {request?.title ?? status?.message ?? label}
+        {stale ? (
+          <span>
+            Refresh failed at{" "}
+            <time dateTime={stale.failedAt}>
+              {new Date(stale.failedAt).toLocaleString()}
+            </time>
+            ; showing the last known status.
+          </span>
+        ) : null}
         {request ? (
           <a href={request.url} target="_blank" rel="noopener noreferrer">
             Open {provider} #{request.number}
@@ -52,7 +66,8 @@ export function WorktreePullRequestBadge({
         ) : null}
         {status ? (
           <time dateTime={status.refreshedAt}>
-            Last checked: {new Date(status.refreshedAt).toLocaleString()}
+            {stale ? "Last successful check" : "Last checked"}:{" "}
+            {new Date(status.refreshedAt).toLocaleString()}
           </time>
         ) : null}
       </div>

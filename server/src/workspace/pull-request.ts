@@ -4,6 +4,8 @@ import type {
   ReviewProvider,
   ReviewRemote,
 } from "../../../shared/pullRequest";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { sshCommandArgv } from "../bridge/ssh-command";
 import type { GitActionContext } from "./git-actions";
 
@@ -148,7 +150,13 @@ export async function readPullRequestStatus(
   function finish(state: PullRequestStatus["state"], message?: string) {
     return { ...result, state, message, refreshedAt: new Date().toISOString() };
   }
-  try {
+  // Rebases stop on a detached HEAD, but Git records the branch being rebased.
+  // That ref is trusted only while HEAD still builds on the rebase's base;
+  // other detached checkouts stay unresolved instead of guessing from commits.
+  async function readBranch(): Promise<{
+    name: string;
+    rebasing: boolean;
+  } | null> {
     const branch = await run([
       "git",
       "symbolic-ref",
@@ -156,11 +164,75 @@ export async function readPullRequestStatus(
       "--short",
       "HEAD",
     ]);
-    if (branch.code === 1)
+    if (branch.code === 0)
+      return { name: branch.stdout.trim(), rebasing: false };
+    if (branch.code !== 1) throw new Error("Cannot read branch");
+    // --git-path resolves linked worktrees' private rebase state.
+    const paths = await run([
+      "git",
+      "rev-parse",
+      "--git-path",
+      "rebase-merge/head-name",
+      "--git-path",
+      "rebase-apply/head-name",
+    ]);
+    if (paths.code !== 0) throw new Error("Cannot read rebase state");
+    for (const path of paths.stdout.split(/\r?\n/).filter(Boolean)) {
+      const ref = (await readGitFile(path))?.trim();
+      if (!ref) continue;
+      if (!ref.startsWith("refs/heads/") || ref === "refs/heads/") return null;
+      const exists = await run([
+        "git",
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        ref,
+      ]);
+      if (exists.code !== 0) return null;
+      // Leftover metadata or a manual detached checkout mid-rebase must not
+      // inherit the rebased branch's request.
+      const onto = (
+        await readGitFile(path.replace(/head-name$/, "onto"))
+      )?.trim();
+      if (!onto || !/^[0-9a-f]{40,64}$/.test(onto)) return null;
+      const builds = await run([
+        "git",
+        "merge-base",
+        "--is-ancestor",
+        onto,
+        "HEAD",
+      ]);
+      if (builds.code === 1) return null;
+      if (builds.code !== 0) throw new Error("Cannot read rebase state");
+      return { name: ref.slice("refs/heads/".length), rebasing: true };
+    }
+    return null;
+  }
+  async function readGitFile(path: string): Promise<string | null> {
+    if (context.host) {
+      const output = await run(["cat", "--", path]);
+      return output.code === 0 ? output.stdout : null;
+    }
+    try {
+      return await readFile(resolve(context.root, path), "utf8");
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") return null;
+      throw error;
+    }
+  }
+  try {
+    const branch = await readBranch();
+    if (!branch)
       return finish("detached", "Detached HEAD has no branch to resolve.");
-    if (branch.code !== 0) throw new Error("Cannot read branch");
-    result.branch = branch.stdout.trim();
-    if (params.branch && params.branch !== result.branch)
+    result.branch = branch.name;
+    if (branch.rebasing) result.rebasing = true;
+    // Workspace status reports any detached HEAD as the "detached" sentinel.
+    if (
+      params.branch &&
+      params.branch !== result.branch &&
+      !(branch.rebasing && params.branch === "detached")
+    )
       return finish(
         "error",
         "The branch changed. Refresh workspace status and try again.",
@@ -437,17 +509,8 @@ export async function readPullRequestStatus(
           ? review.value
           : "Unavailable (approvals request failed)";
     }
-    const currentBranch = await run([
-      "git",
-      "symbolic-ref",
-      "--quiet",
-      "--short",
-      "HEAD",
-    ]);
-    if (
-      currentBranch.code !== 0 ||
-      currentBranch.stdout.trim() !== result.branch
-    ) {
+    const currentBranch = await readBranch();
+    if (currentBranch?.name !== result.branch) {
       delete result.request;
       delete result.matches;
       return finish(
@@ -458,9 +521,14 @@ export async function readPullRequestStatus(
     return finish("ready");
   } catch {
     delete result.request;
-    return finish(
-      "error",
-      "Could not read PR/MR status. Check repository access, CLI version and network connectivity on the checkout host, then refresh.",
-    );
+    // Branch-change guards above are authoritative; only this catch-all
+    // failure may be retried while the browser keeps its last-known status.
+    return {
+      ...finish(
+        "error",
+        "Could not read PR/MR status. Check repository access, CLI version and network connectivity on the checkout host, then refresh.",
+      ),
+      retryable: true,
+    };
   }
 }

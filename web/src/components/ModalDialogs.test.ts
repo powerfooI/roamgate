@@ -4,7 +4,10 @@ import type { ReactElement } from "react";
 import type { Root } from "react-dom/client";
 import type { ConnectionClient } from "../api";
 import type { Workspace, WorktreeList } from "../types";
-import type { PullRequestStatus } from "../../../shared/pullRequest";
+import type {
+  PullRequestStatus,
+  PullRequestSummary,
+} from "../../../shared/pullRequest";
 
 if (process.env.ROAMGATE_DIALOG_EFFECT_DOM_TEST !== "1") {
   test("dialog effect regressions in an isolated runtime", async () => {
@@ -71,6 +74,7 @@ async function registerDomTests() {
   const { Bridge, bridge } = await import("../api");
   const { __storeTesting, store } = await import("../store");
   const { WorkspaceTree } = await import("./WorkspaceTree");
+  const { PullRequestCard } = await import("./PullRequestCard");
   let listCalls = 0;
   const client: ConnectionClient = {
     connectionId: "dialog-test",
@@ -726,6 +730,396 @@ async function registerDomTests() {
     }
   });
 
+  test("sidebar reviews reconcile targets independently and keep the last success across transient failures", async () => {
+    const requests: Array<{
+      params: Record<string, unknown>;
+      resolve: (status: PullRequestStatus) => void;
+      reject: (error: Error) => void;
+    }> = [];
+    const reviewClient = {
+      ...client,
+      call: async (_method: string, params?: Record<string, unknown>) =>
+        new Promise<PullRequestStatus>((resolve, reject) =>
+          requests.push({ params: params!, resolve, reject }),
+        ),
+    };
+    const other: Workspace = {
+      ...sidebarWorkspace,
+      workspace_id: "other-workspace",
+      worktree: {
+        ...sidebarWorkspace.worktree!,
+        checkout_path: "/repo/other",
+      },
+    };
+    const withBranch = (
+      workspace: Workspace,
+      branch?: string,
+      error?: string,
+    ) => ({
+      ...workspace,
+      worktree: {
+        ...workspace.worktree!,
+        git_status: { ...workspace.worktree!.git_status!, branch, error },
+      },
+    });
+    function Reviews({ workspaces }: { workspaces: Workspace[] }) {
+      return h(
+        "pre",
+        null,
+        JSON.stringify(useWorkspacePullRequests(reviewClient, workspaces)),
+      );
+    }
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const render = (workspaces: Workspace[]) =>
+      act(async () => root!.render(h(Reviews, { workspaces })));
+    const shown = () =>
+      JSON.parse(container.textContent!) as Record<string, PullRequestSummary>;
+    const settle = (
+      status: (params: Record<string, unknown>) => PullRequestStatus | Error,
+    ) =>
+      act(async () => {
+        for (const request of requests.splice(0)) {
+          const value = status(request.params);
+          if (value instanceof Error) request.reject(value);
+          else request.resolve(value);
+        }
+      });
+    jest.useFakeTimers();
+    try {
+      await render([sidebarWorkspace, other]);
+      await settle(() => mergedStatus);
+      expect(Object.keys(shown())).toEqual([
+        "other-workspace",
+        "review-workspace",
+      ]);
+
+      // A branch change requests only that target and leaves the other alone.
+      await render([withBranch(sidebarWorkspace, "next"), other]);
+      expect(Object.keys(shown())).toEqual(["other-workspace"]);
+      expect(requests.map((request) => request.params.branch)).toEqual([
+        "next",
+      ]);
+      // An obsolete reply for the old branch never reappears.
+      await render([sidebarWorkspace, other]);
+      await settle(() => ({
+        ...mergedStatus,
+        request: { ...mergedStatus.request!, state: "open" },
+      }));
+      expect(shown()["review-workspace"].request?.state).toBe("merged");
+      expect(requests.map((request) => request.params.branch)).toEqual([
+        "topic-0",
+      ]);
+      await settle(() => mergedStatus);
+
+      // A transient Git status error hides only its own workspace.
+      await render([
+        withBranch(sidebarWorkspace, undefined, "git failed"),
+        other,
+      ]);
+      expect(Object.keys(shown())).toEqual(["other-workspace"]);
+      await render([sidebarWorkspace, other]);
+      expect(Object.keys(shown())).toHaveLength(2);
+      await settle(() => mergedStatus);
+
+      // A poll keeps summaries while pending; failures keep the last success.
+      await act(async () => jest.advanceTimersByTime(60_000));
+      expect(requests).toHaveLength(2);
+      expect(Object.keys(shown())).toHaveLength(2);
+      await settle((params) =>
+        params.workspace_id === "review-workspace"
+          ? new Error("Connection failed")
+          : {
+              ...mergedStatus,
+              state: "error",
+              retryable: true,
+              message: "Provider unavailable",
+              refreshedAt: "2026-10-02T00:00:00Z",
+            },
+      );
+      for (const id of ["review-workspace", "other-workspace"]) {
+        expect(shown()[id]).toMatchObject({
+          state: "ready",
+          refreshedAt: mergedStatus.refreshedAt,
+          request: { state: "merged" },
+        });
+        expect(shown()[id].stale?.failedAt).toBeString();
+      }
+      expect(shown()["other-workspace"].stale?.message).toBe(
+        "Provider unavailable",
+      );
+
+      // Authoritative results and recoveries replace the stale fallback.
+      await act(async () => jest.advanceTimersByTime(60_000));
+      await settle((params) =>
+        params.workspace_id === "review-workspace"
+          ? { ...mergedStatus, refreshedAt: "2026-10-03T00:00:00Z" }
+          : { ...mergedStatus, state: "detached", request: undefined },
+      );
+      expect(shown()["review-workspace"].stale).toBeUndefined();
+      expect(shown()["review-workspace"].refreshedAt).toBe(
+        "2026-10-03T00:00:00Z",
+      );
+      expect(shown()["other-workspace"]).toMatchObject({ state: "detached" });
+      await act(async () => jest.advanceTimersByTime(60_000));
+      await settle(() => ({
+        ...mergedStatus,
+        state: "error",
+        retryable: true,
+        request: undefined,
+      }));
+      // No success remains for the authoritative result to fall back to.
+      expect(shown()["other-workspace"]).toMatchObject({ state: "error" });
+      expect(shown()["other-workspace"].request).toBeUndefined();
+    } finally {
+      await act(async () => root!.unmount());
+      root = null;
+      jest.useRealTimers();
+    }
+  });
+
+  test("sidebar polling is not postponed by other targets changing", async () => {
+    const requests: Array<{
+      params: Record<string, unknown>;
+      resolve: (status: PullRequestStatus) => void;
+    }> = [];
+    const reviewClient = {
+      ...client,
+      call: async (_method: string, params?: Record<string, unknown>) =>
+        new Promise<PullRequestStatus>((resolve) =>
+          requests.push({ params: params!, resolve }),
+        ),
+    };
+    const other: Workspace = {
+      ...sidebarWorkspace,
+      workspace_id: "other-workspace",
+      worktree: { ...sidebarWorkspace.worktree!, checkout_path: "/repo/other" },
+    };
+    function Reviews({ workspaces }: { workspaces: Workspace[] }) {
+      return h(
+        "pre",
+        null,
+        JSON.stringify(useWorkspacePullRequests(reviewClient, workspaces)),
+      );
+    }
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const render = (branch: string) =>
+      act(async () =>
+        root!.render(
+          h(Reviews, {
+            workspaces: [
+              sidebarWorkspace,
+              {
+                ...other,
+                worktree: {
+                  ...other.worktree!,
+                  git_status: { ...other.worktree!.git_status!, branch },
+                },
+              },
+            ],
+          }),
+        ),
+      );
+    const settle = () =>
+      act(async () =>
+        requests.splice(0).forEach(({ resolve }) => resolve(mergedStatus)),
+      );
+    jest.useFakeTimers();
+    try {
+      await render("b0");
+      await settle();
+      // A branch change 30s in requests only that workspace and must not
+      // push back the 60s round for both.
+      await act(async () => jest.advanceTimersByTime(30_000));
+      await render("b1");
+      expect(requests.map(({ params }) => params.workspace_id)).toEqual([
+        "other-workspace",
+      ]);
+      await settle();
+      await act(async () => jest.advanceTimersByTime(30_000));
+      expect(requests.map(({ params }) => params.workspace_id).sort()).toEqual([
+        "other-workspace",
+        "review-workspace",
+      ]);
+    } finally {
+      await act(async () => root!.unmount());
+      root = null;
+      jest.useRealTimers();
+    }
+  });
+
+  test("worktree reviews are requested again when a closed dialog reopens", async () => {
+    let calls = 0;
+    const replies: Array<(status: PullRequestStatus) => void> = [];
+    const reviewClient: ConnectionClient = {
+      ...client,
+      call: async () => {
+        calls += 1;
+        return new Promise((resolve) => replies.push(resolve));
+      },
+    };
+    const single = { ...reviewList, worktrees: [reviewList.worktrees[0]] };
+    function Reviews({ list }: { list: WorktreeList | null }) {
+      return h(
+        "pre",
+        null,
+        JSON.stringify(
+          useWorktreePullRequests(reviewClient, "workspace", list, 0),
+        ),
+      );
+    }
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const render = (list: WorktreeList | null) =>
+      act(async () => root!.render(h(Reviews, { list })));
+    await render(single);
+    await act(async () => replies.shift()!(mergedStatus));
+    expect(calls).toBe(1);
+    // Dialogs stay mounted and pass no list while closed.
+    await render(null);
+    expect(container.textContent).toBe("{}");
+    await render(single);
+    expect(calls).toBe(2);
+    // The previous summary stays visible while the new request is pending.
+    expect(container.textContent).toContain("merged");
+    await act(async () =>
+      replies.shift()!({
+        ...mergedStatus,
+        request: { ...mergedStatus.request!, state: "open" },
+      }),
+    );
+    expect(container.textContent).toContain('"state":"open"');
+  });
+
+  test("sidebar badges and the open action survive a failed refresh", async () => {
+    const previousState = store.get();
+    let fail = false;
+    const call = spyOn(client, "call").mockImplementation(async () => {
+      if (fail) throw new Error("Connection failed");
+      return mergedStatus;
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    jest.useFakeTimers();
+    try {
+      await act(async () => {
+        __storeTesting.replaceState({
+          ...previousState,
+          status: "connected",
+          workspaces: [sidebarWorkspace],
+          tabs: [],
+          panes: [],
+        });
+        root!.render(h(WorkspaceTree));
+      });
+      const badge = () =>
+        container.querySelector(".tree-row > .workspace-review");
+      expect(badge()?.hasAttribute("data-stale")).toBe(false);
+      fail = true;
+      await act(async () => jest.advanceTimersByTime(60_000));
+      expect(badge()?.textContent).toBe("#1");
+      expect(badge()?.hasAttribute("data-stale")).toBe(true);
+      expect(badge()?.getAttribute("aria-label")).toContain("refresh failed");
+      await act(async () => {
+        container.querySelector(".tree-row")!.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            clientX: 10,
+            clientY: 10,
+          }),
+        );
+      });
+      expect(
+        Array.from(container.querySelectorAll("button")).some(
+          (button) => button.textContent === "Open PR on GitHub",
+        ),
+      ).toBe(true);
+    } finally {
+      await act(async () => root!.unmount());
+      root = null;
+      jest.useRealTimers();
+      call.mockRestore();
+      __storeTesting.replaceState(previousState);
+    }
+  });
+
+  test("inspector manual refresh keeps the shown request and falls back to it on failure", async () => {
+    const replies: Array<(status: PullRequestStatus | Error) => void> = [];
+    const cardClient: ConnectionClient = {
+      ...client,
+      call: async () =>
+        new Promise((resolve, reject) =>
+          replies.push((value) =>
+            value instanceof Error ? reject(value) : resolve(value),
+          ),
+        ),
+    };
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const refresh = () =>
+      container.querySelector<HTMLButtonElement>(
+        '[aria-label="Refresh PR/MR status"]',
+      )!;
+    const title = () =>
+      container.querySelector(".pull-request-card-title")?.textContent;
+    await act(async () =>
+      root!.render(
+        h(PullRequestCard, {
+          client: cardClient,
+          workspaceId: "workspace",
+          branch: "topic-0",
+        }),
+      ),
+    );
+    expect(title()).toBe("Checking this branch...");
+    await act(async () => replies.shift()!(mergedStatus));
+    expect(title()).toBe("Merged feature");
+    for (const failure of [
+      new Error("Connection failed"),
+      {
+        ...mergedStatus,
+        state: "error" as const,
+        retryable: true,
+        message: "Provider unavailable",
+        request: undefined,
+      },
+    ]) {
+      await act(async () => refresh().click());
+      expect(refresh().disabled).toBe(true);
+      expect(title()).toBe("Merged feature");
+      expect(container.querySelector(".pull-request-card-link")).not.toBeNull();
+      await act(async () => replies.shift()!(failure));
+      expect(title()).toBe("Merged feature");
+      expect(container.querySelector(".pull-request-card-link")).not.toBeNull();
+      expect(
+        container.querySelector(".pull-request-card-stale")?.textContent,
+      ).toBe("Last known");
+      expect(container.textContent).toContain("Last successful refresh");
+    }
+    expect(container.textContent).toContain("Provider unavailable");
+    await act(async () => refresh().click());
+    await act(async () =>
+      replies.shift()!({
+        ...mergedStatus,
+        state: "no_match",
+        request: undefined,
+      }),
+    );
+    expect(title()).toBe("No linked request");
+    expect(container.querySelector(".pull-request-card-stale")).toBeNull();
+    // Without a previous success, failures stay explicit errors.
+    await act(async () => refresh().click());
+    await act(async () => replies.shift()!(new Error("Connection failed")));
+    expect(title()).toBe("Status unavailable");
+    expect(container.querySelector(".pull-request-card-link")).toBeNull();
+  });
+
   test("worktree reviews bound concurrency, keep ordinary list polling local, and discard obsolete replies", async () => {
     const pending: Array<(value: PullRequestStatus) => void> = [];
     let calls = 0;
@@ -781,10 +1175,12 @@ async function registerDomTests() {
     );
     expect(calls).toBe(5);
 
-    // Explicit refresh clears even a previously merged result.
+    // Explicit refreshes keep unchanged targets visible while pending.
+    const shown = () =>
+      JSON.parse(container.textContent!) as Record<string, PullRequestSummary>;
     const oldReplies = pending.splice(0);
     await act(async () => render(reviewList, 1));
-    expect(container.textContent).toBe("{}");
+    expect(shown()["/repo/topic-0"]?.request?.state).toBe("merged");
     expect(calls).toBe(5);
     await act(async () => render(reviewList, 2));
     expect(calls).toBe(5);
@@ -793,8 +1189,57 @@ async function registerDomTests() {
     );
     expect(calls).toBe(5);
     await act(async () => oldReplies[oldReplies.length - 1](mergedStatus));
-    expect(container.textContent).toBe("{}");
+    // Superseded rounds stop issuing work; topic-5 waits for this round.
+    expect(Object.keys(shown())).toHaveLength(5);
     expect(calls).toBe(9);
+
+    // Retryable failures keep the last success; authoritative results win.
+    const failedAt = "2026-10-02T00:00:00Z";
+    await act(async () => {
+      pending.shift()!({
+        ...mergedStatus,
+        state: "error",
+        retryable: true,
+        message: "Provider unavailable",
+        refreshedAt: failedAt,
+        request: undefined,
+      });
+      pending.shift()!({
+        ...mergedStatus,
+        state: "error",
+        message: "The branch changed during refresh. Refresh again.",
+        request: undefined,
+      });
+      pending.shift()!({
+        ...mergedStatus,
+        state: "no_match",
+        request: undefined,
+      });
+    });
+    expect(shown()["/repo/topic-0"]).toMatchObject({
+      state: "ready",
+      refreshedAt: mergedStatus.refreshedAt,
+      request: { state: "merged" },
+      stale: { failedAt, message: "Provider unavailable" },
+    });
+    expect(shown()["/repo/topic-1"].state).toBe("error");
+    expect(shown()["/repo/topic-1"].request).toBeUndefined();
+    expect(shown()["/repo/topic-2"].state).toBe("no_match");
+    expect(calls).toBe(11);
+    await act(async () => render(reviewList, 3));
+    await act(async () =>
+      pending.splice(0).forEach((resolve) => resolve(mergedStatus)),
+    );
+    expect(calls).toBe(15);
+    // The next success replaces the stale fallback.
+    await act(async () =>
+      pending.shift()!({
+        ...mergedStatus,
+        refreshedAt: "2026-10-03T00:00:00Z",
+      }),
+    );
+    expect(shown()["/repo/topic-0"].stale).toBeUndefined();
+    expect(shown()["/repo/topic-0"].refreshedAt).toBe("2026-10-03T00:00:00Z");
 
     const previousConnection = pending.splice(0);
     current = false;
@@ -804,7 +1249,7 @@ async function registerDomTests() {
       generation: 2,
       isCurrent: () => true,
     };
-    await act(async () => render(reviewList, 2, nextClient));
+    await act(async () => render(reviewList, 3, nextClient));
     await act(async () =>
       previousConnection.forEach((resolve) => resolve(mergedStatus)),
     );
@@ -815,7 +1260,7 @@ async function registerDomTests() {
       ...reviewList,
       source: { ...reviewList.source, repo_key: "other-repo" },
     };
-    await act(async () => render(nextRepo, 2, nextClient));
+    await act(async () => render(nextRepo, 3, nextClient));
     await act(async () =>
       previousRepo.forEach((resolve) => resolve(mergedStatus)),
     );
@@ -922,8 +1367,19 @@ async function registerDomTests() {
           }),
         );
         expect(reviews).toBe(2);
-        expect(document.body.textContent).toContain("PR/MR: Unavailable");
-        expect(document.body.textContent).not.toContain("PR #1: Merged");
+        // A rejected refresh keeps the last success, marked as last known.
+        expect(document.body.textContent).toContain(
+          "PR #1: Merged (last known)",
+        );
+        expect(document.body.textContent).toContain("Refresh failed at");
+        expect(
+          document
+            .querySelector(".worktree-review-detail > time")
+            ?.getAttribute("datetime"),
+        ).toBe(mergedStatus.refreshedAt);
+        expect(
+          document.querySelector(".worktree-review-badge[data-stale]"),
+        ).not.toBeNull();
         failInventory = true;
         await act(async () => refresh.click());
         expect(reviews).toBe(2);

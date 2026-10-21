@@ -14,7 +14,10 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
   icon, preserving the workspace name. When several requests match, the sidebar
   shows the most recently created one. The workspace menu opens that request
   directly. Status refreshes every
-  minute after each check; unresolved requests keep the branch label. This uses
+  minute after each check; unresolved requests keep the branch label. A
+  refresh keeps the current badge visible, and a failed refresh keeps the last
+  known request dimmed with its last successful check time. A rebase stopped on
+  a detached HEAD keeps the rebased branch's request. This uses
   the same host-side authentication as the
   [PR/MR status card](#workspace-inspector).
 - New workspace paths accept absolute paths or `~/` and suggest subdirectories
@@ -82,7 +85,9 @@ Inspector button, shortcuts, or workspace/agent menus.
 - The **PR/MR status** card in **Changes** and **Commits** shows the branch's
   GitHub pull request or GitLab merge request: state, checks, and reviews. It
   needs `gh` or `glab` authenticated on the checkout host and never changes
-  anything remotely.
+  anything remotely. If a refresh fails, it keeps the last known request marked
+  **Last known**. A detached checkout resolves a request only while a branch
+  rebase is in progress.
 
 Inspector state is scoped to each checkout; see
 [resource ownership](docs/ARCHITECTURE.md#workspace-resource-ownership).

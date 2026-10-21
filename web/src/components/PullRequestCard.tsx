@@ -25,14 +25,26 @@ export function PullRequestCard({
   const [match, setMatch] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [status, setStatus] = useState<PullRequestStatus | null>(null);
+  const [stale, setStale] = useState<PullRequestStale | null>(null);
   const [error, setError] = useState("");
   const [finishedAt, setFinishedAt] = useState("");
+  const [loading, setLoading] = useState(true);
   const sequence = useRef(0);
+  // The host remounts this card when its workspace, branch or connection
+  // changes; remote/match selections reset this explicitly.
+  const lastGood = useRef<PullRequestStatus | null>(null);
   useEffect(() => {
     const request = ++sequence.current;
-    setStatus(null);
+    setLoading(true);
     setError("");
-    setFinishedAt("");
+    const fallBack = (failedAt: string, message?: string) => {
+      const good = lastGood.current;
+      if (!good) return false;
+      setStatus(good);
+      setStale({ failedAt, message });
+      setFinishedAt(good.refreshedAt);
+      return true;
+    };
     void client
       .call(
         "git.pull_request",
@@ -46,12 +58,27 @@ export function PullRequestCard({
       )
       .then((value: PullRequestStatus) => {
         if (sequence.current !== request || !client.isCurrent()) return;
+        setLoading(false);
+        if (
+          value.state === "error" &&
+          value.retryable &&
+          fallBack(value.refreshedAt, value.message)
+        )
+          return;
+        lastGood.current = value.state === "ready" ? value : null;
         setStatus(value);
+        setStale(null);
         setFinishedAt(value.refreshedAt);
       })
       .catch(() => {
         if (sequence.current !== request || !client.isCurrent()) return;
-        setError("PR/MR status unavailable. Check the connection and refresh.");
+        setLoading(false);
+        const message =
+          "PR/MR status unavailable. Check the connection and refresh.";
+        if (fallBack(new Date().toISOString(), message)) return;
+        setStatus(null);
+        setStale(null);
+        setError(message);
         setFinishedAt(new Date().toISOString());
       });
     return () => {
@@ -60,10 +87,11 @@ export function PullRequestCard({
   }, [client, workspaceId, branch, remote, match, refresh]);
 
   const current = client.isCurrent() ? status : null;
-  const loading = !status && !error;
   const reset = () => {
     sequence.current++;
+    lastGood.current = null;
     setStatus(null);
+    setStale(null);
     setError("");
     setFinishedAt("");
   };
@@ -71,16 +99,14 @@ export function PullRequestCard({
     <PullRequestCardView
       current={current}
       loading={loading}
+      stale={current ? stale : null}
       error={
         client.isCurrent()
           ? error
           : "Connection changed. Reopen Inspector to refresh."
       }
       finishedAt={finishedAt}
-      onRefresh={() => {
-        reset();
-        setRefresh((value) => value + 1);
-      }}
+      onRefresh={() => setRefresh((value) => value + 1)}
       onRemoteChange={(value) => {
         reset();
         setRemote(value);
@@ -94,9 +120,12 @@ export function PullRequestCard({
   );
 }
 
+type PullRequestStale = { failedAt: string; message?: string };
+
 export function PullRequestCardView({
   current,
   loading,
+  stale = null,
   error,
   finishedAt,
   onRefresh,
@@ -104,7 +133,10 @@ export function PullRequestCardView({
   onMatchChange,
 }: {
   current: PullRequestStatus | null;
+  /** A request is pending; a shown status stays visible while it refreshes. */
   loading: boolean;
+  /** The shown status is the last success; the latest refresh failed. */
+  stale?: PullRequestStale | null;
   error: string;
   finishedAt: string;
   onRefresh: () => void;
@@ -120,30 +152,36 @@ export function PullRequestCardView({
         : "PR/MR";
   const label = error
     ? "Status unavailable"
-    : loading
-      ? "Checking this branch..."
-      : current
-        ? {
-            ready: "Request found",
-            select_remote: "Choose a source remote",
-            select_match: "Choose a request",
-            unsupported: "Provider not configured",
-            missing_cli: "CLI setup needed",
-            unauthenticated: "Authentication needed",
-            no_match: "No linked request",
-            detached: "No branch selected",
-            error: "Status unavailable",
-          }[current.state]
+    : current
+      ? {
+          ready: "Request found",
+          select_remote: "Choose a source remote",
+          select_match: "Choose a request",
+          unsupported: "Provider not configured",
+          missing_cli: "CLI setup needed",
+          unauthenticated: "Authentication needed",
+          no_match: "No linked request",
+          detached: "No branch selected",
+          error: "Status unavailable",
+        }[current.state]
+      : loading
+        ? "Checking this branch..."
         : "Status unavailable";
   const needsAttention =
     !!error ||
+    !!stale ||
     ["error", "missing_cli", "unauthenticated"].includes(current?.state ?? "");
-  const message = error || current?.message;
+  const message = error || stale?.message || current?.message;
+  const staleLabel = stale
+    ? `Refresh failed; showing last known status from ${new Date(current?.refreshedAt ?? stale.failedAt).toLocaleString()}`
+    : "";
   return (
     <section
       className="pull-request-card"
       aria-label="Pull or merge request status"
+      aria-busy={loading || undefined}
       data-attention={needsAttention || undefined}
+      data-stale={stale ? true : undefined}
     >
       <details className="pull-request-card-disclosure">
         <summary className="pull-request-card-summary">
@@ -183,6 +221,16 @@ export function PullRequestCardView({
               data-state={pr.draft ? "draft" : pr.state}
             >
               {pr.draft ? `Draft / ${pr.state}` : pr.state}
+            </span>
+          ) : null}
+          {stale ? (
+            <span
+              className="pull-request-card-stale"
+              title={staleLabel}
+              aria-label={staleLabel}
+              role="img"
+            >
+              Last known
             </span>
           ) : null}
           <ChevronRight
@@ -242,7 +290,7 @@ export function PullRequestCardView({
               </dl>
             </div>
           ) : null}
-          {!loading || error ? (
+          {current || error || !loading ? (
             <details className="pull-request-card-context">
               <summary>
                 <ChevronRight size={12} aria-hidden="true" />
@@ -278,13 +326,26 @@ export function PullRequestCardView({
                       <dt>Branch</dt>
                       <dd>
                         <code>{current.branch || "Detached HEAD"}</code>
+                        {current.rebasing ? " (rebase in progress)" : null}
                       </dd>
                     </div>
                   </>
                 ) : null}
+                {stale ? (
+                  <div>
+                    <dt>Last refresh failed</dt>
+                    <dd>
+                      <time dateTime={stale.failedAt}>
+                        {new Date(stale.failedAt).toLocaleString()}
+                      </time>
+                    </dd>
+                  </div>
+                ) : null}
                 {finishedAt ? (
                   <div>
-                    <dt>Last refreshed</dt>
+                    <dt>
+                      {stale ? "Last successful refresh" : "Last refreshed"}
+                    </dt>
                     <dd>
                       <time dateTime={finishedAt}>
                         {new Date(finishedAt).toLocaleString()}

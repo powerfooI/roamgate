@@ -115,6 +115,10 @@
   color: var(--red);
 }
 
+.workspace-review[data-stale] {
+  opacity: 0.65;
+}
+
 .tree-row.is-focused > .ws-label {
   color: var(--text-strong);
   font-weight: 700;
