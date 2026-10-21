@@ -113,20 +113,6 @@
   opacity: 1;
 }
 
-/* Stands in for the hidden scrollbar while the track overflows. */
-.conversation-minimap-thumb {
-  position: absolute;
-  top: 0;
-  right: -4px;
-  width: 2px;
-  height: var(--thumb-size);
-  border-radius: 1px;
-  background: var(--accent);
-  opacity: 0.55;
-  transform: translateY(var(--thumb-offset));
-  pointer-events: none;
-}
-
 .conversation-minimap-preview {
   position: absolute;
   top: var(--preview-position);
@@ -202,16 +188,6 @@
 .conversation-minimap.is-horizontal .conversation-minimap-mark::before {
   width: 2px;
   height: min(var(--mark-size), 100%);
-}
-
-.conversation-minimap.is-horizontal .conversation-minimap-thumb {
-  top: auto;
-  right: auto;
-  bottom: -1px;
-  left: 0;
-  width: var(--thumb-size);
-  height: 2px;
-  transform: translateX(var(--thumb-offset));
 }
 
 .conversation-minimap.is-horizontal .conversation-minimap-preview {

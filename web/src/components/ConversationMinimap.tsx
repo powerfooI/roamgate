@@ -201,7 +201,6 @@ export const ConversationMinimap = memo(function ConversationMinimap({
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
-  const thumbRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const [horizontal, setHorizontal] = useState(orientation === "horizontal");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -281,46 +280,13 @@ export const ConversationMinimap = memo(function ConversationMinimap({
   const positionPreviewRef = useRef(positionPreview);
   positionPreviewRef.current = positionPreview;
 
-  // The thumb stands in for the track's hidden scrollbar while it overflows.
-  const syncThumb = useCallback(() => {
-    const track = trackRef.current;
-    const thumb = thumbRef.current;
-    if (!track || !thumb) return;
-    const geometry = trackGeometry(track, horizontal, count);
-    const max = geometry.scrollLength - geometry.clientLength;
-    if (max <= 1) {
-      thumb.style.display = "none";
-      return;
-    }
-    const size = clamp(
-      (geometry.clientLength / geometry.scrollLength) * geometry.clientLength,
-      Math.min(12, geometry.clientLength),
-      geometry.clientLength,
-    );
-    thumb.style.display = "block";
-    thumb.style.setProperty("--thumb-size", `${size}px`);
-    thumb.style.setProperty(
-      "--thumb-offset",
-      `${(geometry.scroll / max) * (geometry.clientLength - size)}px`,
-    );
-  }, [count, horizontal]);
-
   useEffect(() => {
     const track = trackRef.current;
-    if (!track) return;
-    const onScroll = () => {
-      syncThumb();
-      if (!horizontal) positionPreviewRef.current();
-    };
-    syncThumb();
+    if (!track || horizontal) return;
+    const onScroll = () => positionPreviewRef.current();
     track.addEventListener("scroll", onScroll, { passive: true });
-    const observer = new window.ResizeObserver(syncThumb);
-    observer.observe(track);
-    return () => {
-      track.removeEventListener("scroll", onScroll);
-      observer.disconnect();
-    };
-  }, [horizontal, syncThumb]);
+    return () => track.removeEventListener("scroll", onScroll);
+  }, [empty, horizontal]);
 
   // Keep the in-view marks inside an overflowing track. Glide only when they
   // actually leave it, so scrolling the conversation does not restart a
@@ -523,12 +489,6 @@ export const ConversationMinimap = memo(function ConversationMinimap({
         >
           {marks}
         </div>
-        <div
-          ref={thumbRef}
-          className="conversation-minimap-thumb"
-          style={{ display: "none" }}
-          aria-hidden="true"
-        />
         {preview ? (
           <div
             ref={previewRef}

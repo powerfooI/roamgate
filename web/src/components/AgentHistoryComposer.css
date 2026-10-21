@@ -16,6 +16,7 @@
 .agent-history-composer-row textarea {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 36px;
   max-height: 160px;
   resize: none;
   padding: 7px 8px;
@@ -25,14 +26,20 @@
   line-height: 1.4;
 }
 
-.agent-history-composer-send {
+.agent-history-composer-send,
+.agent-history-composer-attach {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-height: 30px;
+  height: 36px;
   font-size: 11px;
+}
+
+.agent-history-composer-attach {
+  min-width: 36px;
+  padding: 0;
 }
 
 .agent-history-composer-warning {

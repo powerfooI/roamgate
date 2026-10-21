@@ -97,8 +97,10 @@ Inspector state is scoped to each checkout; see
   minimap, and tool details. The **Chat view** toggle reads them as
   conversation bubbles with rendered replies and collapsible tool-call blocks
   that follow new output, plus a message box that types into the agent's
-  terminal and shares the pane's terminal composer draft. Enter sends and
-  Shift+Enter adds a line; on touch keyboards Enter adds a line and the Send
+  terminal and shares the pane's terminal composer draft. Paste images or use
+  **Add images** to choose them on desktop or mobile; uploaded image paths stay
+  in the draft until you send. Enter sends and Shift+Enter adds a line; on
+  touch keyboards Enter adds a line and the Send
   button sends. On phones the box replaces the terminal composer dock while
   the chat is open. Sending to an agent that is working, blocked, or in an
   unknown state first shows where the text will land and needs **Send

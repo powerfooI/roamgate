@@ -7,7 +7,7 @@
 }
 
 .overlay-scrollbar-thumb {
-  /* Keep the drag target wide while matching the minimap's thin indicator. */
+  /* Keep the drag target wider than the visible indicator. */
   position: absolute;
   padding: 0;
   border: 0;

@@ -27,6 +27,7 @@ import {
   sendTerminalComposerText,
   terminalComposerDraftKey,
 } from "../terminalComposer";
+import { uploadTerminalImage } from "../terminalImageUpload";
 import type { Pane } from "../types";
 import {
   DEFAULT_INSPECTOR_NAVIGATION_RATIO,
@@ -802,8 +803,8 @@ export function AgentHistoryDrawer({
     },
     [connectionClient, loadHistory, pane.pane_id],
   );
-  const notifySendError = useCallback((detail: string) => {
-    store.notify({ kind: "error", message: "Message not sent", detail });
+  const notifyComposerError = useCallback((detail: string) => {
+    store.notify({ kind: "error", message: "Message input failed", detail });
   }, []);
   const composerDraftKey = terminalComposerDraftKey(
     activeConnectionId,
@@ -841,7 +842,8 @@ export function AgentHistoryDrawer({
         status={pane.agent_status}
         stateSeq={pane.state_change_seq}
         onSend={sendMessage}
-        onError={notifySendError}
+        onUploadImage={(file) => uploadTerminalImage(connectionClient, file)}
+        onError={notifyComposerError}
       />
     </div>
   );

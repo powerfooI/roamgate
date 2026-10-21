@@ -5,7 +5,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { Send, TriangleAlert } from "lucide-react";
+import { ImagePlus, Send, TriangleAlert } from "lucide-react";
 import { useLayoutPreferences } from "../layoutPreferences";
 import {
   shortcutLabel,
@@ -13,16 +13,23 @@ import {
   useShortcutPreferences,
 } from "../shortcutPreferences";
 import {
+  beginTerminalComposerUpload,
+  finishTerminalComposerUpload,
+  insertIntoTerminalComposerDraft,
   readTerminalComposerDraft,
+  readTerminalComposerSelection,
+  retainTerminalComposerUploadPaths,
   submitTerminalComposerDraft,
   subscribeTerminalComposerDraft,
   subscribeTerminalComposerSubmission,
   subscribeTerminalComposerUpload,
+  terminalComposerDraftKeyIsActive,
   terminalComposerSubmissionPending,
   terminalComposerUploadCount,
   writeTerminalComposerDraft,
   writeTerminalComposerSelection,
 } from "../terminalComposer";
+import { terminalUploadedPathsText } from "../terminalFileDrop";
 import { agentPromptWarning, agentStateKind } from "./agentSession";
 import { useTouchReleaseSubmit } from "./useTouchReleaseSubmit";
 import "./AgentHistoryComposer.css";
@@ -48,6 +55,7 @@ export function AgentHistoryComposer({
   status,
   stateSeq,
   onSend,
+  onUploadImage,
   onError,
 }: {
   draftKey: string;
@@ -56,6 +64,7 @@ export function AgentHistoryComposer({
   // Herdr's agent state-change sequence; it advances on every transition.
   stateSeq?: number;
   onSend: (text: string) => Promise<void>;
+  onUploadImage: (file: File) => Promise<string>;
   onError: (message: string) => void;
 }) {
   useShortcutPreferences();
@@ -70,6 +79,7 @@ export function AgentHistoryComposer({
   const [composing, setComposing] = useState(false);
   const composingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const warning = agentPromptWarning(agent, status);
   const agentState = agentStateKind(status);
   // What a warning was shown for: the draft, the agent, and its state.
@@ -112,10 +122,53 @@ export function AgentHistoryComposer({
     void text;
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, MAX_INPUT_HEIGHT_PX)}px`;
-  }, [text]);
+    const selection = readTerminalComposerSelection(draftKey);
+    if (selection) textarea.setSelectionRange(selection.start, selection.end);
+  }, [draftKey, text]);
 
   const busy = submissionPending || uploadCount > 0;
   const sendDisabled = !text.trim() || busy || composing;
+
+  const uploadImages = async (files: File[]) => {
+    if (
+      files.length === 0 ||
+      composingRef.current ||
+      terminalComposerSubmissionPending(draftKey) ||
+      !beginTerminalComposerUpload(draftKey)
+    )
+      return;
+    const paths: string[] = [];
+    try {
+      for (const file of files) {
+        if (!file.type.startsWith("image/"))
+          throw new Error("Choose an image to attach.");
+        paths.push(await onUploadImage(file));
+      }
+      if (!terminalComposerDraftKeyIsActive(draftKey))
+        throw new Error(
+          "Connection or pane changed; image paths retained in the original draft.",
+        );
+      if (composingRef.current)
+        throw new Error(
+          "Image paths retained in the draft during text composition.",
+        );
+      insertIntoTerminalComposerDraft(
+        draftKey,
+        terminalUploadedPathsText(paths),
+      );
+      paths.length = 0;
+    } catch (error) {
+      // Keep earlier successful uploads when a later image fails or the pane closes.
+      if (paths.length)
+        retainTerminalComposerUploadPaths(
+          draftKey,
+          terminalUploadedPathsText(paths),
+        );
+      onError(error instanceof Error ? error.message : "Image upload failed");
+    } finally {
+      finishTerminalComposerUpload(draftKey);
+    }
+  };
 
   const send = async (confirmed: boolean) => {
     const draft = text;
@@ -186,6 +239,17 @@ export function AgentHistoryComposer({
         </div>
       ) : null}
       <div className="agent-history-composer-row">
+        <button
+          type="button"
+          className="agent-history-composer-attach"
+          aria-label="Add images"
+          title="Add images"
+          disabled={busy || composing}
+          onMouseDown={keepTextareaFocus}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <ImagePlus size={17} aria-hidden="true" />
+        </button>
         <textarea
           ref={textareaRef}
           value={text}
@@ -194,9 +258,28 @@ export function AgentHistoryComposer({
           placeholder={name ? `Message ${name}...` : "Message..."}
           enterKeyHint={enterAddsLine ? "enter" : "send"}
           autoComplete="off"
-          onChange={(event) =>
-            writeTerminalComposerDraft(draftKey, event.currentTarget.value)
-          }
+          onChange={(event) => {
+            const textarea = event.currentTarget;
+            writeTerminalComposerDraft(draftKey, textarea.value);
+            writeTerminalComposerSelection(
+              draftKey,
+              textarea.selectionStart,
+              textarea.selectionEnd,
+            );
+          }}
+          onPaste={(event) => {
+            const files = Array.from(event.clipboardData.files);
+            const images = (
+              files.length
+                ? files
+                : Array.from(event.clipboardData.items)
+                    .map((item) => item.getAsFile())
+                    .filter((file): file is File => file !== null)
+            ).filter((file) => file.type.startsWith("image/"));
+            if (images.length === 0) return;
+            event.preventDefault();
+            void uploadImages(images);
+          }}
           onSelect={(event) => {
             const textarea = event.currentTarget;
             // Skip selections of a value the shared draft has not committed.
@@ -254,8 +337,24 @@ export function AgentHistoryComposer({
           {...touchSubmit.buttonProps(() => void send(false))}
         >
           <Send size={13} />
-          {submissionPending ? "Sending..." : "Send"}
+          {uploadCount > 0
+            ? "Uploading..."
+            : submissionPending
+              ? "Sending..."
+              : "Send"}
         </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(event) => {
+            const files = Array.from(event.currentTarget.files ?? []);
+            event.currentTarget.value = "";
+            void uploadImages(files);
+          }}
+        />
       </div>
     </div>
   );
