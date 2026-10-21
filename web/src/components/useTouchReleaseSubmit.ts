@@ -45,7 +45,6 @@ export function useTouchReleaseSubmit({
   } | null>(null);
   const submitClickTouchRef = useRef<{
     id: number;
-    button: HTMLButtonElement;
     x: number;
     y: number;
   } | null>(null);
@@ -86,7 +85,6 @@ export function useTouchReleaseSubmit({
     submitTouchRef.current = null;
     submitClickTouchRef.current = {
       id: event.pointerId,
-      button: event.currentTarget,
       x: event.clientX,
       y: event.clientY,
     };
@@ -148,9 +146,10 @@ export function useTouchReleaseSubmit({
     const touch = submitClickTouchRef.current;
     const native = event.nativeEvent;
     // Modern touch clicks carry their pointer identity. Older WebKit emits a
-    // MouseEvent instead; match its button and coordinates. A known touch ID
-    // is consumed even if layout retargets click to the other submit button.
-    // A fresh mouse/pen pointerdown clears the association.
+    // MouseEvent instead; match its release coordinates. Either form is
+    // consumed even if layout retargets it to a sibling submit button, such
+    // as a confirmation the release itself revealed. A fresh mouse/pen
+    // pointerdown clears the association.
     const duplicate =
       touch &&
       (("pointerType" in native &&
@@ -158,7 +157,6 @@ export function useTouchReleaseSubmit({
         "pointerId" in native &&
         native.pointerId === touch.id) ||
         (!("pointerType" in native) &&
-          touch.button === event.currentTarget &&
           event.detail > 0 &&
           Math.hypot(event.clientX - touch.x, event.clientY - touch.y) < 1));
     if (duplicate) {

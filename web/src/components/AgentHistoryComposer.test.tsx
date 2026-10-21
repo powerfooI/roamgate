@@ -236,6 +236,22 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
       await fill("tapped anyway");
       await release("Send");
       expect(warning()).not.toBeNull();
+      // Older WebKit's compatibility click has no pointer identity. Layout can
+      // retarget it to the confirmation the release revealed; it must not
+      // confirm the send.
+      await React.act(async () => {
+        button("Send anyway").dispatchEvent(
+          new browser.MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+            detail: 1,
+            clientX: 20,
+            clientY: 20,
+          }) as unknown as Event,
+        );
+      });
+      expect(send).toHaveBeenCalledTimes(5);
+      expect(warning()).not.toBeNull();
       await release("Send anyway");
       expect(send).toHaveBeenCalledTimes(6);
       expect(send.mock.calls[5]?.[0]).toBe("tapped anyway");
