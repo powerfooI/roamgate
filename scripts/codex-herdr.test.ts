@@ -63,6 +63,23 @@ test("Herdr shell launches isolate Codex while preserving arguments and exit sta
         ],
         ["1", ["-cmodel=example", "agents"], ["-cmodel=example", "agents"]],
         ["1", ["--model", "agents"], ["--no-daemon", "--model", "agents"]],
+        [
+          "1",
+          ["--image", "shot.png", "agents"],
+          ["--no-daemon", "--image", "shot.png", "agents"],
+        ],
+        [
+          "1",
+          ["-i", "shot.png", "app-server", "remote-control"],
+          ["--no-daemon", "-i", "shot.png", "app-server", "remote-control"],
+        ],
+        ["1", ["--image=shot.png", "agents"], ["--image=shot.png", "agents"]],
+        ["1", ["-ishot.png", "agents"], ["-ishot.png", "agents"]],
+        [
+          "1",
+          ["--image", "shot.png", "--model", "example", "agents"],
+          ["--image", "shot.png", "--model", "example", "agents"],
+        ],
         ["1", ["--", "agents"], ["--no-daemon", "--", "agents"]],
         [
           "1",

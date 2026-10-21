@@ -4,7 +4,7 @@ function _roamgate_codex {
   if [ "${1:-}" = command ]; then shift; fi
   local codex_executable="$1"
   shift
-  local codex_arg codex_value=0 codex_root=1
+  local codex_arg codex_value=0 codex_images=0 codex_root=1
   if [ "${HERDR_ENV:-}" != 1 ]; then
     command "$codex_executable" "$@"
     return
@@ -14,13 +14,21 @@ function _roamgate_codex {
       codex_value=0
       continue
     fi
+    if [ "$codex_images" = 1 ]; then
+      case "$codex_arg" in
+        -*) codex_images=0 ;;
+        *) continue ;;
+      esac
+    fi
     case "$codex_arg" in
       --) break ;;
       --no-daemon|--remote|--remote=*)
         command "$codex_executable" "$@"
         return
         ;;
-      -c|--config|--enable|--disable|-i|--image|-m|--model|--local-provider|-p|--profile|-s|--sandbox|-C|--cd|--add-dir|-a|--ask-for-approval|--remote-auth-token-env)
+      # Separate image values continue until the next option; attached values do not.
+      -i|--image) codex_images=1 ;;
+      -c|--config|--enable|--disable|-m|--model|--local-provider|-p|--profile|-s|--sandbox|-C|--cd|--add-dir|-a|--ask-for-approval|--remote-auth-token-env)
         codex_value=1
         ;;
       -*) ;;
