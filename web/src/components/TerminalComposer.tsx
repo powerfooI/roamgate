@@ -961,13 +961,16 @@ export function TerminalComposer({
               onSelectCommand={(command) => {
                 if (readTerminalComposerDraft(draftKey))
                   throw new Error("Clear Message before choosing an agent.");
-                writeTerminalComposerDraft(draftKey, command);
-                writeTerminalComposerSelection(
-                  draftKey,
-                  command.length,
-                  command.length,
-                );
                 activateMessage(false);
+                void submitTerminalComposerDraft(draftKey, command, (text) =>
+                  onSubmit(text, true),
+                ).catch((error) =>
+                  onError(
+                    error instanceof Error
+                      ? error.message
+                      : "Failed to launch agent",
+                  ),
+                );
               }}
             />
           ) : null}

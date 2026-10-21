@@ -626,8 +626,8 @@ async function registerDomTests() {
     ).toBe(false);
   });
 
-  test.each(["composer", "direct", "existing-draft"])(
-    "agent selection safely prefills Message from %s",
+  test.each(["composer", "direct", "existing-draft", "send-failure"])(
+    "agent selection sends once with Enter from %s and retains unsent text",
     async (initial) => {
       integrationResult = Promise.resolve({
         integrations: [
@@ -651,25 +651,39 @@ async function registerDomTests() {
       )!;
       editor.setSelectionRange(1, 5);
       const before = calls.length;
+      failPathInput = initial === "send-failure";
       await click(".agent-launcher-trigger");
       const pi = document.querySelector<HTMLButtonElement>(
         'button[aria-label="Pi"]',
       )!;
       expect(pi).not.toBeNull();
-      await act(async () => pi.click());
+      await act(async () => {
+        pi.click();
+        pi.click();
+      });
       expect(calls.slice(before).map((call) => call.method)).toEqual([
         "integration.list",
+        ...(draft ? [] : ["pane.send_input"]),
       ]);
+      if (!draft)
+        expect(calls[calls.length - 1]?.params).toEqual({
+          pane_id: "pane-a",
+          text: "pi",
+          keys: ["enter"],
+        });
       expect(state.selectedPaneId).toBe("pane-a");
       expect(state.layout.tab_id).toBe("tab-a");
       expect(container.querySelector("textarea.terminal-composer-input")).toBe(
         editor,
       );
-      const expected = draft || "pi";
+      const expected = draft || (failPathInput ? "pi" : "");
       expect(editor.value).toBe(expected);
       expect(readTerminalComposerDraft(draftKey)).toBe(expected);
-      expect(editor.selectionStart).toBe(draft ? 1 : 2);
-      expect(editor.selectionEnd).toBe(draft ? 5 : 2);
+      if (draft) {
+        expect(editor.selectionStart).toBe(1);
+        expect(editor.selectionEnd).toBe(5);
+      }
+      expect(document.activeElement).not.toBe(editor);
       expect(
         container
           .querySelector(".terminal-composer")
@@ -679,6 +693,12 @@ async function registerDomTests() {
         expect(document.querySelector('[role="alert"]')?.textContent).toContain(
           "Clear Message",
         );
+      else {
+        expect(document.querySelector(".agent-launcher-panel")).toBeNull();
+        expect(notices.map((notice) => notice.detail)).toEqual(
+          failPathInput ? ["uncertain write"] : [],
+        );
+      }
     },
   );
 

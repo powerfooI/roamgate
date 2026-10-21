@@ -246,10 +246,10 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
   tools or a mobile view such as Workspaces, Files, Changes or Ranger, one per
   press, before leaving the page. Hidden input tools do not intercept a view's Back.
 - **Agent terminals** beside Message appears only in ordinary shell terminals
-  on mobile, not existing agent or pad terminals. Selecting an agent fills an
-  empty Message draft for you to review and send from an empty shell prompt.
-  It never submits automatically or replaces an existing draft. Use the pencil
-  beside any agent to edit its command, including arguments or a custom
+  on mobile, not existing agent or pad terminals. Selecting an agent sends its
+  launch command to the current terminal and presses Enter. Start from an empty
+  shell prompt and Message draft. A failed send retains the command in Message.
+  Use the pencil beside any agent to edit its command, including arguments or a custom
   executable, even when its default command is not detected on the server.
   Commands are saved in this browser per connection and agent; **Reset** restores
   the detected command. Agent status reporting uses its existing Herdr integration.

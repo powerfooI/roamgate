@@ -177,7 +177,7 @@ async function registerTests() {
     )!;
   }
 
-  test("lists all known agents and selecting Pi only prefills its command", async () => {
+  test("lists all known agents and selecting Pi dispatches its command", async () => {
     const { select, onOpen, trigger } = await mount();
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
@@ -191,7 +191,7 @@ async function registerTests() {
   });
 
   test.each(["Claude", "Future"])(
-    "%s prefills without permission selection",
+    "%s dispatches without permission selection",
     async (label) => {
       const { select } = await mount();
       await act(async () => button(label).click());
