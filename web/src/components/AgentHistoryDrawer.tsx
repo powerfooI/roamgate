@@ -805,6 +805,11 @@ export function AgentHistoryDrawer({
   const notifySendError = useCallback((detail: string) => {
     store.notify({ kind: "error", message: "Message not sent", detail });
   }, []);
+  const composerDraftKey = terminalComposerDraftKey(
+    activeConnectionId,
+    connectionGeneration,
+    pane.pane_id,
+  );
   const historyChat = (
     <div
       className="agent-history-messages"
@@ -828,11 +833,10 @@ export function AgentHistoryDrawer({
         </div>
       )}
       <AgentHistoryComposer
-        draftKey={terminalComposerDraftKey(
-          activeConnectionId,
-          connectionGeneration,
-          pane.pane_id,
-        )}
+        // A pane or connection switch must never render, or send, the
+        // previous draft before the new one loads.
+        key={composerDraftKey}
+        draftKey={composerDraftKey}
         agent={pane.agent}
         status={pane.agent_status}
         onSend={sendMessage}

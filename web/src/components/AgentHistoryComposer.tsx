@@ -86,7 +86,6 @@ export function AgentHistoryComposer({
     setText(readTerminalComposerDraft(draftKey));
     setSubmissionPending(terminalComposerSubmissionPending(draftKey));
     setUploadCount(terminalComposerUploadCount(draftKey));
-    setConfirmation(null);
     const unsubscribeDraft = subscribeTerminalComposerDraft(draftKey, setText);
     const unsubscribeSubmission = subscribeTerminalComposerSubmission(
       draftKey,
