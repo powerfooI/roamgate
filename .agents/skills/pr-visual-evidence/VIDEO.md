@@ -114,10 +114,14 @@ video attachment support can upload the MP4 directly:
 gh pr view "$pr_number" --json body --jq .body > "$capture_work/pr-body.md"
 # Edit that file: keep the screenshot and existing prose, insert the video
 # reference near the top, using the same path passed to --attach below:
-# [Interaction video](/absolute/path/to/evidence.mp4)
+# ![Interaction video](/absolute/path/to/evidence.mp4)
 gh pr edit "$pr_number" --body-file "$capture_work/pr-body.md" \
   --attach "$recording_dir/evidence.mp4"
 ```
+
+Keep the video image reference alone in its own paragraph, with blank lines
+around it. `gh` rewrites that standalone embed to a bare attachment URL so
+GitHub renders a player. An ordinary Markdown link stays a text link.
 
 For a new PR, put both references in the body and pass both `--attach` flags to
 the single creation command. Do not pass video to `pr-attach-image.sh`, which
