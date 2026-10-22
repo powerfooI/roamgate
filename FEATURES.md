@@ -229,6 +229,10 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
 - The bottom bar holds **Message…**, **Direct**, **Tabs** (with the workspace's
   tab count, red when another agent needs you) and **⋮**, a menu of views and tools: Terminal, Files,
   Changes, Commits, Annotations, History, Ranger, and Workspaces.
+- Mobile hides the top tab strip. Use **Tabs** in the bottom bar to switch,
+  create, or close tabs. Tabs with multiple panes list their panes underneath;
+  select a pane to open it directly, including across tabs. The current pane is
+  highlighted, without a separate pane-switching toolbar above the terminal.
 - Touch scrolls without opening the keyboard. Long-press selects text for
   **Copy**, **Add comment**, or link actions.
 - Floating terminal shortcuts (a `2×8` grid plus side buttons) are customizable

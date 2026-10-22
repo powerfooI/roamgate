@@ -34,8 +34,6 @@ import { SHORTCUT_NUMBERS } from "./shortcutBindings";
 import { activeTerminalInput, blurActiveInput } from "./activeTerminalInput";
 import {
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   CircleAlert,
   Command,
   Compass,
@@ -682,17 +680,6 @@ function rectPercent(value: number, start: number, size: number) {
   return ((value - start) / size) * 100;
 }
 
-function paneTitle(
-  paneId: string,
-  panes: ReturnType<typeof store.get>["panes"],
-) {
-  const pane = panes.find((p) => p.pane_id === paneId);
-  if (pane?.agent) return pane.agent;
-  const cwd = pane?.foreground_cwd ?? pane?.cwd;
-  const name = cwd?.split(/[\\/]/).filter(Boolean).pop();
-  return name || paneId;
-}
-
 function PaneJumpOverlay({
   entries,
   selectedIndex,
@@ -1047,10 +1034,11 @@ function TerminalPaneLayout({
     );
   };
 
-  if (!layout || layout.zoomed || visiblePanes.length <= 1) {
+  if (mobile || !layout || layout.zoomed || visiblePanes.length <= 1) {
     return (
       <TerminalView
         key={mountKeyForPane(activePaneId)}
+        paneId={activePaneId ?? undefined}
         terminalTheme={terminalTheme}
         terminalFontFamily={terminalFontFamily}
         terminalFontScale={terminalFontScale}
@@ -1067,69 +1055,6 @@ function TerminalPaneLayout({
         zenMode={zenMode}
         onExitZenMode={onExitZenMode}
       />
-    );
-  }
-
-  if (mobile && activePaneId) {
-    const activeIndex = Math.max(
-      0,
-      visiblePanes.findIndex((lp) => lp.pane_id === activePaneId),
-    );
-    const previousPane =
-      visiblePanes[
-        (activeIndex - 1 + visiblePanes.length) % visiblePanes.length
-      ];
-    const nextPane = visiblePanes[(activeIndex + 1) % visiblePanes.length];
-    return (
-      <div className="pane-switcher-layout" aria-label="Terminal pane switcher">
-        <div className="pane-switcher">
-          <button
-            type="button"
-            className="pane-switcher-button"
-            aria-label="Previous pane"
-            tabIndex={-1}
-            onPointerDown={blurActiveInput}
-            onClick={() => void store.focusPane(previousPane.pane_id)}
-          >
-            <ChevronLeft size={15} />
-          </button>
-          <div className="pane-switcher-label">
-            <strong>
-              Pane {activeIndex + 1} / {visiblePanes.length}
-            </strong>
-            <span>{paneTitle(activePaneId, s.panes)}</span>
-          </div>
-          <button
-            type="button"
-            className="pane-switcher-button"
-            aria-label="Next pane"
-            tabIndex={-1}
-            onPointerDown={blurActiveInput}
-            onClick={() => void store.focusPane(nextPane.pane_id)}
-          >
-            <ChevronRight size={15} />
-          </button>
-        </div>
-        <TerminalView
-          key={mountKeyForPane(activePaneId)}
-          paneId={activePaneId}
-          terminalTheme={terminalTheme}
-          terminalFontFamily={terminalFontFamily}
-          terminalFontScale={terminalFontScale}
-          mobileShortcuts={mobileShortcuts}
-          mobileSideShortcuts={mobileSideShortcuts}
-          visible={visible}
-          mobileInputTarget={mobileInputTarget}
-          onActivateTerminalSurface={onActivateTerminalSurface}
-          composerOpen={composerOpen}
-          onComposerOpenChange={onComposerOpenChange}
-          agentHistoryOpen={agentHistoryOpen}
-          onAgentHistoryOpenChange={onAgentHistoryOpenChange}
-          onOpenWorkspaceFile={onOpenWorkspaceFile}
-          zenMode={zenMode}
-          onExitZenMode={onExitZenMode}
-        />
-      </div>
     );
   }
 

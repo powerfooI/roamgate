@@ -40,7 +40,7 @@ describe("activeTerminalInput", () => {
       }
     },
   );
-  test.each(["single", "split", "switcher"])(
+  test.each(["single", "split"])(
     "finds the selected %s terminal activation target or its composer draft",
     async (layout) => {
       const browser = new Window();
@@ -53,9 +53,7 @@ describe("activeTerminalInput", () => {
         doc.body.innerHTML = `<button>Other control</button><div class="workspace-terminal-surface">${
           layout === "split"
             ? `<div class="pane-layout-cell">${terminal}</div><div class="pane-layout-cell is-active">${terminal}</div>`
-            : layout === "switcher"
-              ? `<div class="pane-switcher-layout">${terminal}</div>`
-              : terminal
+            : terminal
         }</div>`;
         const shell = doc.querySelector(
           layout === "split" ? ".is-active .terminal-shell" : ".terminal-shell",

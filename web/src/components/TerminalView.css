@@ -15,11 +15,7 @@
 .terminal-view:has(.xterm-helper-textarea:focus),
 .terminal-shell:has(.terminal-composer-input:focus) .terminal-view,
 .app:has(.mobile-bottom-bar .terminal-composer-input:focus)
-  :is(
-    .pane-layout-cell.is-active,
-    .pane-switcher-layout,
-    .workspace-terminal-surface
-  )
+  :is(.pane-layout-cell.is-active, .workspace-terminal-surface)
   > .terminal-shell
   .terminal-view {
   border-color: var(--accent);

@@ -12,12 +12,14 @@ import { CloseButton } from "./CloseButton";
 import { focusIfUnchanged } from "./dialogFocus";
 import { requestCloseTab, tabName } from "./TabBar";
 import { orderTabsForDisplay, setTabPinned, useTabPins } from "../tabPins";
+import { activePaneIdForSnapshot } from "../paneJump";
+import { shortId } from "../utils";
 import "./MobileTabSheet.css";
 
 /**
  * Non-modal tab popup beside More, inside the app stacking context so the
- * persistent navigation rail remains usable. Also provides tab actions when
- * the single-tab strip is hidden on narrow layouts.
+ * persistent navigation rail remains usable. Provides tab switching and actions
+ * in mobile layouts, where the tab strip is hidden.
  */
 export function MobileTabSheet({
   open,
@@ -32,6 +34,8 @@ export function MobileTabSheet({
     (state) => ({
       activeConnectionId: state.activeConnectionId,
       connectionGeneration: state.connectionGeneration,
+      layout: state.layout,
+      selectedPaneId: state.selectedPaneId,
       panes: state.panes,
       tabs: state.tabs,
       workspaces: state.workspaces,
@@ -88,6 +92,7 @@ export function MobileTabSheet({
   };
 
   const pinnedTabIds = useTabPins(s.activeConnectionId);
+  const activePaneId = activePaneIdForSnapshot(s);
   const focusedWs = s.workspaces.find((w) => w.focused);
   const createReason = useEndpointCreationReason(
     "tab.create",
@@ -156,64 +161,110 @@ export function MobileTabSheet({
         <div className="mobile-tab-sheet-list" role="list">
           {tabs.map((t) => {
             const name = tabName(t);
+            const panes = s.panes.filter((pane) => pane.tab_id === t.tab_id);
             const agentSummary = summarizeTabAgents(s.panes, t.tab_id);
             return (
-              <div
-                key={t.tab_id}
-                role="listitem"
-                className={`mobile-tab-sheet-row ${t.focused ? "is-active" : ""}`}
-              >
-                <button
-                  type="button"
-                  className="mobile-tab-sheet-focus"
-                  disabled={transitionPending}
-                  onClick={() =>
-                    void runTabTransition(() => store.focusTab(t.tab_id))
-                  }
+              <div key={t.tab_id} role="listitem">
+                <div
+                  className={`mobile-tab-sheet-row ${t.focused ? "is-active" : ""}`}
                 >
-                  {agentSummary ? (
-                    <span
-                      className="tabbar-agent-marker"
-                      aria-label={`${agentSummary.primaryAgent}, status ${agentSummary.status}`}
-                    >
-                      <AgentStatusIcon
-                        agent={agentSummary.primaryAgent}
-                        status={agentSummary.status}
-                      />
-                      {agentSummary.additionalAgents > 0 ? (
-                        <span className="tabbar-agent-more">
-                          +{agentSummary.additionalAgents}
-                        </span>
-                      ) : null}
-                    </span>
-                  ) : null}
-                  <span className="mobile-tab-sheet-name">{name}</span>
-                </button>
-                {pinnedTabIds.has(t.tab_id) ? (
                   <button
                     type="button"
-                    className="mobile-tab-sheet-close"
-                    aria-label={`Unpin ${name}`}
-                    title="Unpin tab"
+                    className="mobile-tab-sheet-focus"
                     disabled={transitionPending}
                     onClick={() =>
-                      setTabPinned(s.activeConnectionId, t.tab_id, false)
+                      void runTabTransition(() => store.focusTab(t.tab_id))
                     }
                   >
-                    <Pin size={13} fill="currentColor" />
+                    {agentSummary ? (
+                      <span
+                        className="tabbar-agent-marker"
+                        aria-label={`${agentSummary.primaryAgent}, status ${agentSummary.status}`}
+                      >
+                        <AgentStatusIcon
+                          agent={agentSummary.primaryAgent}
+                          status={agentSummary.status}
+                        />
+                        {agentSummary.additionalAgents > 0 ? (
+                          <span className="tabbar-agent-more">
+                            +{agentSummary.additionalAgents}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : null}
+                    <span className="mobile-tab-sheet-name">{name}</span>
                   </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="mobile-tab-sheet-close"
-                    aria-label={`Close ${name}`}
-                    title={`Close ${name}`}
-                    disabled={transitionPending}
-                    onClick={() => requestCloseTab(t.tab_id)}
+                  {pinnedTabIds.has(t.tab_id) ? (
+                    <button
+                      type="button"
+                      className="mobile-tab-sheet-close"
+                      aria-label={`Unpin ${name}`}
+                      title="Unpin tab"
+                      disabled={transitionPending}
+                      onClick={() =>
+                        setTabPinned(s.activeConnectionId, t.tab_id, false)
+                      }
+                    >
+                      <Pin size={13} fill="currentColor" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="mobile-tab-sheet-close"
+                      aria-label={`Close ${name}`}
+                      title={`Close ${name}`}
+                      disabled={transitionPending}
+                      onClick={() => requestCloseTab(t.tab_id)}
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+                {panes.length > 1 ? (
+                  <div
+                    className="mobile-tab-sheet-panes"
+                    role="list"
+                    aria-label={`${name} panes`}
                   >
-                    <X size={14} />
-                  </button>
-                )}
+                    {panes.map((pane) => (
+                      <div key={pane.pane_id} role="listitem">
+                        <button
+                          type="button"
+                          className="mobile-tab-sheet-focus mobile-tab-sheet-pane"
+                          aria-label={`${name}: Pane ${shortId(pane.pane_id)}`}
+                          aria-description={
+                            pane.agent || pane.foreground_cwd || pane.cwd
+                          }
+                          aria-current={
+                            t.focused && pane.pane_id === activePaneId
+                              ? "true"
+                              : undefined
+                          }
+                          disabled={transitionPending}
+                          onClick={() =>
+                            void runTabTransition(() =>
+                              store.focusPane(pane.pane_id),
+                            )
+                          }
+                        >
+                          <AgentStatusIcon
+                            agent={pane.agent}
+                            status={pane.agent_status}
+                          />
+                          <span className="mobile-tab-sheet-pane-label">
+                            <span>Pane {shortId(pane.pane_id)}</span>
+                            <span className="mobile-tab-sheet-pane-detail">
+                              {pane.agent ||
+                                pane.foreground_cwd ||
+                                pane.cwd ||
+                                "Terminal"}
+                            </span>
+                          </span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             );
           })}

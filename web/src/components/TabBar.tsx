@@ -64,8 +64,7 @@ export function requestClosePane(paneId: string) {
 
 /**
  * Tab strip for the focused workspace, with create (+) and close (×) controls.
- * Desktop keeps the strip visible even with one tab, while mobile hides it when
- * there is no real tab choice to save vertical terminal space.
+ * Mobile uses the bottom-bar tab switcher; shared confirmation dialogs stay mounted.
  */
 export function TabBar({
   mobile = false,
@@ -155,7 +154,7 @@ export function TabBar({
       pendingClosePane ? [pendingClosePane.pane_id] : [],
     ).length,
   );
-  const showTabStrip = !!focusedWs && (!mobile || tabs.length > 1);
+  const showTabStrip = !!focusedWs && !mobile;
   const gitStatus = focusedWs?.worktree?.git_status;
   const changedCount = gitStatus
     ? gitStatus.staged +

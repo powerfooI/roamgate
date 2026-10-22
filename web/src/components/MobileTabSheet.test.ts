@@ -139,7 +139,19 @@ if (process.env.ROAMGATE_TAB_POPUP_DOM_TEST !== "1") {
   const state = {
     activeConnectionId: "local",
     connectionGeneration: 1,
-    panes: [],
+    selectedPaneId: "one:p2",
+    layout: {
+      focused_pane_id: "one:p1",
+      panes: [{ pane_id: "one:p1" }, { pane_id: "one:p2" }],
+    },
+    panes: ["one", "pinned"].flatMap((tab_id) =>
+      [1, 2].map((number) => ({
+        pane_id: `${tab_id}:p${number}`,
+        tab_id,
+        agent: number === 1 ? "codex" : undefined,
+        cwd: `/project/${tab_id}`,
+      })),
+    ),
     workspaces: [{ workspace_id: "ws", focused: true }],
     tabs: [
       { tab_id: "one", workspace_id: "ws", name: "First", focused: true },
@@ -159,10 +171,16 @@ if (process.env.ROAMGATE_TAB_POPUP_DOM_TEST !== "1") {
         complete = resolve;
       }),
   );
+  const focusPane = mock(
+    () =>
+      new Promise<void>((resolve) => {
+        complete = resolve;
+      }),
+  );
   const requestCloseTab = mock(() => {});
   const setTabPinned = mock(() => {});
   mock.module("../store", () => ({
-    store: { focusTab, createTab },
+    store: { focusTab, createTab, focusPane },
     useStoreSelector: (select: (s: typeof state) => unknown) => select(state),
     shallowEqual: () => true,
     useEndpointCreationReason: () => null,
@@ -230,7 +248,7 @@ if (process.env.ROAMGATE_TAB_POPUP_DOM_TEST !== "1") {
         new browser.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
       ),
     );
-  test("nonmodal actions, pending guard, focus safety and one-click mutual switching", async () => {
+  test("tab and pane navigation preserve pending guards, focus and popup switching", async () => {
     try {
       await act(async () => render());
       await click("Show tabs");
@@ -306,6 +324,51 @@ if (process.env.ROAMGATE_TAB_POPUP_DOM_TEST !== "1") {
       button("More options").focus();
       await escape();
       expect(document.activeElement).toBe(button("More options"));
+      // Pane groups belong to their tab; browser selection takes precedence
+      // over the server's focus and a stale selection falls back to the layout.
+      await click("Show tabs");
+      const groups = container.querySelectorAll(".mobile-tab-sheet-panes");
+      expect(groups).toHaveLength(2);
+      expect(groups[0]?.getAttribute("aria-label")).toBe("First panes");
+      expect(groups[1]?.getAttribute("aria-label")).toBe("Pinned panes");
+      expect(groups[0]?.querySelectorAll("button")).toHaveLength(2);
+      expect(button("First: Pane p1").textContent).toContain("codex");
+      expect(button("First: Pane p2").textContent).toContain("/project/one");
+      expect(button("First: Pane p2").getAttribute("aria-current")).toBe(
+        "true",
+      );
+      expect(button("Pinned: Pane p2").hasAttribute("aria-current")).toBe(
+        false,
+      );
+      state.selectedPaneId = "gone";
+      await act(async () => render());
+      expect(button("First: Pane p1").getAttribute("aria-current")).toBe(
+        "true",
+      );
+      expect(button("First: Pane p2").hasAttribute("aria-current")).toBe(false);
+      const tabCalls = focusTab.mock.calls.length;
+      for (const [name, id] of [
+        ["First: Pane p2", "one:p2"],
+        ["Pinned: Pane p2", "pinned:p2"],
+      ]) {
+        const paneCalls = focusPane.mock.calls.length;
+        const previousShown = shown;
+        await click(name!);
+        await click(name!);
+        await click("New Tab");
+        await escape();
+        expect(focusPane).toHaveBeenLastCalledWith(id);
+        expect(focusPane).toHaveBeenCalledTimes(paneCalls + 1);
+        expect(button("New Tab").disabled).toBe(true);
+        expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+        await act(async () => complete!());
+        expect(container.querySelector('[role="dialog"]')).toBeNull();
+        expect(shown).toBe(previousShown + 1);
+        expect(document.activeElement).toBe(button("Show tabs"));
+        await click("Show tabs");
+      }
+      expect(focusTab).toHaveBeenCalledTimes(tabCalls);
+      await escape();
       // Empty and single-tab workspaces retain their create affordance.
       state.tabs = [];
       await click("Show tabs");
@@ -315,8 +378,10 @@ if (process.env.ROAMGATE_TAB_POPUP_DOM_TEST !== "1") {
       state.tabs = [
         { tab_id: "one", workspace_id: "ws", name: "Only", focused: true },
       ];
+      state.panes = state.panes.slice(0, 1);
       await click("Show tabs");
       expect(container.querySelectorAll('[role="listitem"]')).toHaveLength(1);
+      expect(container.querySelector(".mobile-tab-sheet-panes")).toBeNull();
       await escape();
       state.workspaces = [];
       await click("Show tabs");

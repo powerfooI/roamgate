@@ -83,8 +83,7 @@
 }
 
 .workspace-terminal-surface > .terminal-shell,
-.workspace-terminal-surface > .pane-layout,
-.workspace-terminal-surface > .pane-switcher-layout {
+.workspace-terminal-surface > .pane-layout {
   flex: 1 1 auto;
 }
 
@@ -404,51 +403,10 @@
   flex: 1 1 auto;
 }
 
-.main-view > .pane-switcher-layout {
-  flex: 1 1 auto;
-}
-
 .pane-layout {
   position: relative;
   min-height: 0;
   background: var(--terminal-bg);
-}
-
-.pane-switcher-layout {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--terminal-bg);
-}
-
-.pane-switcher-layout > .terminal-shell {
-  flex: 1 1 auto;
-}
-
-.pane-switcher {
-  display: none;
-}
-
-.pane-switcher-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.pane-switcher-label {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-}
-
-.pane-switcher-label strong,
-.pane-switcher-label span {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .pane-layout-cell {
@@ -631,68 +589,6 @@
   .main {
     padding: 0;
     gap: 0;
-  }
-
-  .pane-switcher {
-    flex: 0 0 auto;
-    display: grid;
-    grid-template-columns: 34px minmax(0, 1fr) 34px;
-    align-items: center;
-    gap: 6px;
-    min-height: 40px;
-    padding: 4px 6px;
-    border-bottom: 1px solid var(--shell-border);
-    background: var(--shell-panel);
-  }
-
-  .pane-switcher-button {
-    width: 34px;
-    height: 30px;
-    padding: 0;
-    border-radius: 7px;
-    touch-action: manipulation;
-    user-select: none;
-    -webkit-user-select: none;
-    -webkit-touch-callout: none;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .pane-switcher-label strong {
-    color: var(--text-strong);
-    font-size: 12px;
-    line-height: 1.1;
-  }
-
-  .pane-switcher-label span {
-    color: var(--muted);
-    font-size: 11px;
-    line-height: 1.1;
-  }
-
-  /* While the phone keyboard is up for terminal input, the switcher folds to
-     one line so the terminal keeps the rows an agent's prompt needs. The
-     topbar and tab bar collapse on the same condition across both input modes. */
-  &.keyboard-open .app:has(.xterm-helper-textarea:focus) .pane-switcher,
-  &.keyboard-open .app:has(.terminal-composer-input:focus) .pane-switcher {
-    min-height: 30px;
-    padding-block: 2px;
-  }
-
-  &.keyboard-open .app:has(.xterm-helper-textarea:focus) .pane-switcher-button,
-  &.keyboard-open
-    .app:has(.terminal-composer-input:focus)
-    .pane-switcher-button {
-    height: 26px;
-  }
-
-  &.keyboard-open .app:has(.xterm-helper-textarea:focus) .pane-switcher-label,
-  &.keyboard-open
-    .app:has(.terminal-composer-input:focus)
-    .pane-switcher-label {
-    flex-direction: row;
-    align-items: baseline;
-    justify-content: center;
-    gap: 6px;
   }
 }
 

@@ -46,7 +46,8 @@
     text-align: left;
   }
 
-  .mobile-tab-sheet-row.is-active .mobile-tab-sheet-focus {
+  .mobile-tab-sheet-row.is-active .mobile-tab-sheet-focus,
+  .mobile-tab-sheet-pane[aria-current="true"] {
     background: var(--accent-soft);
     color: var(--text-strong);
   }
@@ -62,6 +63,31 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .mobile-tab-sheet-panes {
+    margin-left: 16px;
+    padding-left: 4px;
+    border-left: 1px solid var(--border);
+  }
+
+  .mobile-tab-sheet-pane {
+    width: 100%;
+  }
+
+  .mobile-tab-sheet-pane-label {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .mobile-tab-sheet-pane-detail {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+    font-size: 11px;
   }
 
   .mobile-tab-sheet-close {

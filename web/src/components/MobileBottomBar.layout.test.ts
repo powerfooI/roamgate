@@ -169,12 +169,6 @@ test("Composer focus overrides closed bar muted styling and coordinates shortcut
   const topbar = await Bun.file(
     new URL("../styles/layout/topbar.css", import.meta.url),
   ).text();
-  const tabbar = await Bun.file(
-    new URL("./TabBar.css", import.meta.url),
-  ).text();
-  const app = await Bun.file(
-    new URL("../styles/layout/app.css", import.meta.url),
-  ).text();
 
   const focusRule = rule(
     composer,
@@ -196,17 +190,11 @@ test("Composer focus overrides closed bar muted styling and coordinates shortcut
     ".app:has(.terminal-composer-input:focus) .terminal-mobile-side-shortcuts",
   );
 
-  // Header, tabbar, and pane-switcher collapse on .keyboard-open in both Direct and Composer modes.
+  // Header collapses on .keyboard-open in both Direct and Composer modes.
   expect(topbar).toContain(
     "&.keyboard-open .app:has(.terminal-composer-input:focus) .topbar",
   );
   expect(topbar).toContain(
     "&.keyboard-open .app:has(.terminal-composer-input:focus) .topbar > *",
-  );
-  expect(tabbar).toContain(
-    "&.keyboard-open .app:has(.terminal-composer-input:focus) .tabbar",
-  );
-  expect(app).toContain(
-    "&.keyboard-open .app:has(.terminal-composer-input:focus) .pane-switcher",
   );
 });

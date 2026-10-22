@@ -9,8 +9,7 @@
   text-align: center;
 }
 
-.app.zen .tabbar,
-:where(html[data-layout="mobile"]) .app.assistant-view .tabbar {
+.app.zen .tabbar {
   display: none;
 }
 
@@ -231,52 +230,4 @@
   border-color: transparent;
   background: var(--accent-soft);
   color: var(--text-strong);
-}
-
-/* Keep mobile styling in sync with the saved layout and URL override. */
-:where(html[data-layout="mobile"]) {
-  .tabbar {
-    min-height: 36px;
-    padding: 3px 4px;
-    border-top: none;
-    border-right: none;
-    border-left: none;
-    border-radius: 0;
-  }
-
-  .tabbar-tab {
-    max-width: min(48vw, 180px);
-    gap: 4px;
-    padding: 4px 6px 4px 8px;
-    font-size: 12px;
-  }
-
-  .tabbar-name {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .tabbar-close {
-    width: 20px;
-    height: 20px;
-    flex: 0 0 auto;
-  }
-
-  .tabbar-add {
-    width: 28px;
-    height: 28px;
-    flex: 0 0 auto;
-  }
-
-  .tabbar-utilities {
-    display: none;
-  }
-
-  /* Give the terminal these rows while the phone keyboard is up for terminal
-     input. See the pane switcher in the app shell layout. */
-  &.keyboard-open .app:has(.xterm-helper-textarea:focus) .tabbar,
-  &.keyboard-open .app:has(.terminal-composer-input:focus) .tabbar {
-    display: none;
-  }
 }
