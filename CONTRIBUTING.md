@@ -2,7 +2,7 @@
 
 ## Development Setup
 
-Use Bun 1.4.3+, Node ^20.19.0 or >=22.12.0 (for Vite 8), and a running local
+Use Bun 1.4.4+, Node ^20.19.0 or >=22.12.0 (for Vite 8), and a running local
 Herdr server:
 
 ```bash

@@ -112,7 +112,7 @@ test("all workflows use the pinned Bun runtime and matching types", () => {
   const manifest = JSON.parse(
     readFileSync(new URL("package.json", root), "utf8"),
   );
-  const version = "1.4.3";
+  const version = "1.4.4";
   expect(manifest.packageManager).toBe(`bun@${version}`);
   expect(manifest.engines.bun).toBe(`>=${version}`);
   expect(manifest.devDependencies["bun-types"]).toBe(version);

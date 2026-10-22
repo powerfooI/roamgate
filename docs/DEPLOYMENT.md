@@ -9,7 +9,7 @@ remote access, see the [tutorial](./TUTORIAL.md#networking).
   Roamgate uses Herdr's default sockets (`~/.config/herdr/herdr.sock` and
   `herdr-client.sock`; named pipes under `%APPDATA%\herdr\` on Windows).
 - Release binaries need nothing else. Source builds need
-  [Bun](https://bun.sh) 1.4.3+.
+  [Bun](https://bun.sh) 1.4.4+.
 - On Windows, local Git features need [Git for Windows](https://gitforwindows.org/)
   on PATH.
 

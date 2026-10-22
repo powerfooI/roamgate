@@ -17,7 +17,7 @@ are ignored and should not be committed.
 ## Build, Test, and Development Commands
 
 Install all Bun workspace dependencies from the repository root with
-`bun install --frozen-lockfile` (Bun 1.4.3 or newer). The root `bun.lock` is the
+`bun install --frozen-lockfile` (Bun 1.4.4 or newer). The root `bun.lock` is the
 only lockfile; shared TypeScript, Bun types, and lint/format tooling belong in
 the root manifest. Keep runtime dependencies in their owning workspace.
 

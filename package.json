@@ -14,9 +14,9 @@
     "url": "https://github.com/powerfooI/roamgate/issues"
   },
   "engines": {
-    "bun": ">=1.4.3"
+    "bun": ">=1.4.4"
   },
-  "packageManager": "bun@1.4.3",
+  "packageManager": "bun@1.4.4",
   "workspaces": [
     "web",
     "server"
@@ -70,7 +70,7 @@
     "@types/jsdom": "^30.0.0",
     "@types/proper-lockfile": "4.1.4",
     "@types/web-push": "^3.6.4",
-    "bun-types": "1.4.3",
+    "bun-types": "1.4.4",
     "happy-dom": "^20.14.6",
     "jsdom": "^30.1.1",
     "oxlint": "1.88.0",
