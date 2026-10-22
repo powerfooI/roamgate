@@ -74,6 +74,10 @@ async function registerDomTests() {
   const { __storeTesting, store } = await import("../store");
   const { WorkspaceTree } = await import("./WorkspaceTree");
   const { PullRequestCard } = await import("./PullRequestCard");
+  const { readPullRequestCache, PULL_REQUEST_CACHE_KEY } = await import(
+    "../pullRequestCache"
+  );
+  const { roamgateLocalStorage } = await import("../browserStorage");
   let listCalls = 0;
   const client: ConnectionClient = {
     connectionId: "dialog-test",
@@ -619,6 +623,562 @@ async function registerDomTests() {
     }
   });
 
+  test.each(["workspace", "worktree"] as const)(
+    "%s reviews recover when the same client becomes ready after reconnect",
+    async (kind) => {
+      const previousState = store.get();
+      let generation = 1;
+      let ready = true;
+      let calls = 0;
+      const replies: Array<(status: PullRequestStatus) => void> = [];
+      const reviewClient = (capturedGeneration: number): ConnectionClient => ({
+        ...client,
+        generation: capturedGeneration,
+        isCurrent: () => ready && capturedGeneration === generation,
+        call: async (method) => {
+          expect(method).toBe("git.pull_request");
+          calls++;
+          return new Promise((resolve) => replies.push(resolve));
+        },
+      });
+      const workspaces = [sidebarWorkspace];
+      const list = { ...reviewList, worktrees: [reviewList.worktrees[0]] };
+      function Reviews({ client }: { client: ConnectionClient }) {
+        const workspaceReviews = useWorkspacePullRequests(
+          client,
+          kind === "workspace" ? workspaces : [],
+        );
+        const worktreeReviews = useWorktreePullRequests(
+          client,
+          "workspace",
+          kind === "worktree" ? list : null,
+          0,
+        );
+        return h(
+          "pre",
+          null,
+          JSON.stringify({
+            ...workspaceReviews,
+            ...worktreeReviews,
+          }),
+        );
+      }
+      const container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+      const render = (client: ConnectionClient) =>
+        act(async () => root!.render(h(Reviews, { client })));
+      const settle = () => act(async () => replies.shift()!(mergedStatus));
+      jest.useFakeTimers();
+      try {
+        __storeTesting.replaceState({
+          ...previousState,
+          status: "connected",
+          connectionPaused: false,
+        });
+        await render(reviewClient(generation));
+        await settle();
+        expect(container.textContent).toContain("merged");
+
+        generation++;
+        ready = false;
+        __storeTesting.markTerminalReattachPending();
+        const reconnected = reviewClient(generation);
+        await render(reconnected);
+        expect(container.textContent).toBe("{}");
+        await act(async () => jest.advanceTimersByTime(120_000));
+        expect(calls).toBe(1);
+
+        // Catalog recovery publishes a store update without changing the
+        // client object, workspace metadata, or target associations.
+        await act(async () => {
+          ready = true;
+          __storeTesting.applyCatalog(
+            previousState.connections,
+            previousState.defaultConnectionId,
+          );
+          __storeTesting.rearmTerminalAttachmentsAfterCatalog(true);
+        });
+        expect(calls).toBe(2);
+        await settle();
+        expect(container.textContent).toContain("merged");
+
+        await act(async () => jest.advanceTimersByTime(60_000));
+        expect(calls).toBe(kind === "workspace" ? 3 : 2);
+        if (kind === "workspace") await settle();
+      } finally {
+        await act(async () => root!.unmount());
+        root = null;
+        __storeTesting.replaceState(previousState);
+        jest.useRealTimers();
+      }
+    },
+  );
+
+  test.each(["workspace", "worktree"] as const)(
+    "%s reviews restore persisted summaries, survive reconnect and invalidate definitive misses",
+    async (kind) => {
+      const previousState = store.get();
+      let ready = true;
+      let generation = 1;
+      let calls = 0;
+      let refresh = 0;
+      const replies: Array<(status: PullRequestStatus) => void> = [];
+      const makeClient = (captured: number): ConnectionClient => ({
+        ...client,
+        generation: captured,
+        isCurrent: () => ready && generation === captured,
+        call: async () => {
+          calls++;
+          return new Promise((resolve) => replies.push(resolve));
+        },
+      });
+      let activeClient = makeClient(generation);
+      let workspace = sidebarWorkspace;
+      let list = { ...reviewList, worktrees: [reviewList.worktrees[0]] };
+      function Reviews({ refresh }: { refresh: number }) {
+        const workspaceReviews = useWorkspacePullRequests(
+          activeClient,
+          kind === "workspace" ? [workspace] : [],
+        );
+        const worktreeReviews = useWorktreePullRequests(
+          activeClient,
+          "workspace",
+          kind === "worktree" ? list : null,
+          refresh,
+        );
+        return h(
+          "pre",
+          null,
+          JSON.stringify({ ...workspaceReviews, ...worktreeReviews }),
+        );
+      }
+      const container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+      let mount = 0;
+      const render = () =>
+        act(async () => root!.render(h(Reviews, { key: mount, refresh })));
+      const settle = (status = mergedStatus) =>
+        act(async () => replies.shift()!(status));
+      const shown = () =>
+        Object.values(
+          JSON.parse(container.textContent!) as Record<
+            string,
+            PullRequestSummary
+          >,
+        )[0];
+      const requestRefresh = async () => {
+        if (kind === "workspace")
+          await act(async () => jest.advanceTimersByTime(60_000));
+        else {
+          refresh++;
+          await render();
+        }
+      };
+      jest.useFakeTimers();
+      try {
+        __storeTesting.replaceState({
+          ...previousState,
+          status: "connected",
+          connectionPaused: false,
+          connections: [
+            {
+              id: client.connectionId,
+              label: "Test",
+              source: "local",
+              type: "local",
+              control_socket_path: "/tmp/review.sock",
+              is_default: true,
+              state: "ready",
+              generation: 1,
+            },
+          ],
+        });
+        await render();
+        await settle();
+        expect(readPullRequestCache().size).toBe(1);
+        mount++;
+        await render();
+        expect(shown().request?.state).toBe("merged");
+        expect(shown().stale?.failedAt).toBeUndefined();
+        expect(shown().stale?.message).toContain("Refreshing");
+
+        // Even on the same client, an unmounted consumer cannot replace disk
+        // state after its replacement has already refreshed the summary.
+        const unmountedReply = replies.shift()!;
+        mount++;
+        await render();
+        await settle();
+        await act(async () =>
+          unmountedReply({
+            ...mergedStatus,
+            request: { ...mergedStatus.request!, state: "closed" },
+          }),
+        );
+        expect(
+          [...readPullRequestCache().values()][0].status.request?.state,
+        ).toBe("merged");
+        await requestRefresh();
+        const beforeReconnect = calls;
+
+        generation++;
+        ready = false;
+        activeClient = makeClient(generation);
+        __storeTesting.markTerminalReattachPending();
+        for (const field of ["branch", "path", "repo"] as const) {
+          workspace = {
+            ...sidebarWorkspace,
+            worktree: {
+              ...sidebarWorkspace.worktree!,
+              repo_key: field === "repo" ? "other" : "repo",
+              checkout_path: field === "path" ? "/other" : "/repo/topic-0",
+              git_status: {
+                ...sidebarWorkspace.worktree!.git_status!,
+                branch: field === "branch" ? "other" : "topic-0",
+              },
+            },
+          };
+          list = {
+            ...reviewList,
+            source: {
+              ...reviewList.source,
+              repo_key: workspace.worktree!.repo_key,
+            },
+            worktrees: [
+              {
+                ...reviewList.worktrees[0],
+                path: workspace.worktree!.checkout_path,
+                branch: workspace.worktree!.git_status!.branch,
+              },
+            ],
+          };
+          mount++;
+          await render();
+          expect(container.textContent).toBe("{}");
+        }
+        workspace = sidebarWorkspace;
+        list = { ...reviewList, worktrees: [reviewList.worktrees[0]] };
+        mount++;
+        await render();
+        expect(shown().request?.state).toBe("merged");
+        expect(shown().stale?.message).toContain("connection");
+        expect(calls).toBe(beforeReconnect);
+        // An old connection must not overwrite either the screen or disk.
+        await settle({
+          ...mergedStatus,
+          request: { ...mergedStatus.request!, state: "closed" },
+        });
+        expect(
+          [...readPullRequestCache().values()][0].status.request?.state,
+        ).toBe("merged");
+        await act(async () => {
+          ready = true;
+          __storeTesting.rearmTerminalAttachmentsAfterCatalog(true);
+        });
+        expect(calls).toBe(beforeReconnect + 1);
+        for (const state of [
+          "unauthenticated",
+          "missing_cli",
+          "unsupported",
+          "error",
+        ] as const) {
+          await settle({
+            ...mergedStatus,
+            state,
+            request: undefined,
+            retryable: state === "unsupported" || state === "error",
+            message: "Temporarily unavailable",
+          });
+          expect(shown().request?.state).toBe("merged");
+          expect(shown().stale?.failedAt).toBeString();
+          expect(readPullRequestCache().size).toBe(1);
+          await requestRefresh();
+        }
+        await settle({
+          ...mergedStatus,
+          request: { ...mergedStatus.request!, state: "open" },
+        });
+        expect(shown().request?.state).toBe("open");
+        expect(shown().stale).toBeUndefined();
+        await requestRefresh();
+        await settle({
+          ...mergedStatus,
+          state: "no_match",
+          request: undefined,
+        });
+        expect(shown().request).toBeUndefined();
+        expect(readPullRequestCache().size).toBe(0);
+        mount++;
+        await render();
+        expect(container.textContent).toBe("{}");
+      } finally {
+        await act(async () => root!.unmount());
+        root = null;
+        roamgateLocalStorage.removeItem(PULL_REQUEST_CACHE_KEY);
+        __storeTesting.replaceState(previousState);
+        jest.useRealTimers();
+      }
+    },
+  );
+
+  test.each(["pending", "failed"] as const)(
+    "sidebar does not restore another branch when its query is %s and Git status disappears",
+    async (phase) => {
+      const previousState = store.get();
+      const replies: Array<(status: PullRequestStatus) => void> = [];
+      const reviewClient: ConnectionClient = {
+        ...client,
+        call: async () => new Promise((resolve) => replies.push(resolve)),
+      };
+      function Reviews({ branch, error }: { branch?: string; error?: string }) {
+        return h(
+          "pre",
+          null,
+          JSON.stringify(
+            useWorkspacePullRequests(reviewClient, [
+              {
+                ...sidebarWorkspace,
+                worktree: {
+                  ...sidebarWorkspace.worktree!,
+                  git_status: {
+                    ...sidebarWorkspace.worktree!.git_status!,
+                    branch,
+                    error,
+                  },
+                },
+              },
+            ]),
+          ),
+        );
+      }
+      const container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+      let mount = 0;
+      const render = (branch?: string, error?: string) =>
+        act(async () =>
+          root!.render(h(Reviews, { key: mount, branch, error })),
+        );
+      const settle = (status: PullRequestStatus) =>
+        act(async () => replies.shift()!(status));
+      try {
+        __storeTesting.replaceState({
+          ...previousState,
+          connections: [
+            {
+              id: client.connectionId,
+              label: "Test",
+              source: "local",
+              is_default: true,
+              state: "ready",
+              generation: 1,
+            },
+          ],
+        });
+        await render("topic-0");
+        await settle(mergedStatus);
+        expect(readPullRequestCache().size).toBe(1);
+        await render("other");
+        expect(container.textContent).toBe("{}");
+        if (phase === "failed")
+          await settle({
+            ...mergedStatus,
+            state: "error",
+            retryable: true,
+            request: undefined,
+          });
+        await render(undefined, "Git temporarily unavailable");
+        expect(container.textContent).not.toContain('"request"');
+        // A late reply for B must not be mistaken for a verified current branch.
+        if (phase === "pending") await settle(mergedStatus);
+        expect(container.textContent).not.toContain('"request"');
+        // A fresh mount with no branch information cannot identify disk's A cache.
+        mount++;
+        await render(undefined, "Git temporarily unavailable");
+        expect(container.textContent).toBe("{}");
+        await render("other");
+        expect(replies).toHaveLength(1);
+        await settle({
+          ...mergedStatus,
+          request: { ...mergedStatus.request!, number: 2, source: "other" },
+        });
+        await render(undefined, "Git temporarily unavailable");
+        expect(container.textContent).toContain('"number":2');
+        expect(container.textContent).toContain("Git branch");
+      } finally {
+        await act(async () => root!.unmount());
+        root = null;
+        roamgateLocalStorage.removeItem(PULL_REQUEST_CACHE_KEY);
+        __storeTesting.replaceState(previousState);
+      }
+    },
+  );
+
+  test.each(["workspace", "worktree"] as const)(
+    "%s detached reviews require a new successful lookup after reconnect",
+    async (kind) => {
+      const previousState = store.get();
+      let generation = 1;
+      let ready = true;
+      const replies: Array<(status: PullRequestStatus) => void> = [];
+      const makeClient = (captured: number): ConnectionClient => ({
+        ...client,
+        generation: captured,
+        isCurrent: () => ready && captured === generation,
+        call: async () => new Promise((resolve) => replies.push(resolve)),
+      });
+      const workspace = {
+        ...sidebarWorkspace,
+        worktree: {
+          ...sidebarWorkspace.worktree!,
+          git_status: {
+            ...sidebarWorkspace.worktree!.git_status!,
+            branch: "detached",
+          },
+        },
+      };
+      const list = {
+        ...reviewList,
+        worktrees: [{ ...reviewList.worktrees[0], branch: undefined }],
+      };
+      function Reviews({ client }: { client: ConnectionClient }) {
+        const workspaceReviews = useWorkspacePullRequests(
+          client,
+          kind === "workspace" ? [workspace] : [],
+        );
+        const worktreeReviews = useWorktreePullRequests(
+          client,
+          "workspace",
+          kind === "worktree" ? list : null,
+          0,
+        );
+        return h(
+          "pre",
+          null,
+          JSON.stringify({ ...workspaceReviews, ...worktreeReviews }),
+        );
+      }
+      const container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+      const render = (client: ConnectionClient) =>
+        act(async () => root!.render(h(Reviews, { client })));
+      const settle = (status: PullRequestStatus) =>
+        act(async () => replies.shift()!(status));
+      try {
+        __storeTesting.replaceState({
+          ...previousState,
+          status: "connected",
+          connectionPaused: false,
+          connections: [
+            {
+              id: client.connectionId,
+              label: "Test",
+              source: "local",
+              is_default: true,
+              state: "ready",
+              generation: 1,
+            },
+          ],
+        });
+        await render(makeClient(generation));
+        await settle({ ...mergedStatus, rebasing: true });
+        expect(container.textContent).toContain('"request"');
+        expect(readPullRequestCache().size).toBe(0);
+        generation++;
+        ready = false;
+        __storeTesting.markTerminalReattachPending();
+        await render(makeClient(generation));
+        expect(container.textContent).toBe("{}");
+        await act(async () => {
+          ready = true;
+          __storeTesting.rearmTerminalAttachmentsAfterCatalog(true);
+        });
+        expect(container.textContent).toBe("{}");
+        await settle({
+          ...mergedStatus,
+          state: "error",
+          retryable: true,
+          request: undefined,
+        });
+        expect(container.textContent).not.toContain('"request"');
+        generation++;
+        await render(makeClient(generation));
+        await settle({ ...mergedStatus, rebasing: true });
+        expect(container.textContent).toContain('"request"');
+      } finally {
+        await act(async () => root!.unmount());
+        root = null;
+        roamgateLocalStorage.removeItem(PULL_REQUEST_CACHE_KEY);
+        __storeTesting.replaceState(previousState);
+      }
+    },
+  );
+
+  test.each(["worktree dialog", "inspector"] as const)(
+    "%s waits for routing and resumes without remounting",
+    async (kind) => {
+      const previousState = store.get();
+      let ready = false;
+      let calls = 0;
+      const waitingClient: ConnectionClient = {
+        ...client,
+        isCurrent: () => ready,
+        call: async (method) => {
+          calls++;
+          expect(ready).toBe(true);
+          return method === "worktree.list"
+            ? { ...reviewList, worktrees: [reviewList.worktrees[0]] }
+            : mergedStatus;
+        },
+      };
+      connection.mockReturnValue(waitingClient);
+      const container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+      try {
+        __storeTesting.replaceState({
+          ...previousState,
+          status: "connected",
+          connectionPaused: false,
+          workspaces: [sidebarWorkspace],
+        });
+        __storeTesting.markTerminalReattachPending();
+        await act(async () =>
+          root!.render(
+            kind === "worktree dialog"
+              ? h(WorktreeOpenDialog, {
+                  open: true,
+                  workspaceId: sidebarWorkspace.workspace_id,
+                  onClose: () => {},
+                })
+              : h(PullRequestCard, {
+                  client: waitingClient,
+                  workspaceId: sidebarWorkspace.workspace_id,
+                  branch: "topic-0",
+                }),
+          ),
+        );
+        expect(calls).toBe(0);
+        await act(async () => {
+          ready = true;
+          __storeTesting.rearmTerminalAttachmentsAfterCatalog(true);
+        });
+        expect(calls).toBe(kind === "worktree dialog" ? 2 : 1);
+        expect(container.textContent).toContain(
+          kind === "worktree dialog" ? "Merged" : "Merged feature",
+        );
+        expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+      } finally {
+        await act(async () => root!.unmount());
+        root = null;
+        connection.mockReturnValue(client);
+        __storeTesting.replaceState(previousState);
+      }
+    },
+  );
+
   test("sidebar reviews reconcile targets independently and keep the last success across transient failures", async () => {
     const requests: Array<{
       params: Record<string, unknown>;
@@ -702,12 +1262,15 @@ async function registerDomTests() {
       ]);
       await settle(() => mergedStatus);
 
-      // A transient Git status error hides only its own workspace.
+      // A transient Git status error keeps the last success marked stale.
       await render([
         withBranch(sidebarWorkspace, undefined, "git failed"),
         other,
       ]);
-      expect(Object.keys(shown())).toEqual(["other-workspace"]);
+      expect(Object.keys(shown())).toHaveLength(2);
+      expect(shown()["review-workspace"].stale?.message).toContain(
+        "Git branch",
+      );
       await render([sidebarWorkspace, other]);
       expect(Object.keys(shown())).toHaveLength(2);
       await settle(() => mergedStatus);
@@ -971,6 +1534,11 @@ async function registerDomTests() {
     expect(title()).toBe("Merged feature");
     for (const failure of [
       new Error("Connection failed"),
+      ...(["unauthenticated", "missing_cli"] as const).map((state) => ({
+        ...mergedStatus,
+        state,
+        request: undefined,
+      })),
       {
         ...mergedStatus,
         state: "error" as const,

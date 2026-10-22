@@ -21,7 +21,7 @@ export function workspacePullRequest(status?: PullRequestSummary) {
   }[state];
   const github = status.provider === "github";
   const stale = status.stale
-    ? `\nLast known status from ${new Date(status.refreshedAt).toLocaleString()}; refresh failed.`
+    ? `\nLast known status from ${new Date(status.refreshedAt).toLocaleString()}; ${status.stale.failedAt ? "refresh failed." : (status.stale.message ?? "awaiting refresh.")}`
     : "";
   return {
     request,

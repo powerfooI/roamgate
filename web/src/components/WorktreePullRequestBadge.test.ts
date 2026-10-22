@@ -5,6 +5,7 @@ import type {
   PullRequestStatus,
   PullRequestSummary,
 } from "../../../shared/pullRequest";
+import { workspacePullRequest } from "../workspaceTreeBadges";
 import { WorktreePullRequestBadge } from "./WorktreePullRequestBadge";
 
 const base: PullRequestStatus = {
@@ -90,9 +91,9 @@ test("unresolved and failed worktree badges never claim a merged request", () =>
 });
 
 test("stale worktree badges stay actionable and show the last successful check", () => {
-  const html = render({
+  const status = {
     ...base,
-    provider: "gitlab",
+    provider: "gitlab" as const,
     stale: { failedAt: "2026-10-02T00:00:00Z" },
     request: {
       id: "team/project#3",
@@ -105,11 +106,24 @@ test("stale worktree badges stay actionable and show the last successful check",
       draft: false,
       url: "https://gitlab.com/team/project/-/merge_requests/3",
     },
-  });
+  };
+  const html = render(status);
   expect(html).toContain("MR #3: Open (last known)");
   expect(html).toContain('data-stale="true"');
   expect(html).toContain("Open MR #3");
   expect(html).toContain('dateTime="2026-10-02T00:00:00Z"');
   expect(html).toContain("Last successful check");
   expect(html).toContain(`dateTime="${base.refreshedAt}"`);
+  const cached = {
+    ...status,
+    stale: { message: "Refreshing PR/MR status." },
+  };
+  const cachedHtml = render(cached);
+  expect(cachedHtml).toContain("MR #3: Open (last known)");
+  expect(cachedHtml).toContain("Refreshing PR/MR status.");
+  expect(cachedHtml).not.toContain("Refresh failed");
+  expect(cachedHtml).not.toContain("Invalid Date");
+  expect(workspacePullRequest(cached)?.title).toContain(
+    "Refreshing PR/MR status.",
+  );
 });

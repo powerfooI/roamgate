@@ -52,11 +52,18 @@ export function WorktreePullRequestBadge({
         {request?.title ?? status?.message ?? label}
         {stale ? (
           <span>
-            Refresh failed at{" "}
-            <time dateTime={stale.failedAt}>
-              {new Date(stale.failedAt).toLocaleString()}
-            </time>
-            ; showing the last known status.
+            {stale.failedAt ? (
+              <>
+                Refresh failed at{" "}
+                <time dateTime={stale.failedAt}>
+                  {new Date(stale.failedAt).toLocaleString()}
+                </time>
+                ; showing the last known status.
+              </>
+            ) : (
+              (stale.message ??
+              "Showing the last known status while refreshing.")
+            )}
           </span>
         ) : null}
         {request ? (

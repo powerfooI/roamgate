@@ -322,10 +322,13 @@ export async function readPullRequestStatus(
       if (!provider && (gh.status === "rejected" || glab.status === "rejected"))
         throw new Error("Host discovery failed");
       if (!provider)
-        return finish(
-          "unsupported",
-          "Unsupported or unconfigured host. Configure this instance in gh or glab on the checkout host.",
-        );
+        return {
+          ...finish(
+            "unsupported",
+            "Unsupported or unconfigured host. Configure this instance in gh or glab on the checkout host.",
+          ),
+          retryable: true,
+        };
     }
     result.provider = provider;
     const cli = provider === "github" ? "gh" : "glab";

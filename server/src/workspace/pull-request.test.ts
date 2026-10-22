@@ -692,6 +692,14 @@ describe("PR/MR status", () => {
     ).toBe("select_remote");
   });
   test("unsupported hosts and detached HEAD have explicit states", async () => {
+    const undiscovered = await fixture("gitlab", {
+      host: "git.example.com",
+      override: (command) => (command.includes("'auth'") ? ok("") : undefined),
+    }).read();
+    expect(undiscovered).toMatchObject({
+      state: "unsupported",
+      retryable: true,
+    });
     expect(
       (
         await fixture("github", {

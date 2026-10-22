@@ -35,8 +35,9 @@ export type PullRequestStatus = {
   /** The branch was recovered from an in-progress rebase on a detached HEAD. */
   rebasing?: boolean;
   /**
-   * A transient provider or transport failure. Errors without this flag, such
-   * as a branch change during refresh, invalidate the previous association.
+   * A provider or transport failure that cannot disprove an existing link.
+   * Errors without this flag, such as a branch change during refresh,
+   * invalidate the previous association.
    */
   retryable?: boolean;
   refreshedAt: string;
@@ -54,9 +55,16 @@ export type PullRequestSummary = Pick<
   "state" | "message" | "refreshedAt" | "provider" | "request" | "retryable"
 > & {
   /**
-   * Set by the browser when a retryable refresh failed and this summary is the
-   * last successful result for the same association. `refreshedAt` remains the
-   * last successful refresh time.
+   * The last successful result, awaiting verification or after a failed refresh.
+   * `refreshedAt` remains the last successful refresh time.
    */
-  stale?: { failedAt: string; message?: string };
+  stale?: { failedAt?: string; message?: string };
 };
+
+export function pullRequestUnavailable(status: PullRequestSummary): boolean {
+  return (
+    status.retryable === true ||
+    status.state === "missing_cli" ||
+    status.state === "unauthenticated"
+  );
+}

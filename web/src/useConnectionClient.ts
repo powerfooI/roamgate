@@ -1,6 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { bridge, type ConnectionClient } from "./api";
-import { useStoreSelector } from "./store";
+import { store, useStoreSelector } from "./store";
+
+/** Catalog restoration can make the same client usable after socket hello. */
+export function useConnectionReady(client: ConnectionClient): boolean {
+  return useSyncExternalStore(store.subscribe, client.isCurrent);
+}
 
 /** Captures the active browser routing lease for component-owned work. */
 export function useConnectionClient(): ConnectionClient {

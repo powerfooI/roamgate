@@ -7,8 +7,12 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { PullRequestStatus } from "../../../shared/pullRequest";
+import {
+  pullRequestUnavailable,
+  type PullRequestStatus,
+} from "../../../shared/pullRequest";
 import type { ConnectionClient } from "../api";
+import { useConnectionReady } from "../useConnectionClient";
 import { ThemedSelect } from "./ThemedSelect";
 import "./PullRequestCard.css";
 
@@ -21,6 +25,7 @@ export function PullRequestCard({
   workspaceId: string;
   branch?: string;
 }) {
+  const ready = useConnectionReady(client);
   const [remote, setRemote] = useState("");
   const [match, setMatch] = useState("");
   const [refresh, setRefresh] = useState(0);
@@ -37,6 +42,7 @@ export function PullRequestCard({
     const request = ++sequence.current;
     setLoading(true);
     setError("");
+    if (!ready) return;
     const fallBack = (failedAt: string, message?: string) => {
       const good = lastGood.current;
       if (!good) return false;
@@ -60,8 +66,7 @@ export function PullRequestCard({
         if (sequence.current !== request || !client.isCurrent()) return;
         setLoading(false);
         if (
-          value.state === "error" &&
-          value.retryable &&
+          pullRequestUnavailable(value) &&
           fallBack(value.refreshedAt, value.message)
         )
           return;
@@ -84,7 +89,7 @@ export function PullRequestCard({
     return () => {
       sequence.current = request + 1;
     };
-  }, [client, workspaceId, branch, remote, match, refresh]);
+  }, [client, ready, workspaceId, branch, remote, match, refresh]);
 
   const current = client.isCurrent() ? status : null;
   const reset = () => {
@@ -101,9 +106,7 @@ export function PullRequestCard({
       loading={loading}
       stale={current ? stale : null}
       error={
-        client.isCurrent()
-          ? error
-          : "Connection changed. Reopen Inspector to refresh."
+        client.isCurrent() ? error : "Waiting for the connection to recover."
       }
       finishedAt={finishedAt}
       onRefresh={() => setRefresh((value) => value + 1)}

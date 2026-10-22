@@ -5,6 +5,7 @@ import { luckyWorktreeBranchName } from "../luckyName";
 import {
   connectionClientScopeKey,
   useConnectionClient,
+  useConnectionReady,
 } from "../useConnectionClient";
 import { useWorktreePullRequests } from "../useWorktreePullRequests";
 import { store, useStoreSelector } from "../store";
@@ -93,6 +94,7 @@ export function WorktreeLifecycleDialog({
 }) {
   const workspaces = useStoreSelector((state) => state.workspaces);
   const connectionClient = useConnectionClient();
+  const ready = useConnectionReady(connectionClient);
   const selectedWorkspace = workspaces.find(
     (workspace) => workspace.workspace_id === workspaceId,
   );
@@ -137,7 +139,7 @@ export function WorktreeLifecycleDialog({
 
   const load = useCallback(
     async (showLoading: boolean, force = false) => {
-      if (!repositoryWorkspaceId) return;
+      if (!repositoryWorkspaceId || !connectionClient.isCurrent()) return;
       const existingLoad = inFlightLoad.current;
       if (!force && existingLoad?.workspaceId === repositoryWorkspaceId) {
         if (showLoading) setLoading(true);
@@ -227,7 +229,7 @@ export function WorktreeLifecycleDialog({
   );
 
   useEffect(() => {
-    if (!open || !repositoryWorkspaceId) return;
+    if (!ready || !open || !repositoryWorkspaceId) return;
     setListResult(null);
     setHooks(null);
     setAutoSync({});
@@ -244,7 +246,7 @@ export function WorktreeLifecycleDialog({
       operationRunningRef.current = false;
       inFlightLoad.current = null;
     };
-  }, [load, open, repositoryWorkspaceId]);
+  }, [load, ready, open, repositoryWorkspaceId]);
 
   const list =
     listResult && listResult.scope === scope ? listResult.list : null;

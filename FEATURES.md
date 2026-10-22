@@ -89,6 +89,16 @@ Inspector button, shortcuts, or workspace/agent menus.
   **Last known**. A detached checkout resolves a request only while a branch
   rebase is in progress.
 
+Sidebar and worktree PR/MR badges keep the last successful summary in this
+browser (up to 200 checkouts). Reloading or reconnecting shows it as **Last known**
+while the status refreshes. Temporary Git, network, CLI, or authentication
+failures do not erase a known link. Cached summaries are isolated by connection
+destination, repository, checkout, and branch; a confirmed missing or ambiguous
+request clears the cached link. Cached links require a known branch; temporary
+Git status failures retain the last confirmed branch. A detached checkout waits
+for Git to confirm an active branch rebase before showing a request, and must
+confirm it again after reconnecting.
+
 Inspector state is scoped to each checkout; see
 [resource ownership](docs/ARCHITECTURE.md#workspace-resource-ownership).
 

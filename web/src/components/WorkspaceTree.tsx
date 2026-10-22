@@ -261,10 +261,7 @@ export function WorkspaceTree({
     shallowEqual,
   );
   const connectionClient = useConnectionClient();
-  const reviews = useWorkspacePullRequests(
-    connectionClient,
-    s.status === "connected" ? s.workspaces : [],
-  );
+  const reviews = useWorkspacePullRequests(connectionClient, s.workspaces);
   const agentOrderStorageKey = connectionStorageKey(
     s.activeConnectionId,
     AGENT_ORDER_STORAGE_KEY,
