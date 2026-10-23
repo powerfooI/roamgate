@@ -72,8 +72,8 @@ export function readTerminalComposerShortcutsOpen(): boolean {
  * (IME, dictation, selection, autocorrect, multiline paste) and text only
  * reaches the PTY when the user explicitly chooses Insert or Send, which
  * sidesteps the xterm helper-textarea races described in the IME recovery
- * code. Drafts are write-through to the in-memory store so pane switches and
- * virtual-keyboard resizes never lose text.
+ * code. Drafts are written through the shared store for pane switches,
+ * reconnects and browser recovery.
  *
  * The configurable mobile shortcut keys live at the top of the dock so the
  * composer is the single mobile input control surface. Direct mode reuses

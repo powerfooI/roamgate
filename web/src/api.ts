@@ -9,6 +9,7 @@ import {
   type AssistantSnapshot,
   type AssistantTaskNotification,
 } from "../../shared/assistant";
+import { clearSavedTerminalComposerDrafts } from "./terminalComposer";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
@@ -308,6 +309,7 @@ export async function logoutBrowserSession(): Promise<void> {
     headers: { "x-roamgate-logout": "1" },
   });
   if (!response.ok) throw new Error("Could not log out. Please try again.");
+  clearSavedTerminalComposerDrafts();
   location.replace("/login");
 }
 
@@ -590,6 +592,7 @@ export class Bridge {
     ws.onclose = (event) => {
       if (this.ws !== ws) return;
       if (event?.code === 4001) {
+        clearSavedTerminalComposerDrafts();
         this.disconnect("logged out");
         // Clear the shared cookie in every tab before navigating. A close frame
         // can arrive before the initiating tab receives its logout response.

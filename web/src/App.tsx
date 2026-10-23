@@ -1207,6 +1207,7 @@ export default function App() {
     (state) => ({
       activeConnectionId: state.activeConnectionId,
       connectionGeneration: state.connectionGeneration,
+      connections: state.connections,
       lastRefresh: state.lastRefresh,
       layout: state.layout,
       notice: state.notice,
@@ -1228,8 +1229,12 @@ export default function App() {
     activateTerminalComposerDraftScope(
       s.activeConnectionId,
       s.connectionGeneration,
+      s.panes,
+      s.connections.find(
+        (connection) => connection.id === s.activeConnectionId,
+      ),
     );
-  }, [s.activeConnectionId, s.connectionGeneration]);
+  }, [s.activeConnectionId, s.connectionGeneration, s.panes, s.connections]);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [mobileView, setMobileView] = useState<MobileView>("session");
   const [assistantOpen, setAssistantOpen] = useState(false);
