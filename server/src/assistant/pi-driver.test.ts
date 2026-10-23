@@ -56,7 +56,8 @@ function expectAnthropicTools(
 function durableEntries(directory: string, entries: unknown[]) {
   const pointer = entries[0] as { id: string };
   const sqlite = join(directory, "durable", pointer.id, "execution.sqlite");
-  const database = new DatabaseSync(sqlite, { readOnly: true });
+  // Allow SQLite to recreate WAL sidecars when inspecting closed fixture stores.
+  const database = new DatabaseSync(sqlite);
   try {
     return database
       .prepare("SELECT record FROM entries ORDER BY id")

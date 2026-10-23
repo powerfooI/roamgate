@@ -189,7 +189,8 @@ test.each([
           "This is not a SQLite database",
         );
       else {
-        const database = new DatabaseSync(f.path, { readOnly: true });
+        // Allow SQLite to recreate WAL sidecars when inspecting closed fixture stores.
+        const database = new DatabaseSync(f.path);
         try {
           if (failure === "missing root")
             expect(

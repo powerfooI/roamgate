@@ -62,11 +62,9 @@ function reply(tool = false) {
 
 function records(directory: string, entries: unknown[]) {
   const id = (entries[0] as { id: string }).id;
+  // Allow SQLite to recreate WAL sidecars when inspecting closed fixture stores.
   const database = new DatabaseSync(
     join(directory, "durable", id, "execution.sqlite"),
-    {
-      readOnly: true,
-    },
   );
   try {
     return database
