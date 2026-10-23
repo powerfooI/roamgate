@@ -71,7 +71,7 @@
         "cmdk": "^1.1.1",
         "codemirror": "^6.0.2",
         "diff2html": "^3.4.56",
-        "dompurify": "^3.4.16",
+        "dompurify": "^3.4.17",
         "highlight.js": "11.12.0",
         "lucide-react": "^1.49.0",
         "marked": "^18.0.14",
@@ -670,7 +670,7 @@
 
     "diff2html": ["diff2html@3.4.56", "", { "dependencies": { "@profoundlogic/hogan": "^3.0.4", "diff": "^8.0.3" }, "optionalDependencies": { "highlight.js": "11.11.1" } }, "sha512-u9gfn+BlbHcyO7vItCIC4z49LJDUt31tODzOfAuJ5R1E7IdlRL6KjugcB9zOpejD+XiR+dDZbsnHSQ3g6A/u8A=="],
 
-    "dompurify": ["dompurify@3.4.16", "", { "optionalDependencies": { "@types/trusted-types": "^2.0.7" } }, "sha512-sqo+pNp3qRhCIpbgRi1y8Tgk27Bo2Ry7w0dC1NBeNTdZChWjz9Xb/KOoZbRP/R6pQZ80Qw8YhXw13hWWBbMRnQ=="],
+    "dompurify": ["dompurify@3.4.17", "", { "optionalDependencies": { "@types/trusted-types": "^2.0.7" } }, "sha512-B/pSlYVHQ58kqISD/yDjuJ1yfzI34m1gF4lAod2bwSRhiN4K5Cl3H8Af7hqB2PmTL911tdEudnnXn5FnhRoz0w=="],
 
     "ecdsa-sig-formatter": ["ecdsa-sig-formatter@1.0.11", "", { "dependencies": { "safe-buffer": "^5.0.1" } }, "sha512-nagl3RYrbNv6kQkeJIpt6NJZy8twLB/2vtz6yN9Z4vRKHN4/QZJIEbqohALSgwKdnksuY3k5Addp5lg8sVoVcQ=="],
 
