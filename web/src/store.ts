@@ -20,7 +20,10 @@ export {
   type TaskNotificationTarget,
 } from "./taskNotifications";
 import { withAgentActivity } from "./agentOrder";
-import { clearTerminalComposerDrafts } from "./terminalComposer";
+import {
+  clearSavedTerminalComposerDrafts,
+  clearTerminalComposerDrafts,
+} from "./terminalComposer";
 import {
   forgetClosedTabPins,
   paneCloseBlockReason,
@@ -659,6 +662,7 @@ function wait(ms: number) {
 }
 
 function redirectToLogin() {
+  clearSavedTerminalComposerDrafts();
   const loginUrl = new URL("/login", window.location.origin);
   window.location.replace(loginUrl.href);
 }
@@ -4102,6 +4106,7 @@ export const store = {
 
 /** Test-only singleton seam for deterministic deferred production-store tests. */
 export const __storeTesting = {
+  reloadWhenUpdatedServerIsReady,
   notifyRangerTask,
   handleBridgeStatus,
   handleHerdrEvent,

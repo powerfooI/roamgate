@@ -127,6 +127,111 @@ describe("request authentication boundaries", () => {
     expect(location.href).toBe("/#roamgate-task=example-target");
   });
 
+  test.each([false, true])(
+    "login page clears drafts only for missing or expired authentication (PIN=%s)",
+    async (pinEnabled) => {
+      const handlers = createAuthHandlers({
+        sessionSecret: "a".repeat(64),
+        password: "test-login-secret",
+        ...(pinEnabled ? { pin: "123456" } : {}),
+      });
+      const login = await handlers.handleLogin(
+        new Request("http://localhost/api/login", {
+          method: "POST",
+          body: JSON.stringify({ password: "test-login-secret" }),
+        }),
+        "127.0.0.1",
+      );
+      const validCookie = cookieHeader(login);
+      const expiredPayload = Buffer.from(JSON.stringify({ exp: 0 })).toString(
+        "base64url",
+      );
+      const signature = createHmac("sha256", Buffer.from("a".repeat(64), "hex"))
+        .update(expiredPayload)
+        .digest("hex");
+      for (const cookie of [
+        validCookie,
+        "",
+        `herdr_auth=${expiredPayload}.${signature}`,
+      ]) {
+        const browser = new Window();
+        const storageKey = 'roamgate:terminalComposerDraft:v1:["old-session"]';
+        for (const storage of [browser.localStorage, browser.sessionStorage]) {
+          storage.setItem(storageKey, "previous user's secret");
+          storage.setItem("roamgate:theme", "dark");
+        }
+        browser.localStorage.setItem(
+          "roamgate:terminalComposerLogout",
+          "before",
+        );
+        const html = await handlers
+          .loginPage(
+            new Request("http://localhost/login", { headers: { cookie } }),
+          )
+          .text();
+        const document = new parserWindow.DOMParser().parseFromString(
+          html,
+          "text/html",
+        );
+        runInNewContext(loginScript(html), {
+          document,
+          localStorage: browser.localStorage,
+          sessionStorage: browser.sessionStorage,
+        });
+        for (const storage of [browser.localStorage, browser.sessionStorage]) {
+          expect(storage.getItem(storageKey)).toBe(
+            cookie === validCookie ? "previous user's secret" : "",
+          );
+          expect(storage.getItem("roamgate:theme")).toBe("dark");
+        }
+        expect(
+          browser.localStorage.getItem("roamgate:terminalComposerLogout") ===
+            "before",
+        ).toBe(cookie === validCookie);
+        await browser.happyDOM.close();
+      }
+    },
+  );
+
+  test("storage denial on the unauthenticated login page does not block login", async () => {
+    const handlers = createAuthHandlers({
+      sessionSecret: "a".repeat(64),
+      password: "test-login-secret",
+    });
+    const html = await handlers
+      .loginPage(new Request("http://localhost/login"))
+      .text();
+    const document = new parserWindow.DOMParser().parseFromString(
+      html,
+      "text/html",
+    );
+    const blocked = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error("Storage denied");
+        },
+      },
+    );
+    let destination = "";
+    await runInNewContext(
+      `${loginScript(html)}\nform.onsubmit({preventDefault(){}})`,
+      {
+        document,
+        localStorage: blocked,
+        sessionStorage: blocked,
+        location: {
+          hash: "",
+          replace: (url: string) => {
+            destination = url;
+          },
+        },
+        fetch: async () => new Response(null, { status: 200 }),
+      },
+    );
+    expect(destination).toBe("/");
+  });
+
   test.each(["credentials", "server", "network", "throttle"])(
     "login recovers from %s failures and prevents duplicate submissions",
     async (failure) => {

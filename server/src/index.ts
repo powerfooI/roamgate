@@ -1556,7 +1556,7 @@ function main() {
             return handleLogin(req, clientIp);
           }
           if (url.pathname === "/login") {
-            return loginPage();
+            return loginPage(req);
           }
           // The login page's logo and favicon must also work before login.
           if (url.pathname === "/roamgate-icon-192.png") {

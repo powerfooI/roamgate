@@ -361,20 +361,27 @@ export function createAuthHandlers(args: {
     return handleCredentialLogin(req, ip, true);
   }
 
-  function loginPage(): Response {
+  function loginPage(req?: Request): Response {
     if (!authRequired) {
       return new Response(null, {
         status: 302,
         headers: { location: "/", "cache-control": "no-store" },
       });
     }
-    return new Response(renderLoginPage(Boolean(args.pin), args.tokenCommand), {
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-store",
-        "referrer-policy": "no-referrer",
+    return new Response(
+      renderLoginPage(
+        Boolean(args.pin),
+        args.tokenCommand,
+        !req || !isAuthed(req),
+      ),
+      {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "referrer-policy": "no-referrer",
+        },
       },
-    });
+    );
   }
 
   return {

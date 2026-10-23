@@ -9,6 +9,7 @@ function escapeHtml(text: string): string {
 export function renderLoginPage(
   pinEnabled: boolean,
   tokenCommand?: string,
+  clearDrafts = false,
 ): string {
   return `<!doctype html>
 <html lang="en">
@@ -112,11 +113,26 @@ export function renderLoginPage(
   <footer>Your workspace, wherever you are.</footer>
 </main>
 <script>
+${clearDrafts ? CLEAR_DRAFTS_SCRIPT : ""}
 ${pinEnabled ? PIN_LOGIN_SCRIPT : PASSWORD_LOGIN_SCRIPT}${tokenCommand ? COPY_COMMAND_SCRIPT : ""}
 </script>
 </body>
 </html>`;
 }
+
+// An unauthenticated document request can reach login without loading the app.
+const CLEAR_DRAFTS_SCRIPT = `
+  for(const name of ['localStorage','sessionStorage']){
+    try{
+      const storage=globalThis[name];
+      for(let i=0;i<storage.length;i++){
+        const key=storage.key(i);
+        if(key?.startsWith('roamgate:terminalComposerDraft:v1:'))storage.setItem(key,'');
+      }
+    }catch{}
+  }
+  try{localStorage.setItem('roamgate:terminalComposerLogout',Date.now()+'-'+Math.random());}catch{}
+`;
 
 const PASSWORD_LOGIN_SCRIPT = `  const form=document.getElementById('login'),pw=document.getElementById('pw'),btn=document.getElementById('btn'),err=document.getElementById('err'),reveal=document.getElementById('reveal');
   reveal.onclick=()=>{
