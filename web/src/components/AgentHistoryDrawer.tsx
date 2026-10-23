@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useId,
   useRef,
   useState,
   type CSSProperties,
@@ -10,6 +11,8 @@ import {
 } from "react";
 import {
   Copy,
+  ChevronDown,
+  Search,
   Download,
   Eye,
   Info,
@@ -17,6 +20,7 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
+import { useLayoutPreferences } from "../layoutPreferences";
 import { store, useStoreSelector } from "../store";
 import { copyTextWithFeedback } from "../copyText";
 import { useConnectionClient } from "../useConnectionClient";
@@ -98,6 +102,16 @@ export function AgentHistoryDrawer({
   wide?: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { mobile } = useLayoutPreferences();
+  const [headerExpanded, setHeaderExpanded] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const headerId = useId();
+  const searchId = useId();
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchToggleRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (mobile && searchOpen) searchInputRef.current?.focus();
+  }, [mobile, searchOpen]);
   const workspaces = useStoreSelector((state) => state.workspaces);
   const activeConnectionId = useStoreSelector(
     (state) => state.activeConnectionId,
@@ -278,6 +292,8 @@ export function AgentHistoryDrawer({
     setWideListRatio(DEFAULT_INSPECTOR_NAVIGATION_RATIO);
     setHistory(null);
     setQuery("");
+    setHeaderExpanded(false);
+    setSearchOpen(false);
     setSession(null);
     setDetailsOpen(false);
     setExpandedMessage(null);
@@ -672,18 +688,47 @@ export function AgentHistoryDrawer({
     </>
   ) : null;
 
-  const historySearch = (
-    <div className="agent-history-search">
-      <input
-        type="search"
-        aria-label="Search history messages"
-        placeholder="Search loaded messages"
-        title="Search loaded message text. Tool content is searchable after loading it."
-        value={query}
-        onChange={(event) => changeFilters(filters, event.currentTarget.value)}
-      />
-    </div>
-  );
+  // Never hide an active desktop query after switching to mobile layout.
+  const mobileSearchOpen = searchOpen || query.length > 0;
+  const closeSearch = () => {
+    changeFilters(filters, "");
+    setSearchOpen(false);
+    searchToggleRef.current?.focus();
+  };
+  const historySearch =
+    !mobile || mobileSearchOpen ? (
+      <div className="agent-history-search" id={searchId}>
+        <input
+          ref={searchInputRef}
+          type="search"
+          aria-label="Search history messages"
+          placeholder="Search loaded messages"
+          title="Search loaded message text. Tool content is searchable after loading it."
+          value={query}
+          onChange={(event) =>
+            changeFilters(filters, event.currentTarget.value)
+          }
+          onKeyDown={(event) => {
+            if (mobile && event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              closeSearch();
+            }
+          }}
+        />
+        {mobile ? (
+          <button
+            type="button"
+            className="agent-history-icon"
+            aria-label="Close search"
+            title="Close search"
+            onClick={closeSearch}
+          >
+            <X size={16} />
+          </button>
+        ) : null}
+      </div>
+    ) : null;
   const historyFilters = (
     <>
       {historySearch}
@@ -930,7 +975,63 @@ export function AgentHistoryDrawer({
         aria-hidden={!open}
         inert={!open}
       >
-        <div className="agent-history-drawer-head">
+        {mobile ? (
+          <div className="agent-history-mobile-head">
+            <button
+              type="button"
+              className="agent-history-session-toggle"
+              aria-expanded={headerExpanded}
+              aria-controls={headerId}
+              onClick={() => setHeaderExpanded((current) => !current)}
+            >
+              <ChevronDown size={14} aria-hidden="true" />
+              <span>Session</span>
+              <span className="agent-history-count">{messages.length}</span>
+              <span className="agent-history-mobile-agent">
+                {pane.agent ?? "Agent"}
+              </span>
+            </button>
+            <span
+              className={`agent-history-status is-${pane.agent_status.toLowerCase()}`}
+            >
+              {pane.agent_status}
+            </span>
+            <button
+              ref={searchToggleRef}
+              type="button"
+              className="agent-history-icon"
+              aria-label="Search history messages"
+              title="Search history messages"
+              aria-expanded={mobileSearchOpen}
+              aria-controls={mobileSearchOpen ? searchId : undefined}
+              onClick={() => {
+                if (mobileSearchOpen) closeSearch();
+                else {
+                  setDetailsOpen(false);
+                  setSearchOpen(true);
+                }
+              }}
+            >
+              <Search size={16} />
+            </button>
+            {!embedded ? (
+              <button
+                type="button"
+                className="agent-history-icon"
+                aria-label="Close session"
+                title="Close"
+                onClick={() => onOpenChange(false)}
+              >
+                <X size={16} />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        <div
+          className="agent-history-drawer-head"
+          id={headerId}
+          hidden={mobile && !headerExpanded}
+        >
           <div className="agent-history-identity">
             <AgentIcon agent={pane.agent} />
             <div className="agent-history-title">
@@ -997,7 +1098,7 @@ export function AgentHistoryDrawer({
             >
               <RefreshCw size={14} />
             </button>
-            {!embedded ? (
+            {!embedded && !mobile ? (
               <button
                 type="button"
                 className="agent-history-icon"

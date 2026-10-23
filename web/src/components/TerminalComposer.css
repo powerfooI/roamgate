@@ -391,3 +391,66 @@
     }
   }
 }
+
+/* History shares the editor and submission flow in one compact row. */
+:where(html[data-layout="mobile"]) {
+  .terminal-composer.is-history {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+
+  .terminal-composer.is-history [hidden] {
+    display: none;
+  }
+
+  .terminal-composer.is-history .terminal-composer-toolbar {
+    display: contents;
+  }
+
+  .terminal-composer.is-history > .terminal-mobile-input-bar {
+    display: flex;
+    flex: 1 1 0;
+    padding-right: 0;
+    background: transparent;
+    order: 2;
+    min-width: 0;
+  }
+
+  .terminal-composer.is-history .terminal-composer-attach {
+    order: 1;
+    width: 40px;
+    height: 48px;
+  }
+
+  .terminal-composer.is-history .terminal-composer-submit-actions {
+    order: 3;
+    flex: 0 0 auto;
+    margin: 0;
+  }
+
+  .terminal-composer.is-history .terminal-composer-submit {
+    min-height: 48px;
+  }
+
+  .terminal-composer.is-history .terminal-composer-hint:empty {
+    display: none;
+  }
+
+  .terminal-composer.is-history .terminal-composer-hint:not(:empty) {
+    max-width: 64px;
+  }
+
+  .terminal-composer.is-history .terminal-mobile-message {
+    width: 100%;
+    min-height: 48px;
+    padding: 12px 10px;
+    border-radius: 24px;
+  }
+
+  .terminal-composer.is-history > .terminal-composer-commands,
+  .terminal-composer.is-history > .agent-history-composer-warning {
+    order: 0;
+    flex: 0 0 100%;
+  }
+}
