@@ -61,8 +61,10 @@ function clearStoredDrafts(storage: Storage, keepEpoch?: string): void {
 
 function retireDraft(key: string): void {
   retiredDraftKeys.add(key);
-  clearTerminalComposerDraft(key);
+  const storageKey = draftStorageKeys.get(key);
+  if (storageKey) saveDraft(storageKey, "", true);
   draftStorageKeys.delete(key);
+  clearTerminalComposerDraft(key);
   finishTerminalComposerSubmission(key);
   clearTerminalComposerUploads(key);
 }
@@ -94,7 +96,7 @@ subscribeLocalStorage((key) => {
   if (key === null || key === DRAFT_LOGOUT_KEY) synchronizeDraftLogout();
 });
 
-function saveDraft(storageKey: string, text: string): void {
+function saveDraft(storageKey: string, text: string, forceClear = false): void {
   const previous = savedDrafts.get(storageKey) ?? "";
   savedDrafts.set(storageKey, text);
   for (const storage of [roamgateSessionStorage, roamgateLocalStorage]) {
@@ -103,6 +105,7 @@ function saveDraft(storageKey: string, text: string): void {
       if (
         storage === roamgateLocalStorage &&
         !text &&
+        !forceClear &&
         (storage.getItem(storageKey) ?? "") !==
           (lastLocalWrites.get(storageKey) ?? previous)
       )
@@ -415,6 +418,25 @@ export function activateTerminalComposerDraftScope(
       ) {
         retireDraft(key);
       }
+    }
+    // Reloaded tabs have saved drafts but no live mappings for removed panes.
+    const storedKeys = new Set(savedDrafts.keys());
+    for (const storage of [roamgateSessionStorage, roamgateLocalStorage]) {
+      try {
+        for (let i = 0; i < storage.length; i++) {
+          const key = storage.key(i);
+          if (key) storedKeys.add(key);
+        }
+      } catch {
+        // Live draft retirement still works when storage access is denied.
+      }
+    }
+    for (const storageKey of storedKeys) {
+      if (
+        storageKey.startsWith(storagePrefix) &&
+        !survivingStorageKeys.has(storageKey)
+      )
+        saveDraft(storageKey, "", true);
     }
     for (const [key, storageKey] of targets) {
       if (retiredDraftKeys.has(key)) continue;

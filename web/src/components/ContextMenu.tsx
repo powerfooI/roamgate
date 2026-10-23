@@ -3,7 +3,6 @@ import type { Workspace } from "../types";
 import type { PullRequestSummary } from "../../../shared/pullRequest";
 import { store, useStoreSelector } from "../store";
 import {
-  clearTerminalComposerDrafts,
   terminalComposerCloseWarning,
   terminalComposerDraftPaneIds,
 } from "../terminalComposer";
@@ -211,13 +210,6 @@ export function ContextMenu({
         onClose={() => setDialog(null)}
         onConfirm={() => {
           if (dialog?.type === "close-workspace") {
-            clearTerminalComposerDrafts(
-              activeConnectionId,
-              connectionGeneration,
-              panes
-                .filter((pane) => pane.workspace_id === dialog.workspaceId)
-                .map((pane) => pane.pane_id),
-            );
             store.closeWorkspace(dialog.workspaceId);
           }
         }}

@@ -535,3 +535,64 @@ test("a replacement terminal stays editable while callbacks for the previous ter
     ),
   ).toBe("");
 });
+
+test.each(["confirmed", "observed"])(
+  "%s pane closure clears a newer tab's backup and its missed session copy on reload",
+  async (close) => {
+    const { local, session: sessionA } = storage();
+    const first = await freshDrafts();
+    first.writeTerminalComposerDraft(activate(first), "tab A secret");
+    const sessionB = memoryStorage();
+    storage(local, sessionB);
+    const second = await freshDrafts();
+    second.writeTerminalComposerDraft(activate(second), "tab B secret");
+    const storedKey = sessionB.key(0)!;
+
+    storage(local, sessionA);
+    if (close === "confirmed") {
+      first.clearTerminalComposerDrafts(connection.id, 1, [pane.pane_id]);
+    } else {
+      first.activateTerminalComposerDraftScope(
+        connection.id,
+        1,
+        [],
+        connection,
+      );
+    }
+    expect(local.getItem(storedKey)).toBe("");
+
+    // The paused tab missed the removal and reloads without any live key mapping.
+    storage(local, sessionB);
+    expect(sessionB.getItem(storedKey)).toBe("tab B secret");
+    const reload = await freshDrafts();
+    reload.activateTerminalComposerDraftScope(
+      connection.id,
+      2,
+      undefined,
+      connection,
+    );
+    expect(sessionB.getItem(storedKey)).toBe("tab B secret");
+    reload.activateTerminalComposerDraftScope(connection.id, 2, [], connection);
+    expect(sessionB.getItem(storedKey)).toBe("");
+    expect(local.getItem(storedKey)).toBe("");
+  },
+);
+
+test("fresh topology clears only removed drafts from its own destination", async () => {
+  const { local, session } = storage();
+  const first = await freshDrafts();
+  first.writeTerminalComposerDraft(activate(first), "removed secret");
+  const removedStorageKey = session.key(0)!;
+  const otherHost = { ...connection, id: "other-host" };
+  first.writeTerminalComposerDraft(
+    activate(first, 1, otherHost),
+    "other draft",
+  );
+  const reload = await freshDrafts();
+  reload.activateTerminalComposerDraftScope(connection.id, 2, [], connection);
+  expect(session.getItem(removedStorageKey)).toBe("");
+  expect(local.getItem(removedStorageKey)).toBe("");
+  expect(reload.readTerminalComposerDraft(activate(reload, 2, otherHost))).toBe(
+    "other draft",
+  );
+});

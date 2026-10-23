@@ -127,6 +127,64 @@ describe("pinned close draft protection", () => {
   );
 });
 
+test("workspace drafts stay editable through failed closes and clear only after success", async () => {
+  const previousState = store.get();
+  const previousConnection = bridge.connection;
+  const snapshot = partitionState();
+  snapshot.connectionGeneration = 2953;
+  const target = snapshot.panes[0];
+  const key = terminalComposerDraftKey("alpha", 2953, target.pane_id);
+  const otherKey = terminalComposerDraftKey("alpha", 2953, "other-pane");
+  let result = Promise.withResolvers<unknown>();
+  bridge.connection = (connectionId = "alpha") => ({
+    connectionId,
+    generation: 2953,
+    serverRuntimeGeneration: 1,
+    isCurrent: () => true,
+    acceptsServerGeneration: () => true,
+    call: async () => result.promise,
+  });
+  try {
+    __storeTesting.replaceState({
+      ...snapshot,
+      panes: [
+        target,
+        { ...target, pane_id: "other-pane", workspace_id: "other-workspace" },
+      ],
+    });
+    activateTerminalComposerDraftScope("alpha", 2953);
+    writeTerminalComposerDraft(key, "unsent draft");
+    writeTerminalComposerDraft(otherKey, "other workspace draft");
+    for (const error of [
+      "Close failed",
+      "workspace_group_close_required: linked worktrees",
+    ]) {
+      const closing = store.closeWorkspace(target.workspace_id);
+      expect(readTerminalComposerDraft(key)).toBe("unsent draft");
+      result.reject(new Error(error));
+      await closing;
+      expect(readTerminalComposerDraft(key)).toBe("unsent draft");
+      writeTerminalComposerDraft(key, "still editable");
+      expect(readTerminalComposerDraft(key)).toBe("still editable");
+      writeTerminalComposerDraft(key, "unsent draft");
+      result = Promise.withResolvers<unknown>();
+    }
+    const closing = store.closeWorkspace(target.workspace_id);
+    expect(readTerminalComposerDraft(key)).toBe("unsent draft");
+    result.resolve({});
+    await closing;
+    expect(readTerminalComposerDraft(key)).toBe("");
+    expect(readTerminalComposerDraft(otherKey)).toBe("other workspace draft");
+  } finally {
+    bridge.connection = previousConnection;
+    __storeTesting.replaceState(previousState);
+    activateTerminalComposerDraftScope(
+      previousState.activeConnectionId,
+      previousState.connectionGeneration,
+    );
+  }
+});
+
 describe("automatic update check preference", () => {
   test("defaults to enabled and honors an explicit disabled value", () => {
     expect(automaticUpdateChecksEnabledFromStorage(undefined)).toBe(true);

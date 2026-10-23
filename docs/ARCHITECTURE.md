@@ -143,7 +143,10 @@ and async uploads, but do not own the saved text. Recovery never sends a draft.
 Sending, discarding, closing its pane through Roamgate, or logging out clears
 the saved text. Storage events immediately clear live drafts and old session
 copies on logout; a shared marker also invalidates copies in tabs that missed
-the event. Observed pane removals retire drafts from all connection generations.
+the event. Successful closes and observed pane removals clear the shared backup
+even when another tab wrote it, and retire drafts from all connection
+generations. A fresh topology also clears saved copies of removed panes in a
+reloaded tab. Failed close requests preserve editable drafts.
 Paths retained after a partial upload failure are saved with the original
 destination's draft; reconnect callbacks append paths without replacing newer
 edits or sending input. Unsent input may contain sensitive information and

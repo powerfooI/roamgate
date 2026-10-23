@@ -35,7 +35,6 @@ import {
 } from "lucide-react";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import {
-  clearTerminalComposerDrafts,
   terminalComposerCloseWarning,
   terminalComposerDraftPaneIds,
 } from "../terminalComposer";
@@ -286,12 +285,6 @@ export function CommandCombobox({
         s.connectionGeneration,
         paneIds,
       ).length,
-    );
-  const clearComposerDraftsFor = (paneIds: string[]) =>
-    clearTerminalComposerDrafts(
-      s.activeConnectionId,
-      s.connectionGeneration,
-      paneIds,
     );
 
   const focusedWorkspace = s.workspaces.find((w) => w.focused);
@@ -1163,14 +1156,6 @@ export function CommandCombobox({
         onClose={() => setPendingCloseWorkspace(null)}
         onConfirm={() => {
           if (pendingCloseWorkspace) {
-            clearComposerDraftsFor(
-              s.panes
-                .filter(
-                  (pane) =>
-                    pane.workspace_id === pendingCloseWorkspace.workspace_id,
-                )
-                .map((pane) => pane.pane_id),
-            );
             store.closeWorkspace(pendingCloseWorkspace.workspace_id);
           }
         }}
