@@ -1502,8 +1502,10 @@ export default function App() {
   const activePaneHasAgent = paneHasAgentHistory(activePane);
   const historyInspectorOpen =
     inspectorState?.open === true && inspectorState.view === "history";
+  const historyInspectorVisible =
+    historyInspectorOpen && (!mobile || mobileView === "history");
   const agentHistoryOpen =
-    historyInspectorOpen &&
+    historyInspectorVisible &&
     (!inspectorState.originPaneId ||
       inspectorState.originPaneId === activePane?.pane_id);
   const inspectorOriginPane = inspectorState?.originPaneId
@@ -1523,9 +1525,11 @@ export default function App() {
       ? inspectorHistoryPaneCandidate
       : undefined;
   const mobileHistoryPaneId =
-    mobile && historyInspectorOpen ? inspectorHistoryPane?.pane_id : undefined;
+    mobile && historyInspectorVisible
+      ? inspectorHistoryPane?.pane_id
+      : undefined;
   const historyInputPending =
-    mobile && historyInspectorOpen && mobileHistoryPaneId !== activePaneId;
+    mobile && historyInspectorVisible && mobileHistoryPaneId !== activePaneId;
   useEffect(() => {
     if (
       mobileHistoryPaneId &&

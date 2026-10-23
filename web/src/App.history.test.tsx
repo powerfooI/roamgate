@@ -224,6 +224,29 @@ if (process.env.ROAMGATE_APP_HISTORY_TEST !== "1") {
       expect(terminalProps.mobileInputTarget).not.toBeNull();
       expect(terminalProps.agentHistoryOpen).toBe(true);
       expect(terminalProps.composerOpen).toBe(true);
+      // A retained History panel must not keep its input tools on Workspaces.
+      await React.act(async () =>
+        container
+          .querySelector<HTMLButtonElement>('[aria-label="Show workspaces"]')!
+          .click(),
+      );
+      expect(inspectorProps.state.open).toBe(true);
+      expect(inspectorProps.visible).toBe(false);
+      expect(terminalProps.visible).toBe(false);
+      expect(terminalProps.agentHistoryOpen).toBe(false);
+      expect(terminalProps.composerOpen).toBe(true);
+      expect(terminalProps.mobileInputTarget).not.toBeNull();
+      await React.act(async () =>
+        container
+          .querySelector<HTMLButtonElement>(
+            '[aria-label="Show agent message history"]',
+          )!
+          .click(),
+      );
+      expect(inspectorProps.visible).toBe(true);
+      expect(terminalProps.agentHistoryOpen).toBe(true);
+      expect(terminalProps.composerOpen).toBe(true);
+      expect(focusRequests).toHaveLength(1);
       // Rapid history switches must keep the latest target, even if focus lags.
       await openHistory("a");
       await openHistory("c");
