@@ -340,6 +340,10 @@
     background: var(--terminal-bg);
   }
 
+  .app:has(.agent-history-drawer.is-open[data-view="chat"]) .mobile-bottom-bar {
+    --terminal-bg: var(--shell-panel);
+  }
+
   /* The fixed menu cannot escape the topbar's stacking context. */
   .topbar:has(.config-dropdown) {
     z-index: 134;
@@ -348,14 +352,6 @@
   .mobile-bottom-input {
     flex: 1 1 0;
     min-width: 0;
-  }
-
-  /* The open History chat has its own message box on the same shared draft,
-     so the terminal composer would only repeat it. Timeline and details views
-     have no box of their own and keep the terminal composer. */
-  &:has(.agent-history-drawer.is-open .agent-history-composer)
-    .mobile-bottom-input {
-    display: none;
   }
 
   .mobile-appbar {

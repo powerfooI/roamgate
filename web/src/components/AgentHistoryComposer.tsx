@@ -33,7 +33,6 @@ import {
 import { terminalUploadedPathsText } from "../terminalFileDrop";
 import { agentPromptWarning, agentStateKind } from "./agentSession";
 import { useTouchReleaseSubmit } from "./useTouchReleaseSubmit";
-import { TerminalComposer } from "./TerminalComposer";
 import "./AgentHistoryComposer.css";
 
 // Grow with the draft up to this height, then scroll inside the textarea.
@@ -51,63 +50,7 @@ const MAX_INPUT_HEIGHT_PX = 160;
  * Touch keyboards cannot type Shift+Enter, so there Enter adds a line and
  * sending uses the button or the composer send shortcut.
  */
-type AgentHistoryComposerProps = {
-  draftKey: string;
-  agent?: string;
-  status?: string;
-  stateSeq?: number;
-  onSend: (text: string) => Promise<void>;
-  onUploadImage: (file: File) => Promise<string>;
-  onError: (message: string) => void;
-};
-
-export function AgentHistoryComposer(props: AgentHistoryComposerProps) {
-  const { mobile } = useLayoutPreferences();
-  if (!mobile) return <DesktopHistoryComposer {...props} />;
-  const { draftKey, agent, status, stateSeq, onSend, onUploadImage, onError } =
-    props;
-  const uploadImage = (file: File) => {
-    if (file.type && !file.type.startsWith("image/"))
-      return Promise.reject(new Error("Choose an image to attach."));
-    return onUploadImage(file);
-  };
-  return (
-    <div className="agent-history-composer">
-      <TerminalComposer
-        key={draftKey}
-        draftKey={draftKey}
-        presentation="history"
-        agent={agent}
-        submitWarning={agentPromptWarning(agent, status)}
-        submitWarningKey={JSON.stringify([
-          agent,
-          agentStateKind(status),
-          stateSeq,
-        ])}
-        mode="composer"
-        onModeChange={() => {}}
-        onFocusDirect={() => {}}
-        directDisabled
-        shortcutRows={[]}
-        onRunShortcut={() => {}}
-        onClose={() => {}}
-        onSubmit={(text) => onSend(text)}
-        onUploadImage={uploadImage}
-        onUploadFile={uploadImage}
-        onPreparePathInsertion={() => async (paths) => {
-          if (!terminalComposerDraftKeyIsActive(draftKey))
-            throw new Error(
-              "Connection or pane changed; image paths retained in the original draft.",
-            );
-          insertIntoTerminalComposerDraft(draftKey, paths);
-        }}
-        onError={onError}
-      />
-    </div>
-  );
-}
-
-function DesktopHistoryComposer({
+export function AgentHistoryComposer({
   draftKey,
   agent,
   status,

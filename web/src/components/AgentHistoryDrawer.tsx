@@ -875,18 +875,20 @@ export function AgentHistoryDrawer({
           {historyMinimap("auto")}
         </div>
       )}
-      <AgentHistoryComposer
-        // A pane or connection switch must never render, or send, the
-        // previous draft before the new one loads.
-        key={composerDraftKey}
-        draftKey={composerDraftKey}
-        agent={pane.agent}
-        status={pane.agent_status}
-        stateSeq={pane.state_change_seq}
-        onSend={sendMessage}
-        onUploadImage={(file) => uploadTerminalImage(connectionClient, file)}
-        onError={notifyComposerError}
-      />
+      {!mobile ? (
+        <AgentHistoryComposer
+          // A pane or connection switch must never render, or send, the
+          // previous draft before the new one loads.
+          key={composerDraftKey}
+          draftKey={composerDraftKey}
+          agent={pane.agent}
+          status={pane.agent_status}
+          stateSeq={pane.state_change_seq}
+          onSend={sendMessage}
+          onUploadImage={(file) => uploadTerminalImage(connectionClient, file)}
+          onError={notifyComposerError}
+        />
+      ) : null}
     </div>
   );
   const changeView = (next: AgentHistoryView) => {
@@ -895,6 +897,20 @@ export function AgentHistoryDrawer({
     setDetailsOpen(false);
     setExpandedMessage(null);
   };
+
+  const chatViewToggle = (
+    <button
+      type="button"
+      className="agent-history-icon"
+      aria-label="Chat view"
+      aria-pressed={chatView && !detailsOpen}
+      title={chatView && !detailsOpen ? "Show as timeline" : "Show as chat"}
+      onClick={() => changeView(chatView && !detailsOpen ? "timeline" : "chat")}
+      disabled={!hasSessionData}
+    >
+      <MessagesSquare size={mobile ? 16 : 14} />
+    </button>
+  );
 
   // Wide layout: master-detail. The left column is a resizable list of
   // compact entries; the right column reads the selected entry in full.
@@ -971,6 +987,7 @@ export function AgentHistoryDrawer({
         className={`agent-history-drawer ${open ? "is-open" : ""} ${
           embedded ? "is-embedded" : ""
         } ${wide ? "is-wide" : ""}`}
+        data-view={detailsOpen ? "details" : view}
         aria-label="Agent session"
         aria-hidden={!open}
         inert={!open}
@@ -996,6 +1013,7 @@ export function AgentHistoryDrawer({
             >
               {pane.agent_status}
             </span>
+            {chatViewToggle}
             <button
               ref={searchToggleRef}
               type="button"
@@ -1014,17 +1032,15 @@ export function AgentHistoryDrawer({
             >
               <Search size={16} />
             </button>
-            {!embedded ? (
-              <button
-                type="button"
-                className="agent-history-icon"
-                aria-label="Close session"
-                title="Close"
-                onClick={() => onOpenChange(false)}
-              >
-                <X size={16} />
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className="agent-history-icon"
+              aria-label="Close session"
+              title="Close"
+              onClick={() => onOpenChange(false)}
+            >
+              <X size={16} />
+            </button>
           </div>
         ) : null}
         <div
@@ -1061,21 +1077,7 @@ export function AgentHistoryDrawer({
             {pane.agent_status}
           </span>
           <div className="agent-history-actions">
-            <button
-              type="button"
-              className="agent-history-icon"
-              aria-label="Chat view"
-              aria-pressed={chatView && !detailsOpen}
-              title={
-                chatView && !detailsOpen ? "Show as timeline" : "Show as chat"
-              }
-              onClick={() =>
-                changeView(chatView && !detailsOpen ? "timeline" : "chat")
-              }
-              disabled={!hasSessionData}
-            >
-              <MessagesSquare size={14} />
-            </button>
+            {!mobile ? chatViewToggle : null}
             <button
               type="button"
               className="agent-history-icon"

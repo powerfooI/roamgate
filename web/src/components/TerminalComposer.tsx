@@ -86,7 +86,6 @@ export function readTerminalComposerShortcutsOpen(): boolean {
  */
 export function TerminalComposer({
   draftKey,
-  presentation = "terminal",
   submitWarning,
   submitWarningKey,
   paneId,
@@ -113,7 +112,6 @@ export function TerminalComposer({
   onError,
 }: {
   draftKey: string;
-  presentation?: "terminal" | "history";
   submitWarning?: string | null;
   submitWarningKey?: string;
   paneId?: string;
@@ -148,7 +146,7 @@ export function TerminalComposer({
   const [uploadCount, setUploadCount] = useState(() =>
     terminalComposerUploadCount(draftKey),
   );
-  const history = presentation === "history";
+  const accessoriesOpen = open && accessoriesVisible;
   const warningContext = JSON.stringify([
     draftKey,
     text,
@@ -156,11 +154,15 @@ export function TerminalComposer({
     submitWarningKey,
   ]);
   const [confirmation, setConfirmation] = useState<string | null>(null);
-  const confirming = !!submitWarning && confirmation === warningContext;
+  const confirming =
+    accessoriesOpen && !!submitWarning && confirmation === warningContext;
   useEffect(() => {
-    if (confirmation !== null && confirmation !== warningContext)
+    if (
+      confirmation !== null &&
+      (!accessoriesOpen || confirmation !== warningContext)
+    )
       setConfirmation(null);
-  }, [confirmation, warningContext]);
+  }, [accessoriesOpen, confirmation, warningContext]);
   const [composing, setComposing] = useState(false);
   const [editorFocused, setEditorFocused] = useState(false);
   // Latch expansion for this focus session: expanding changes the wrapping
@@ -201,7 +203,6 @@ export function TerminalComposer({
       ? filterComposerCommands(commands, /^\/[^\s]*/.exec(text)?.[0] ?? "")
       : commands;
   const pickerOpen = pickerMode !== null && commands.length > 0;
-  const accessoriesOpen = open && accessoriesVisible;
   const presentedPickerOpen = accessoriesOpen && pickerOpen;
   const selectedCommand = matches[activeCommand];
 
@@ -450,7 +451,7 @@ export function TerminalComposer({
     const paths: string[] = [];
     try {
       for (const file of files) paths.push(await upload(file));
-      if (history && composingRef.current)
+      if (mode === "composer" && composingRef.current)
         await new Promise<void>((resolve) =>
           compositionUploadsRef.current.push(resolve),
         );
@@ -464,7 +465,7 @@ export function TerminalComposer({
       // Keep successful earlier files when a later upload fails. Delivery
       // itself owns its fallback, so do not retry an uncertain PTY write.
       if (paths.length) {
-        if (history && composingRef.current)
+        if (mode === "composer" && composingRef.current)
           await new Promise<void>((resolve) =>
             compositionUploadsRef.current.push(resolve),
           );
@@ -491,14 +492,14 @@ export function TerminalComposer({
     const submittedDraftKey = draftKey;
     if (
       !accessoriesOpen ||
-      !(history ? draft.trim() : draft) ||
+      !draft ||
       terminalComposerUploadCount(submittedDraftKey) > 0 ||
       composingRef.current
     ) {
       return;
     }
 
-    if (submitWarning && !confirmed) {
+    if (sendEnter && submitWarning && !confirmed) {
       setConfirmation(warningContext);
       return;
     }
@@ -641,7 +642,7 @@ export function TerminalComposer({
   useEffect(() => {
     if (busy || composing) cancelSubmitTouch();
   }, [busy, composing, cancelSubmitTouch]);
-  const submitDisabled = !(history ? text.trim() : text) || busy || composing;
+  const submitDisabled = !text || busy || composing;
   const hasShortcuts = shortcutRows.some((row) =>
     row.some((shortcut) => shortcut !== null),
   );
@@ -658,9 +659,7 @@ export function TerminalComposer({
     <>
       <div
         ref={composerRef}
-        className={
-          history ? "terminal-composer is-history" : "terminal-composer"
-        }
+        className="terminal-composer"
         data-expanded={
           (expanded &&
             (editorFocused || toolPointerPending) &&
@@ -673,7 +672,7 @@ export function TerminalComposer({
         data-open={open || undefined}
         data-reserved={reserved || undefined}
         role="group"
-        aria-label={history ? "Message input" : "Terminal input"}
+        aria-label="Terminal input"
         tabIndex={-1}
         onFocus={(event) => {
           // Composer dock/background focus stays neutral. Only its native
@@ -710,8 +709,8 @@ export function TerminalComposer({
           <button
             type="button"
             className="terminal-composer-attach"
-            title={history ? "Add images" : "Add a file"}
-            aria-label={history ? "Add images" : "Add a file"}
+            title="Add a file"
+            aria-label="Add a file"
             disabled={busy || composing}
             onMouseDown={keepTextareaFocus}
             onClick={() => {
@@ -779,7 +778,6 @@ export function TerminalComposer({
           <button
             type="button"
             className="terminal-composer-commands-toggle"
-            hidden={history}
             aria-label="Commands"
             ref={commandsButtonRef}
             aria-expanded={presentedPickerOpen}
@@ -823,7 +821,6 @@ export function TerminalComposer({
             <button
               type="button"
               className="terminal-composer-submit"
-              hidden={history}
               title="Insert into the terminal without executing"
               aria-label="Insert draft into the terminal"
               disabled={submitDisabled}
@@ -840,11 +837,7 @@ export function TerminalComposer({
                 "Insert into the terminal and send Enter",
                 "composer.send",
               )}
-              aria-label={
-                history
-                  ? "Send message to the agent"
-                  : "Send draft to the terminal"
-              }
+              aria-label="Send draft to the terminal"
               disabled={submitDisabled || confirming}
               onMouseDown={keepTextareaFocus}
               {...touchSubmit.buttonProps(() => void submit(true))}
@@ -856,7 +849,6 @@ export function TerminalComposer({
           <button
             type="button"
             className="terminal-composer-close"
-            hidden={history}
             title="Close terminal input"
             aria-label="Close terminal input"
             onMouseDown={keepTextareaFocus}
@@ -1076,11 +1068,7 @@ export function TerminalComposer({
             }}
             onClick={() => activateMessage(true)}
             autoComplete="off"
-            aria-label={
-              history
-                ? `Message ${agent?.trim() || "agent"}`
-                : "Terminal input draft"
-            }
+            aria-label="Terminal input draft"
             enterKeyHint="enter"
             role="combobox"
             aria-expanded={presentedPickerOpen && !replacement}
@@ -1135,27 +1123,20 @@ export function TerminalComposer({
                 for (const resume of compositionUploadsRef.current.splice(0))
                   resume();
               };
-              if (history)
-                compositionEndTimerRef.current = setTimeout(finish, 0);
-              else finish();
+              compositionEndTimerRef.current = setTimeout(finish, 0);
             }}
             onPaste={(e) => {
-              const clipboardFiles = history
-                ? Array.from(e.clipboardData?.files ?? [])
-                : [];
+              const clipboardFiles = Array.from(e.clipboardData?.files ?? []);
               const files = clipboardFiles.length
                 ? clipboardFiles
                 : Array.from(e.clipboardData?.items ?? [])
                     .filter((item) => item.kind === "file")
                     .map((item) => item.getAsFile())
                     .filter((file): file is File => file !== null);
-              const images = history
-                ? files.filter((file) => file.type.startsWith("image/"))
-                : files;
-              // No image on the clipboard: let the native text paste proceed.
-              if (images.length === 0) return;
+              // No files on the clipboard: let the native text paste proceed.
+              if (files.length === 0) return;
               e.preventDefault();
-              void uploadAndInsert(images, (file) =>
+              void uploadAndInsert(files, (file) =>
                 file.type.startsWith("image/")
                   ? onUploadImage(file)
                   : onUploadFile(file),
@@ -1215,7 +1196,6 @@ export function TerminalComposer({
           <button
             type="button"
             className="terminal-mobile-direct"
-            hidden={history}
             aria-label="Type directly into the terminal"
             title="Type directly into the terminal"
             aria-pressed={open && mode === "direct"}
@@ -1240,7 +1220,6 @@ export function TerminalComposer({
         <input
           ref={fileInputRef}
           type="file"
-          accept={history ? "image/*" : undefined}
           multiple
           hidden
           onChange={(e) => pickFiles(e.currentTarget)}

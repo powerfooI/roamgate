@@ -3,6 +3,7 @@ import {
   afterEach,
   beforeEach,
   expect,
+  jest,
   mock,
   spyOn,
   test,
@@ -1377,17 +1378,27 @@ async function registerDomTests() {
       container.querySelector<HTMLButtonElement>(".terminal-mobile-direct")!
         .disabled,
     ).toBe(true);
-    act(() =>
-      editor.dispatchEvent(
-        new browser.CompositionEvent("compositionend", {
-          bubbles: true,
-        }) as unknown as CompositionEvent,
-      ),
-    );
-    expect(
-      container.querySelector<HTMLButtonElement>(".terminal-mobile-direct")!
-        .disabled,
-    ).toBe(false);
+    jest.useFakeTimers();
+    try {
+      act(() =>
+        editor.dispatchEvent(
+          new browser.CompositionEvent("compositionend", {
+            bubbles: true,
+          }) as unknown as CompositionEvent,
+        ),
+      );
+      expect(
+        container.querySelector<HTMLButtonElement>(".terminal-mobile-direct")!
+          .disabled,
+      ).toBe(true);
+      act(() => jest.advanceTimersByTime(0));
+      expect(
+        container.querySelector<HTMLButtonElement>(".terminal-mobile-direct")!
+          .disabled,
+      ).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test.each([false, true])(

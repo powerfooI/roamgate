@@ -1,0 +1,248 @@
+import { expect, mock, spyOn, test } from "bun:test";
+import * as React from "react";
+import type { Pane } from "./types";
+import type { TerminalView } from "./components/TerminalView";
+import type { WorkspaceInspectorHost } from "./components/WorkspaceInspectorHost";
+
+if (process.env.ROAMGATE_APP_HISTORY_TEST !== "1") {
+  test("mobile history input routing in an isolated DOM runtime", async () => {
+    const child = Bun.spawn([process.execPath, "test", import.meta.path], {
+      env: { ...process.env, ROAMGATE_APP_HISTORY_TEST: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
+    expect(code).toBe(0);
+  }, 15_000);
+} else {
+  test("history switches the input target and withholds input until focus settles", async () => {
+    const { Window } = await import("happy-dom");
+    const browser = new Window({ url: "http://localhost/?layout=mobile" });
+    const originals = new Map<string, PropertyDescriptor | undefined>();
+    for (const [key, value] of Object.entries({
+      window: browser,
+      document: browser.document,
+      navigator: browser.navigator,
+      HTMLElement: browser.HTMLElement,
+      Element: browser.Element,
+      Node: browser.Node,
+      Event: browser.Event,
+      CustomEvent: browser.CustomEvent,
+      localStorage: browser.localStorage,
+      sessionStorage: browser.sessionStorage,
+      requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
+      cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
+      IS_REACT_ACT_ENVIRONMENT: true,
+    })) {
+      originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+      Object.defineProperty(globalThis, key, {
+        value,
+        configurable: true,
+        writable: true,
+      });
+    }
+    const { store } = await import("./store");
+    const panes: Pane[] = ["a", "b", "c"].map((id) => ({
+      pane_id: id,
+      terminal_id: `terminal-${id}`,
+      workspace_id: "workspace",
+      tab_id: "tab",
+      agent: "codex",
+      agent_status: "working",
+      focused: id === "a",
+      revision: 1,
+    }));
+    const rect = { x: 0, y: 0, width: 80, height: 24 };
+    let snapshot = {
+      ...store.get(),
+      activeConnectionId: "local",
+      connectionGeneration: 1,
+      selectedPaneId: "a",
+      panes,
+      workspaces: [
+        {
+          workspace_id: "workspace",
+          number: 1,
+          label: "Workspace",
+          focused: true,
+          pane_count: 3,
+          tab_count: 1,
+          agent_status: "working",
+          active_tab_id: "tab",
+        },
+      ],
+      tabs: [
+        {
+          tab_id: "tab",
+          workspace_id: "workspace",
+          number: 1,
+          label: "Tab",
+          focused: true,
+          pane_count: 3,
+          agent_status: "working",
+        },
+      ],
+      layout: {
+        workspace_id: "workspace",
+        tab_id: "tab",
+        focused_pane_id: "a",
+        zoomed: false,
+        area: rect,
+        panes: panes.map((pane) => ({
+          pane_id: pane.pane_id,
+          focused: pane.focused,
+          rect,
+        })),
+        splits: [],
+      },
+    };
+    const listeners = new Set<() => void>();
+    const subscribe = (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    };
+    const spies: Array<{ mockRestore: () => void }> = [
+      spyOn(store, "get").mockImplementation(() => snapshot),
+      spyOn(store, "init").mockImplementation(() => {}),
+      spyOn(store, "subscribe").mockImplementation(subscribe),
+    ];
+    const focusRequests: Array<{ paneId: string; finish: () => void }> = [];
+    spies.push(
+      spyOn(store, "focusPane").mockImplementation(
+        (paneId) =>
+          new Promise<undefined>((resolve) => {
+            focusRequests.push({ paneId, finish: () => resolve(undefined) });
+          }),
+      ),
+    );
+    const storeModule = await import("./store");
+    mock.module("./store", () => ({
+      ...storeModule,
+      useStoreSelector: <T,>(
+        selector: (state: ReturnType<typeof store.get>) => T,
+      ) => selector(React.useSyncExternalStore(subscribe, () => snapshot)),
+    }));
+    const client = {
+      connectionId: "local",
+      generation: 1,
+      isCurrent: () => true,
+    };
+    mock.module("./useConnectionClient", () => ({
+      useConnectionClient: () => client,
+      useConnectionReady: () => true,
+      connectionClientScopeKey: () => "local:1",
+    }));
+    mock.module("./assistant", () => ({
+      useAssistantState: () => ({ snapshot: null }),
+      assistantActionExecuting: () => false,
+    }));
+    for (const name of [
+      "ConnectionSwitcher",
+      "GlobalTooltip",
+      "MobileTabSheet",
+      "AnnotationPanel",
+    ])
+      mock.module(`./components/${name}`, () => ({ [name]: () => null }));
+    mock.module("./components/ConfigMenu", () => ({
+      ConfigMenu: () => null,
+      CONFIG_MENU_ID: "config-menu",
+    }));
+    mock.module("./components/TabBar", () => ({
+      TabBar: () => null,
+      requestClosePane() {},
+      requestCloseTab() {},
+    }));
+    mock.module("./components/WorkspaceTree", () => ({
+      WorkspaceTree: ({
+        onViewAgentHistory,
+      }: {
+        onViewAgentHistory: (pane: Pane) => void;
+      }) => (
+        <>
+          {panes.map((pane) => (
+            <button key={pane.pane_id} onClick={() => onViewAgentHistory(pane)}>
+              History {pane.pane_id}
+            </button>
+          ))}
+        </>
+      ),
+    }));
+    let terminalProps!: React.ComponentProps<typeof TerminalView>;
+    let inspectorProps!: React.ComponentProps<typeof WorkspaceInspectorHost>;
+    mock.module("./components/TerminalView", () => ({
+      TerminalView: (props: typeof terminalProps) => {
+        terminalProps = props;
+        return null;
+      },
+    }));
+    mock.module("./components/WorkspaceInspectorHost", () => ({
+      WorkspaceInspectorHost: (props: typeof inspectorProps) => {
+        inspectorProps = props;
+        return null;
+      },
+    }));
+    const { initializeLayoutPreferences } = await import("./layoutPreferences");
+    initializeLayoutPreferences();
+    const { default: App } = await import("./App");
+    const { createRoot } = await import("react-dom/client");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const openHistory = (id: string) =>
+      React.act(async () => {
+        Array.from(container.querySelectorAll("button"))
+          .find((button) => button.textContent === `History ${id}`)!
+          .click();
+      });
+    const focusSettled = (id: string) =>
+      React.act(async () => {
+        snapshot = { ...snapshot, selectedPaneId: id };
+        for (const listener of listeners) listener();
+        focusRequests.find((request) => request.paneId === id)?.finish();
+      });
+    try {
+      await React.act(async () => root.render(<App />));
+      expect(terminalProps.paneId).toBe("a");
+      expect(terminalProps.mobileInputTarget).not.toBeNull();
+      await React.act(async () => terminalProps.onComposerOpenChange!(true));
+      expect(terminalProps.composerOpen).toBe(true);
+      await openHistory("b");
+      expect(inspectorProps.historyPane?.pane_id).toBe("b");
+      expect(focusRequests.map((request) => request.paneId)).toEqual(["b"]);
+      expect(terminalProps.mobileInputTarget).toBeNull();
+      expect(terminalProps.composerOpen).toBe(false);
+      // A failed focus cannot re-enable A's editor under B's history.
+      await React.act(async () => focusRequests[0]!.finish());
+      expect(terminalProps.mobileInputTarget).toBeNull();
+      await focusSettled("b");
+      expect(terminalProps.paneId).toBe("b");
+      expect(terminalProps.mobileInputTarget).not.toBeNull();
+      expect(terminalProps.agentHistoryOpen).toBe(true);
+      expect(terminalProps.composerOpen).toBe(true);
+      // Rapid history switches must keep the latest target, even if focus lags.
+      await openHistory("a");
+      await openHistory("c");
+      await focusSettled("a");
+      expect(inspectorProps.historyPane?.pane_id).toBe("c");
+      expect(terminalProps.mobileInputTarget).toBeNull();
+      await focusSettled("c");
+      expect(terminalProps.paneId).toBe("c");
+      expect(terminalProps.mobileInputTarget).not.toBeNull();
+      expect(terminalProps.agentHistoryOpen).toBe(true);
+    } finally {
+      await React.act(async () => root.unmount());
+      for (const spy of spies) spy.mockRestore();
+      container.remove();
+      await browser.happyDOM.close();
+      for (const [key, descriptor] of originals) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else Reflect.deleteProperty(globalThis, key);
+      }
+    }
+  });
+}

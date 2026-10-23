@@ -178,7 +178,11 @@ import {
 } from "../terminalScroll";
 import { TerminalSelectionDragGuard } from "../terminalSelectionGuard";
 import { applyTerminalTheme } from "../terminalThemes";
-import { paneHasAgentHistory } from "./agentSession";
+import {
+  agentPromptWarning,
+  agentStateKind,
+  paneHasAgentHistory,
+} from "./agentSession";
 import { ConfirmDialog, MessageDialog } from "./ModalDialogs";
 import {
   readTerminalComposerShortcutsOpen,
@@ -3438,15 +3442,27 @@ export function TerminalView({
       tabId={pane.tab_id}
       terminalId={pane.terminal_id}
       open={composerOpen}
-      accessoriesVisible={visible}
+      accessoriesVisible={visible || agentHistoryOpen}
       reserved={visible && touchHandles.length > 0}
       agent={pane.agent}
+      submitWarning={
+        agentHistoryOpen
+          ? agentPromptWarning(pane.agent, pane.agent_status)
+          : null
+      }
+      submitWarningKey={JSON.stringify([
+        agentHistoryOpen,
+        pane.agent,
+        agentStateKind(pane.agent_status),
+        pane.state_change_seq,
+      ])}
       mode={composerMode}
       onModeChange={(mode, remember) => {
         if (!connectionClient.isCurrent() || !isActivePaneRef.current) return;
         if (remember) rememberTerminalInputMode(mode);
         if (!composerOpen) pendingExplicitModeRef.current = mode;
-        onActivateTerminalSurface?.();
+        if (!agentHistoryOpen || mode === "direct")
+          onActivateTerminalSurface?.();
         composerModeRef.current = mode;
         composerEditingRef.current = mode === "composer";
         closeTerminalInput();

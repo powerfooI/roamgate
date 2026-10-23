@@ -69,6 +69,7 @@ if (process.env.ROAMGATE_HISTORY_DRAWER_DOM_TEST !== "1") {
       focused: true,
       revision: 1,
     };
+    const onOpenChange = mock(() => {});
     const render = (current = pane) =>
       React.act(async () => {
         root.render(
@@ -76,7 +77,7 @@ if (process.env.ROAMGATE_HISTORY_DRAWER_DOM_TEST !== "1") {
             pane={current}
             open
             embedded
-            onOpenChange={() => {}}
+            onOpenChange={onOpenChange}
           />,
         );
       });
@@ -96,12 +97,41 @@ if (process.env.ROAMGATE_HISTORY_DRAWER_DOM_TEST !== "1") {
         )!;
       const search = () =>
         container.querySelector<HTMLInputElement>('input[type="search"]');
+      expect(container.querySelector(".agent-history-composer")).toBeNull();
       expect(header().hidden).toBe(true);
       expect(toggle().getAttribute("aria-expanded")).toBe("false");
       expect(search()).toBeNull();
+      const chatToggle = button("Chat view");
+      expect(chatToggle.closest(".agent-history-mobile-head")).not.toBeNull();
+      expect(
+        container.querySelectorAll('[aria-label="Chat view"]').length,
+      ).toBe(1);
+      expect(chatToggle.nextElementSibling).toBe(
+        button("Search history messages"),
+      );
+      expect(button("Search history messages").nextElementSibling).toBe(
+        button("Close session"),
+      );
+      expect(chatToggle.getAttribute("aria-pressed")).toBe("true");
+      const drawer = container.querySelector<HTMLElement>(
+        ".agent-history-drawer",
+      )!;
+      expect(drawer.dataset.view).toBe("chat");
+      await click(chatToggle);
+      expect(chatToggle.getAttribute("aria-pressed")).toBe("false");
+      expect(drawer.dataset.view).toBe("timeline");
+      expect(container.querySelector(".agent-history-filters")).not.toBeNull();
+      await click(chatToggle);
+      expect(chatToggle.getAttribute("aria-pressed")).toBe("true");
+      await click(button("Close session"));
+      expect(onOpenChange).toHaveBeenCalledWith(false);
       await click(toggle());
       expect(header().hidden).toBe(false);
       expect(toggle().getAttribute("aria-controls")).toBe(header().id);
+      await click(button("Session details"));
+      expect(drawer.dataset.view).toBe("details");
+      await click(chatToggle);
+      expect(drawer.dataset.view).toBe("chat");
       await click(toggle());
       expect(header().hidden).toBe(true);
 
@@ -138,6 +168,13 @@ if (process.env.ROAMGATE_HISTORY_DRAWER_DOM_TEST !== "1") {
 
       await React.act(async () => updateLayoutPreferences({ mode: "desktop" }));
       expect(container.querySelector(".agent-history-mobile-head")).toBeNull();
+      expect(
+        button("Chat view").closest(".agent-history-actions"),
+      ).not.toBeNull();
+      expect(
+        container.querySelector('[aria-label="Close session"]'),
+      ).toBeNull();
+      expect(container.querySelector(".agent-history-composer")).not.toBeNull();
       expect(header().hidden).toBe(false);
       expect(search()).not.toBeNull();
       await React.act(async () => {
@@ -148,6 +185,7 @@ if (process.env.ROAMGATE_HISTORY_DRAWER_DOM_TEST !== "1") {
         search()!.dispatchEvent(new window.Event("input", { bubbles: true }));
       });
       await React.act(async () => updateLayoutPreferences({ mode: "mobile" }));
+      expect(container.querySelector(".agent-history-composer")).toBeNull();
       expect(search()!.value).toBe("desktop query");
       expect(
         button("Search history messages").getAttribute("aria-expanded"),

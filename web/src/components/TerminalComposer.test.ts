@@ -1,4 +1,4 @@
-import { expect, mock, spyOn, test } from "bun:test";
+import { expect, jest, mock, spyOn, test } from "bun:test";
 import { Keyboard, SquareTerminal } from "lucide-react";
 import * as React from "react";
 import * as ReactDOM from "react-dom";
@@ -414,7 +414,15 @@ test.each(["claude", "grok-build", "agy"])(
       expect(draft).toBe("new upload or edit");
       expect(editor().props["aria-expanded"]).toBe(false);
       expect(commands().props.disabled).toBe(true);
-      invoke(editor(), "onCompositionEnd");
+      jest.useFakeTimers();
+      try {
+        invoke(editor(), "onCompositionEnd");
+        expect(commands().props.disabled).toBe(true);
+        jest.advanceTimersByTime(0);
+        render();
+      } finally {
+        jest.useRealTimers();
+      }
       expect(commands().props.disabled).toBe(false);
 
       // A pending command from the previous agent cannot remain in the menu.
@@ -544,7 +552,14 @@ test.each(["claude", "grok-build", "agy"])(
       expect(mode).toBe("composer");
       expect(modeChoices).toEqual(choicesBeforeCommands);
       expect(onRunShortcut).not.toHaveBeenCalled();
-      invoke(editor(), "onCompositionEnd");
+      jest.useFakeTimers();
+      try {
+        invoke(editor(), "onCompositionEnd");
+        jest.advanceTimersByTime(0);
+        render();
+      } finally {
+        jest.useRealTimers();
+      }
       invoke(find("aria-label", "Send Enter"), "onClick");
       expect(onRunShortcut).toHaveBeenCalledTimes(1);
       expect(draft).toBe("new upload or edit");

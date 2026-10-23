@@ -1,10 +1,10 @@
 import { expect, mock, test } from "bun:test";
 import * as React from "react";
 
-if (process.env.ROAMGATE_MOBILE_HISTORY_COMPOSER_TEST !== "1") {
-  test("mobile history composer in an isolated DOM runtime", async () => {
+if (process.env.ROAMGATE_BOTTOM_HISTORY_COMPOSER_TEST !== "1") {
+  test("bottom history composer in an isolated DOM runtime", async () => {
     const child = Bun.spawn([process.execPath, "test", import.meta.path], {
-      env: { ...process.env, ROAMGATE_MOBILE_HISTORY_COMPOSER_TEST: "1" },
+      env: { ...process.env, ROAMGATE_BOTTOM_HISTORY_COMPOSER_TEST: "1" },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -17,7 +17,7 @@ if (process.env.ROAMGATE_MOBILE_HISTORY_COMPOSER_TEST !== "1") {
     expect(code).toBe(0);
   }, 15_000);
 } else {
-  test("mobile reuse preserves guarded sends, drafts, IME, and image paste", async () => {
+  test("bottom composer preserves guarded sends, drafts, IME, and file paste", async () => {
     const { Window } = await import("happy-dom");
     const browser = new Window({ url: "http://localhost/?layout=mobile" });
     const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -42,35 +42,61 @@ if (process.env.ROAMGATE_MOBILE_HISTORY_COMPOSER_TEST !== "1") {
       });
     }
     const { createRoot } = await import("react-dom/client");
-    const { AgentHistoryComposer } = await import("./AgentHistoryComposer");
+    const { TerminalComposer } = await import("./TerminalComposer");
+    const { agentPromptWarning, agentStateKind } = await import(
+      "./agentSession"
+    );
     const drafts = await import("../terminalComposer");
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
     const draftKey = drafts.terminalComposerDraftKey("local", 1, "mobile-pane");
-    const send = mock<(text: string) => Promise<void>>(async () => {});
+    const send = mock<(text: string, submit: boolean) => Promise<void>>(
+      async () => {},
+    );
     const error = mock<(message: string) => void>(() => {});
     const upload = mock(async (file: File) => `/tmp/${file.name}`);
     let status = "working";
     let stateSeq = 1;
+    let open = true;
+    let accessoriesVisible = true;
     const render = () =>
       React.act(async () =>
         root.render(
-          <AgentHistoryComposer
-            draftKey={draftKey}
-            agent="codex"
-            status={status}
-            stateSeq={stateSeq}
-            onSend={send}
-            onUploadImage={upload}
-            onError={error}
-          />,
+          <div className="mobile-bottom-bar">
+            <div className="mobile-bottom-input">
+              <TerminalComposer
+                draftKey={draftKey}
+                agent="codex"
+                mode="composer"
+                open={open}
+                accessoriesVisible={accessoriesVisible}
+                submitWarning={agentPromptWarning("codex", status)}
+                submitWarningKey={JSON.stringify([
+                  agentStateKind(status),
+                  stateSeq,
+                ])}
+                onModeChange={() => {}}
+                onFocusDirect={() => {}}
+                directDisabled={false}
+                shortcutRows={[]}
+                onRunShortcut={() => {}}
+                onClose={() => {
+                  open = false;
+                }}
+                onSubmit={send}
+                onUploadImage={upload}
+                onUploadFile={upload}
+                onError={error}
+              />
+            </div>
+          </div>,
         ),
       );
     const input = () => container.querySelector("textarea")!;
     const sendButton = () =>
       container.querySelector<HTMLButtonElement>(
-        '[aria-label="Send message to the agent"]',
+        '[aria-label="Send draft to the terminal"]',
       )!;
     const key = (key: string, options: KeyboardEventInit = {}) =>
       React.act(async () => {
@@ -95,7 +121,7 @@ if (process.env.ROAMGATE_MOBILE_HISTORY_COMPOSER_TEST !== "1") {
       drafts.writeTerminalComposerDraft(draftKey, "original draft");
       await render();
       expect(
-        container.querySelector(".terminal-composer.is-history"),
+        container.querySelector(".mobile-bottom-input .terminal-composer"),
       ).not.toBeNull();
       expect(input().classList.contains("terminal-composer-input")).toBe(true);
       for (const selector of [
@@ -105,15 +131,37 @@ if (process.env.ROAMGATE_MOBILE_HISTORY_COMPOSER_TEST !== "1") {
       ])
         expect(
           container.querySelector<HTMLButtonElement>(selector)!.hidden,
-        ).toBe(true);
+        ).toBe(false);
       expect(
         container.querySelector<HTMLInputElement>('input[type="file"]')!.accept,
-      ).toBe("image/*");
+      ).toBe("");
       await key("Enter");
       expect(send).not.toHaveBeenCalled();
       await React.act(async () => sendButton().click());
       expect(container.querySelector('[role="alert"]')).not.toBeNull();
       expect(send).not.toHaveBeenCalled();
+      await React.act(async () =>
+        container
+          .querySelector<HTMLButtonElement>(".terminal-composer-close")!
+          .click(),
+      );
+      await render();
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      expect(input().value).toBe("original draft");
+      expect(send).not.toHaveBeenCalled();
+      open = true;
+      await render();
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      await React.act(async () => sendButton().click());
+      expect(container.querySelector('[role="alert"]')).not.toBeNull();
+      accessoriesVisible = false;
+      await render();
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      accessoriesVisible = true;
+      await render();
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      await React.act(async () => sendButton().click());
+      expect(container.querySelector('[role="alert"]')).not.toBeNull();
       stateSeq++;
       await render();
       expect(container.querySelector('[role="alert"]')).toBeNull();
@@ -123,7 +171,7 @@ if (process.env.ROAMGATE_MOBILE_HISTORY_COMPOSER_TEST !== "1") {
           .find((button) => button.textContent === "Send anyway")!
           .click(),
       );
-      expect(send).toHaveBeenCalledWith("original draft");
+      expect(send).toHaveBeenCalledWith("original draft", true);
       expect(drafts.readTerminalComposerDraft(draftKey)).toBe("");
       status = "idle";
       await React.act(async () =>
@@ -153,7 +201,7 @@ if (process.env.ROAMGATE_MOBILE_HISTORY_COMPOSER_TEST !== "1") {
       await render();
       expect(input().value).toBe("IME draft");
       await React.act(async () => sendButton().click());
-      expect(send).toHaveBeenLastCalledWith("IME draft");
+      expect(send).toHaveBeenLastCalledWith("IME draft", true);
       // Async image paths must wait until native IME input has committed.
       let finishUpload!: (path: string) => void;
       upload.mockImplementationOnce(
@@ -210,8 +258,11 @@ if (process.env.ROAMGATE_MOBILE_HISTORY_COMPOSER_TEST !== "1") {
       });
       const uploadsBefore = upload.mock.calls.length;
       await React.act(async () => input().dispatchEvent(textPaste));
-      expect(textPaste.defaultPrevented).toBe(false);
-      expect(upload).toHaveBeenCalledTimes(uploadsBefore);
+      expect(textPaste.defaultPrevented).toBe(true);
+      expect(upload).toHaveBeenCalledTimes(uploadsBefore + 1);
+      expect(drafts.readTerminalComposerDraft(draftKey)).toContain(
+        "/tmp/notes.txt",
+      );
       expect(error).not.toHaveBeenCalled();
     } finally {
       await React.act(async () => root.unmount());

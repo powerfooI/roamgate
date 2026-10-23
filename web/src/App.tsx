@@ -1522,6 +1522,17 @@ export default function App() {
     inspectorWorkspace?.workspace_id
       ? inspectorHistoryPaneCandidate
       : undefined;
+  const mobileHistoryPaneId =
+    mobile && historyInspectorOpen ? inspectorHistoryPane?.pane_id : undefined;
+  const historyInputPending =
+    mobile && historyInspectorOpen && mobileHistoryPaneId !== activePaneId;
+  useEffect(() => {
+    if (
+      mobileHistoryPaneId &&
+      mobileHistoryPaneId !== activePaneIdForSnapshot(store.get())
+    )
+      void store.focusPane(mobileHistoryPaneId);
+  }, [mobileHistoryPaneId, resourceUiKey]);
   const annotationStorageKey = annotationScope
     ? annotationDraftStorageKey(annotationScope)
     : null;
@@ -4130,7 +4141,9 @@ export default function App() {
             >
               <div className="workspace-terminal-surface">
                 <TerminalPaneLayout
-                  mobileInputTarget={mobileInputTarget}
+                  mobileInputTarget={
+                    historyInputPending ? null : mobileInputTarget
+                  }
                   onActivateTerminalSurface={activateTerminalSurface}
                   visible={!mobile || mobileView === "session"}
                   terminalTheme={terminalTheme}
@@ -4138,7 +4151,7 @@ export default function App() {
                   terminalFontScale={terminalFontScale}
                   mobileShortcuts={mobileTerminalShortcuts}
                   mobileSideShortcuts={mobileTerminalSideShortcuts}
-                  composerOpen={terminalComposerOpen}
+                  composerOpen={terminalComposerOpen && !historyInputPending}
                   onComposerOpenChange={setTerminalComposerOpen}
                   agentHistoryOpen={agentHistoryOpen}
                   onAgentHistoryOpenChange={setAgentHistoryInspectorOpen}

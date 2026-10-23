@@ -324,6 +324,13 @@
   .workspace-inspector-tabs {
     display: none;
   }
+
+  /* History owns its close action in the Session row. Keep the host header
+     available when no session can be rendered. */
+  .workspace-inspector[data-view="history"]:has(.agent-history-drawer)
+    .workspace-inspector-head {
+    display: none;
+  }
 }
 
 .workspace-inspector-file-detail {
@@ -331,50 +338,4 @@
 }
 .workspace-inspector-file-detail > .file-preview-tabs {
   flex: 0 0 auto;
-}
-
-.workspace-inspector-identity-details {
-  min-width: 0;
-  display: grid;
-  gap: 1px;
-}
-
-.workspace-inspector-identity-details[hidden] {
-  display: none;
-}
-
-.workspace-inspector-identity-toggle {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  min-height: 32px;
-  padding: 0;
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
-  text-align: left;
-}
-
-.workspace-inspector-identity-toggle span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-inspector-identity-toggle svg {
-  flex: 0 0 auto;
-  transform: rotate(-90deg);
-}
-
-.workspace-inspector-identity-toggle[aria-expanded="true"] svg {
-  transform: none;
-}
-
-:where(html[data-layout="mobile"])
-  .workspace-inspector[data-view="history"]
-  .workspace-inspector-head {
-  min-height: 36px;
-  padding-block: 2px;
 }

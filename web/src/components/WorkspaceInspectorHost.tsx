@@ -1,6 +1,7 @@
 import {
   FileDiff,
   FolderTree,
+  GitFork,
   GitGraph,
   History,
   Maximize2,
@@ -27,7 +28,6 @@ import {
   type NewReviewAnnotation,
   type ReviewAnnotation,
 } from "../annotations";
-import { useLayoutPreferences } from "../layoutPreferences";
 import { lazyWithReload } from "../lazyWithReload";
 import { shortcutTitle, useShortcutPreferences } from "../shortcutPreferences";
 import type { GitDiffEntry, Pane, Workspace } from "../types";
@@ -61,7 +61,6 @@ import {
   FilePreviewContent,
 } from "./FilePreviewContent";
 import { FilePreviewTabs } from "./FilePreviewTabs";
-import { WorkspaceInspectorIdentity } from "./WorkspaceInspectorIdentity";
 import { workspaceInspectorLayout } from "./workspaceInspectorLayout";
 import { PullRequestCard } from "./PullRequestCard";
 import { InspectorSplitResizer } from "./InspectorSplitResizer";
@@ -83,6 +82,16 @@ function changedCount(workspace?: Workspace) {
   return status
     ? status.staged + status.unstaged + status.untracked + status.conflicted
     : 0;
+}
+
+function checkoutLabel(workspace?: Workspace) {
+  if (!workspace) return "Unavailable checkout";
+  return (
+    workspace.worktree?.git_status?.branch ||
+    workspace.worktree?.repo_name ||
+    workspace.label ||
+    workspace.workspace_id
+  );
 }
 
 const INSPECTOR_RESOURCE_HORIZONTAL_PADDING = 16;
@@ -147,7 +156,6 @@ export function WorkspaceInspectorHost({
   onBack: () => void;
 }) {
   const hostRef = useRef<HTMLElement | null>(null);
-  const { mobile } = useLayoutPreferences();
   const [fileTabs, setFileTabs] = useState(() =>
     readResourceFileTabs(roamgateLocalStorage, state.scope),
   );
@@ -395,11 +403,27 @@ export function WorkspaceInspectorHost({
       data-view={state.view}
     >
       <header className="workspace-inspector-head">
-        <WorkspaceInspectorIdentity
-          key={contentResourceKey}
-          workspace={workspace}
-          collapsible={mobile && state.view === "history"}
-        />
+        <div className="workspace-inspector-identity">
+          <span className="workspace-inspector-repo">
+            {workspace?.worktree?.repo_name || workspace?.label || "Workspace"}
+          </span>
+          <span className="workspace-inspector-checkout">
+            {checkoutLabel(workspace)}
+            {workspace?.worktree?.is_linked_worktree ? (
+              <span className="workspace-inspector-wt" title="Linked worktree">
+                <GitFork size={11} aria-hidden="true" /> Worktree
+              </span>
+            ) : null}
+          </span>
+          {workspace?.worktree?.checkout_path || workspace?.cwd ? (
+            <code
+              className="workspace-inspector-path"
+              title={workspace.worktree?.checkout_path ?? workspace.cwd}
+            >
+              {workspace.worktree?.checkout_path ?? workspace.cwd}
+            </code>
+          ) : null}
+        </div>
         <div className="workspace-inspector-tabs" role="tablist">
           <button
             ref={filesTabRef}
