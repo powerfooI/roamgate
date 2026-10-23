@@ -730,6 +730,7 @@ export function TerminalView({
       state.activeConnectionId,
       state.connectionGeneration,
       destinationPaneId ?? "",
+      terminalId ?? undefined,
     );
     const mode = isMobileLayout() ? composerModeRef.current : "direct";
     const epoch = pathInsertionEpochRef.current;
@@ -1610,6 +1611,7 @@ export function TerminalView({
           terminalIdentity.connectionId,
           terminalIdentity.generation,
           destination,
+          paneTerminalIdRef.current ?? undefined,
         );
       if (
         terminalComposerSubmissionPending(key) ||
@@ -1664,6 +1666,7 @@ export function TerminalView({
         terminalIdentity.connectionId,
         terminalIdentity.generation,
         paneIdRef.current ?? "",
+        paneTerminalIdRef.current ?? undefined,
       );
       const destinationPaneId = paneIdRef.current ?? null;
       try {
@@ -3418,6 +3421,7 @@ export function TerminalView({
     s.activeConnectionId,
     s.connectionGeneration,
     pane.pane_id,
+    pane.terminal_id,
   );
   const composerDraftWarning = terminalComposerCloseWarning(
     terminalComposerDraftPaneIds(s.activeConnectionId, s.connectionGeneration, [

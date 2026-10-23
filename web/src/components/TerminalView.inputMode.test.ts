@@ -364,7 +364,12 @@ async function registerDomTests() {
     terminalComposerDraftKey,
     writeTerminalComposerDraft,
   } = await import("../terminalComposer");
-  const draftKey = terminalComposerDraftKey("connection-a", 1, "pane-a");
+  const draftKey = terminalComposerDraftKey(
+    "connection-a",
+    1,
+    "pane-a",
+    "terminal-a",
+  );
   const storageKey = `roamgate:${TERMINAL_INPUT_MODE_STORAGE_KEY}`;
   let root: Root | null = null;
   let container: HTMLDivElement;
@@ -2275,7 +2280,7 @@ async function registerDomTests() {
     expect(readTerminalComposerDraft(draftKey)).toContain("/tmp/picker.txt");
     expect(
       readTerminalComposerDraft(
-        terminalComposerDraftKey("connection-a", 1, "pane-b"),
+        terminalComposerDraftKey("connection-a", 1, "pane-b", "terminal-b"),
       ),
     ).toBe("");
     expect(

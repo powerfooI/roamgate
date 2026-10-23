@@ -806,6 +806,7 @@ export function AgentHistoryDrawer({
     activeConnectionId,
     connectionGeneration,
     pane.pane_id,
+    pane.terminal_id,
   );
   const historyChat = (
     <div

@@ -141,10 +141,12 @@ reloads and `localStorage` for reopening the app; a new tab starts with the last
 saved text, then edits independently. Connection generations still guard sends
 and async uploads, but do not own the saved text. Recovery never sends a draft.
 Sending, discarding, closing its pane through Roamgate, or logging out clears
-the saved text. A shared logout marker invalidates older tab copies even if
-they missed the logout notification. Paths retained after a partial upload
-failure are saved with the active draft; retired connection callbacks cannot
-overwrite its replacement. Unsent input may contain sensitive information and
+the saved text. Storage events immediately clear live drafts and old session
+copies on logout; a shared marker also invalidates copies in tabs that missed
+the event. Observed pane removals retire drafts from all connection generations.
+Paths retained after a partial upload failure are saved with the original
+destination's draft; reconnect callbacks append paths without replacing newer
+edits or sending input. Unsent input may contain sensitive information and
 remains in this browser until cleared. If browser storage is unavailable, only
 in-memory reconnect recovery is available.
 

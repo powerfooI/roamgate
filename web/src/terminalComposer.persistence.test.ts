@@ -5,7 +5,7 @@ type Drafts = typeof import("./terminalComposer");
 let moduleId = 0;
 const freshDrafts = (): Promise<Drafts> =>
   import(`./terminalComposer.ts?draft-persistence-${++moduleId}`);
-const originals = ["localStorage", "sessionStorage"].map(
+const originals = ["localStorage", "sessionStorage", "window"].map(
   (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const,
 );
 
@@ -68,7 +68,12 @@ function activate(
     [target],
     host,
   );
-  return drafts.terminalComposerDraftKey(host.id, generation, target.pane_id);
+  return drafts.terminalComposerDraftKey(
+    host.id,
+    generation,
+    target.pane_id,
+    target.terminal_id,
+  );
 }
 
 test("draft text survives a fresh page and a fresh browser session without sending", async () => {
@@ -95,7 +100,12 @@ test("reconnect recovers text and notifies mounted inputs while retiring old wor
   const first = activate(drafts);
   drafts.writeTerminalComposerDraft(first, "keep me");
   drafts.beginTerminalComposerUpload(first);
-  const next = drafts.terminalComposerDraftKey(connection.id, 2, pane.pane_id);
+  const next = drafts.terminalComposerDraftKey(
+    connection.id,
+    2,
+    pane.pane_id,
+    pane.terminal_id,
+  );
   const observed: string[] = [];
   drafts.subscribeTerminalComposerDraft(next, (text) => observed.push(text));
   activate(drafts, 2);
@@ -116,6 +126,12 @@ test("recovery is isolated by destination, pane and terminal, not labels or gene
   storage();
   const drafts = await freshDrafts();
   drafts.writeTerminalComposerDraft(activate(drafts), "host A draft");
+  const restored = activate(drafts, 3, {
+    ...connection,
+    label: "Renamed",
+    generation: 2,
+  });
+  expect(drafts.readTerminalComposerDraft(restored)).toBe("host A draft");
   for (const [host, target] of [
     [{ ...connection, id: "other-host" }, pane],
     [{ ...connection, ssh_destination: "user@other" }, pane],
@@ -126,12 +142,6 @@ test("recovery is isolated by destination, pane and terminal, not labels or gene
     const isolated = activate(drafts, 2, host, target);
     expect(drafts.readTerminalComposerDraft(isolated)).toBe("");
   }
-  const restored = activate(drafts, 3, {
-    ...connection,
-    label: "Renamed",
-    generation: 2,
-  });
-  expect(drafts.readTerminalComposerDraft(restored)).toBe("host A draft");
 });
 
 test("tab reload restores its own edits while reopening uses the last saved draft", async () => {
@@ -356,25 +366,172 @@ test("upload recovery saves the inserted paths across reconnects, reloads and re
   }
 });
 
-test("retired upload recovery cannot overwrite a current saved draft or revive a closed pane", async () => {
+test("retired upload recovery appends to newer text without replacing the current selection", async () => {
   const { local } = storage();
   const drafts = await freshDrafts();
   const oldKey = activate(drafts);
   drafts.writeTerminalComposerDraft(oldKey, "old text");
   const currentKey = activate(drafts, 2);
   drafts.writeTerminalComposerDraft(currentKey, "new text");
+  drafts.writeTerminalComposerSelection(currentKey, 0, 3);
+  const observed: string[] = [];
+  drafts.subscribeTerminalComposerDraft(currentKey, (text) =>
+    observed.push(text),
+  );
   drafts.retainTerminalComposerUploadPaths(oldKey, "/late.png");
-  expect(drafts.readTerminalComposerDraft(currentKey)).toBe("new text");
+  expect(observed).toEqual(["new text /late.png "]);
+  expect(drafts.readTerminalComposerDraft(currentKey)).toBe(
+    "new text /late.png ",
+  );
   storage(local);
   const reloaded = await freshDrafts();
   expect(reloaded.readTerminalComposerDraft(activate(reloaded))).toBe(
-    "new text",
+    "new text /late.png ",
   );
 
   drafts.clearTerminalComposerDrafts(connection.id, 2, [pane.pane_id]);
+  drafts.retainTerminalComposerUploadPaths(oldKey, "/older-closed.png");
   drafts.retainTerminalComposerUploadPaths(currentKey, "/closed.png");
   expect(drafts.readTerminalComposerDraft(currentKey)).toBe("");
   storage(local);
   const reopened = await freshDrafts();
   expect(reopened.readTerminalComposerDraft(activate(reopened))).toBe("");
+});
+
+test("storage logout notifications immediately clear mounted drafts and stale session copies", async () => {
+  const { local, session: sessionA } = storage();
+  const events = new EventTarget();
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: events,
+  });
+  const first = await freshDrafts();
+  first.writeTerminalComposerDraft(activate(first), "first secret");
+  const sessionB = memoryStorage();
+  storage(local, sessionB);
+  const second = await freshDrafts();
+  const key = activate(second);
+  second.writeTerminalComposerDraft(key, "second secret");
+  const observed: string[] = [];
+  second.subscribeTerminalComposerDraft(key, (text) => observed.push(text));
+
+  storage(local, sessionA);
+  first.clearSavedTerminalComposerDrafts();
+  storage(local, sessionB);
+  events.dispatchEvent(
+    Object.assign(new Event("storage"), {
+      key: "roamgate:terminalComposerLogout",
+      storageArea: local,
+    }),
+  );
+  // Check notification and storage before calling any composer read/write API.
+  expect(observed).toEqual([""]);
+  for (let i = 0; i < sessionB.length; i++) {
+    expect(sessionB.getItem(sessionB.key(i)!)).not.toContain("secret");
+  }
+});
+
+test("reloading a tab after logout erases its old session copies", async () => {
+  const { local, session } = storage();
+  const first = await freshDrafts();
+  first.writeTerminalComposerDraft(activate(first), "old secret");
+  storage(local);
+  const otherTab = await freshDrafts();
+  otherTab.clearSavedTerminalComposerDrafts();
+  storage(local, session);
+  const reloaded = await freshDrafts();
+  expect(reloaded.readTerminalComposerDraft(activate(reloaded))).toBe("");
+  for (let i = 0; i < session.length; i++) {
+    expect(session.getItem(session.key(i)!)).not.toContain("old secret");
+  }
+});
+
+test("late upload paths survive switching connections without reaching the other terminal", async () => {
+  const { local } = storage();
+  const drafts = await freshDrafts();
+  const first = activate(drafts);
+  drafts.writeTerminalComposerDraft(first, "original");
+  const other = activate(drafts, 2, { ...connection, id: "other" });
+  drafts.writeTerminalComposerDraft(other, "other terminal");
+  drafts.retainTerminalComposerUploadPaths(first, "/partial.png");
+  expect(drafts.readTerminalComposerDraft(other)).toBe("other terminal");
+  expect(drafts.readTerminalComposerDraft(activate(drafts, 3))).toBe(
+    "original /partial.png ",
+  );
+  storage(local);
+  const reopened = await freshDrafts();
+  expect(reopened.readTerminalComposerDraft(activate(reopened))).toBe(
+    "original /partial.png ",
+  );
+});
+
+test("a missing topology preserves recovery but an observed pane removal retires every generation", async () => {
+  const { local, session } = storage();
+  const drafts = await freshDrafts();
+  const oldKey = activate(drafts);
+  drafts.writeTerminalComposerDraft(oldKey, "removed pane draft");
+  drafts.activateTerminalComposerDraftScope(
+    connection.id,
+    2,
+    undefined,
+    connection,
+  );
+  drafts.retainTerminalComposerUploadPaths(oldKey, "/during-reconnect.png");
+  const currentKey = activate(drafts, 2);
+  expect(drafts.readTerminalComposerDraft(currentKey)).toBe(
+    "removed pane draft /during-reconnect.png ",
+  );
+  drafts.beginTerminalComposerUpload(currentKey);
+  drafts.beginTerminalComposerSubmission(currentKey);
+  const observed: string[] = [];
+  drafts.subscribeTerminalComposerDraft(currentKey, (text) =>
+    observed.push(text),
+  );
+  drafts.activateTerminalComposerDraftScope(connection.id, 2, [], connection);
+  expect(observed).toEqual([""]);
+  for (const key of [oldKey, currentKey]) {
+    drafts.writeTerminalComposerDraft(key, "stale edit");
+    drafts.retainTerminalComposerUploadPaths(key, "/after-close.png");
+    expect(drafts.readTerminalComposerDraft(key)).toBe("");
+    expect(drafts.beginTerminalComposerUpload(key)).toBe(false);
+    expect(drafts.beginTerminalComposerSubmission(key)).toBe(false);
+  }
+  expect(drafts.terminalComposerUploadCount(currentKey)).toBe(0);
+  expect(drafts.terminalComposerSubmissionPending(currentKey)).toBe(false);
+  for (const nextSession of [session, memoryStorage()]) {
+    storage(local, nextSession);
+    const reopened = await freshDrafts();
+    expect(reopened.readTerminalComposerDraft(activate(reopened))).toBe("");
+  }
+});
+
+test("a replacement terminal stays editable while callbacks for the previous terminal are retired", async () => {
+  const { local } = storage();
+  const drafts = await freshDrafts();
+  const oldKey = activate(drafts);
+  drafts.writeTerminalComposerDraft(oldKey, "previous terminal");
+  drafts.beginTerminalComposerUpload(oldKey);
+  const replacement = { ...pane, terminal_id: "replacement" };
+  const currentKey = activate(drafts, 1, connection, replacement);
+  expect(currentKey).not.toBe(oldKey);
+  drafts.writeTerminalComposerDraft(currentKey, "replacement text");
+  drafts.retainTerminalComposerUploadPaths(oldKey, "/old-terminal.png");
+  expect(drafts.readTerminalComposerDraft(oldKey)).toBe("");
+  expect(drafts.readTerminalComposerDraft(currentKey)).toBe("replacement text");
+  expect(
+    drafts.terminalComposerDraftPaneIds(connection.id, 1, [pane.pane_id]),
+  ).toEqual([pane.pane_id]);
+  drafts.clearTerminalComposerDrafts(connection.id, 1, [pane.pane_id]);
+  drafts.retainTerminalComposerUploadPaths(
+    currentKey,
+    "/closed-replacement.png",
+  );
+  expect(drafts.readTerminalComposerDraft(currentKey)).toBe("");
+  storage(local);
+  const reopened = await freshDrafts();
+  expect(
+    reopened.readTerminalComposerDraft(
+      activate(reopened, 1, connection, replacement),
+    ),
+  ).toBe("");
 });
