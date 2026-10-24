@@ -336,6 +336,8 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
   terminal color themes. Preferences sync across tabs in the same browser.
 - Run as a [user service](docs/DEPLOYMENT.md#run-as-a-user-service) with
   checksum-verified updates, and probe `/health` or `/healthz`.
+- An open page reloads itself when the server it reconnects to, or comes back
+  to, serves another frontend build; unsent text in a field delays it.
 - [Command-line tools](docs/DEPLOYMENT.md#command-line-management) such as
   `roamgate doctor`, `url --qr`, `config`, `auth`, and `connections`.
 

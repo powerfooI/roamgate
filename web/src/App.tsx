@@ -25,6 +25,7 @@ import {
 import { roamgateLocalStorage, subscribeLocalStorage } from "./browserStorage";
 import { LAYOUT_CHANGE_EVENT, useLayoutPreferences } from "./layoutPreferences";
 import { useSystemBack } from "./systemBack";
+import { startFrontendFreshness } from "./frontendFreshness";
 import {
   shortcutMatches,
   shortcutTitle,
@@ -2877,6 +2878,7 @@ export default function App() {
   useEffect(() => {
     store.init();
   }, []);
+  useEffect(() => startFrontendFreshness(), []);
   useEffect(() => {
     if (!mobile) return;
     const current = inspectorStateRef.current;
