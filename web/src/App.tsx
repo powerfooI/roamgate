@@ -40,10 +40,10 @@ import {
   FileDiff,
   FolderTree,
   GitGraph,
-  History,
   Info,
   LoaderCircle,
   MessageSquareText,
+  MessagesSquare,
   Minimize2,
   PanelTop,
   SquareTerminal,
@@ -99,7 +99,7 @@ import { AnnotationPanel } from "./components/AnnotationPanel";
 import { assistantActionExecuting, useAssistantState } from "./assistant";
 import type { AssistantSource } from "../../shared/assistant";
 import { GlobalTooltip } from "./components/GlobalTooltip";
-import { MobileTabSheet } from "./components/MobileTabSheet";
+import "./components/MobileTabSheet.css";
 import { requestClosePane, requestCloseTab, TabBar } from "./components/TabBar";
 import type { TerminalWorkspaceFileRequest } from "./components/TerminalView";
 import { WorkspaceTree } from "./components/WorkspaceTree";
@@ -200,6 +200,11 @@ import "./styles/layout/mobile-nav.css";
 import "./components/AssistantPanel.css";
 import "./components/markdown.css";
 
+const MobileTabSheet = lazyWithReload("mobile-tabs", () =>
+  import("./components/MobileTabSheet").then((module) => ({
+    default: module.MobileTabSheet,
+  })),
+);
 const AssistantPanel = lazyWithReload("assistant", () =>
   import("./components/AssistantPanel").then((module) => ({
     default: module.AssistantPanel,
@@ -1243,6 +1248,34 @@ export default function App() {
   ]);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [mobileView, setMobileView] = useState<MobileView>("session");
+  const mobileAgentViewRef = useRef(
+    roamgateLocalStorage.getItem("mobileAgentView") === "terminal"
+      ? "terminal"
+      : "chat",
+  );
+  const rememberMobileAgentView = useCallback(
+    (view: "chat" | "terminal") => {
+      if (!mobile) return;
+      mobileAgentViewRef.current = view;
+      try {
+        roamgateLocalStorage.setItem("mobileAgentView", view);
+      } catch {
+        // Keep the choice for this page when browser storage is unavailable.
+      }
+    },
+    [mobile],
+  );
+  useEffect(
+    () =>
+      subscribeLocalStorage((key) => {
+        if (key === "mobileAgentView" || key === null)
+          mobileAgentViewRef.current =
+            roamgateLocalStorage.getItem("mobileAgentView") === "terminal"
+              ? "terminal"
+              : "chat";
+      }),
+    [],
+  );
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantMounted, setAssistantMounted] = useState(false);
   const [assistantTaskTarget, setAssistantTaskTarget] =
@@ -1613,6 +1646,10 @@ export default function App() {
       });
     }
   }, [mobile, updateInspectorState]);
+  const selectTerminalSurface = useCallback(() => {
+    rememberMobileAgentView("terminal");
+    activateTerminalSurface();
+  }, [activateTerminalSurface, rememberMobileAgentView]);
   // The phone's Back closes the tab sheet, then returns from Workspaces,
   // Files, Changes, Assistant or Annotations to the session.
   useSystemBack(
@@ -1620,7 +1657,11 @@ export default function App() {
     () => setMobileTabSheetOpen(false),
     "popup",
   );
-  useSystemBack(mobileView !== "session", activateTerminalSurface, "panel");
+  useSystemBack(
+    mobileView !== "session",
+    mobileView === "history" ? selectTerminalSurface : activateTerminalSurface,
+    "panel",
+  );
   const toggleSidebar = useCallback(() => {
     setMobileView("session");
     setSidebarHidden((value) => !value);
@@ -2134,6 +2175,7 @@ export default function App() {
   const closeInspector = useCallback(() => {
     const current = inspectorStateRef.current;
     if (!current) return;
+    if (current.view === "history") rememberMobileAgentView("terminal");
     const returnFocus = inspectorReturnFocusRef.current;
     inspectorReturnFocusRef.current = null;
     commitInspectorState({ ...current, open: false });
@@ -2156,7 +2198,7 @@ export default function App() {
     } else {
       restoreControlFocus();
     }
-  }, [commitInspectorState]);
+  }, [commitInspectorState, rememberMobileAgentView]);
   const setAgentHistoryInspectorOpen = useCallback(
     (open: boolean, pane?: Pane) => {
       const current = inspectorStateRef.current;
@@ -2185,8 +2227,34 @@ export default function App() {
       openInspector("history", targetPane.workspace_id, {
         originPaneId: targetPane.pane_id,
       });
+      rememberMobileAgentView("chat");
     },
-    [closeInspector, openInspector],
+    [closeInspector, openInspector, rememberMobileAgentView],
+  );
+  const activateSessionSurface = useCallback(
+    (pane?: Pane | null) => {
+      const snapshot = store.get();
+      const target =
+        pane === undefined
+          ? snapshot.panes.find(
+              (candidate) =>
+                candidate.pane_id === activePaneIdForSnapshot(snapshot),
+            )
+          : pane;
+      if (
+        mobile &&
+        mobileAgentViewRef.current === "chat" &&
+        paneHasAgentHistory(target)
+      ) {
+        setMobileMoreOpen(false);
+        setAnnotationsOpen(false);
+        openInspector("history", target.workspace_id, {
+          originPaneId: target.pane_id,
+          focusInspector: false,
+        });
+      } else activateTerminalSurface();
+    },
+    [activateTerminalSurface, mobile, openInspector],
   );
   const toggleWorkspaceInspector = useCallback(() => {
     const current = inspectorStateRef.current;
@@ -2241,7 +2309,7 @@ export default function App() {
   const keepInspectorForWorkspace = useCallback(
     (workspaceId: string, originPane?: Pane) => {
       const current = inspectorStateRef.current;
-      if (!current?.open) {
+      if (!current?.open && !mobile) {
         activateTerminalSurface();
         return;
       }
@@ -2259,6 +2327,11 @@ export default function App() {
         explicitPane ??
         workspacePanes.find((pane) => pane.pane_id === activePaneId) ??
         workspacePanes.find((pane) => pane.focused);
+      if (mobile && (!current?.open || current.view === "history")) {
+        activateSessionSurface(routedPane ?? null);
+        return;
+      }
+      if (!current) return;
       const historyPane = paneHasAgentHistory(routedPane)
         ? routedPane
         : workspacePanes.find(paneHasAgentHistory);
@@ -2271,7 +2344,7 @@ export default function App() {
           (view === "history" ? historyPane?.pane_id : undefined),
       });
     },
-    [activateTerminalSurface, openInspector],
+    [activateSessionSurface, activateTerminalSurface, mobile, openInspector],
   );
   const toggleFileExplorer = useCallback(() => {
     const snapshot = store.get();
@@ -2753,6 +2826,40 @@ export default function App() {
             : "session",
     );
   }, [annotationsOpen, assistantOpen, mobile]);
+  const mobileSessionKey = JSON.stringify([
+    resourceUiKey,
+    activePane?.tab_id,
+    activePaneHasAgent,
+  ]);
+  const restoredMobileSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!mobile) {
+      restoredMobileSessionRef.current = null;
+      return;
+    }
+    if (
+      !activePaneId ||
+      s.pendingFocusWorkspaceId ||
+      restoredMobileSessionRef.current === mobileSessionKey
+    )
+      return;
+    if (inspectorStateRef.current?.open || annotationsOpen || assistantOpen) {
+      restoredMobileSessionRef.current = mobileSessionKey;
+      return;
+    }
+    if (mobileView !== "session") return;
+    restoredMobileSessionRef.current = mobileSessionKey;
+    activateSessionSurface();
+  }, [
+    activateSessionSurface,
+    activePaneId,
+    annotationsOpen,
+    assistantOpen,
+    mobile,
+    mobileSessionKey,
+    mobileView,
+    s.pendingFocusWorkspaceId,
+  ]);
   useLayoutEffect(() => {
     if (!annotationScope || annotationWorkspace) return;
     selectAnnotationDraft(null);
@@ -2853,12 +2960,16 @@ export default function App() {
     const routedPane =
       workspacePanes.find((pane) => pane.pane_id === activePaneId) ??
       workspacePanes.find((pane) => pane.focused);
+    if (mobile) {
+      activateSessionSurface(routedPane ?? null);
+      return;
+    }
     const historyPane = paneHasAgentHistory(routedPane)
       ? routedPane
       : workspacePanes.find(paneHasAgentHistory);
     if (!historyPane || historyPane.pane_id === current.originPaneId) return;
     commitInspectorState({ ...current, originPaneId: historyPane.pane_id });
-  }, [commitInspectorState, s]);
+  }, [activateSessionSurface, commitInspectorState, mobile, s]);
   // Search keeps the current pane listed for context, but focusing it is a
   // no-op, so selection lands on the first entry a jump can actually reach.
   useEffect(() => {
@@ -3577,6 +3688,7 @@ export default function App() {
     commitInspectorState(next);
     writeInspectorPreferences(roamgateLocalStorage, next);
     if (mobile) setMobileView(view);
+    if (view === "history") rememberMobileAgentView("chat");
   };
   const setInspectorDock = (dock: InspectorDock) => {
     const current = inspectorStateRef.current;
@@ -3708,6 +3820,32 @@ export default function App() {
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   };
+  const showMobileChat = () => {
+    setMobileMoreOpen(false);
+    setMobileTabSheetOpen(false);
+    rememberMobileAgentView("chat");
+    if (historyInspectorOpen) setMobileView("history");
+    else setAgentHistoryInspectorOpen(true);
+  };
+  const mobileChatButton = (
+    <button
+      type="button"
+      className={`mobile-chat-button ${historyInspectorVisible ? "active" : ""}`}
+      title={
+        activePaneHasAgent || historyInspectorOpen
+          ? "Read and reply in Chat"
+          : "Select an agent pane to use Chat"
+      }
+      aria-label="Show agent message history"
+      aria-pressed={historyInspectorVisible}
+      disabled={!activePaneHasAgent && !historyInspectorOpen}
+      onPointerDown={blurActiveInput}
+      onClick={showMobileChat}
+    >
+      <MessagesSquare size={16} aria-hidden="true" />
+      <span>Chat</span>
+    </button>
+  );
   const assistantEntry = (
     <button
       type="button"
@@ -3831,11 +3969,15 @@ export default function App() {
         </button>
       ) : null}
 
-      <MobileTabSheet
-        open={mobile && mobileTabSheetOpen}
-        onClose={() => setMobileTabSheetOpen(false)}
-        onShowSession={activateTerminalSurface}
-      />
+      {mobile && mobileTabSheetOpen ? (
+        <Suspense fallback={null}>
+          <MobileTabSheet
+            open
+            onClose={() => setMobileTabSheetOpen(false)}
+            onShowSession={activateSessionSurface}
+          />
+        </Suspense>
+      ) : null}
       {mobile && mobileMoreOpen ? (
         <button
           type="button"
@@ -3892,28 +4034,6 @@ export default function App() {
               {annotations.length > 0 ? ` ${annotations.length}` : ""}
             </span>
           </button>
-          <button
-            type="button"
-            className={mobileView === "history" ? "active" : ""}
-            title={
-              activePaneHasAgent || historyInspectorOpen
-                ? "History"
-                : "Select an agent pane to view History"
-            }
-            aria-label="Show agent message history"
-            aria-pressed={historyInspectorOpen}
-            disabled={!activePaneHasAgent && !historyInspectorOpen}
-            onClick={() => {
-              if (historyInspectorOpen && mobileView !== "history") {
-                setMobileView("history");
-              } else {
-                setAgentHistoryInspectorOpen(!historyInspectorOpen);
-              }
-            }}
-          >
-            <History size={16} />
-            <span className="mobile-nav-label">History</span>
-          </button>
         </nav>
         <nav
           className="mobile-nav mobile-workspace-tools"
@@ -3937,15 +4057,16 @@ export default function App() {
                 : openWorkspaces
             }
           >
-            <PanelTop size={17} />
+            <PanelTop size={16} />
             <span className="mobile-nav-label">Workspaces</span>
           </button>
         </nav>
         <div className="mobile-terminal-controls">
           <nav
             className="mobile-nav mobile-terminal-tools"
-            aria-label="Terminal, files, and changes"
+            aria-label="Chat, terminal, files, and changes"
           >
+            {mobileChatButton}
             <button
               type="button"
               className={
@@ -3953,7 +4074,7 @@ export default function App() {
               }
               title="Terminal"
               aria-label="Show terminal session"
-              onClick={activateTerminalSurface}
+              onClick={selectTerminalSurface}
             >
               <SquareTerminal size={16} />
               <span className="mobile-nav-label">Terminal</span>
@@ -4148,7 +4269,7 @@ export default function App() {
                   mobileInputTarget={
                     historyInputPending ? null : mobileInputTarget
                   }
-                  onActivateTerminalSurface={activateTerminalSurface}
+                  onActivateTerminalSurface={selectTerminalSurface}
                   visible={!mobile || mobileView === "session"}
                   terminalTheme={terminalTheme}
                   terminalFontFamily={terminalFontFamily}
@@ -4340,6 +4461,9 @@ export default function App() {
       {mobile ? (
         <MobileBottomBar
           inputRef={setMobileInputTarget}
+          chatButton={
+            activePaneHasAgent || historyInspectorOpen ? mobileChatButton : null
+          }
           tabCount={focusedWorkspaceTabCount}
           attention={focusedWorkspaceAttention}
           tabsOpen={mobileTabSheetOpen}

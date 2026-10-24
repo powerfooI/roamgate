@@ -19,18 +19,26 @@ function rule(css: string, selector: string, occurrence = 0) {
 }
 
 const control = "max(44px, calc(44px / var(--ui-scale, 1)))";
+const sizedControl = `var(--mobile-control-size, ${control})`;
 const message = "max(48px, calc(48px / var(--ui-scale, 1)))";
 
 // These are CSS contract tests, not painted-layout tests. Device acceptance
 // still checks actual rects/overlap, keyboard geometry and multiline focus.
-test("Direct, Tabs and More use 44px controls with inverse zoom compensation", () => {
+test("Direct, Chat, Tabs and More use 44px controls with inverse zoom compensation", () => {
   const buttons = rule(nav, ".mobile-appbar button");
-  expect(buttons).toContain(`width: ${control};`);
-  expect(buttons).toContain(`height: ${control};`);
+  expect(buttons).toContain("width: var(--mobile-control-size);");
+  expect(buttons).toContain("height: var(--mobile-control-size);");
+  expect(rule(nav, ".mobile-bottom-bar")).toContain(
+    `--mobile-control-size: ${control};`,
+  );
   expect(buttons).toContain("flex: 0 0 auto;");
   const direct = rule(terminal, ".terminal-mobile-input-bar button");
-  expect(direct).toContain(`min-width: ${control};`);
-  expect(direct).toContain(`min-height: ${control};`);
+  expect(direct.replace(/\s/g, "")).toContain(
+    `min-width: ${sizedControl};`.replace(/\s/g, ""),
+  );
+  expect(direct.replace(/\s/g, "")).toContain(
+    `min-height: ${sizedControl};`.replace(/\s/g, ""),
+  );
   expect(direct).toContain("flex: 0 0 auto;");
   expect(direct).toContain("padding: 0;");
 
@@ -94,7 +102,15 @@ test("footer controls share quiet borderless styling without losing selected or 
 
 test("navigation slots and centering track control size without shrinking Message", () => {
   const row = rule(terminal, ".terminal-mobile-input-bar", 1);
-  expect(row).toContain(`padding-right: calc(2 * ${control} + 4px);`);
+  expect(row.replace(/\s/g, "")).toContain(
+    `padding-right: calc(var(--mobile-navigation-slots, 2) * ${sizedControl} + 4px);`.replace(
+      /\s/g,
+      "",
+    ),
+  );
+  expect(rule(nav, ".mobile-bottom-bar[data-chat]")).toContain(
+    "--mobile-navigation-slots: 3;",
+  );
   expect(row).toContain("align-items: center;");
   const editor = rule(
     terminal,
@@ -109,7 +125,7 @@ test("navigation slots and centering track control size without shrinking Messag
   expect(rule(nav, ".mobile-bottom-bar")).toContain(message);
   const appbar = rule(nav, ".mobile-appbar");
   expect(appbar.replace(/\s/g, "")).toContain(
-    `(${message} - ${control}) / 2`.replace(/\s/g, ""),
+    `(${message} - var(--mobile-control-size)) / 2`.replace(/\s/g, ""),
   );
   expect(appbar).toContain("env(safe-area-inset-bottom, 0px)");
   expect(appbar).toContain("env(safe-area-inset-right, 0px)");
@@ -124,6 +140,18 @@ test("tab counts and attention badges stay inside the narrower button", () => {
   expect(rule(nav, ".mobile-appbar-count[data-attention]")).toContain(
     "background: var(--red);",
   );
+});
+
+test("Chat fits a 320px phone at every supported scale without reducing touch targets", () => {
+  expect(nav).toContain("@media (max-width: 360px)");
+  expect(rule(nav, ".mobile-bottom-bar[data-chat]", 1)).toContain(
+    "--mobile-control-size: calc(44px / var(--ui-scale, 1));",
+  );
+  for (let percent = 80; percent <= 150; percent++) {
+    const scale = percent / 100;
+    const available = 320 - (16 + 8) * scale - 4 * 44;
+    expect(available).toBeGreaterThanOrEqual(48 * Math.max(1, scale));
+  }
 });
 
 test("toolbar close stays right aligned when Direct hides the submit actions", () => {
@@ -150,7 +178,7 @@ test("More remains anchored above the Message rail with keyboard and safe-area c
     "var(--keyboard-inset-content, var(--keyboard-inset-bottom, 0px))",
   );
   expect(menu).toContain("overflow-y: auto;");
-  // Focused multiline editing still borrows all three navigation slots.
+  // Focused multiline editing still borrows all navigation slots.
   expect(
     rule(
       nav,

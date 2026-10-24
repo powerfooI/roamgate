@@ -321,6 +321,7 @@
 
 :where(html[data-layout="mobile"]) {
   .mobile-bottom-bar {
+    --mobile-control-size: max(44px, calc(44px / var(--ui-scale, 1)));
     position: relative;
     /* Keep navigation reachable above More's backdrop (130), below its
        panel (132). Application Menu lifts its whole topbar context. */
@@ -344,6 +345,17 @@
     --terminal-bg: var(--shell-panel);
   }
 
+  .mobile-bottom-bar[data-chat] {
+    --mobile-navigation-slots: 3;
+  }
+
+  @media (max-width: 360px) {
+    .mobile-bottom-bar[data-chat] {
+      /* Keep four controls at 44 physical pixels when UI zoom would overlap them. */
+      --mobile-control-size: calc(44px / var(--ui-scale, 1));
+    }
+  }
+
   /* The fixed menu cannot escape the topbar's stacking context. */
   .topbar:has(.config-dropdown) {
     z-index: 134;
@@ -364,7 +376,7 @@
       env(safe-area-inset-bottom, 0px) +
       (
         max(48px, calc(48px / var(--ui-scale, 1))) -
-        max(44px, calc(44px / var(--ui-scale, 1)))
+        var(--mobile-control-size)
       ) /
       2
     );
@@ -373,7 +385,7 @@
   }
 
   /* The active portal owns editing state, not App's draft business state.
-     Only focused multiline editing borrows the three navigation slots. */
+     Only focused multiline editing borrows the navigation slots. */
   .mobile-bottom-bar:has(.terminal-composer[data-expanded]) .mobile-appbar {
     display: none;
   }
@@ -390,8 +402,8 @@
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
-    width: max(44px, calc(44px / var(--ui-scale, 1)));
-    height: max(44px, calc(44px / var(--ui-scale, 1)));
+    width: var(--mobile-control-size);
+    height: var(--mobile-control-size);
     padding: 0;
     border: 0;
     border-radius: 22px;
@@ -402,6 +414,15 @@
 
   .mobile-appbar button:disabled {
     opacity: 0.4;
+  }
+
+  .mobile-appbar .mobile-chat-button > span {
+    display: none;
+  }
+
+  .mobile-appbar .mobile-chat-button > svg {
+    width: 21px;
+    height: 21px;
   }
 
   .terminal-mobile-direct[aria-pressed="true"],
@@ -614,7 +635,7 @@
 
   body .app[data-mobile-more] .mobile-controls-stack .mobile-terminal-controls {
     order: -1;
-    padding-bottom: 4px;
+    padding: 0;
     border-bottom: 1px solid var(--border);
     margin-bottom: 4px;
   }

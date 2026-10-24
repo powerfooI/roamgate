@@ -43,7 +43,7 @@ export default defineConfig({
             {
               // Keep startup UI primitives together without loading feature-only icons.
               name: "ui-runtime",
-              test: /(?:node_modules[\\/](?:lucide-react|react|react-dom|scheduler|@radix-ui|@floating-ui)[\\/]|src[\\/](?:utils\.ts|components[\\/]ui[\\/]popover\.tsx)$)/,
+              test: /(?:vite[\\/]preload-helper\.js|node_modules[\\/](?:lucide-react|react|react-dom|scheduler|@radix-ui|@floating-ui)[\\/]|src[\\/](?:utils\.ts|components[\\/](?:ui[\\/]popover|CloseButton)\.tsx)$)/,
               tags: ["$initial"],
             },
             {

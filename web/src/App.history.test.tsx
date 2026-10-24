@@ -135,7 +135,7 @@ if (process.env.ROAMGATE_APP_HISTORY_TEST !== "1") {
     mock.module("./useConnectionClient", () => ({
       useConnectionClient: () => client,
       useConnectionReady: () => true,
-      connectionClientScopeKey: () => "local:1",
+      connectionClientScopeKey: () => `local:${client.generation}`,
     }));
     mock.module("./assistant", () => ({
       useAssistantState: () => ({ snapshot: null }),
@@ -144,10 +144,25 @@ if (process.env.ROAMGATE_APP_HISTORY_TEST !== "1") {
     for (const name of [
       "ConnectionSwitcher",
       "GlobalTooltip",
-      "MobileTabSheet",
       "AnnotationPanel",
     ])
       mock.module(`./components/${name}`, () => ({ [name]: () => null }));
+    let showSession!: () => void;
+    mock.module("./components/MobileTabSheet", () => ({
+      MobileTabSheet: ({
+        onShowSession,
+        onClose,
+      }: {
+        onShowSession: () => void;
+        onClose: () => void;
+      }) => {
+        showSession = () => {
+          onClose();
+          onShowSession();
+        };
+        return null;
+      },
+    }));
     mock.module("./components/ConfigMenu", () => ({
       ConfigMenu: () => null,
       CONFIG_MENU_ID: "config-menu",
@@ -209,6 +224,51 @@ if (process.env.ROAMGATE_APP_HISTORY_TEST !== "1") {
       await React.act(async () => root.render(<App />));
       expect(terminalProps.paneId).toBe("a");
       expect(terminalProps.mobileInputTarget).not.toBeNull();
+      const chatButton = container.querySelector<HTMLButtonElement>(
+        '.mobile-appbar [aria-label="Show agent message history"]',
+      )!;
+      const terminalButton = container.querySelector<HTMLButtonElement>(
+        '.mobile-terminal-tools [aria-label="Show terminal session"]',
+      )!;
+      expect(
+        container.querySelector(
+          '.topbar [aria-label="Show agent message history"]',
+        ),
+      ).toBeNull();
+      expect(container.querySelector(".mobile-appbar")?.firstElementChild).toBe(
+        chatButton,
+      );
+      expect(
+        container.querySelector(".mobile-bottom-bar[data-chat]"),
+      ).not.toBeNull();
+      expect(chatButton.textContent).toBe("Chat");
+      expect(chatButton.getAttribute("aria-pressed")).toBe("true");
+      expect(inspectorProps.historyPane?.pane_id).toBe("a");
+      expect(terminalProps.agentHistoryOpen).toBe(true);
+      const menuChat = container.querySelector<HTMLButtonElement>(
+        ".mobile-terminal-tools button:first-child",
+      )!;
+      expect(menuChat.textContent).toBe("Chat");
+      await React.act(async () => {
+        container
+          .querySelector<HTMLButtonElement>(".mobile-appbar-more")!
+          .click();
+      });
+      await React.act(async () => menuChat.click());
+      expect(container.querySelector("[data-mobile-more]")).toBeNull();
+      expect(inspectorProps.historyPane?.pane_id).toBe("a");
+      expect(terminalProps.agentHistoryOpen).toBe(true);
+      expect(chatButton.getAttribute("aria-pressed")).toBe("true");
+      await React.act(async () => chatButton.click());
+      expect(inspectorProps.visible).toBe(true);
+      await React.act(async () => terminalButton.click());
+      expect(terminalProps.visible).toBe(true);
+      expect(terminalProps.agentHistoryOpen).toBe(false);
+      expect(chatButton.getAttribute("aria-pressed")).toBe("false");
+      await React.act(async () => chatButton.click());
+      expect(terminalProps.agentHistoryOpen).toBe(true);
+      await React.act(async () => terminalButton.click());
+      expect(focusRequests).toHaveLength(0);
       await React.act(async () => terminalProps.onComposerOpenChange!(true));
       expect(terminalProps.composerOpen).toBe(true);
       await openHistory("b");
@@ -256,6 +316,150 @@ if (process.env.ROAMGATE_APP_HISTORY_TEST !== "1") {
       await focusSettled("c");
       expect(terminalProps.paneId).toBe("c");
       expect(terminalProps.mobileInputTarget).not.toBeNull();
+      expect(terminalProps.agentHistoryOpen).toBe(true);
+      // Ordinary shell panes do not advertise a Chat view they cannot open.
+      await React.act(async () =>
+        terminalProps.onAgentHistoryOpenChange!(false),
+      );
+      await React.act(async () => {
+        snapshot = {
+          ...snapshot,
+          panes: snapshot.panes.map((pane) => ({ ...pane, agent: undefined })),
+        };
+        for (const listener of listeners) listener();
+      });
+      expect(
+        container.querySelector(".mobile-appbar .mobile-chat-button"),
+      ).toBeNull();
+      expect(
+        container.querySelector(".mobile-bottom-bar[data-chat]"),
+      ).toBeNull();
+      expect(menuChat.disabled).toBe(true);
+
+      const { roamgateLocalStorage } = await import("./browserStorage");
+      const chooseChat = () =>
+        React.act(async () => {
+          container
+            .querySelector<HTMLButtonElement>(
+              ".mobile-appbar .mobile-chat-button",
+            )!
+            .click();
+        });
+      const switchSession = async (id: string, agent = true) => {
+        await React.act(async () => {
+          container
+            .querySelector<HTMLButtonElement>(".mobile-appbar-tabs")!
+            .click();
+        });
+        await React.act(async () => {
+          const tabId = `tab-${id}`;
+          snapshot = {
+            ...snapshot,
+            selectedPaneId: id,
+            panes: panes.map((pane) => ({
+              ...pane,
+              tab_id: `tab-${pane.pane_id}`,
+              agent: pane.pane_id === id && !agent ? undefined : "codex",
+              focused: pane.pane_id === id,
+            })),
+            tabs: panes.map((pane, index) => ({
+              ...snapshot.tabs[0]!,
+              tab_id: `tab-${pane.pane_id}`,
+              number: index + 1,
+              focused: pane.pane_id === id,
+              pane_count: 1,
+            })),
+            workspaces: snapshot.workspaces.map((workspace) => ({
+              ...workspace,
+              active_tab_id: tabId,
+              tab_count: 3,
+            })),
+            layout: {
+              ...snapshot.layout,
+              tab_id: tabId,
+              focused_pane_id: id,
+              panes: [{ pane_id: id, focused: true, rect }],
+            },
+          };
+          for (const listener of listeners) listener();
+        });
+        // TabSheet completes after the store has published the new target.
+        await React.act(async () => showSession());
+      };
+      const reload = (key: string) =>
+        React.act(async () => root.render(<App key={key} />));
+
+      // An explicit Terminal choice survives switching and page reloads.
+      expect(roamgateLocalStorage.getItem("mobileAgentView")).toBe("terminal");
+      await switchSession("a");
+      expect(terminalProps.visible).toBe(true);
+      expect(terminalProps.agentHistoryOpen).toBe(false);
+      await reload("terminal");
+      expect(terminalProps.visible).toBe(true);
+      expect(terminalProps.agentHistoryOpen).toBe(false);
+
+      await chooseChat();
+      await switchSession("b");
+      expect(inspectorProps.visible).toBe(true);
+      expect(inspectorProps.historyPane?.pane_id).toBe("b");
+      expect(terminalProps.paneId).toBe("b");
+      expect(terminalProps.agentHistoryOpen).toBe(true);
+      expect(terminalProps.mobileInputTarget).not.toBeNull();
+      await switchSession("c", false);
+      expect(terminalProps.visible).toBe(true);
+      expect(terminalProps.agentHistoryOpen).toBe(false);
+      expect(roamgateLocalStorage.getItem("mobileAgentView")).toBe("chat");
+      await switchSession("a");
+      expect(inspectorProps.historyPane?.pane_id).toBe("a");
+      expect(terminalProps.agentHistoryOpen).toBe(true);
+      await reload("chat");
+      expect(terminalProps.agentHistoryOpen).toBe(true);
+
+      // Another browser tab updates the preference, without stealing this view.
+      await React.act(async () => {
+        roamgateLocalStorage.setItem("mobileAgentView", "terminal");
+        browser.dispatchEvent(
+          new browser.StorageEvent("storage", {
+            key: "roamgate:mobileAgentView",
+            storageArea: browser.localStorage,
+          }),
+        );
+      });
+      expect(terminalProps.agentHistoryOpen).toBe(true);
+      await switchSession("b");
+      expect(terminalProps.agentHistoryOpen).toBe(false);
+
+      // Direct input is also an explicit Terminal choice; failed storage is safe.
+      await chooseChat();
+      const failedStorage = spyOn(
+        roamgateLocalStorage,
+        "setItem",
+      ).mockImplementation(() => {
+        throw new Error("Storage unavailable");
+      });
+      try {
+        await React.act(async () => terminalProps.onActivateTerminalSurface!());
+        expect(terminalProps.agentHistoryOpen).toBe(false);
+        await switchSession("a");
+        expect(terminalProps.agentHistoryOpen).toBe(false);
+      } finally {
+        failedStorage.mockRestore();
+      }
+
+      // Desktop choices never overwrite the mobile preference or auto-open Chat.
+      const { updateLayoutPreferences } = await import("./layoutPreferences");
+      await React.act(async () => updateLayoutPreferences({ mode: "desktop" }));
+      await reload("desktop");
+      expect(terminalProps.agentHistoryOpen).toBe(false);
+      await React.act(async () => terminalProps.onActivateTerminalSurface!());
+      expect(roamgateLocalStorage.getItem("mobileAgentView")).toBe("chat");
+      await React.act(async () => updateLayoutPreferences({ mode: "mobile" }));
+      expect(terminalProps.agentHistoryOpen).toBe(true);
+      await React.act(async () => {
+        client.generation += 1;
+        snapshot = { ...snapshot, connectionGeneration: client.generation };
+        for (const listener of listeners) listener();
+      });
       expect(terminalProps.agentHistoryOpen).toBe(true);
     } finally {
       await React.act(async () => root.unmount());

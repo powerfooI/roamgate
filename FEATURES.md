@@ -226,9 +226,16 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
 
 - **Configuration > Appearance > Layout** selects Automatic, Mobile, or Desktop
   (`?layout=mobile|desktop|auto` overrides it).
-- The bottom bar holds **Message…**, **Direct**, **Tabs** (with the workspace's
-  tab count, red when another agent needs you) and **⋮**, a menu of views and tools: Terminal, Files,
-  Changes, Commits, Annotations, History, Ranger, and Workspaces.
+- Agent panes have a **Chat** button immediately to the right of **Direct**
+  in the bottom bar. It opens Agent History for reading and replying in a
+  conversation, without adding a row above the content. Chat is the default
+  history view; a saved timeline preference is still respected.
+- Mobile agent sessions initially open in Chat. Choosing Chat or Terminal is
+  remembered on this browser and reused when switching sessions or reloading.
+  Shell panes open in Terminal without changing that preference.
+- The bottom bar holds **Message…**, **Direct**, **Chat** (for agent panes), **Tabs** (with the workspace's
+  tab count, red when another agent needs you) and **⋮**, a menu of views and tools: Chat, Terminal,
+  Files, Changes, Commits, Annotations, Ranger, and Workspaces.
 - Mobile hides the top tab strip. Use **Tabs** in the bottom bar to switch,
   create, or close tabs. Tabs with multiple panes list their panes underneath;
   select a pane to open it directly, including across tabs. The current pane is
@@ -248,7 +255,7 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
   Enter; in Message they insert into the draft. If the original Direct target
   changes during an upload, its paths stay in that pane's draft with a warning.
   While editing a multiline draft (including visual wraps), Message expands
-  and temporarily hides Direct, Tabs, and **⋮**. Leaving the field restores
+  and temporarily hides Direct, Chat, Tabs, and **⋮**. Leaving the field restores
   the single-line preview and navigation; tapping Message resumes editing.
   Drafts stay in the field when collapsed. Sends, scrolling, and shortcut
   actions leave a dismissed keyboard closed.

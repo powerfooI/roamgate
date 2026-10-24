@@ -458,7 +458,11 @@
     gap: 4px;
     min-width: 0;
     align-items: center;
-    padding-right: calc(2 * max(44px, calc(44px / var(--ui-scale, 1))) + 4px);
+    padding-right: calc(
+      var(--mobile-navigation-slots, 2) *
+      var(--mobile-control-size, max(44px, calc(44px / var(--ui-scale, 1)))) +
+      4px
+    );
     background: var(--terminal-bg);
   }
 
@@ -472,8 +476,14 @@
     flex: 0 0 auto;
     align-items: center;
     justify-content: center;
-    min-width: max(44px, calc(44px / var(--ui-scale, 1)));
-    min-height: max(44px, calc(44px / var(--ui-scale, 1)));
+    min-width: var(
+      --mobile-control-size,
+      max(44px, calc(44px / var(--ui-scale, 1)))
+    );
+    min-height: var(
+      --mobile-control-size,
+      max(44px, calc(44px / var(--ui-scale, 1)))
+    );
     padding: 0;
     color: var(--text-strong);
     border: 0;

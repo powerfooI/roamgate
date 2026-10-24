@@ -30,7 +30,6 @@ import { createFileSearchMatcher } from "../fileSearch";
 import { connectionHttpPath } from "../connectionHttp";
 import { connectionStorageKey } from "../connectionStorage";
 import { downloadFileFromUrl } from "../downloadFile";
-import { lazyWithReload } from "../lazyWithReload";
 import {
   lastStepCompletionKey,
   subscribeLastStepCompletion,
@@ -69,9 +68,10 @@ import {
   keyboardContextMenuPoint,
   treeKeyboardAction,
 } from "./treeKeyboard";
-import type {
-  ActiveFilePreviewSelection,
-  FilePreviewSelectionMeta,
+import {
+  FilePreviewContent,
+  type ActiveFilePreviewSelection,
+  type FilePreviewSelectionMeta,
 } from "./FilePreviewContent";
 
 import {
@@ -99,12 +99,6 @@ import {
   deleteExplorerEntry,
 } from "./fileExplorerResources";
 import "./FileExplorerDialog.css";
-
-const FilePreviewContent = lazyWithReload("file-preview", () =>
-  import("./FilePreviewContent").then((module) => ({
-    default: module.FilePreviewContent,
-  })),
-);
 
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;

@@ -1,5 +1,5 @@
 import { EllipsisVertical, SquareStack } from "lucide-react";
-import { useEffect, type Ref } from "react";
+import { useEffect, type ReactNode, type Ref } from "react";
 import { focusIfUnchanged } from "./dialogFocus";
 import { blurActiveInput } from "../activeTerminalInput";
 
@@ -7,6 +7,7 @@ import { blurActiveInput } from "../activeTerminalInput";
 // TerminalView portals its shared editor and tools into the input surface.
 export function MobileBottomBar({
   inputRef,
+  chatButton,
   tabCount,
   attention,
   tabsOpen,
@@ -15,6 +16,7 @@ export function MobileBottomBar({
   onMoreOpenChange,
 }: {
   inputRef: Ref<HTMLDivElement>;
+  chatButton?: ReactNode;
   tabCount: number;
   attention: boolean;
   tabsOpen: boolean;
@@ -41,9 +43,14 @@ export function MobileBottomBar({
     };
   }, [moreOpen, onMoreOpenChange]);
   return (
-    <div className="mobile-bottom-bar" aria-label="Mobile controls">
+    <div
+      className="mobile-bottom-bar"
+      aria-label="Mobile controls"
+      data-chat={chatButton ? "" : undefined}
+    >
       <div className="mobile-bottom-input" ref={inputRef} />
       <nav className="mobile-appbar" aria-label="Workspace navigation">
+        {chatButton}
         <button
           type="button"
           className="mobile-appbar-tabs"
