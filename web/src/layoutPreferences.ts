@@ -60,15 +60,27 @@ export function layoutUrlOverride(search: string): LayoutMode | null {
     : null;
 }
 
+/** A touch screen this short is a phone on its side, however wide. */
+export const LANDSCAPE_PHONE_MAX_HEIGHT = 500;
+
 export function resolveMobileLayout(
   width: number,
   preferences: LayoutPreferences,
   search = "",
+  landscapePhone = false,
 ): boolean {
   const mode = layoutUrlOverride(search) ?? preferences.mode;
   return (
     mode === "mobile" ||
-    (mode === "auto" && width <= preferences.mobileBreakpoint)
+    (mode === "auto" &&
+      (width <= preferences.mobileBreakpoint || landscapePhone))
+  );
+}
+
+function isLandscapePhone() {
+  return (
+    window.innerHeight <= LANDSCAPE_PHONE_MAX_HEIGHT &&
+    window.matchMedia("(pointer: coarse)").matches
   );
 }
 
@@ -91,6 +103,7 @@ function publishLayout(preferences = snapshot.preferences) {
     window.innerWidth,
     preferences,
     window.location.search,
+    isLandscapePhone(),
   );
   const urlOverride = layoutUrlOverride(window.location.search);
   document.documentElement.dataset.layout = mobile ? "mobile" : "desktop";

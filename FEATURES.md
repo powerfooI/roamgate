@@ -29,7 +29,8 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
   it on a pane's edge to place it on that side. Running programs keep going.
 - The command menu searches workspaces, worktrees, files, tabs, panes, and
   agents, and opens typed file paths.
-- Desktop **Zen mode** hides app chrome so the terminal fills the window.
+- **Zen mode** hides app chrome so the terminal fills the window. On a phone
+  it hides the top bar and keeps the bottom bar; **⋮** offers **Exit Zen mode**.
 - **Configuration > Integrations > Automatic tab renaming** names default tabs
   from the focused agent's bound session title, or its own terminal title.
   Existing custom labels are preserved. After a bridge restart, previously named
@@ -204,7 +205,7 @@ Inspector state is scoped to each checkout; see
   status, the pages the session published with Claude Code's Artifact tool
   (a list to open or copy each link; each publish also links under the tool
   calls that made it), search, **Stop** (Esc in the terminal) and the way back
-  to the terminal; on a phone that row stands for the top bar, which hides,
+  to the terminal; on a phone in Zen mode that row stands for the top bar,
   and the message box sits in the bottom bar, taking the whole width while
   you write. Below the conversation, a working agent shows its own word for
   what it does, read from its screen (Claude Code's "Sublimating... (1m 5s)"),
@@ -356,6 +357,8 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
 
 - **Configuration > Appearance > Layout** selects Automatic, Mobile, or Desktop
   (`?layout=mobile|desktop|auto` overrides it).
+  Automatic also gives a touch screen at most 500px tall, a phone on its side,
+  the mobile layout however wide it is.
 - Agent panes have a **Chat** button immediately to the right of **Direct**
   in the bottom bar. It opens Agent History for reading and replying in a
   conversation, without adding a row above the content. Chat is the default

@@ -41,6 +41,11 @@ describe("layout preferences", () => {
     expect(resolveMobileLayout(1000, preferences)).toBe(true);
     expect(resolveMobileLayout(1100, preferences)).toBe(true);
     expect(resolveMobileLayout(1101, preferences)).toBe(false);
+    // A phone on its side: wide, but short on a touch screen.
+    expect(resolveMobileLayout(915, defaults, "", true)).toBe(true);
+    expect(
+      resolveMobileLayout(915, { ...defaults, mode: "desktop" }, "", true),
+    ).toBe(false);
     expect(
       parseLayoutPreferences('{"mobileBreakpoint":0}').mobileBreakpoint,
     ).toBe(320);
