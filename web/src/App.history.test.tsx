@@ -409,6 +409,18 @@ if (process.env.ROAMGATE_APP_HISTORY_TEST !== "1") {
       expect(terminalProps.visible).toBe(true);
       expect(terminalProps.agentHistoryOpen).toBe(false);
       expect(roamgateLocalStorage.getItem("mobileAgentView")).toBe("chat");
+      // Shell Message/Direct input and the Terminal menu keep the agent choice.
+      await React.act(async () => terminalProps.onActivateTerminalSurface!());
+      expect(terminalProps.visible).toBe(true);
+      expect(roamgateLocalStorage.getItem("mobileAgentView")).toBe("chat");
+      await React.act(async () =>
+        container
+          .querySelector<HTMLButtonElement>(
+            '.mobile-terminal-tools [aria-label="Show terminal session"]',
+          )!
+          .click(),
+      );
+      expect(roamgateLocalStorage.getItem("mobileAgentView")).toBe("chat");
       await switchSession("a");
       expect(inspectorProps.historyPane?.pane_id).toBe("a");
       expect(terminalProps.agentHistoryOpen).toBe(true);

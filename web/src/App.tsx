@@ -1647,9 +1647,9 @@ export default function App() {
     }
   }, [mobile, updateInspectorState]);
   const selectTerminalSurface = useCallback(() => {
-    rememberMobileAgentView("terminal");
+    if (activePaneHasAgent) rememberMobileAgentView("terminal");
     activateTerminalSurface();
-  }, [activateTerminalSurface, rememberMobileAgentView]);
+  }, [activateTerminalSurface, activePaneHasAgent, rememberMobileAgentView]);
   // The phone's Back closes the tab sheet, then returns from Workspaces,
   // Files, Changes, Assistant or Annotations to the session.
   useSystemBack(
