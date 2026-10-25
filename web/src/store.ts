@@ -1691,6 +1691,27 @@ function startPolling() {
   startUpdatePolling();
 }
 
+/** The connection this browser was last on, opened again on load. */
+const LAST_CONNECTION_KEY = "lastConnection";
+
+/**
+ * The connection to open when none is active: the one this browser was last
+ * on while the catalog still has it, else the server's default.
+ */
+function preferredConnectionId(defaultConnectionId: string): string {
+  let last: string | null;
+  try {
+    last = roamgateLocalStorage.getItem(LAST_CONNECTION_KEY);
+  } catch {
+    last = null;
+  }
+  return last &&
+    (state.connections.length === 0 ||
+      state.connections.some((connection) => connection.id === last))
+    ? last
+    : defaultConnectionId;
+}
+
 function selectConnectionNow(connectionId: string, refresh = true): boolean {
   if (!connectionId || connectionId === state.activeConnectionId) return false;
   if (
@@ -1704,6 +1725,11 @@ function selectConnectionNow(connectionId: string, refresh = true): boolean {
     typeof localStorage !== "undefined"
   ) {
     migrateLegacyConnectionStorage(roamgateLocalStorage, connectionId);
+  }
+  try {
+    roamgateLocalStorage.setItem(LAST_CONNECTION_KEY, connectionId);
+  } catch {
+    // Storage may be unavailable; a reload then opens the default.
   }
   stopPolling();
   disposeTerminalConnection(
@@ -1892,7 +1918,8 @@ function applyConnectionCatalog(result: unknown, requestSeq: number) {
     !sessionsChanged &&
     defaultConnectionId === state.defaultConnectionId
   ) {
-    if (!nextActive) selectConnectionNow(defaultConnectionId);
+    if (!nextActive)
+      selectConnectionNow(preferredConnectionId(defaultConnectionId));
     return;
   }
 
@@ -1904,7 +1931,8 @@ function applyConnectionCatalog(result: unknown, requestSeq: number) {
     sessionsByConnectionId: stableSessions,
   };
   emit();
-  if (!nextActive) selectConnectionNow(defaultConnectionId);
+  if (!nextActive)
+    selectConnectionNow(preferredConnectionId(defaultConnectionId));
 }
 
 async function refreshConnectionCatalog(): Promise<boolean> {
@@ -2503,7 +2531,7 @@ export const store = {
         state.activeConnectionId === LEGACY_DEFAULT_CONNECTION_ID &&
         defaultConnectionId !== state.activeConnectionId
       ) {
-        selectConnectionNow(defaultConnectionId, false);
+        selectConnectionNow(preferredConnectionId(defaultConnectionId), false);
       }
       if (state.status === "connected" && !state.connectionPaused) {
         void refreshConnectionCatalog();

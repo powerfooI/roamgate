@@ -878,6 +878,44 @@ describe("connection-partitioned store state", () => {
     }
   });
 
+  test("opens the connection this browser was last on, else the default", () => {
+    const originalSetActiveConnection = bridge.setActiveConnection;
+    bridge.setActiveConnection = (() =>
+      22) as typeof bridge.setActiveConnection;
+    const previousStorage = globalThis.localStorage;
+    const stored = new Map<string, string>();
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => stored.set(key, value),
+        removeItem: (key: string) => stored.delete(key),
+      },
+    });
+    try {
+      const pick = (last: string) => {
+        stored.set("roamgate:lastConnection", last);
+        const snapshot = { ...partitionState(), activeConnectionId: "gone" };
+        __storeTesting.replaceState(snapshot);
+        __storeTesting.applyCatalog(snapshot.connections, "alpha");
+        return store.get().activeConnectionId;
+      };
+      expect(pick("beta")).toBe("beta");
+      // One the catalog no longer has gives way to the default.
+      expect(pick("removed")).toBe("alpha");
+      expect(stored.get("roamgate:lastConnection")).toBe("alpha");
+      store.selectConnection("beta");
+      expect(stored.get("roamgate:lastConnection")).toBe("beta");
+    } finally {
+      bridge.setActiveConnection = originalSetActiveConnection;
+      Object.defineProperty(globalThis, "localStorage", {
+        configurable: true,
+        value: previousStorage,
+      });
+      __storeTesting.replaceState(partitionState());
+    }
+  });
+
   test("publishes an empty active session before replacement refresh", () => {
     const originalAdvanceGeneration = bridge.advanceActiveConnectionGeneration;
     bridge.advanceActiveConnectionGeneration = (() =>
