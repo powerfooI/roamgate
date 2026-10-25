@@ -79,6 +79,43 @@ test("keeps overlapping server IDs separate through sorting and workspace groupi
   expect(new Set(groups.map((group) => group.key)).size).toBe(2);
 });
 
+test("all-server attention order uses durable activity across overlapping server IDs", () => {
+  const connections: ConnectionSummary[] = ["alpha", "beta"].map((id) => ({
+    id,
+    label: id,
+    source: "test",
+    is_default: id === "alpha",
+    state: "ready",
+    generation: 1,
+  }));
+  const snapshots = connections.map(({ id }, index) => {
+    const snapshot = agentSnapshot(id);
+    snapshot.panes[0].agent_status = "idle";
+    snapshot.agents = {
+      agents: [
+        {
+          pane_id: "w1:p1",
+          terminal_id: "term1",
+          agent: "codex",
+          agent_status: "idle",
+          state_change_seq: index === 0 ? 999 : 1,
+          last_activity_at: index === 0 ? 1000 : 2000,
+        },
+      ],
+    };
+    return snapshot;
+  });
+  const ordered = sortAgentPanes(
+    allServerAgentPanes(connections, snapshots),
+    [],
+    "attention",
+  );
+  expect(ordered.map(({ connectionId }) => connectionId)).toEqual([
+    "beta",
+    "alpha",
+  ]);
+});
+
 test("hides failed, disconnected, and replaced runtime snapshots", () => {
   const connection: ConnectionSummary = {
     id: "alpha",

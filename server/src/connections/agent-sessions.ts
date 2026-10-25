@@ -11,6 +11,9 @@ export async function readConnectionAgentSessions<
     herdr: Pick<HerdrClient, "call">;
     worktreeParents?: { enrichWorkspaceList(result: any): Promise<any> };
     status: { enrichWorkspacesWithGitStatus(result: any): Promise<any> };
+    agentSessions: {
+      listWithActivity(params: Record<string, unknown>): Promise<unknown>;
+    };
     remotePlatform?: string;
   },
 >(manager: Pick<ConnectionManager<Runtime>, "list" | "readyRuntimeLease">) {
@@ -27,7 +30,10 @@ export async function readConnectionAgentSessions<
           lease.runtime.herdr.call("workspace.list", {}, 5000),
           lease.runtime.herdr.call("tab.list", {}, 5000),
           lease.runtime.herdr.call("pane.list", {}, 5000),
-          lease.runtime.herdr.call("agent.list", {}, 5000).catch(() => null),
+          (lease.runtime.remotePlatform === "windows"
+            ? lease.runtime.herdr.call("agent.list", {}, 5000)
+            : lease.runtime.agentSessions.listWithActivity({})
+          ).catch(() => null),
         ]);
         if (
           !Array.isArray(workspaces?.workspaces) ||

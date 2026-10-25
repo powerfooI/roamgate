@@ -8,6 +8,8 @@ function fixture() {
   const parents = new Map<string, string>();
   const platforms = new Map<string, "windows">();
   const gitReads: string[] = [];
+  const activityReads: string[] = [];
+  const activityResults = new Map<string, unknown>();
   const runtime = (id: string) => ({
     identity: { id, label: id, source: "test" },
     remotePlatform: platforms.get(id),
@@ -40,6 +42,15 @@ function fixture() {
         };
       },
     },
+    agentSessions: {
+      listWithActivity: async (params: Record<string, unknown>) => {
+        expect(params).toEqual({});
+        activityReads.push(id);
+        if (activityResults.has(id)) return activityResults.get(id);
+        if (replies.has(id)) return await replies.get(id)!("agent.list");
+        return { agents: [{ id: "same-id" }] };
+      },
+    },
     herdr: {
       call: async (
         method: string,
@@ -60,11 +71,20 @@ function fixture() {
       createRuntime: () => runtime(id),
     });
   }
-  return { manager, calls, replies, parents, platforms, gitReads };
+  return {
+    manager,
+    calls,
+    replies,
+    parents,
+    platforms,
+    gitReads,
+    activityReads,
+    activityResults,
+  };
 }
 
 test("summarizes only ready connections without switching or starting others", async () => {
-  const { manager, calls, parents } = fixture();
+  const { manager, calls, parents, activityReads } = fixture();
   parents.set("alpha", "alpha-parent");
   parents.set("beta", "beta-parent");
   try {
@@ -97,7 +117,8 @@ test("summarizes only ready connections without switching or starting others", a
     });
     expect(manager.defaultId()).toBe("alpha");
     expect(manager.status("offline").state).toBe("disconnected");
-    expect(calls).toHaveLength(8);
+    expect(calls).toHaveLength(6);
+    expect(activityReads).toEqual(["alpha", "beta"]);
   } finally {
     await manager.stopAll();
   }
@@ -157,20 +178,49 @@ test("discards a retired runtime even if its read finishes before other servers"
   }
 });
 
-test("Windows summaries skip Unix Git enrichment", async () => {
-  const { manager, parents, platforms, gitReads } = fixture();
+test("Windows summaries use raw agents and skip Unix enrichment", async () => {
+  const { manager, parents, platforms, gitReads, calls, activityReads } =
+    fixture();
   platforms.set("alpha", "windows");
   parents.set("alpha", "alpha-parent");
   try {
     await Promise.all([manager.start("alpha"), manager.start("beta")]);
     const result = await readConnectionAgentSessions(manager);
     expect(gitReads).toEqual(["beta"]);
+    expect(activityReads).toEqual(["beta"]);
+    expect(calls).toContain("alpha:agent.list");
+    expect(calls).not.toContain("beta:agent.list");
+    expect(result.connections[0].agents).toEqual({
+      agents: [{ id: "same-id" }],
+    });
     expect(result.connections[0].workspaces[0].worktree).toEqual({
       parent_workspace_id: "alpha-parent",
     });
     expect(result.connections[1].workspaces[0].worktree.git_status.branch).toBe(
       "beta/main",
     );
+  } finally {
+    await manager.stopAll();
+  }
+});
+
+test("preserves each Unix runtime's durable activity metadata", async () => {
+  const { manager, activityResults } = fixture();
+  activityResults.set("alpha", {
+    agents: [
+      { pane_id: "w1:p1", state_change_seq: 999, last_activity_at: 1000 },
+    ],
+  });
+  activityResults.set("beta", {
+    agents: [{ pane_id: "w1:p1", state_change_seq: 1, last_activity_at: 2000 }],
+  });
+  try {
+    await Promise.all([manager.start("alpha"), manager.start("beta")]);
+    const result = await readConnectionAgentSessions(manager);
+    expect(result.connections.map(({ agents }) => agents)).toEqual([
+      activityResults.get("alpha"),
+      activityResults.get("beta"),
+    ]);
   } finally {
     await manager.stopAll();
   }
