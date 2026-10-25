@@ -30,6 +30,24 @@
   overflow: auto;
 }
 
+.workspace-server-message {
+  overflow-wrap: anywhere;
+}
+
+.workspace-server-badge {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 84px;
+  overflow: hidden;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tree-row {
   position: relative;
   display: flex;

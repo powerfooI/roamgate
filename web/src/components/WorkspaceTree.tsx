@@ -2,14 +2,24 @@ import { roamgateLocalStorage, subscribeLocalStorage } from "../browserStorage";
 import type { PullRequestSummary } from "../../../shared/pullRequest";
 import { useWorkspacePullRequests } from "../useWorktreePullRequests";
 import { shallowEqual, store, useStoreSelector } from "../store";
-import type { GitStatusSummary, Pane, Workspace } from "../types";
+import type { GitStatusSummary, Pane, Tab, Workspace } from "../types";
+import type { ConnectionSummary } from "../api";
+import { connectionLifecycleLabel } from "../connectionProfiles";
 import { shortId } from "../utils";
 import {
   terminalComposerCloseWarning,
   terminalComposerDraftPaneIds,
 } from "../terminalComposer";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ContextMenu, type ContextMenuState } from "./ContextMenu";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { ContextMenuState } from "./ContextMenu";
 import { ThemedSelect } from "./ThemedSelect";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
 import { buildWorkspaceHierarchy, worktreeCreationSource } from "../worktree";
@@ -61,10 +71,18 @@ import {
   serializeAgentOrder,
 } from "../agentOrder";
 import {
+  AGENT_LIST_SCOPE_STORAGE_KEY,
   WORKSPACE_AGENT_LAYOUT_STORAGE_KEY,
   type WorkspaceAgentLayout,
   parseWorkspaceAgentLayout,
 } from "../workspaceAgentLayout";
+import {
+  type ServerAgentPane,
+  type ServerSessionSource,
+  type ConnectionAgentSessions,
+  openServerSession,
+  useAllServerAgentSessions,
+} from "../useAllServerAgentSessions";
 import { useConnectionClient } from "../useConnectionClient";
 import { activePaneIdForSnapshot } from "../paneJump";
 import { ConfirmDialog } from "./ModalDialogs";
@@ -87,10 +105,14 @@ import {
 } from "./treeKeyboard";
 import { TREE_DEPTH_INDENT } from "./treeIndent";
 import "./WorkspaceTree.css";
+import "./WorkspaceAutoSyncDialog.css";
 
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;
 const EMPTY_AGENT_PANES_BY_WORKSPACE = new Map<string, Pane[]>();
+const ContextMenu = lazy(() =>
+  import("./ContextMenu").then((module) => ({ default: module.ContextMenu })),
+);
 
 function stringArraysEqual(left: readonly string[], right: readonly string[]) {
   return (
@@ -250,6 +272,8 @@ export function WorkspaceTree({
     (state) => ({
       activeConnectionId: state.activeConnectionId,
       connectionGeneration: state.connectionGeneration,
+      serverRuntimeGeneration: state.serverRuntimeGeneration,
+      connections: state.connections,
       lastRefresh: state.lastRefresh,
       layout: state.layout,
       panes: state.panes,
@@ -267,6 +291,7 @@ export function WorkspaceTree({
     AGENT_ORDER_STORAGE_KEY,
   );
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  const [menuMounted, setMenuMounted] = useState(false);
   const [agentMenu, setAgentMenu] = useState<AgentMenuState | null>(null);
   const [pendingClosePane, setPendingClosePane] = useState<Pane | null>(null);
   const [draggedWorkspaceId, setDraggedWorkspaceId] = useState<string | null>(
@@ -302,6 +327,14 @@ export function WorkspaceTree({
       roamgateLocalStorage.getItem(WORKSPACE_AGENT_LAYOUT_STORAGE_KEY),
     ),
   );
+  const [allServers, setAllServers] = useState(
+    () => roamgateLocalStorage.getItem(AGENT_LIST_SCOPE_STORAGE_KEY) === "all",
+  );
+  const allServerSessions = useAllServerAgentSessions(allServers);
+  const agentSort =
+    allServers && agentListPreferences.sort === "manual"
+      ? "workspace"
+      : agentListPreferences.sort;
   const [createOpen, setCreateOpen] = useState(false);
   const [lifecycleWorkspaceId, setLifecycleWorkspaceId] = useState<
     string | null
@@ -363,14 +396,22 @@ export function WorkspaceTree({
     [agentPaneOrder, defaultAgentPanes, agentListPreferences.sort],
   );
 
+  const listedAgentPanes: (Pane | ServerAgentPane)[] = allServers
+    ? sortAgentPanes(allServerSessions.panes, [], agentSort)
+    : agentPanes;
   const agentGroups = groupOrderedAgentPanes(
-    agentPanes,
+    listedAgentPanes,
     agentListPreferences.grouping,
     new Map(
-      s.workspaces.map((workspace) => [
-        workspace.workspace_id,
-        workspaceDisplayName(workspace),
-      ]),
+      allServers
+        ? allServerSessions.panes.map((pane) => [
+            pane.workspaceKey,
+            `${pane.serverLabel} / ${pane.workspaceLabel}`,
+          ])
+        : s.workspaces.map((workspace) => [
+            workspace.workspace_id,
+            workspaceDisplayName(workspace),
+          ]),
     ),
   );
   useEffect(() => {
@@ -380,6 +421,9 @@ export function WorkspaceTree({
     );
   }, [agentListPreferences]);
 
+  useEffect(() => {
+    if (menu) setMenuMounted(true);
+  }, [menu]);
   useEffect(() => {
     setMenu(null);
     setAgentMenu(null);
@@ -395,6 +439,12 @@ export function WorkspaceTree({
       agentLayout,
     );
   }, [agentLayout]);
+  useEffect(() => {
+    roamgateLocalStorage.setItem(
+      AGENT_LIST_SCOPE_STORAGE_KEY,
+      allServers ? "all" : "current",
+    );
+  }, [allServers]);
   useEffect(() => {
     roamgateLocalStorage.setItem(
       agentOrderStorageKey,
@@ -457,6 +507,11 @@ export function WorkspaceTree({
           parseAgentListPreferences(
             roamgateLocalStorage.getItem(AGENT_LIST_PREFERENCES_STORAGE_KEY),
           ),
+        );
+      }
+      if (key === AGENT_LIST_SCOPE_STORAGE_KEY || key === null) {
+        setAllServers(
+          roamgateLocalStorage.getItem(AGENT_LIST_SCOPE_STORAGE_KEY) === "all",
         );
       }
       if (key === agentOrderStorageKey || key === null) {
@@ -584,42 +639,6 @@ export function WorkspaceTree({
     );
   };
 
-  if (s.workspaces.length === 0) {
-    return (
-      <>
-        <div
-          key="workspaces"
-          className="panel tree workspace-tree-panel"
-          tabIndex={-1}
-        >
-          <div className="panel-head">
-            <h2>Workspaces</h2>
-            <button
-              className="panel-add panel-action-icon"
-              title="New workspace"
-              onClick={() => setCreateOpen(true)}
-            >
-              <Plus size={14} />
-            </button>
-          </div>
-          <div className="workspace-tree-content">
-            <p className="muted">
-              {s.status === "connected"
-                ? "No workspaces."
-                : "Connect to the bridge to load workspaces."}
-            </p>
-          </div>
-          <AgentLayoutControl value={agentLayout} onChange={setAgentLayout} />
-        </div>
-        <CreateWorkspaceDialog
-          key="create-workspace"
-          open={createOpen}
-          onClose={() => setCreateOpen(false)}
-        />
-      </>
-    );
-  }
-
   const { topLevel, childrenByParent } = buildWorkspaceHierarchy(
     s.workspaces,
     pinnedWorkspaceSet,
@@ -637,6 +656,22 @@ export function WorkspaceTree({
       <div className="panel-head">
         <h2>Workspaces</h2>
         <div className="panel-actions">
+          <ThemedSelect
+            className="workspace-scope-control"
+            aria-label="Workspace server scope"
+            value={allServers ? "all" : "current"}
+            options={[
+              { value: "current", label: "Current" },
+              { value: "all", label: "All servers" },
+            ]}
+            onChange={(scope) => {
+              clearWorkspaceDrag();
+              clearAgentDrag();
+              setMenu(null);
+              setAgentMenu(null);
+              setAllServers(scope === "all");
+            }}
+          />
           {focusedRepoWorkspace ? (
             <button
               type="button"
@@ -664,41 +699,103 @@ export function WorkspaceTree({
         role="tree"
         aria-label="Workspaces and agents"
       >
-        {topLevel.map((w) => (
-          <WorkspaceRow
-            key={w.workspace_id}
-            w={w}
-            reviews={reviews}
-            depth={0}
-            childrenByParent={childrenByParent}
-            agentsByWorkspace={
-              agentLayout === "nested"
-                ? agentsByWorkspace
-                : EMPTY_AGENT_PANES_BY_WORKSPACE
-            }
-            tabCountsByWorkspace={tabCountsByWorkspace}
-            alwaysShowTabCount={agentLayout === "compact"}
-            activePaneId={activePaneId}
-            pinnedWorkspaceKeys={pinnedWorkspaceSet}
-            collapsedWorktreeGroupKeys={collapsedWorktreeGroupSet}
-            onCollapsedChange={updateCollapsedWorktreeGroup}
-            onSelect={onSelect}
-            onSelectAgent={onSelectAgent}
-            onAgentContextMenu={(pane, x, y) => setAgentMenu({ pane, x, y })}
-            onContextMenu={(w, x, y) => setMenu({ workspace: w, x, y })}
-            workspaceDrag={{
-              isDragging: draggedWorkspaceId === w.workspace_id,
-              dropPosition:
-                workspaceDropTarget?.workspaceId === w.workspace_id
-                  ? workspaceDropTarget.position
-                  : null,
-              onDragStart: (e) => onWorkspaceDragStart(w, e),
-              onDragOver: (e) => onWorkspaceDragOver(w, e),
-              onDrop: (e) => onWorkspaceDrop(w, e),
-              onDragEnd: clearWorkspaceDrag,
-            }}
-          />
-        ))}
+        {allServers ? (
+          <>
+            {allServerSessions.messages.map((message) => (
+              <p key={message} className="muted" role="status">
+                {message}
+              </p>
+            ))}
+            {s.connections.map((connection) => {
+              const current = connection.id === s.activeConnectionId;
+              let snapshot =
+                connection.state === "ready"
+                  ? allServerSessions.snapshots.find(
+                      (entry) =>
+                        entry.connection_id === connection.id &&
+                        entry.connection_generation === connection.generation,
+                    )
+                  : undefined;
+              if (
+                snapshot &&
+                !snapshot.error &&
+                current &&
+                s.lastRefresh > 0 &&
+                s.serverRuntimeGeneration === connection.generation
+              ) {
+                snapshot = {
+                  ...snapshot,
+                  workspaces: s.workspaces,
+                  tabs: s.tabs,
+                  panes: s.panes,
+                };
+              }
+              return (
+                <ServerWorkspaceRows
+                  key={JSON.stringify([connection.id, connection.generation])}
+                  connection={connection}
+                  snapshot={snapshot}
+                  layout={agentLayout}
+                  activePaneId={activePaneId}
+                  reviews={current ? reviews : {}}
+                  pinnedKeys={current ? pinnedWorkspaceSet : undefined}
+                  collapsedKeys={
+                    current ? collapsedWorktreeGroupSet : undefined
+                  }
+                  onCollapsedChange={
+                    current ? updateCollapsedWorktreeGroup : undefined
+                  }
+                  onSelect={onSelect}
+                  onSelectAgent={onSelectAgent}
+                  onContextMenu={setMenu}
+                  onAgentContextMenu={setAgentMenu}
+                />
+              );
+            })}
+          </>
+        ) : s.workspaces.length === 0 ? (
+          <p className="muted">
+            {s.status === "connected"
+              ? "No workspaces."
+              : "Connect to the bridge to load workspaces."}
+          </p>
+        ) : null}
+        {!allServers &&
+          topLevel.map((w) => (
+            <WorkspaceRow
+              key={w.workspace_id}
+              w={w}
+              reviews={reviews}
+              depth={0}
+              childrenByParent={childrenByParent}
+              agentsByWorkspace={
+                agentLayout === "nested"
+                  ? agentsByWorkspace
+                  : EMPTY_AGENT_PANES_BY_WORKSPACE
+              }
+              tabCountsByWorkspace={tabCountsByWorkspace}
+              alwaysShowTabCount={agentLayout === "compact"}
+              activePaneId={activePaneId}
+              pinnedWorkspaceKeys={pinnedWorkspaceSet}
+              collapsedWorktreeGroupKeys={collapsedWorktreeGroupSet}
+              onCollapsedChange={updateCollapsedWorktreeGroup}
+              onSelect={onSelect}
+              onSelectAgent={onSelectAgent}
+              onAgentContextMenu={(pane, x, y) => setAgentMenu({ pane, x, y })}
+              onContextMenu={(w, x, y) => setMenu({ workspace: w, x, y })}
+              workspaceDrag={{
+                isDragging: draggedWorkspaceId === w.workspace_id,
+                dropPosition:
+                  workspaceDropTarget?.workspaceId === w.workspace_id
+                    ? workspaceDropTarget.position
+                    : null,
+                onDragStart: (e) => onWorkspaceDragStart(w, e),
+                onDragOver: (e) => onWorkspaceDragOver(w, e),
+                onDrop: (e) => onWorkspaceDrop(w, e),
+                onDragEnd: clearWorkspaceDrag,
+              }}
+            />
+          ))}
       </div>
       <AgentLayoutControl value={agentLayout} onChange={setAgentLayout} />
     </div>
@@ -714,12 +811,14 @@ export function WorkspaceTree({
               icon={<ArrowDownWideNarrow size={15} aria-hidden="true" />}
               align="end"
               aria-label="Agent sort order"
-              title={`Sort agents: ${{ attention: "Attention first", workspace: "Workspace order", manual: "Manual order" }[agentListPreferences.sort]}`}
-              value={agentListPreferences.sort}
+              title={`Sort agents: ${{ attention: "Attention first", workspace: "Workspace order", manual: "Manual order" }[agentSort]}`}
+              value={agentSort}
               options={[
                 { value: "attention", label: "Attention first" },
                 { value: "workspace", label: "Workspace order" },
-                { value: "manual", label: "Manual order" },
+                ...(!allServers
+                  ? [{ value: "manual", label: "Manual order" }]
+                  : []),
               ]}
               onChange={(sort) => {
                 clearAgentDrag();
@@ -753,7 +852,7 @@ export function WorkspaceTree({
           </div>
         </div>
         <div className="agents-list">
-          {agentPanes.length > 0 ? (
+          {listedAgentPanes.length > 0 ? (
             agentGroups.map((group) => {
               const groupKey = `${agentListPreferences.grouping}:${group.key}`;
               const collapsed = collapsedAgentGroups.has(groupKey);
@@ -784,29 +883,64 @@ export function WorkspaceTree({
                   ) : null}
                   {(!collapsed || agentListPreferences.grouping === "none") &&
                     group.panes.map((pane) => {
+                      const source = "connectionId" in pane ? pane : null;
+                      const current =
+                        !source || source.connectionId === s.activeConnectionId;
                       const workspace = s.workspaces.find(
                         (candidate) =>
                           candidate.workspace_id === pane.workspace_id,
                       );
                       return (
                         <AgentRow
-                          key={pane.pane_id}
+                          key={
+                            source
+                              ? JSON.stringify([
+                                  source.workspaceKey,
+                                  pane.pane_id,
+                                ])
+                              : pane.pane_id
+                          }
                           pane={pane}
                           selected={
-                            pane.pane_id === activePaneId ||
-                            (!activePaneId && pane.focused)
+                            current &&
+                            (pane.pane_id === activePaneId ||
+                              (!activePaneId && pane.focused))
                           }
                           showPaneId
                           variant="standalone"
                           workspaceLabel={
-                            workspace
+                            source?.workspaceLabel ??
+                            (workspace
                               ? workspaceDisplayName(workspace)
-                              : pane.workspace_id
+                              : pane.workspace_id)
+                          }
+                          serverLabel={source?.serverLabel}
+                          tabLabel={source?.tabLabel}
+                          onActivate={
+                            source
+                              ? () => {
+                                  void openServerSession(
+                                    source,
+                                    source.workspace_id,
+                                    source.pane_id,
+                                  ).then((opened) => {
+                                    if (opened && current)
+                                      onSelectAgent?.(pane);
+                                  });
+                                }
+                              : undefined
                           }
                           onSelect={onSelectAgent}
-                          onOpenMenu={(x, y) => setAgentMenu({ pane, x, y })}
+                          onOpenMenu={(x, y) =>
+                            setAgentMenu({
+                              pane,
+                              x,
+                              y,
+                              source: source ?? undefined,
+                            })
+                          }
                           drag={
-                            manualAgentOrder
+                            !allServers && manualAgentOrder
                               ? {
                                   isDragging:
                                     draggedAgentPaneId === pane.pane_id,
@@ -830,7 +964,11 @@ export function WorkspaceTree({
               );
             })
           ) : (
-            <p className="muted">No agent sessions.</p>
+            <p className="muted">
+              {allServers && allServerSessions.loading
+                ? "Loading..."
+                : "No agent sessions."}
+            </p>
           )}
         </div>
       </div>
@@ -840,21 +978,39 @@ export function WorkspaceTree({
     <>
       {agentsFirst ? agentsPanel : workspacePanel}
       {agentsFirst ? workspacePanel : agentsPanel}
-      <ContextMenu
-        state={menu}
-        reviewStatus={menu ? reviews[menu.workspace.workspace_id] : undefined}
-        pinnedWorkspaceKeys={pinnedWorkspaceSet}
-        onPinnedChange={updatePinnedWorkspace}
-        onBrowseFiles={onBrowseFiles}
-        onReviewChanges={onReviewChanges}
-        onClose={() => setMenu(null)}
-      />
+      <Suspense fallback={null}>
+        {(menu || menuMounted) && (
+          <ContextMenu
+            state={menu}
+            reviewStatus={
+              menu ? reviews[menu.workspace.workspace_id] : undefined
+            }
+            pinnedWorkspaceKeys={pinnedWorkspaceSet}
+            onPinnedChange={updatePinnedWorkspace}
+            onBrowseFiles={onBrowseFiles}
+            onReviewChanges={onReviewChanges}
+            onClose={() => setMenu(null)}
+          />
+        )}
+      </Suspense>
       <AgentContextMenu
         state={agentMenu}
         onClose={() => setAgentMenu(null)}
         onFocus={(pane) => {
-          void store.focusPane(pane.pane_id);
-          onSelectAgent?.(pane);
+          if (agentMenu?.source) {
+            const current =
+              agentMenu.source.connectionId === s.activeConnectionId;
+            void openServerSession(
+              agentMenu.source,
+              pane.workspace_id,
+              pane.pane_id,
+            ).then((opened) => {
+              if (opened && current) onSelectAgent?.(pane);
+            });
+          } else {
+            void store.focusPane(pane.pane_id);
+            onSelectAgent?.(pane);
+          }
         }}
         onBrowseFiles={onBrowseFilesForAgent}
         onReviewChanges={onReviewChangesForAgent}
@@ -912,6 +1068,149 @@ type WorkspaceDragProps = {
   onDragEnd: () => void;
 };
 
+type WorkspaceTreeSource = ServerSessionSource & { tabs: Tab[] };
+
+function ServerWorkspaceRows({
+  connection,
+  snapshot,
+  layout,
+  activePaneId,
+  reviews,
+  pinnedKeys,
+  collapsedKeys,
+  onCollapsedChange,
+  onSelect,
+  onSelectAgent,
+  onContextMenu,
+  onAgentContextMenu,
+}: {
+  connection: ConnectionSummary;
+  snapshot?: ConnectionAgentSessions;
+  layout: WorkspaceAgentLayout;
+  activePaneId: string | null;
+  reviews: Record<string, PullRequestSummary>;
+  pinnedKeys?: ReadonlySet<string>;
+  collapsedKeys?: ReadonlySet<string>;
+  onCollapsedChange?: (workspace: Workspace, collapsed: boolean) => void;
+  onSelect?: (workspace: Workspace) => void;
+  onSelectAgent?: (pane: Pane) => void;
+  onContextMenu: (menu: ContextMenuState) => void;
+  onAgentContextMenu: (menu: AgentMenuState) => void;
+}) {
+  const pinsKey = connectionStorageKey(
+    connection.id,
+    WORKSPACE_PINS_STORAGE_KEY,
+  );
+  const groupsKey = connectionStorageKey(
+    connection.id,
+    COLLAPSED_WORKTREE_GROUPS_STORAGE_KEY,
+  );
+  const readPreferences = useCallback(
+    () => ({
+      pins: parseWorkspacePins(roamgateLocalStorage.getItem(pinsKey)),
+      groups: parseCollapsedWorktreeGroups(
+        roamgateLocalStorage.getItem(groupsKey),
+      ),
+    }),
+    [pinsKey, groupsKey],
+  );
+  const [preferences, setPreferences] = useState(readPreferences);
+  useEffect(
+    () =>
+      subscribeLocalStorage((key) => {
+        if (key === null || key === pinsKey || key === groupsKey)
+          setPreferences(readPreferences());
+      }),
+    [pinsKey, groupsKey, readPreferences],
+  );
+  const source: WorkspaceTreeSource = {
+    connectionId: connection.id,
+    runtimeGeneration: connection.generation,
+    serverLabel: connection.label,
+    tabs: snapshot?.tabs ?? [],
+  };
+  const workspaces = snapshot?.workspaces ?? [];
+  const pins = pinnedKeys ?? new Set(preferences.pins);
+  const { topLevel, childrenByParent } = buildWorkspaceHierarchy(
+    workspaces,
+    pins,
+  );
+  const agents =
+    layout === "nested"
+      ? groupAgentPanesByWorkspace(snapshot?.panes ?? [])
+      : EMPTY_AGENT_PANES_BY_WORKSPACE;
+  const tabCounts = new Map<string, number>();
+  for (const tab of source.tabs)
+    tabCounts.set(tab.workspace_id, (tabCounts.get(tab.workspace_id) ?? 0) + 1);
+  const updateCollapsed = (workspace: Workspace, collapsed: boolean) => {
+    if (onCollapsedChange) onCollapsedChange(workspace, collapsed);
+    else {
+      const groups = setWorktreeGroupCollapsed(
+        preferences.groups,
+        workspace,
+        collapsed,
+      );
+      setPreferences((previous) => ({ ...previous, groups }));
+      roamgateLocalStorage.setItem(
+        groupsKey,
+        serializeCollapsedWorktreeGroups(groups),
+      );
+    }
+  };
+  const message =
+    connection.state !== "ready"
+      ? connectionLifecycleLabel(connection.state)
+      : snapshot?.error
+        ? snapshot.error
+        : !snapshot
+          ? "Loading..."
+          : topLevel.length === 0
+            ? "No workspaces."
+            : null;
+  if (message) {
+    return (
+      <p
+        className="muted workspace-server-message"
+        data-connection-id={connection.id}
+        role="status"
+      >
+        {connection.label}: {message}
+      </p>
+    );
+  }
+  return (
+    <>
+      {topLevel.map((workspace) => (
+        <WorkspaceRow
+          key={workspace.workspace_id}
+          w={workspace}
+          source={source}
+          reviews={reviews}
+          depth={0}
+          childrenByParent={childrenByParent}
+          agentsByWorkspace={agents}
+          tabCountsByWorkspace={tabCounts}
+          alwaysShowTabCount={layout === "compact"}
+          activePaneId={activePaneId}
+          pinnedWorkspaceKeys={pins}
+          collapsedWorktreeGroupKeys={
+            collapsedKeys ?? new Set(preferences.groups)
+          }
+          onCollapsedChange={updateCollapsed}
+          onSelect={onSelect}
+          onSelectAgent={onSelectAgent}
+          onContextMenu={(workspace, x, y) =>
+            onContextMenu({ workspace, x, y, source })
+          }
+          onAgentContextMenu={(pane, x, y) =>
+            onAgentContextMenu({ pane, x, y, source })
+          }
+        />
+      ))}
+    </>
+  );
+}
+
 function workspaceSubtreeContainsActiveItem(
   workspace: Workspace,
   childrenByParent: ReadonlyMap<string, Workspace[]>,
@@ -940,6 +1239,7 @@ function workspaceSubtreeContainsActiveItem(
 
 function WorkspaceRow({
   w,
+  source,
   reviews,
   depth,
   childrenByParent,
@@ -957,6 +1257,7 @@ function WorkspaceRow({
   workspaceDrag,
 }: {
   w: Workspace;
+  source?: WorkspaceTreeSource;
   reviews: Record<string, PullRequestSummary>;
   depth: number;
   childrenByParent: Map<string, Workspace[]>;
@@ -980,31 +1281,40 @@ function WorkspaceRow({
   const tabCountVisible = alwaysShowTabCount || tabCount > 1;
   const s = useStoreSelector(
     (state) => ({
+      activeConnectionId: state.activeConnectionId,
       pendingFocusWorkspaceId: state.pendingFocusWorkspaceId,
       tabs: state.tabs,
     }),
     shallowEqual,
   );
-  const paneIdsToShow = nestedAgentPaneIds(agents, s.tabs);
+  const current = !source || source.connectionId === s.activeConnectionId;
+  const workspaceFocused = current && w.focused;
+  const tabs = source?.tabs ?? s.tabs;
+  const paneIdsToShow = nestedAgentPaneIds(agents, tabs);
   const isChild = depth > 0;
   const hasChildren = children.length > 0;
   const hasNestedItems = hasChildren || agents.length > 0;
-  const hasActiveAgent = agents.some(
-    (pane) => pane.pane_id === activePaneId || (!activePaneId && pane.focused),
-  );
-  const hiddenDescendantActive = children.some((child) =>
-    workspaceSubtreeContainsActiveItem(
-      child,
-      childrenByParent,
-      agentsByWorkspace,
-      activePaneId,
-    ),
-  );
+  const hasActiveAgent =
+    current &&
+    agents.some(
+      (pane) =>
+        pane.pane_id === activePaneId || (!activePaneId && pane.focused),
+    );
+  const hiddenDescendantActive =
+    current &&
+    children.some((child) =>
+      workspaceSubtreeContainsActiveItem(
+        child,
+        childrenByParent,
+        agentsByWorkspace,
+        activePaneId,
+      ),
+    );
   const collapsed =
     hasNestedItems && isWorktreeGroupCollapsed(collapsedWorktreeGroupKeys, w);
   const pinned = isWorkspacePinned(pinnedWorkspaceKeys, w);
   const isPendingFocus =
-    s.pendingFocusWorkspaceId === w.workspace_id && !w.focused;
+    current && s.pendingFocusWorkspaceId === w.workspace_id && !w.focused;
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressStart = useRef<{ x: number; y: number } | null>(null);
   const longPressTriggered = useRef(false);
@@ -1022,8 +1332,14 @@ function WorkspaceRow({
     onContextMenu(w, x, y);
   };
   const selectWorkspace = () => {
-    store.focusWorkspace(w.workspace_id);
-    onSelect?.(w);
+    if (source) {
+      void openServerSession(source, w.workspace_id).then((opened) => {
+        if (opened && current) onSelect?.(w);
+      });
+    } else {
+      store.focusWorkspace(w.workspace_id);
+      onSelect?.(w);
+    }
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1056,7 +1372,7 @@ function WorkspaceRow({
   return (
     <>
       <div
-        className={`tree-row clickable-row ${w.focused ? "is-focused" : ""} ${
+        className={`tree-row clickable-row ${workspaceFocused ? "is-focused" : ""} ${
           hasActiveAgent ? "has-active-agent" : ""
         } ${isChild ? "is-child" : ""} ${pinned ? "is-pinned" : ""} ${
           isPendingFocus ? "is-loading" : ""
@@ -1067,8 +1383,11 @@ function WorkspaceRow({
             ? `drop-${workspaceDrag.dropPosition}`
             : ""
         }`}
-        style={{ paddingLeft: 6 + depth * TREE_DEPTH_INDENT }}
+        style={{
+          paddingLeft: 6 + depth * TREE_DEPTH_INDENT,
+        }}
         role="treeitem"
+        data-connection-id={source?.connectionId}
         draggable={!!workspaceDrag}
         onDragStart={workspaceDrag?.onDragStart}
         onDragOver={workspaceDrag?.onDragOver}
@@ -1076,7 +1395,7 @@ function WorkspaceRow({
         onDragEnd={workspaceDrag?.onDragEnd}
         tabIndex={
           workspaceTreeItemIsTabStop({
-            workspaceFocused: w.focused,
+            workspaceFocused,
             directAgentActive: hasActiveAgent,
             collapsed,
             hiddenDescendantActive,
@@ -1085,7 +1404,7 @@ function WorkspaceRow({
             : -1
         }
         aria-level={depth + 1}
-        aria-selected={w.focused}
+        aria-selected={workspaceFocused}
         aria-expanded={hasNestedItems ? !collapsed : undefined}
         onClick={(e) => {
           if (longPressTriggered.current) {
@@ -1188,6 +1507,15 @@ function WorkspaceRow({
         <strong className="ws-label" title={workspaceDisplayName(w)}>
           {workspaceDisplayName(w)}
         </strong>
+        {source ? (
+          <span
+            className="workspace-server-badge"
+            title={source.serverLabel}
+            aria-label={`Server: ${source.serverLabel}`}
+          >
+            {source.serverLabel}
+          </span>
+        ) : null}
         {tabCountVisible ? (
           <span
             className="workspace-tab-count"
@@ -1227,7 +1555,31 @@ function WorkspaceRow({
               depth={depth + 1}
               showPaneId={paneIdsToShow.has(pane.pane_id)}
               selected={
-                pane.pane_id === activePaneId || (!activePaneId && pane.focused)
+                current &&
+                (pane.pane_id === activePaneId ||
+                  (!activePaneId && pane.focused))
+              }
+              tabLabel={
+                source
+                  ? (tabs.find(
+                      (tab) =>
+                        tab.tab_id === pane.tab_id &&
+                        tab.workspace_id === pane.workspace_id,
+                    )?.label ?? "")
+                  : undefined
+              }
+              onActivate={
+                source
+                  ? () => {
+                      void openServerSession(
+                        source,
+                        pane.workspace_id,
+                        pane.pane_id,
+                      ).then((opened) => {
+                        if (opened && current) onSelectAgent?.(pane);
+                      });
+                    }
+                  : undefined
               }
               onSelect={onSelectAgent}
               onOpenMenu={(x, y) => onAgentContextMenu(pane, x, y)}
@@ -1237,6 +1589,7 @@ function WorkspaceRow({
             <WorkspaceRow
               key={child.workspace_id}
               w={child}
+              source={source}
               reviews={reviews}
               depth={depth + 1}
               childrenByParent={childrenByParent}

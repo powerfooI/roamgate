@@ -108,6 +108,14 @@ Inspector state is scoped to each checkout; see
   sidebar, switcher, command menu, Agent panel, and notifications.
 - Choose nested, **Separate**, or **Compact** agent views with optional
   attention-first ordering and grouping.
+- Switch **Current / All servers** in the **Workspaces** heading in any agent
+  layout. **All servers** labels each workspace with its server, preserving
+  the existing worktree nesting and indentation. **Nested** also shows agents
+  under their workspace, **Compact** keeps workspace tab counts, and **Separate**
+  collects agents in their own panel. Selecting a workspace or agent opens its
+  server. Disconnected servers and failed reads remain visible. Other servers'
+  context menus offer navigation; switch to their server for workspace and pane
+  actions.
 - **Agent History** shows the latest 200 conversation entries with search, a
   minimap, and tool details. The **Chat view** toggle reads them as
   conversation bubbles with rendered replies and collapsible tool-call blocks

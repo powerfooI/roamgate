@@ -32,18 +32,18 @@ export default defineConfig({
             {
               // Share startup transport and small agent RPC helpers without extra requests.
               name: "bridge-client",
-              test: /src[\\/](?:api|connectionHttp|useConnectionClient|agentIntegrations|agentLauncher)\.tsx?$/,
+              test: /src[\\/](?:api|connectionHttp|useConnectionClient|agentIntegrations|agentLauncher|terminalClipboard)\.tsx?$/,
             },
             {
-              // These startup preferences share storage; keep their small
-              // helpers together instead of adding utility-only requests.
+              // Keep small startup preferences and UI helpers together
+              // instead of adding utility-only requests.
               name: "browser-preferences",
-              test: /src[\\/](?:browserStorage|layoutPreferences|shortcutPreferences)\.ts$/,
+              test: /src[\\/](?:browserStorage|layoutPreferences|shortcutPreferences|uiLocale|luckyName)\.ts$/,
             },
             {
               // Keep startup UI primitives together without loading feature-only icons.
               name: "ui-runtime",
-              test: /(?:vite[\\/]preload-helper\.js|node_modules[\\/](?:lucide-react|react|react-dom|scheduler|@radix-ui|@floating-ui)[\\/]|src[\\/](?:utils\.ts|components[\\/](?:ui[\\/]popover|CloseButton)\.tsx)$)/,
+              test: /(?:vite[\\/]preload-helper\.js|node_modules[\\/](?:lucide-react|react|react-dom|scheduler|@radix-ui|@floating-ui)[\\/]|src[\\/](?:utils\.ts|components[\\/](?:(?:dialogFocus|contextMenuPosition)\.ts|(?:ui[\\/]popover|CloseButton|ModalDialogs)\.tsx))$)/,
               tags: ["$initial"],
             },
             {

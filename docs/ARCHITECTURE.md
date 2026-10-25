@@ -39,6 +39,16 @@ reconnect lifecycle. Disconnecting stops the runtime and SSH tunnel, never Herdr
   work regardless of runtime state. One failed runtime never blocks others.
 - Browser caches, storage, and pending actions are scoped per connection.
 
+`connections.agent_sessions` provides read-only workspace, tab, pane, and agent
+summaries for all sidebar layouts across ready runtimes, without selecting or
+starting connections. Worktree parent associations and Git status are preserved
+per connection.
+Summaries carry connection IDs and runtime generations; retired reads are
+discarded and failures stay per connection. Opening a session uses the existing
+connection-scoped navigation path.
+Workspace and agent context menus retain their source identity. Other servers'
+menus only navigate; workspace and pane mutations use the active scoped client.
+
 ## Instance naming
 
 `/api/instance-settings` reads and writes `title_suffix` in the GUI settings

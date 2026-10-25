@@ -204,3 +204,24 @@ test("standalone Agents rows retain their title, subtitle and details", () => {
   );
   expect(markup).toContain('role="button"');
 });
+
+test("server summaries use the source tab label instead of a matching local ID", () => {
+  const markup = renderRow(pane(), [tab("Local tab")], {
+    variant: "standalone",
+    workspaceLabel: "Remote workspace",
+    tabLabel: "Remote tab",
+    serverLabel: "Remote server",
+  });
+  expect(title(markup)).toBe("Remote workspace · Remote tab");
+  expect(markup).toContain("Remote server · claude · Alice");
+  expect(markup).not.toContain("Local tab");
+  expect(
+    title(
+      renderRow(pane(), [tab("Local tab")], {
+        variant: "standalone",
+        tabLabel: "",
+        workspaceLabel: "Remote workspace",
+      }),
+    ),
+  ).toBe("Remote workspace");
+});

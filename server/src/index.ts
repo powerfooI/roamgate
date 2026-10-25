@@ -81,6 +81,7 @@ import {
   type LegacyConnectionRuntime,
 } from "./connections/runtime";
 import { createShutdownController } from "./connections/shutdown";
+import { readConnectionAgentSessions } from "./connections/agent-sessions";
 import { bindListenerBeforeConnectionStart } from "./connections/startup";
 import { LEGACY_DEFAULT_CONNECTION_ID } from "./connections/types";
 import { unixOnlyMessage } from "./connections/unix-only";
@@ -860,6 +861,15 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       },
       "connections-list",
     );
+    return;
+  }
+  if (method === "connections.agent_sessions") {
+    try {
+      const result = await readConnectionAgentSessions(connectionManager);
+      sendReply({ id, result }, "connections-agent-sessions");
+    } catch (error) {
+      sendError("connections-agent-sessions-error", error);
+    }
     return;
   }
   if (method.startsWith("connections.")) {

@@ -179,7 +179,19 @@ async function fakeHerdr(
                     },
                   ],
                 }
-              : {});
+              : request.method === "tab.list"
+                ? { tabs: [] }
+                : request.method === "pane.list"
+                  ? {
+                      panes: [
+                        {
+                          pane_id: "shared-pane",
+                          agent: "codex",
+                          agent_status: "working",
+                        },
+                      ],
+                    }
+                  : {});
         socket.write(`${JSON.stringify({ id: request.id, result })}\n`);
         if (request.method !== "events.subscribe") socket.end();
       });
@@ -461,6 +473,16 @@ test("production dispatcher isolates two local profiles and profile CRUD", async
     const oldAlphaGeneration = catalog.connections.find(
       ({ id }: { id: string }) => id === "alpha",
     ).generation as number;
+    const initialSessions = await rpc("connections.agent_sessions");
+    expect(
+      initialSessions.connections.map(
+        (entry: { connection_id: string }) => entry.connection_id,
+      ),
+    ).toEqual(["alpha"]);
+    expect(initialSessions.connections[0]).toMatchObject({
+      connection_generation: oldAlphaGeneration,
+      panes: [{ pane_id: "shared-pane" }],
+    });
     const browserBCatalog = await browserB.rpc("connections.list");
     expect(
       browserBCatalog.connections.find(
@@ -569,6 +591,17 @@ test("production dispatcher isolates two local profiles and profile CRUD", async
     const betaGeneration = connectedCatalog.connections.find(
       ({ id }: { id: string }) => id === "beta",
     ).generation as number;
+    const allSessions = await rpc("connections.agent_sessions");
+    expect(
+      allSessions.connections.map(
+        (entry: { connection_id: string }) => entry.connection_id,
+      ),
+    ).toEqual(["alpha", "beta"]);
+    expect(
+      allSessions.connections.map(
+        (entry: { panes: { pane_id: string }[] }) => entry.panes[0].pane_id,
+      ),
+    ).toEqual(["shared-pane", "shared-pane"]);
     expect(
       (await rpc("workspace.list", {}, "beta", betaGeneration)).workspaces[0]
         .name,

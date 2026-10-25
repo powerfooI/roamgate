@@ -20,12 +20,18 @@ import {
 } from "../workspaceTreeBadges";
 import { copyTextFromUserGesture } from "../terminalClipboard";
 import { observeClampedContextMenu } from "./contextMenuPosition";
+import {
+  isServerSourceAvailable,
+  openServerSession,
+  type ServerSessionSource,
+} from "../useAllServerAgentSessions";
 import "./ContextMenu.css";
 
 export interface ContextMenuState {
   x: number;
   y: number;
   workspace: Workspace;
+  source?: ServerSessionSource;
 }
 
 interface Item {
@@ -245,7 +251,7 @@ export function ContextMenu({
       onClose={() => setLifecycleWorkspaceId(null)}
     />
   );
-  if (!state) {
+  if (!state || (state.source && !isServerSourceAvailable(state.source))) {
     return (
       <>
         {dialogs}
@@ -256,10 +262,13 @@ export function ContextMenu({
       </>
     );
   }
-  const w =
-    workspaces.find(
-      (workspace) => workspace.workspace_id === state.workspace.workspace_id,
-    ) ?? state.workspace;
+  const remote =
+    !!state.source && state.source.connectionId !== activeConnectionId;
+  const w = remote
+    ? state.workspace
+    : (workspaces.find(
+        (workspace) => workspace.workspace_id === state.workspace.workspace_id,
+      ) ?? state.workspace);
   const isLinked = !!w.worktree?.is_linked_worktree;
   const displayName = workspaceDisplayName(w);
   const pinned = isWorkspacePinned(pinnedWorkspaceKeys, w);
@@ -392,13 +401,27 @@ export function ContextMenu({
       });
     },
   });
-  const groups: ItemGroup[] = [
-    { label: "Inspect", items: inspectItems },
-    { label: "Organize", items: organizeItems },
-    { label: "Worktrees", items: worktreeItems },
-    { label: "Source control", items: sourceControlItems },
-    { label: "Close", items: closeItems, danger: true },
-  ].filter((group) => group.items.length > 0);
+  const groups: ItemGroup[] = remote
+    ? [
+        {
+          label: state.source!.serverLabel,
+          items: [
+            {
+              label: "Open workspace",
+              action: () => {
+                void openServerSession(state.source!, w.workspace_id);
+              },
+            },
+          ],
+        },
+      ]
+    : [
+        { label: "Inspect", items: inspectItems },
+        { label: "Organize", items: organizeItems },
+        { label: "Worktrees", items: worktreeItems },
+        { label: "Source control", items: sourceControlItems },
+        { label: "Close", items: closeItems, danger: true },
+      ].filter((group) => group.items.length > 0);
 
   const style: React.CSSProperties = {
     position: "fixed",
@@ -437,6 +460,14 @@ export function ContextMenu({
                 className={`context-menu-item ${item.danger ? "is-danger" : ""}`}
                 onClick={() => {
                   onClose();
+                  if (
+                    state.source &&
+                    (!isServerSourceAvailable(state.source) ||
+                      (!remote &&
+                        store.get().activeConnectionId !==
+                          state.source.connectionId))
+                  )
+                    return;
                   item.action();
                 }}
               >

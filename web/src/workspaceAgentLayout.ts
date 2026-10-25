@@ -1,4 +1,5 @@
 export const WORKSPACE_AGENT_LAYOUT_STORAGE_KEY = "workspaceAgentLayout";
+export const AGENT_LIST_SCOPE_STORAGE_KEY = "agentListScope";
 
 export type WorkspaceAgentLayout = "nested" | "separate" | "compact";
 

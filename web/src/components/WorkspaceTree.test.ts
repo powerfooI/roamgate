@@ -1,8 +1,9 @@
-import { expect, test } from "bun:test";
+import { expect, jest, spyOn, test } from "bun:test";
 import { Window } from "happy-dom";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { roamgateLocalStorage } from "../browserStorage";
+import { bridge, type HerdrEventMsg } from "../api";
 import { connectionStorageKey } from "../connectionStorage";
 import { __storeTesting, store } from "../store";
 import {
@@ -18,7 +19,11 @@ import {
 } from "../agentOrder";
 import { WORKSPACE_PINS_STORAGE_KEY } from "../workspacePins";
 import { COLLAPSED_WORKTREE_GROUPS_STORAGE_KEY } from "../workspaceTreeCollapse";
-import { WORKSPACE_AGENT_LAYOUT_STORAGE_KEY } from "../workspaceAgentLayout";
+import {
+  AGENT_LIST_SCOPE_STORAGE_KEY,
+  WORKSPACE_AGENT_LAYOUT_STORAGE_KEY,
+} from "../workspaceAgentLayout";
+import type { ConnectionAgentSessions } from "../useAllServerAgentSessions";
 import { WorkspaceTree } from "./WorkspaceTree";
 
 // Isolate browser globals and React's module graph from other Bun tests.
@@ -38,7 +43,7 @@ if (process.env.ROAMGATE_WORKSPACE_STORAGE_DOM_TEST !== "1") {
     expect(code).toBe(0);
   }, 15_000);
 } else {
-  test("reloads tree preferences and only affected tab pins from local storage", async () => {
+  test("reloads preferences and monitors isolated server sessions", async () => {
     const browser = new Window({ url: "http://localhost" });
     const originals = new Map<string, PropertyDescriptor | undefined>();
     for (const [key, value] of Object.entries({
@@ -60,6 +65,7 @@ if (process.env.ROAMGATE_WORKSPACE_STORAGE_DOM_TEST !== "1") {
       });
     }
     const previousState = store.get();
+    const mocks: { mockRestore(): void }[] = [];
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -197,8 +203,254 @@ if (process.env.ROAMGATE_WORKSPACE_STORAGE_DOM_TEST !== "1") {
       ).toBe("true");
       expect(container.querySelectorAll(".agent-row").length).toBe(2);
       expect(tabPinsFor("beta").size).toBe(0);
+
+      jest.useFakeTimers();
+      let onEvent: ((event: HerdrEventMsg) => void) | undefined;
+      mocks.push(
+        spyOn(bridge, "onEvent").mockImplementation((callback) => {
+          onEvent = callback;
+          return () => {
+            onEvent = undefined;
+          };
+        }),
+      );
+      let snapshots: ConnectionAgentSessions[] = ["alpha", "beta"].map(
+        (id) => ({
+          connection_id: id,
+          connection_generation: 1,
+          workspaces: [
+            {
+              workspace_id: "w1",
+              label: `${id} workspace`,
+              number: 1,
+              focused: false,
+              pane_count: 1,
+              tab_count: 1,
+              agent_status: "working",
+            },
+          ],
+          tabs: [
+            {
+              tab_id: "t1",
+              workspace_id: "w1",
+              number: 1,
+              label: `${id} tab`,
+              focused: true,
+              pane_count: 1,
+              agent_status: "working",
+            },
+          ],
+          panes: [
+            {
+              pane_id: "w1:p1",
+              terminal_id: "term1",
+              workspace_id: "w1",
+              tab_id: "t1",
+              focused: true,
+              agent: "codex",
+              agent_status: "working",
+              revision: 1,
+            },
+          ],
+          agents: null,
+        }),
+      );
+      const summary = spyOn(bridge, "call").mockImplementation(
+        async (method) => {
+          expect(method).toBe("connections.agent_sessions");
+          return { connections: snapshots };
+        },
+      );
+      const navigate = spyOn(store, "focusWorkspaceSource").mockResolvedValue(
+        true,
+      );
+      const localFocus = spyOn(store, "focusPane").mockResolvedValue(undefined);
+      mocks.push(summary, navigate, localFocus);
+      await act(async () =>
+        __storeTesting.replaceState({
+          ...store.get(),
+          status: "connected",
+          connectionPaused: false,
+          workspaces: [],
+          panes: [],
+          tabs: [],
+          layout: null,
+          connections: ["alpha", "beta", "offline"].map((id) => ({
+            id,
+            label: id,
+            source: "test",
+            generation: 1,
+            is_default: id === "alpha",
+            state: id === "offline" ? "disconnected" : "ready",
+          })),
+        }),
+      );
+      await write(WORKSPACE_AGENT_LAYOUT_STORAGE_KEY, "separate");
+      expect(summary).not.toHaveBeenCalled();
+      await write(AGENT_LIST_SCOPE_STORAGE_KEY, "all");
+      const rows = () => [
+        ...container.querySelectorAll<HTMLElement>(".agents-panel .agent-row"),
+      ];
+      expect(rows()).toHaveLength(2);
+      expect(rows().map((row) => row.textContent)).toEqual([
+        expect.stringContaining("alpha tab"),
+        expect.stringContaining("beta tab"),
+      ]);
+      expect(
+        container.querySelector('[data-connection-id="offline"]')?.textContent,
+      ).toContain("Disconnected");
+      expect(
+        container.querySelector(
+          '.workspace-tree-panel [aria-label="Workspace server scope"]',
+        ),
+      ).not.toBeNull();
+      expect(
+        container.querySelector(
+          '.agents-panel [aria-label="Workspace server scope"]',
+        ),
+      ).toBeNull();
+      expect(store.get().activeConnectionId).toBe("alpha");
+      await act(async () => rows()[1].click());
+      expect(navigate).toHaveBeenCalledWith({
+        connectionId: "beta",
+        runtimeGeneration: 1,
+        workspaceId: "w1",
+        paneId: "w1:p1",
+      });
+      expect(localFocus).not.toHaveBeenCalled();
+      await act(async () =>
+        rows()[1].dispatchEvent(
+          new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+        ),
+      );
+      expect(navigate).toHaveBeenCalledTimes(2);
+      const remoteMenu = new window.MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+      });
+      await act(async () => rows()[1].dispatchEvent(remoteMenu));
+      expect(remoteMenu.defaultPrevented).toBe(true);
+      expect(container.querySelector(".context-menu")?.textContent).toContain(
+        "beta",
+      );
+      expect(
+        container.querySelector(".context-menu")?.textContent,
+      ).not.toContain("Close pane");
+      await act(async () =>
+        container
+          .querySelector<HTMLButtonElement>(".context-menu-item")!
+          .click(),
+      );
+      expect(navigate).toHaveBeenLastCalledWith({
+        connectionId: "beta",
+        runtimeGeneration: 1,
+        workspaceId: "w1",
+        paneId: "w1:p1",
+      });
+      await act(async () => rows()[0].click());
+      expect(navigate).toHaveBeenLastCalledWith({
+        connectionId: "alpha",
+        runtimeGeneration: 1,
+        workspaceId: "w1",
+        paneId: "w1:p1",
+      });
+      expect(localFocus).not.toHaveBeenCalled();
+
+      const refresh = async () =>
+        act(async () => {
+          onEvent?.({
+            connection_id: "beta",
+            connection_generation: 1,
+            event: "pane.agent_status_changed",
+            data: {},
+          });
+          jest.advanceTimersByTime(150);
+        });
+      snapshots = snapshots.map((snapshot) =>
+        snapshot.connection_id === "beta"
+          ? {
+              ...snapshot,
+              panes: snapshot.panes.map((pane) => ({
+                ...pane,
+                agent_status: "blocked",
+              })),
+            }
+          : snapshot,
+      );
+      await refresh();
+      expect(rows()[0].textContent).toContain("beta tab");
+      expect(rows()[0].textContent).toContain("blocked");
+      await write(
+        AGENT_LIST_PREFERENCES_STORAGE_KEY,
+        '{"grouping":"workspace"}',
+      );
+      expect(container.querySelectorAll(".agent-group-toggle")).toHaveLength(2);
+
+      await act(async () =>
+        __storeTesting.applyCatalog(
+          store
+            .get()
+            .connections.map((connection) =>
+              connection.id === "beta"
+                ? { ...connection, generation: 2 }
+                : connection,
+            ),
+          "alpha",
+        ),
+      );
+      expect(rows()).toHaveLength(1);
+      snapshots = snapshots.map((snapshot) => ({
+        ...snapshot,
+        connection_generation: snapshot.connection_id === "beta" ? 2 : 1,
+      }));
+      await refresh();
+      expect(rows()).toHaveLength(2);
+      await act(async () =>
+        __storeTesting.applyCatalog(
+          store
+            .get()
+            .connections.map((connection) =>
+              connection.id === "beta"
+                ? { ...connection, state: "disconnected" }
+                : connection,
+            ),
+          "alpha",
+        ),
+      );
+      expect(rows()).toHaveLength(1);
+      expect(
+        container.querySelector('[data-connection-id="beta"]')?.textContent,
+      ).toContain("Disconnected");
+
+      summary.mockRejectedValueOnce(new Error("read failed"));
+      await refresh();
+      expect(rows()).toHaveLength(0);
+      expect(container.textContent).toContain(
+        "Could not load sessions: read failed",
+      );
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+      });
+      expect(rows()).toHaveLength(1);
+
+      const pending = Promise.withResolvers<{
+        connections: ConnectionAgentSessions[];
+      }>();
+      summary.mockReturnValueOnce(pending.promise);
+      await refresh();
+      await write(AGENT_LIST_SCOPE_STORAGE_KEY, "current");
+      await act(async () => pending.resolve({ connections: snapshots }));
+      expect(rows()).toHaveLength(0);
+      const callCount = summary.mock.calls.length;
+      await act(async () => {
+        jest.advanceTimersByTime(30_000);
+      });
+      expect(summary).toHaveBeenCalledTimes(callCount);
+      expect(onEvent).toBeUndefined();
     } finally {
       await act(async () => root.unmount());
+      jest.useRealTimers();
+      for (const mock of mocks) mock.mockRestore();
       container.remove();
       __storeTesting.replaceState(previousState);
       __resetTabPinsForTests();
