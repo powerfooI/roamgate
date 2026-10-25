@@ -19,6 +19,7 @@ import {
   terminalComposerDraftKey,
   terminalComposerDraftPaneIds,
   terminalComposerInsertAtCaret,
+  sendTerminalComposerText,
   terminalComposerRequest,
   terminalComposerSubmissionPending,
   terminalComposerUploadCount,
@@ -286,6 +287,52 @@ describe("terminal composer request", () => {
   test("normalizes newlines like terminal paste", () => {
     const request = terminalComposerRequest("p3", "one\r\ntwo\nthree", true);
     expect(request.params.text).toBe("one\rtwo\rthree");
+  });
+
+  test("an uploaded image gets time to attach before Enter", async () => {
+    const calls: unknown[] = [];
+    const waits: number[] = [];
+    const client = {
+      call: async (method: string, params: unknown) => {
+        calls.push([method, params]);
+      },
+    } as Parameters<typeof sendTerminalComposerText>[0];
+    const path = "/tmp/roamgate-uploads-501/upload-abc/img-1.png";
+    await sendTerminalComposerText(
+      client,
+      "p3",
+      `${path} look`,
+      true,
+      async (ms) => {
+        waits.push(ms);
+        calls.push("wait");
+      },
+    );
+    expect(calls).toEqual([
+      ["pane.send_input", { pane_id: "p3", text: `${path} look`, keys: [] }],
+      "wait",
+      ["pane.send_input", { pane_id: "p3", text: "", keys: ["enter"] }],
+    ]);
+    expect(waits[0]).toBeGreaterThan(0);
+
+    // Plain text, or an image only typed in, goes in one request.
+    calls.length = 0;
+    await sendTerminalComposerText(client, "p3", "ls", true, async () => {
+      calls.push("wait");
+    });
+    await sendTerminalComposerText(
+      client,
+      "p3",
+      `${path} `,
+      false,
+      async () => {
+        calls.push("wait");
+      },
+    );
+    expect(calls).toEqual([
+      ["pane.send_input", { pane_id: "p3", text: "ls", keys: ["enter"] }],
+      ["pane.send_input", { pane_id: "p3", text: `${path} `, keys: [] }],
+    ]);
   });
 });
 
