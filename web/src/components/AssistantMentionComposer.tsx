@@ -97,6 +97,26 @@ export function AssistantMentionComposer({
     });
   const scopeSignature = JSON.stringify(scope);
   const workspaceSignature = JSON.stringify(workspaces);
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    if (!input || !mobile) return;
+    const resize = () => {
+      input.style.height = "auto";
+      input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+    };
+    resize();
+    let width = input.clientWidth;
+    const observer = new window.ResizeObserver(() => {
+      if (width === input.clientWidth) return;
+      width = input.clientWidth;
+      resize();
+    });
+    observer.observe(input);
+    return () => {
+      observer.disconnect();
+      input.style.height = "";
+    };
+  }, [value, draftKey, mobile, inputRef]);
   useEffect(() => {
     const input = inputRef.current;
     if (!input) return;
@@ -377,9 +397,11 @@ export function AssistantMentionComposer({
         <textarea
           ref={inputRef}
           aria-label="Message Ranger"
-          placeholder="Ask about your workspaces, or @mention one"
+          placeholder={
+            mobile ? "Ask Ranger" : "Ask about your workspaces, or @mention one"
+          }
           enterKeyHint={mobile ? "send" : undefined}
-          rows={3}
+          rows={mobile ? 1 : 3}
           maxLength={20_000}
           value={value}
           role="combobox"

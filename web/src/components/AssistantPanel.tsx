@@ -28,6 +28,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   ASSISTANT_MAX_CUSTOM_MODELS,
   ASSISTANT_MAX_WORKSPACES,
@@ -64,6 +65,7 @@ import {
 } from "../assistant";
 import { formatUiDateTime } from "../uiLocale";
 import { useStoreSelector } from "../store";
+import { useSystemBack } from "../systemBack";
 import { MarkdownPreview } from "./markdown";
 import { ConfirmDialog } from "./ModalDialogs";
 import { ThemedSelect } from "./ThemedSelect";
@@ -927,6 +929,7 @@ export function AssistantPanel({
   open,
   floating,
   mobile,
+  mobileInputTarget,
   requestedTask,
   onRequestedTaskHandled,
   onClose,
@@ -936,6 +939,7 @@ export function AssistantPanel({
   open: boolean;
   floating: boolean;
   mobile: boolean;
+  mobileInputTarget?: HTMLElement | null;
   requestedTask?: RangerTaskNotificationTarget | null;
   onRequestedTaskHandled?: () => void;
   onClose: () => void;
@@ -970,6 +974,7 @@ export function AssistantPanel({
   const [confirmNew, setConfirmNew] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [modelControlsOpen, setModelControlsOpen] = useState(false);
   const [view, setView] = useState<"chat" | "tasks">("chat");
   const [confirmApproval, setConfirmApproval] = useState(false);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
@@ -978,6 +983,11 @@ export function AssistantPanel({
   const [contextTruncated, setContextTruncated] = useState(false);
   // Settings is one page; only the custom model editor replaces it.
   const [modelEditor, setModelEditor] = useState<"add" | "edit" | null>(null);
+  useSystemBack(
+    open && mobile && modelControlsOpen,
+    () => setModelControlsOpen(false),
+    "popup",
+  );
   useEffect(() => {
     if (!requestedTask) return;
     setSettingsOpen(false);
@@ -1267,10 +1277,11 @@ export function AssistantPanel({
 
   useEffect(() => {
     setPermissionsOpen(false);
+    setModelControlsOpen(false);
     if (!open || showSettings || view !== "chat") return;
     if (historyOpen) historyHeadingRef.current?.focus({ preventScroll: true });
     else inputRef.current?.focus({ preventScroll: true });
-  }, [open, showSettings, view, historyOpen]);
+  }, [open, mobile, mobileInputTarget, showSettings, view, historyOpen]);
 
   const run = async (action: string, params: Record<string, unknown> = {}) => {
     if (
@@ -1483,6 +1494,277 @@ export function AssistantPanel({
       ),
     ).values(),
   );
+  const statusIndicator = (
+    <span
+      role="status"
+      title={headerStatus}
+      className={`assistant-panel-status is-${headerTone}`}
+    >
+      {headerStatus}
+    </span>
+  );
+  const chatControls = snapshot ? (
+    <AssistantChatControls
+      key={`${snapshot.instance_id}:${snapshot.session_id ?? ""}`}
+      snapshot={snapshot}
+      mobile={mobile}
+      disabled={busy || !connected || !!authPending}
+      onChange={(params) => {
+        if (!composing.current) void run("configure_chat", params);
+      }}
+      onSelectedClose={() => {
+        setModelControlsOpen(false);
+        inputRef.current?.focus({ preventScroll: true });
+      }}
+    />
+  ) : null;
+
+  const composer = snapshot ? (
+    <form
+      className={`assistant-panel-footer${mobile ? " is-mobile" : ""}${mobile && mobileInputTarget ? " is-docked" : ""}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
+      <AssistantQueue
+        queue={snapshot.queue ?? []}
+        running={snapshot.running}
+        held={snapshot.queue_held === true}
+        reviewing={snapshot.messages.some(
+          (message) =>
+            message.actions?.some((action) => action.status === "pending") ||
+            message.task_proposals?.some(
+              (proposal) => proposal.status === "pending",
+            ),
+        )}
+        disabled={operationBusy || !connected}
+        onEdit={(item) => void editQueued(item)}
+        onRemove={(item) => void run("queue.remove", { id: item.id })}
+        onResume={() => {
+          followingOutput.current = true;
+          void run("queue.resume");
+        }}
+      />
+      <AssistantMentionComposer
+        value={state.draft}
+        mentions={state.draftMentions ?? []}
+        workspaces={permittedWorkspaces}
+        currentWorkspace={
+          currentWorkspaceId
+            ? {
+                connection_id: currentConnectionId,
+                workspace_id: currentWorkspaceId,
+              }
+            : undefined
+        }
+        draftKey={`${snapshot.instance_id}:${snapshot.session_id ?? ""}`}
+        inputRef={inputRef}
+        mobile={mobile}
+        onChange={setAssistantDraft}
+        onSubmit={(options) => void submit(options?.queue)}
+        onCompositionChange={(value) => {
+          composing.current = value;
+        }}
+        onOpenMention={(target) => void openMention(target)}
+      />
+      {!mobile ? chatControls : null}
+      <div className="assistant-compose-options">
+        {mobile ? (
+          <Popover open={modelControlsOpen} onOpenChange={setModelControlsOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="assistant-model-toggle"
+                aria-label="Ranger model settings"
+                title={modelLabel || "Choose a model"}
+              >
+                <span>{modelLabel || "Model"}</span>
+                <ChevronDown size={13} aria-hidden="true" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              className="assistant-model-popover"
+              aria-label="Model and thinking"
+              side="top"
+              collisionPadding={8}
+              onEscapeKeyDown={(event) => {
+                event.stopPropagation();
+                inputRef.current?.focus({ preventScroll: true });
+              }}
+              onCloseAutoFocus={(event) => {
+                event.preventDefault();
+              }}
+            >
+              <strong>Model &amp; thinking</strong>
+              {chatControls}
+            </PopoverContent>
+          </Popover>
+        ) : null}
+        <Popover open={permissionsOpen} onOpenChange={setPermissionsOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={`assistant-permission-trigger${highPermission ? " is-high-permission" : ""}`}
+              aria-label="Ranger permissions"
+              title={
+                highPermission
+                  ? allWorkspacesAllowed
+                    ? "High permission: all current and future workspaces"
+                    : "High permission: selected workspaces"
+                  : "Actions require confirmation"
+              }
+            >
+              <ShieldCheck size={13} aria-hidden="true" />
+              <span>
+                {highPermission
+                  ? allWorkspacesAllowed
+                    ? "Full access"
+                    : "High permission"
+                  : "Ask for approval"}
+              </span>
+              <ChevronDown size={13} aria-hidden="true" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            className={`assistant-permission-popover${mobile ? " is-mobile" : ""}`}
+            aria-label="Ranger permission settings"
+            side="top"
+            align="end"
+            collisionPadding={8}
+            onEscapeKeyDown={(event) => event.stopPropagation()}
+            onCloseAutoFocus={(event) => {
+              if (confirmApproval) event.preventDefault();
+            }}
+          >
+            <div className="assistant-permission-toggle">
+              <div>
+                <strong>High-permission mode</strong>
+                <p
+                  className="assistant-hint"
+                  id="ranger-high-permission-description"
+                >
+                  {highPermission && !allWorkspacesAllowed
+                    ? "Applies only to your selected workspaces."
+                    : "Skip confirmations and allow every workspace."}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-label="High-permission mode"
+                aria-describedby="ranger-high-permission-description"
+                aria-checked={highPermission}
+                className={`settings-switch${highPermission ? " is-on" : ""}`}
+                disabled={
+                  busy ||
+                  !connected ||
+                  !!authPending ||
+                  (!highPermission && (executing || snapshot.running))
+                }
+                onClick={() => {
+                  setPermissionsOpen(false);
+                  if (highPermission)
+                    void run("configure_approval", {
+                      approval_mode: "manual",
+                    });
+                  else setConfirmApproval(true);
+                }}
+              >
+                <span />
+              </button>
+            </div>
+            {highPermission && !allWorkspacesAllowed ? (
+              <button
+                type="button"
+                className="assistant-permission-upgrade"
+                disabled={
+                  busy ||
+                  !connected ||
+                  !!authPending ||
+                  executing ||
+                  snapshot.running
+                }
+                onClick={() => {
+                  setPermissionsOpen(false);
+                  setConfirmApproval(true);
+                }}
+              >
+                Enable high permission for all workspaces
+              </button>
+            ) : null}
+          </PopoverContent>
+        </Popover>
+        <div
+          className="assistant-compose-actions"
+          onMouseDown={mobile ? (event) => event.preventDefault() : undefined}
+        >
+          {snapshot.running && queueSupported ? (
+            <>
+              <button
+                type="button"
+                aria-label="Queue"
+                title={`Queue: send after Ranger finishes (${altEnter})`}
+                disabled={
+                  operationBusy ||
+                  !connected ||
+                  !state.draft.trim() ||
+                  !scope.length
+                }
+                onClick={() => void submit(true)}
+              >
+                <ListPlus size={13} />
+                <span>Queue</span>
+              </button>
+              <button
+                type="submit"
+                aria-label="Steer"
+                title="Steer: join the current answer after its next step (Enter)"
+                disabled={
+                  operationBusy ||
+                  !connected ||
+                  !state.draft.trim() ||
+                  !scope.length
+                }
+              >
+                <CornerDownRight size={13} />
+                <span>Steer</span>
+              </button>
+            </>
+          ) : null}
+          {snapshot.running ? (
+            <button
+              type="button"
+              aria-label="Stop"
+              title="Stop the model response; confirmed actions continue and waiting messages are kept"
+              disabled={busy || !connected}
+              onClick={() => void run("stop")}
+            >
+              <Square size={13} />
+              <span>Stop</span>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              aria-label="Send"
+              title="Send message (Enter); Shift+Enter for a new line"
+              disabled={
+                operationBusy ||
+                !connected ||
+                !ready ||
+                authPending ||
+                !state.draft.trim() ||
+                !scope.length
+              }
+            >
+              <Send size={13} />
+              <span>Send</span>
+            </button>
+          )}
+        </div>
+      </div>
+    </form>
+  ) : null;
 
   return (
     <aside
@@ -1511,7 +1793,10 @@ export function AssistantPanel({
             selection.removeAllRanges();
             return;
           }
-          if (showSettings && modelEditor) {
+          if (mobile && modelControlsOpen) {
+            setModelControlsOpen(false);
+            inputRef.current?.focus({ preventScroll: true });
+          } else if (showSettings && modelEditor) {
             if (!operationBusy) closeModelEditor();
           } else if (!showSettings && view === "chat" && historyOpen) {
             setHistoryOpen(false);
@@ -1589,7 +1874,10 @@ export function AssistantPanel({
             <strong title="Experimental workspace management assistant">
               Ranger
             </strong>
-            <span className="assistant-panel-experimental">Experimental</span>
+            {!mobile ? (
+              <span className="assistant-panel-experimental">Experimental</span>
+            ) : null}
+            {mobile ? statusIndicator : null}
           </div>
           <div className="assistant-panel-meta">
             <nav className="assistant-primary-nav" aria-label="Ranger views">
@@ -1609,13 +1897,7 @@ export function AssistantPanel({
                 </button>
               ))}
             </nav>
-            <span
-              role="status"
-              title={headerStatus}
-              className={`assistant-panel-status is-${headerTone}`}
-            >
-              {headerStatus}
-            </span>
+            {!mobile ? statusIndicator : null}
           </div>
         </div>
         {!mobile && !maximized ? (
@@ -1645,6 +1927,41 @@ export function AssistantPanel({
             {maximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
         ) : null}
+        {mobile ? (
+          <>
+            {historySupported ? (
+              <button
+                type="button"
+                className="assistant-icon-button"
+                aria-label="Ranger chat history"
+                title="History"
+                disabled={historyBlocked}
+                onClick={() => {
+                  setView("chat");
+                  setSettingsOpen(false);
+                  setHistoryOpen(true);
+                }}
+              >
+                <History size={16} aria-hidden="true" />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="assistant-icon-button"
+              aria-label="New chat"
+              title="New chat"
+              disabled={historyBlocked || !snapshot?.messages.length}
+              onClick={() => {
+                setView("chat");
+                setSettingsOpen(false);
+                setHistoryOpen(false);
+                setConfirmNew(true);
+              }}
+            >
+              <Plus size={16} aria-hidden="true" />
+            </button>
+          </>
+        ) : null}
         <button
           type="button"
           className="assistant-icon-button"
@@ -1656,7 +1973,7 @@ export function AssistantPanel({
             setModelEditor(null);
           }}
         >
-          <Settings size={16} />
+          <Settings size={16} aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -2322,74 +2639,94 @@ export function AssistantPanel({
         </section>
       ) : (
         <>
-          <div className="assistant-chat-toolbar">
-            {historySupported ? (
-              <div className="assistant-chat-title">
-                <strong>{currentSession?.title ?? "New chat"}</strong>
+          {!mobile ? (
+            <div className="assistant-chat-toolbar">
+              {historySupported ? (
+                <div className="assistant-chat-title">
+                  <strong>{currentSession?.title ?? "New chat"}</strong>
+                  <span
+                    title={`${snapshot.config.provider} / ${snapshot.config.model}`}
+                  >
+                    {modelLabel}
+                  </span>
+                </div>
+              ) : (
                 <span
                   title={`${snapshot.config.provider} / ${snapshot.config.model}`}
                 >
                   {modelLabel}
                 </span>
-              </div>
-            ) : (
-              <span
-                title={`${snapshot.config.provider} / ${snapshot.config.model}`}
-              >
-                {modelLabel}
-              </span>
-            )}
-            {historySupported ? (
+              )}
+              {historySupported ? (
+                <button
+                  type="button"
+                  className="assistant-icon-button"
+                  aria-label="Ranger chat history"
+                  title="History"
+                  disabled={historyBlocked}
+                  onClick={() => {
+                    if (!historyBlocked) {
+                      setHistoryOpen(true);
+                    }
+                  }}
+                >
+                  <History size={16} aria-hidden="true" />
+                </button>
+              ) : null}
               <button
                 type="button"
-                className="ghost"
-                aria-label="Ranger chat history"
-                disabled={historyBlocked}
+                className="assistant-icon-button"
+                aria-label="New chat"
+                title="New chat"
+                disabled={historyBlocked || !snapshot.messages.length}
                 onClick={() => {
-                  if (!historyBlocked) setHistoryOpen(true);
+                  if (!historyBlocked && snapshot.messages.length)
+                    setConfirmNew(true);
                 }}
               >
-                <History size={13} /> History
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="ghost"
-              disabled={historyBlocked || !snapshot.messages.length}
-              onClick={() => {
-                if (!historyBlocked && snapshot.messages.length)
-                  setConfirmNew(true);
-              }}
-            >
-              <Plus size={13} /> New chat
-            </button>
-          </div>
-          {!ready || authPending || !scope.length ? (
-            <div className="assistant-setup-notice">
-              <span>
-                {authPending
-                  ? "Provider sign-in is in progress. Open model settings to continue."
-                  : !ready
-                    ? "Connect a provider and choose a model to send messages."
-                    : !allWorkspacesAllowed &&
-                        !snapshot.config.allowed_workspaces.length
-                      ? "Allow workspaces in Ranger settings to send messages."
-                      : contextLoading
-                        ? "Loading authorized workspaces"
-                        : unavailableScopeMessage}
-              </span>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => {
-                  setSettingsOpen(true);
-                  setModelEditor(null);
-                }}
-              >
-                <Settings size={13} />{" "}
-                {ready && !authPending ? "Ranger settings" : "Model settings"}
+                <Plus size={16} aria-hidden="true" />
               </button>
             </div>
+          ) : null}
+          {!ready || authPending || !scope.length ? (
+            <details className="assistant-setup-notice" open={!mobile}>
+              <summary>
+                <Settings size={13} aria-hidden="true" />
+                {authPending
+                  ? "Complete provider sign-in"
+                  : !ready
+                    ? "Connect a model to chat"
+                    : contextLoading
+                      ? "Loading authorized workspaces"
+                      : "Workspace access needed"}
+                <ChevronDown size={13} aria-hidden="true" />
+              </summary>
+              <div className="assistant-setup-detail">
+                <span>
+                  {authPending
+                    ? "Provider sign-in is in progress. Open model settings to continue."
+                    : !ready
+                      ? "Connect a provider and choose a model to send messages."
+                      : !allWorkspacesAllowed &&
+                          !snapshot.config.allowed_workspaces.length
+                        ? "Allow workspaces in Ranger settings to send messages."
+                        : contextLoading
+                          ? "Loading authorized workspaces"
+                          : unavailableScopeMessage}
+                </span>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    setSettingsOpen(true);
+                    setModelEditor(null);
+                  }}
+                >
+                  <Settings size={13} />{" "}
+                  {ready && !authPending ? "Ranger settings" : "Model settings"}
+                </button>
+              </div>
+            </details>
           ) : null}
           <div className="assistant-conversation">
             <div
@@ -2524,234 +2861,9 @@ export function AssistantPanel({
               />
             ) : null}
           </div>
-          <form
-            className="assistant-panel-footer"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submit();
-            }}
-          >
-            <AssistantQueue
-              queue={snapshot.queue ?? []}
-              running={snapshot.running}
-              held={snapshot.queue_held === true}
-              reviewing={snapshot.messages.some(
-                (message) =>
-                  message.actions?.some(
-                    (action) => action.status === "pending",
-                  ) ||
-                  message.task_proposals?.some(
-                    (proposal) => proposal.status === "pending",
-                  ),
-              )}
-              disabled={operationBusy || !connected}
-              onEdit={(item) => void editQueued(item)}
-              onRemove={(item) => void run("queue.remove", { id: item.id })}
-              onResume={() => {
-                followingOutput.current = true;
-                void run("queue.resume");
-              }}
-            />
-            <AssistantMentionComposer
-              value={state.draft}
-              mentions={state.draftMentions ?? []}
-              workspaces={permittedWorkspaces}
-              currentWorkspace={
-                currentWorkspaceId
-                  ? {
-                      connection_id: currentConnectionId,
-                      workspace_id: currentWorkspaceId,
-                    }
-                  : undefined
-              }
-              draftKey={`${snapshot.instance_id}:${snapshot.session_id ?? ""}`}
-              inputRef={inputRef}
-              mobile={mobile}
-              onChange={setAssistantDraft}
-              onSubmit={(options) => void submit(options?.queue)}
-              onCompositionChange={(value) => {
-                composing.current = value;
-              }}
-              onOpenMention={(target) => void openMention(target)}
-            />
-            <div className="assistant-compose-options">
-              <AssistantChatControls
-                key={`${snapshot.instance_id}:${snapshot.session_id ?? ""}`}
-                snapshot={snapshot}
-                mobile={mobile}
-                disabled={busy || !connected || !!authPending}
-                onChange={(params) => {
-                  if (!composing.current) void run("configure_chat", params);
-                }}
-                onSelectedClose={() =>
-                  inputRef.current?.focus({ preventScroll: true })
-                }
-              />
-              <Popover open={permissionsOpen} onOpenChange={setPermissionsOpen}>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    className={`assistant-permission-trigger${highPermission ? " is-high-permission" : ""}`}
-                    aria-label="Ranger permissions"
-                    title={
-                      highPermission
-                        ? allWorkspacesAllowed
-                          ? "High permission: all current and future workspaces"
-                          : "High permission: selected workspaces"
-                        : "Actions require confirmation"
-                    }
-                  >
-                    <ShieldCheck size={13} aria-hidden="true" />
-                    <span>
-                      {highPermission
-                        ? allWorkspacesAllowed
-                          ? "Full access"
-                          : "High permission"
-                        : "Ask for approval"}
-                    </span>
-                    <ChevronDown size={13} aria-hidden="true" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent
-                  className={`assistant-permission-popover${mobile ? " is-mobile" : ""}`}
-                  aria-label="Ranger permission settings"
-                  side="top"
-                  align="end"
-                  collisionPadding={8}
-                  onEscapeKeyDown={(event) => event.stopPropagation()}
-                  onCloseAutoFocus={(event) => {
-                    if (confirmApproval) event.preventDefault();
-                  }}
-                >
-                  <div className="assistant-permission-toggle">
-                    <div>
-                      <strong>High-permission mode</strong>
-                      <p
-                        className="assistant-hint"
-                        id="ranger-high-permission-description"
-                      >
-                        {highPermission && !allWorkspacesAllowed
-                          ? "Applies only to your selected workspaces."
-                          : "Skip confirmations and allow every workspace."}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-label="High-permission mode"
-                      aria-describedby="ranger-high-permission-description"
-                      aria-checked={highPermission}
-                      className={`settings-switch${highPermission ? " is-on" : ""}`}
-                      disabled={
-                        busy ||
-                        !connected ||
-                        !!authPending ||
-                        (!highPermission && (executing || snapshot.running))
-                      }
-                      onClick={() => {
-                        setPermissionsOpen(false);
-                        if (highPermission)
-                          void run("configure_approval", {
-                            approval_mode: "manual",
-                          });
-                        else setConfirmApproval(true);
-                      }}
-                    >
-                      <span />
-                    </button>
-                  </div>
-                  {highPermission && !allWorkspacesAllowed ? (
-                    <button
-                      type="button"
-                      className="assistant-permission-upgrade"
-                      disabled={
-                        busy ||
-                        !connected ||
-                        !!authPending ||
-                        executing ||
-                        snapshot.running
-                      }
-                      onClick={() => {
-                        setPermissionsOpen(false);
-                        setConfirmApproval(true);
-                      }}
-                    >
-                      Enable high permission for all workspaces
-                    </button>
-                  ) : null}
-                </PopoverContent>
-              </Popover>
-              <div
-                className="assistant-compose-actions"
-                onMouseDown={
-                  mobile ? (event) => event.preventDefault() : undefined
-                }
-              >
-                {snapshot.running && queueSupported ? (
-                  <>
-                    <button
-                      type="button"
-                      aria-label="Queue"
-                      title={`Queue: send after Ranger finishes (${altEnter})`}
-                      disabled={
-                        operationBusy ||
-                        !connected ||
-                        !state.draft.trim() ||
-                        !scope.length
-                      }
-                      onClick={() => void submit(true)}
-                    >
-                      <ListPlus size={13} />
-                      Queue
-                    </button>
-                    <button
-                      type="submit"
-                      aria-label="Steer"
-                      title="Steer: join the current answer after its next step (Enter)"
-                      disabled={
-                        operationBusy ||
-                        !connected ||
-                        !state.draft.trim() ||
-                        !scope.length
-                      }
-                    >
-                      <CornerDownRight size={13} />
-                      Steer
-                    </button>
-                  </>
-                ) : null}
-                {snapshot.running ? (
-                  <button
-                    type="button"
-                    aria-label="Stop"
-                    title="Stop the model response; confirmed actions continue and waiting messages are kept"
-                    disabled={busy || !connected}
-                    onClick={() => void run("stop")}
-                  >
-                    <Square size={13} />
-                    Stop
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    aria-label="Send"
-                    title="Send message (Enter); Shift+Enter for a new line"
-                    disabled={
-                      operationBusy ||
-                      !connected ||
-                      !ready ||
-                      authPending ||
-                      !state.draft.trim() ||
-                      !scope.length
-                    }
-                  >
-                    <Send size={13} />
-                    Send
-                  </button>
-                )}
-              </div>
-            </div>
-          </form>
+          {mobile && mobileInputTarget
+            ? createPortal(composer, mobileInputTarget)
+            : composer}
         </>
       )}
       {snapshot ? (

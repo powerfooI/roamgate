@@ -627,22 +627,29 @@
 
 .assistant-setup-notice {
   flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 9px 12px;
   border-bottom: 1px solid var(--viewer-border);
   background: var(--viewer-header-bg);
   color: var(--muted);
   font-size: 11px;
 }
 
-.assistant-setup-notice > span {
+.assistant-setup-notice > summary {
+  display: none;
+}
+
+.assistant-setup-detail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+}
+
+.assistant-setup-detail > span {
   min-width: 0;
 }
 
-.assistant-setup-notice > button {
+.assistant-setup-detail > button {
   flex: 0 0 auto;
 }
 
@@ -1260,10 +1267,6 @@
   min-width: 0;
 }
 
-.assistant-compose-options > .assistant-chat-controls {
-  grid-column: 1 / -1;
-}
-
 .assistant-permission-trigger {
   justify-self: start;
   min-width: 0;
@@ -1338,11 +1341,13 @@
 }
 
 .assistant-panel.is-mobile {
+  container: ranger-panel / inline-size;
   width: 100%;
   border-radius: 0;
   box-shadow: none;
 }
 
+.assistant-panel-footer.is-mobile button,
 .assistant-panel.is-mobile button {
   min-height: 44px;
 }
@@ -1352,13 +1357,228 @@
   min-width: 44px;
 }
 
-.assistant-panel.is-mobile .assistant-panel-head .assistant-icon-button {
-  min-width: 28px;
-  min-height: 28px;
+.assistant-panel.is-mobile .assistant-panel-head {
+  min-height: 44px;
+  gap: 2px;
+  padding: 2px 8px;
 }
 
+.assistant-panel.is-mobile .assistant-panel-head > .assistant-icon-button {
+  width: 32px;
+  min-width: 32px;
+}
+
+.assistant-panel.is-mobile .assistant-panel-head > .assistant-icon-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.assistant-panel.is-mobile .assistant-panel-head > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.assistant-panel.is-mobile .assistant-panel-title {
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+
+.assistant-panel.is-mobile .assistant-panel-meta {
+  margin-left: auto;
+}
+
+@container ranger-panel (max-width: 312px) {
+  .assistant-panel.is-mobile .assistant-panel-head {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .assistant-panel.is-mobile .assistant-panel-head > div {
+    flex-basis: 100%;
+  }
+}
+
+/* The visible tabs are 32px high; transparent borders retain 44px tap targets. */
 .assistant-panel.is-mobile .assistant-primary-nav button {
-  min-height: 26px;
+  min-height: 44px;
+  border: 6px solid transparent;
+  border-inline-width: 2px;
+  border-radius: 10px;
+  padding: 0 6px;
+  background-clip: padding-box;
+  font-size: 12px;
+}
+
+.assistant-model-popover {
+  z-index: 5010;
+  display: grid;
+  gap: 4px;
+  width: min(280px, calc(100vw / var(--ui-scale, 1) - 16px));
+  max-height: calc(
+    var(--radix-popover-content-available-height) /
+    var(--ui-scale, 1)
+  );
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.assistant-model-popover > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.assistant-model-popover .assistant-chat-controls {
+  display: grid;
+  gap: 6px;
+}
+
+.assistant-model-popover .themed-select-trigger {
+  width: 100%;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 8px;
+  font-size: 12px;
+}
+
+.assistant-model-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.assistant-model-toggle[aria-expanded="true"] > svg:last-child,
+.assistant-setup-notice[open] > summary > svg:last-child {
+  transform: rotate(180deg);
+}
+
+.assistant-panel.is-mobile .assistant-panel-status {
+  border: 0;
+  padding-left: 0;
+  gap: 0;
+  font-size: 0;
+}
+
+.assistant-panel.is-mobile .assistant-setup-notice > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.assistant-setup-notice > summary::-webkit-details-marker {
+  display: none;
+}
+
+.assistant-panel.is-mobile .assistant-setup-notice > summary > svg:last-child {
+  margin-left: auto;
+}
+
+.assistant-panel-footer.is-mobile {
+  gap: 0;
+  margin: 0 8px 8px;
+  padding: 4px 6px;
+  border: 1px solid var(--viewer-border);
+  border-radius: 12px;
+  background: var(--input-bg);
+}
+
+.assistant-panel-footer.is-mobile:focus-within {
+  border-color: var(--accent);
+}
+
+.assistant-panel-footer.is-mobile textarea {
+  min-height: 44px;
+  max-height: min(160px, calc(var(--app-viewport-height, 100dvh) * 0.25));
+  line-height: 1.4;
+  resize: none;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+.assistant-panel-footer.is-mobile .assistant-mention-trigger {
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 44px;
+}
+
+.assistant-panel.is-mobile .conversation-minimap.is-horizontal {
+  border-top: 0;
+  padding-block: 0;
+}
+
+.assistant-panel.is-mobile
+  .conversation-minimap.is-horizontal
+  .conversation-minimap-frame {
+  height: 24px;
+}
+
+.assistant-panel-footer.is-mobile .assistant-compose-options {
+  grid-template-columns: minmax(44px, 1fr) minmax(44px, max-content) auto;
+  gap: 4px;
+}
+
+.assistant-model-toggle {
+  gap: 4px;
+  justify-self: start;
+  max-width: 100%;
+  padding-inline: 6px;
+}
+
+.assistant-model-toggle > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.assistant-model-toggle > svg {
+  flex-shrink: 0;
+}
+
+.assistant-panel-footer.is-mobile
+  .assistant-permission-trigger:not(.is-high-permission)
+  > span,
+.assistant-panel-footer.is-mobile
+  .assistant-permission-trigger
+  > svg:last-child,
+.assistant-panel-footer.is-mobile .assistant-compose-actions > button > span {
+  display: none;
+}
+
+.assistant-panel-footer.is-mobile .assistant-permission-trigger,
+.assistant-panel-footer.is-mobile .assistant-compose-actions > button {
+  min-width: 44px;
+  min-height: 44px;
+  padding-inline: 8px;
+}
+
+.assistant-panel-footer.is-mobile .assistant-compose-actions > button {
+  border-color: transparent;
+  border-radius: 50%;
+}
+
+.assistant-panel-footer.is-mobile
+  .assistant-compose-actions
+  > button[aria-label="Send"]:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .assistant-panel.is-mobile .assistant-workspace-choice {
@@ -1390,19 +1610,64 @@
   padding-bottom: 10px;
 }
 
-/* The composer keeps the desktop panel's compact controls on phones. */
-.assistant-panel.is-mobile
-  .assistant-panel-footer
-  .assistant-compose-options
-  button,
-.assistant-panel.is-mobile
-  .assistant-panel-footer
-  .assistant-queue-head
-  button {
+.assistant-panel-footer.is-mobile .assistant-queue-head button {
   min-height: 30px;
 }
 
+.assistant-panel-footer.is-mobile textarea,
 .assistant-panel.is-mobile textarea,
 .assistant-panel.is-mobile input:not([type="checkbox"]) {
   font-size: 16px;
+}
+
+/* Ranger takes the shared Message slot; navigation stays on the input row. */
+.assistant-panel-footer.is-docked {
+  --ranger-navigation-width: calc(
+    var(--mobile-control-size) *
+    var(--mobile-navigation-slots, 2) +
+    4px
+  );
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.assistant-panel-footer.is-docked .assistant-compose-options {
+  order: -1;
+}
+
+.assistant-panel-footer.is-docked .assistant-compose-input {
+  margin-inline-end: var(--ranger-navigation-width);
+}
+
+.assistant-panel-footer.is-docked .assistant-mention-picker {
+  width: calc(100% + var(--ranger-navigation-width));
+}
+
+.assistant-panel-footer.is-docked .assistant-mention-tray {
+  order: -1;
+}
+
+.assistant-panel-footer.is-docked .assistant-mention-editor {
+  min-height: 48px;
+  border: 1px solid var(--viewer-border);
+  border-radius: 24px;
+  background: var(--input-bg);
+}
+
+.assistant-panel-footer.is-docked .assistant-mention-editor:focus-within {
+  border-color: var(--accent);
+}
+
+.assistant-panel-footer.is-docked textarea {
+  min-height: 46px;
+  padding: 11px 44px 11px 12px;
+}
+
+.assistant-panel-footer.is-docked .assistant-mention-trigger {
+  top: 1px;
 }

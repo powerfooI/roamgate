@@ -370,7 +370,7 @@
     position: absolute;
     right: calc(8px + env(safe-area-inset-right, 0px));
     /* Center 44px navigation on the 48px Message row, including when no
-       terminal is portalled here (empty workspaces, Files and Ranger). */
+       no Message editor is portalled here (for example, an empty workspace). */
     bottom: calc(
       4px +
       env(safe-area-inset-bottom, 0px) +

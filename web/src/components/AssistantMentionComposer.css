@@ -194,12 +194,13 @@
   overflow-wrap: anywhere;
 }
 
-.assistant-panel.is-mobile .assistant-mention-categories button,
-.assistant-panel.is-mobile .assistant-mention-close,
-.assistant-panel.is-mobile .assistant-mention-chip button {
+.assistant-panel-footer.is-mobile .assistant-mention-categories button,
+.assistant-panel-footer.is-mobile .assistant-mention-close,
+.assistant-panel-footer.is-mobile .assistant-mention-chip button {
   min-height: 44px;
 }
 
-.assistant-panel.is-mobile .assistant-compose-input.assistant-mention-compose {
+.assistant-panel-footer.is-mobile
+  .assistant-compose-input.assistant-mention-compose {
   display: grid;
 }

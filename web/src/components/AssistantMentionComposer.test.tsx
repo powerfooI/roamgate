@@ -83,6 +83,7 @@ if (process.env.ROAMGATE_MENTION_DOM_TEST !== "1") {
     let value = "";
     let mentions: AssistantMention[] = [];
     let draftKey = "bridge:chat";
+    let mobile = false;
     const inputRef = React.createRef<HTMLTextAreaElement>();
     const render = async () => {
       await React.act(async () => root.render(<Harness />));
@@ -96,7 +97,7 @@ if (process.env.ROAMGATE_MENTION_DOM_TEST !== "1") {
           currentWorkspace={workspace}
           draftKey={draftKey}
           inputRef={inputRef}
-          mobile={false}
+          mobile={mobile}
           onChange={(next, refs, inputType, edit) => {
             mentions =
               refs ?? adjustAssistantMentions(value, next, mentions, edit);
@@ -248,6 +249,28 @@ if (process.env.ROAMGATE_MENTION_DOM_TEST !== "1") {
       await render();
       expect(input().value).toBe("Another draft");
       expect(input().getAttribute("aria-expanded")).toBe("false");
+
+      const originalInput = input();
+      let scrollHeight = 44;
+      Object.defineProperty(input(), "scrollHeight", {
+        configurable: true,
+        get: () => scrollHeight,
+      });
+      mobile = true;
+      await render();
+      expect(input().getAttribute("rows")).toBe("1");
+      expect(input().style.height).toBe("44px");
+      scrollHeight = 240;
+      await fill("A long\nmultiline\ndraft");
+      expect(input().style.height).toBe("160px");
+      scrollHeight = 44;
+      await fill("");
+      expect(input().style.height).toBe("44px");
+      expect(input()).toBe(originalInput);
+      mobile = false;
+      await render();
+      expect(input().getAttribute("rows")).toBe("3");
+      expect(input().style.height).toBe("");
 
       const unsafe = { ...target, label: "<script>unsafe</script>" };
       const text = `Explain @${unsafe.label} please`;

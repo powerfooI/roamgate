@@ -3,8 +3,8 @@ import { useEffect, type ReactNode, type Ref } from "react";
 import { focusIfUnchanged } from "./dialogFocus";
 import { blurActiveInput } from "../activeTerminalInput";
 
-// App owns this rail, outside every hideable mobile surface. Only the active
-// TerminalView portals its shared editor and tools into the input surface.
+// App owns this rail, outside every hideable mobile surface. The active
+// input owner (TerminalView or Ranger) portals its editor into the input surface.
 export function MobileBottomBar({
   inputRef,
   chatButton,

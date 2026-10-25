@@ -1249,9 +1249,9 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [mobileView, setMobileView] = useState<MobileView>("session");
   const mobileAgentViewRef = useRef(
-    roamgateLocalStorage.getItem("mobileAgentView") === "terminal"
-      ? "terminal"
-      : "chat",
+    roamgateLocalStorage.getItem("mobileAgentView") === "chat"
+      ? "chat"
+      : "terminal",
   );
   const rememberMobileAgentView = useCallback(
     (view: "chat" | "terminal") => {
@@ -1270,9 +1270,9 @@ export default function App() {
       subscribeLocalStorage((key) => {
         if (key === "mobileAgentView" || key === null)
           mobileAgentViewRef.current =
-            roamgateLocalStorage.getItem("mobileAgentView") === "terminal"
-              ? "terminal"
-              : "chat";
+            roamgateLocalStorage.getItem("mobileAgentView") === "chat"
+              ? "chat"
+              : "terminal";
       }),
     [],
   );
@@ -4267,7 +4267,9 @@ export default function App() {
               <div className="workspace-terminal-surface">
                 <TerminalPaneLayout
                   mobileInputTarget={
-                    historyInputPending ? null : mobileInputTarget
+                    historyInputPending || assistantVisible
+                      ? null
+                      : mobileInputTarget
                   }
                   onActivateTerminalSurface={selectTerminalSurface}
                   visible={!mobile || mobileView === "session"}
@@ -4276,7 +4278,11 @@ export default function App() {
                   terminalFontScale={terminalFontScale}
                   mobileShortcuts={mobileTerminalShortcuts}
                   mobileSideShortcuts={mobileTerminalSideShortcuts}
-                  composerOpen={terminalComposerOpen && !historyInputPending}
+                  composerOpen={
+                    terminalComposerOpen &&
+                    !historyInputPending &&
+                    !assistantVisible
+                  }
                   onComposerOpenChange={setTerminalComposerOpen}
                   agentHistoryOpen={agentHistoryOpen}
                   onAgentHistoryOpenChange={setAgentHistoryInspectorOpen}
@@ -4447,6 +4453,7 @@ export default function App() {
                   open={assistantVisible}
                   floating={assistantFloating && !mobile}
                   mobile={mobile}
+                  mobileInputTarget={mobileInputTarget}
                   requestedTask={assistantTaskTarget}
                   onRequestedTaskHandled={consumeAssistantTaskTarget}
                   onClose={closeAssistant}

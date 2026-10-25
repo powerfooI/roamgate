@@ -99,8 +99,8 @@ test("Workspaces and page footers do not reserve the rail or safe area again", (
   expect(rule(annotations, ".annotation-panel-footer")).toContain(
     "padding: 10px;",
   );
-  expect(rule(ranger, ".assistant-panel-footer", true)).toContain(
-    "padding: 10px;",
+  expect(rule(ranger, ".assistant-panel-footer.is-mobile")).toContain(
+    "padding: 4px 6px;",
   );
   expect(
     rule(ranger, ".assistant-panel.is-mobile .assistant-settings-save"),

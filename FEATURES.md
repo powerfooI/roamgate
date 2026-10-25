@@ -145,6 +145,10 @@ or its shortcut.
   output, and cites its sources. Type **@** to point it at a workspace or agent.
   When the model shares its reasoning, a collapsible **Thinking** section shows
   it above the reply.
+- **Mobile:** Chat and Tasks share a compact header. History, new chat, and
+  settings icons sit beside Close. Ranger uses the bottom Message input while
+  open, keeping its draft separate from the terminal draft. Model and thinking
+  options open above the input; the message box grows with your draft.
 - **Steer or queue:** while Ranger answers, **Enter** (or **Steer**) adds your
   message to the current answer after its next step, and **Alt+Enter**
   (**Option+Enter** on macOS, or **Queue**) sends it once the answer finishes.
@@ -230,8 +234,9 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
   in the bottom bar. It opens Agent History for reading and replying in a
   conversation, without adding a row above the content. Chat is the default
   history view; a saved timeline preference is still respected.
-- Mobile agent sessions initially open in Chat. Choosing Chat or Terminal is
-  remembered on this browser and reused when switching sessions or reloading.
+- Mobile agent sessions initially open in Terminal; select **Chat** to opt in.
+  Choosing Chat or Terminal is remembered on this browser and reused when
+  switching sessions or reloading.
   Shell panes open in Terminal without changing that preference.
 - The bottom bar holds **Message…**, **Direct**, **Chat** (for agent panes), **Tabs** (with the workspace's
   tab count, red when another agent needs you) and **⋮**, a menu of views and tools: Chat, Terminal,
@@ -259,8 +264,9 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
   the single-line preview and navigation; tapping Message resumes editing.
   Drafts stay in the field when collapsed. Sends, scrolling, and shortcut
   actions leave a dismissed keyboard closed.
-  Secondary pages (including Ranger settings, Files, and Workspaces) keep only
-  the bottom input/navigation row. Returning to Terminal restores the tools and
+  Files and Workspaces keep only the bottom input/navigation row. Ranger Chat
+  uses that input for Ranger; its History, Tasks, and Settings keep navigation
+  without terminal input. Returning to Terminal restores the tools and
   shortcuts as left, without changing the draft/caret or reopening the keyboard.
   Ordinary Tabs and **⋮** popups keep the underlying page's input-tool visibility.
 - The phone's Back gesture or button closes Tabs or **⋮**, then the visible input

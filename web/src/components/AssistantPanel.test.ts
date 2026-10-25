@@ -10,6 +10,7 @@ import {
 import * as assistant from "../assistant";
 import { bridge, type ConnectionSummary } from "../api";
 import * as storeModule from "../store";
+import * as systemBack from "../systemBack";
 import type { RangerTaskNotificationTarget } from "../taskNotifications";
 import { terminalFocusBlockedByOverlay } from "../terminalFocus";
 
@@ -1366,6 +1367,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
     let panelFloating = true;
     let panelMobile = false;
     let panelKey = "configured";
+    let panelInputTarget: HTMLElement | null = null;
     const close = mock(() => {
       panelOpen = false;
     });
@@ -1381,6 +1383,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
             open: panelOpen,
             floating: panelFloating,
             mobile: panelMobile,
+            mobileInputTarget: panelInputTarget,
             onClose: close,
             onToggleFloating: toggleFloating,
             onOpenSource: openSource,
@@ -1722,6 +1725,90 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(
         container.querySelector(".assistant-panel.is-mobile"),
       ).not.toBeNull();
+      const headerControls = () =>
+        container.querySelector<HTMLElement>(".assistant-panel-meta")!;
+      expect(headerControls().hidden).toBe(false);
+      expect(container.querySelector(".assistant-chat-toolbar")).toBeNull();
+      await React.act(async () => button("Ranger settings").click());
+      expect(
+        container.querySelector(".assistant-panel-settings"),
+      ).not.toBeNull();
+      await React.act(async () => button("Chat").click());
+      expect(container.querySelector(".assistant-panel-settings")).toBeNull();
+      expect(headerControls().hidden).toBe(false);
+
+      const composer = container.querySelector<HTMLTextAreaElement>(
+        '[aria-label="Message Ranger"]',
+      )!;
+      composer.focus();
+      composer.setSelectionRange(2, 5);
+      expect(container.querySelector('[aria-label="Chat model"]')).toBeNull();
+      await React.act(async () => button("Ranger model settings").click());
+      const modelPopup = document.querySelector(".assistant-model-popover")!;
+      expect(modelPopup).not.toBeNull();
+      expect(container.contains(modelPopup)).toBe(false);
+      expect(
+        modelPopup.querySelector('[aria-label="Chat model"]'),
+      ).not.toBeNull();
+      expect(
+        modelPopup.querySelector('[aria-label="Thinking effort"]'),
+      ).not.toBeNull();
+      const closesBeforeModelEscape = close.mock.calls.length;
+      await React.act(async () =>
+        button("Chat model", modelPopup).dispatchEvent(
+          new window.KeyboardEvent("keydown", {
+            key: "Escape",
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      );
+      expect(document.querySelector(".assistant-model-popover")).toBeNull();
+      // Radix restores focus after the closing portal has unmounted.
+      await React.act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+      });
+      expect(container.querySelector('[aria-label="Message Ranger"]')).toBe(
+        composer,
+      );
+      expect(composer.value).toBe("Next question");
+      expect(composer.selectionStart).toBe(2);
+      expect(composer.selectionEnd).toBe(5);
+      expect(document.activeElement === composer).toBe(true);
+      expect(close).toHaveBeenCalledTimes(closesBeforeModelEscape);
+      panelInputTarget = document.createElement("div");
+      document.body.append(panelInputTarget);
+      await render();
+      expect(
+        container.querySelector('[aria-label="Message Ranger"]'),
+      ).toBeNull();
+      expect(
+        panelInputTarget.querySelector<HTMLTextAreaElement>(
+          '[aria-label="Message Ranger"]',
+        )?.value,
+      ).toBe("Next question");
+      await React.act(async () => button("Tasks").click());
+      expect(panelInputTarget.childElementCount).toBe(0);
+      await React.act(async () => button("Chat").click());
+      expect(
+        panelInputTarget.querySelector<HTMLTextAreaElement>(
+          '[aria-label="Message Ranger"]',
+        )?.value,
+      ).toBe("Next question");
+      await React.act(async () => button("Send", panelInputTarget!).click());
+      expect(send).toHaveBeenLastCalledWith("Next question", [
+        {
+          connection_id: workspace.connection_id,
+          workspace_id: workspace.workspace_id,
+        },
+      ]);
+      send.mockClear();
+      panelOpen = false;
+      await render();
+      expect(panelInputTarget.childElementCount).toBe(0);
+      panelOpen = true;
+      panelInputTarget.remove();
+      panelInputTarget = null;
       panelMobile = false;
       await render();
       clientState.snapshot = {
@@ -1752,7 +1839,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
         conversation().scrollTop = 120;
         conversation().dispatchEvent(new Event("scroll"));
       });
-      await React.act(async () => button("History").click());
+      await React.act(async () => button("Ranger chat history").click());
       expect(
         container.querySelector('[aria-label="Saved Ranger chats"]'),
       ).not.toBeNull();
@@ -1768,7 +1855,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       expect(document.activeElement?.getAttribute("aria-label")).toBe(
         "Message Ranger",
       );
-      await React.act(async () => button("History").click());
+      await React.act(async () => button("Ranger chat history").click());
       await React.act(async () =>
         document.activeElement!.dispatchEvent(
           new window.KeyboardEvent("keydown", {
@@ -1780,7 +1867,7 @@ if (process.env.ROAMGATE_ASSISTANT_ACTION_DOM_TEST !== "1") {
       );
       expect(container.querySelector(".assistant-chat-history")).toBeNull();
       expect(close).toHaveBeenCalledTimes(1);
-      await React.act(async () => button("History").click());
+      await React.act(async () => button("Ranger chat history").click());
       await React.act(async () => button("Chat").click());
       expect(container.querySelector(".assistant-chat-history")).toBeNull();
       await React.act(async () => button("Tasks").click());
@@ -2574,6 +2661,7 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
     return { workspaces: contextWorkspaces };
   });
   const spies = [
+    spyOn(systemBack, "useSystemBack").mockImplementation(() => {}),
     spyOn(storeModule, "useStoreSelector").mockImplementation((selector) =>
       selector(storeModule.store.get()),
     ),
@@ -2900,7 +2988,7 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
       credential_method: "api_key",
     });
     states[0] = true;
-    states[15] = null;
+    states[17] = null;
     states[1] = { ...snapshot.config, model: "unsaved-model" };
     render();
     expect(find("aria-label", "Credential source").props.role).toBe("group");
@@ -3241,13 +3329,7 @@ test("assistant uses saved workspace permissions, guards IME sends, and hides wi
       ),
     ).toBe(false);
     expect(find("aria-label", "Ranger chat history")).toBeDefined();
-    const newChat = elements.find(
-      (item) =>
-        item.type === "button" &&
-        React.Children.toArray(item.props.children as React.ReactNode).includes(
-          " New chat",
-        ),
-    )!;
+    const newChat = find("aria-label", "New chat");
     (newChat.props.onClick as () => void)();
     render();
     expect(find("title", "Start a new Ranger chat?").props.message).toContain(
