@@ -39,9 +39,14 @@ async function registerDomTests() {
     "HTMLButtonElement",
     "Element",
     "Node",
+    "NodeFilter",
     "Event",
+    "CustomEvent",
+    "MutationObserver",
+    "ResizeObserver",
     "KeyboardEvent",
     "MouseEvent",
+    "PointerEvent",
     "localStorage",
     "sessionStorage",
   ] as const) {
@@ -51,13 +56,19 @@ async function registerDomTests() {
       configurable: true,
     });
   }
-  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  Object.assign(globalThis, {
+    getComputedStyle: browser.getComputedStyle.bind(browser),
+    requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
+    cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
   const {
     act,
     createElement: h,
     Fragment,
     startTransition,
     Suspense,
+    useState,
   } = await import("react");
   const { createRoot } = await import("react-dom/client");
   const { ConfirmDialog, MessageDialog, TextInputDialog } = await import(
@@ -71,13 +82,27 @@ async function registerDomTests() {
     "../useWorktreePullRequests"
   );
   const { bridge } = await import("../api");
-  const { __storeTesting, store } = await import("../store");
+  const { __storeTesting, store, useStoreSelector } = await import("../store");
   const { WorkspaceTree } = await import("./WorkspaceTree");
   const { PullRequestCard } = await import("./PullRequestCard");
   const { readPullRequestCache, PULL_REQUEST_CACHE_KEY } = await import(
     "../pullRequestCache"
   );
   const { roamgateLocalStorage } = await import("../browserStorage");
+  function WorkspaceCreation() {
+    const [scope, setScope] = useState<boolean | null>(null);
+    const connectionId = useStoreSelector((state) => state.activeConnectionId);
+    return h(
+      Fragment,
+      null,
+      h(WorkspaceTree, { key: connectionId, onCreateWorkspace: setScope }),
+      h(CreateWorkspaceDialog, {
+        open: scope !== null,
+        allServers: scope === true,
+        onClose: () => setScope(null),
+      }),
+    );
+  }
   let listCalls = 0;
   const client: ConnectionClient = {
     connectionId: "dialog-test",
@@ -410,7 +435,7 @@ async function registerDomTests() {
           tabs: [],
           panes: [],
         });
-        root!.render(h(WorkspaceTree));
+        root!.render(h(WorkspaceCreation));
       });
     const openMenu = () =>
       act(async () => {
@@ -1468,7 +1493,7 @@ async function registerDomTests() {
           tabs: [],
           panes: [],
         });
-        root!.render(h(WorkspaceTree));
+        root!.render(h(WorkspaceCreation));
       });
       const badge = () =>
         container.querySelector(".tree-row > .workspace-review");
@@ -1969,6 +1994,218 @@ async function registerDomTests() {
     }
   });
 
+  test("workspace server selection requires all-server scope and multiple connected servers", async () => {
+    const previousState = store.get();
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    try {
+      for (const [allServers, connectedCount] of [
+        [true, 1],
+        [true, 2],
+        [false, 2],
+        [true, 0],
+      ] as const) {
+        __storeTesting.replaceState({
+          ...previousState,
+          activeConnectionId: "alpha",
+          navigationMode: "shared",
+          connections: ["alpha", "beta", "offline"].map((id, index) => ({
+            id,
+            label: id,
+            generation: 1,
+            source: "test",
+            is_default: index === 0,
+            state: index < connectedCount ? "ready" : "disconnected",
+          })),
+        });
+        await act(async () =>
+          root!.render(
+            h(CreateWorkspaceDialog, {
+              open: true,
+              allServers,
+              initialName: "Test",
+              onClose: () => {},
+            }),
+          ),
+        );
+        expect(
+          !!container.querySelector('[aria-label="Workspace server"]'),
+        ).toBe(allServers && connectedCount > 1);
+      }
+    } finally {
+      await act(async () => root!.unmount());
+      root = null;
+      __storeTesting.replaceState(previousState);
+    }
+  });
+
+  test("all-server creation keeps the dialog open and checks paths on the selected server", async () => {
+    const previousState = store.get();
+    const scopeKey = "agentListScope";
+    const previousScope = roamgateLocalStorage.getItem(scopeKey);
+    const suggestion = spyOn(
+      luckyNames,
+      "luckyWorkspaceName",
+    ).mockResolvedValue("New workspace");
+    let resolveOld!: (value: unknown) => void;
+    const alphaCall = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve;
+        }),
+    );
+    const betaCall = jest.fn(async () => ({
+      path: "/beta/project",
+      error: null,
+      directories: [],
+    }));
+    const clients = {
+      alpha: { ...client, connectionId: "alpha", call: alphaCall },
+      beta: { ...client, connectionId: "beta", call: betaCall },
+    };
+    connection.mockImplementation(
+      (id) => clients[id as keyof typeof clients] ?? client,
+    );
+    const select = spyOn(store, "selectConnection");
+    let finish!: (value: unknown) => void;
+    const create = spyOn(store, "createWorkspace").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const render = () => root!.render(h(WorkspaceCreation));
+    const submit = () =>
+      container
+        .querySelector("form")!
+        .dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+    try {
+      roamgateLocalStorage.setItem(scopeKey, "all");
+      __storeTesting.replaceState({
+        ...previousState,
+        activeConnectionId: "alpha",
+        status: "connected",
+        connectionPaused: false,
+        navigationMode: "shared",
+        workspaces: [],
+        tabs: [],
+        panes: [],
+        connections: ["alpha", "beta", "offline"].map((id) => ({
+          id,
+          label: id,
+          generation: 1,
+          source: "test",
+          is_default: id === "alpha",
+          state: id === "offline" ? "disconnected" : "ready",
+        })),
+      });
+      await act(async () => render());
+      await act(async () =>
+        container
+          .querySelector<HTMLButtonElement>('[title="New workspace"]')!
+          .click(),
+      );
+      await act(async () => browser.happyDOM.whenAsyncComplete());
+      const form = container.querySelector("form")!;
+      const server = () =>
+        form.querySelector<HTMLButtonElement>(
+          '[aria-label="Workspace server"]',
+        )!;
+      expect(server().textContent).toContain("alpha");
+      const cwd = form.querySelectorAll<HTMLInputElement>("input")[1];
+      jest.useFakeTimers();
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype,
+          "value",
+        )!.set!.call(cwd, "~/project");
+        cwd.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => jest.advanceTimersByTime(200));
+      expect(alphaCall).toHaveBeenCalledWith("workspace.path", {
+        path: "~/project",
+      });
+      jest.useRealTimers();
+      await act(async () => server().click());
+      expect(
+        document.querySelector('[cmdk-item][data-value="offline"]'),
+      ).toBeNull();
+      jest.useFakeTimers();
+      await act(async () =>
+        document
+          .querySelector<HTMLElement>('[cmdk-item][data-value="beta"]')!
+          .click(),
+      );
+      expect(select).toHaveBeenLastCalledWith("beta");
+      expect(store.get().activeConnectionId).toBe("beta");
+      expect(container.querySelector("form")).toBe(form);
+      expect(cwd.value).toBe("~/project");
+      expect(form.querySelector<HTMLInputElement>("input")!.value).toBe(
+        "New workspace",
+      );
+      await act(async () => submit());
+      expect(create).not.toHaveBeenCalled();
+      await act(async () => jest.advanceTimersByTime(200));
+      expect(betaCall).toHaveBeenCalledWith("workspace.path", {
+        path: "~/project",
+      });
+      await act(async () =>
+        resolveOld({
+          path: "/alpha/project",
+          error: "Old error",
+          directories: [],
+        }),
+      );
+      expect(form.textContent).toContain("/beta/project");
+      expect(form.textContent).not.toContain("Old error");
+      __storeTesting.replaceState({
+        ...store.get(),
+        connections: store
+          .get()
+          .connections.map((entry) =>
+            entry.id === "beta" ? { ...entry, state: "disconnected" } : entry,
+          ),
+      });
+      await act(async () => render());
+      await act(async () => submit());
+      expect(create).not.toHaveBeenCalled();
+      expect(form.querySelector('[aria-label="Workspace server"]')).toBeNull();
+      expect(form.textContent).toContain(
+        "Reconnect or switch to a connected server",
+      );
+      __storeTesting.replaceState({
+        ...store.get(),
+        connections: store
+          .get()
+          .connections.map((entry) => ({ ...entry, state: "ready" })),
+      });
+      await act(async () => render());
+      await act(async () => submit());
+      expect(create).toHaveBeenLastCalledWith("New workspace", "/beta/project");
+      expect(server().disabled).toBe(true);
+      await act(async () => finish({ type: "workspace_created" }));
+      expect(container.querySelector("form")).toBeNull();
+    } finally {
+      jest.useRealTimers();
+      await act(async () => root!.unmount());
+      root = null;
+      connection.mockReturnValue(client);
+      select.mockRestore();
+      create.mockRestore();
+      suggestion.mockRestore();
+      bridge.setActiveConnection(previousState.activeConnectionId);
+      __storeTesting.replaceState(previousState);
+      if (previousScope === null) roamgateLocalStorage.removeItem(scopeKey);
+      else roamgateLocalStorage.setItem(scopeKey, previousScope);
+    }
+  });
+
   test("first workspace creation stays pending across an early topology refresh", async () => {
     const previousState = store.get();
     const suggestion = spyOn(
@@ -1985,7 +2222,7 @@ async function registerDomTests() {
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
-    const render = () => root!.render(h(WorkspaceTree));
+    const render = () => root!.render(h(WorkspaceCreation));
     try {
       __storeTesting.replaceState({
         ...previousState,
@@ -2002,6 +2239,7 @@ async function registerDomTests() {
           .click(),
       );
       const form = container.querySelector("form")!;
+      expect(form.querySelector('[aria-label="Workspace server"]')).toBeNull();
       const submit = () =>
         form.dispatchEvent(
           new Event("submit", { bubbles: true, cancelable: true }),

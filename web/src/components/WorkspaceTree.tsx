@@ -21,7 +21,6 @@ import {
 } from "react";
 import type { ContextMenuState } from "./ContextMenu";
 import { ThemedSelect } from "./ThemedSelect";
-import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
 import { buildWorkspaceHierarchy, worktreeCreationSource } from "../worktree";
 import {
   ArrowDownWideNarrow,
@@ -251,6 +250,7 @@ function PullRequestBadge({
 
 export function WorkspaceTree({
   agentsFirst = false,
+  onCreateWorkspace,
   onSelect,
   onBrowseFiles,
   onReviewChanges,
@@ -260,6 +260,7 @@ export function WorkspaceTree({
   onViewAgentHistory,
 }: {
   agentsFirst?: boolean;
+  onCreateWorkspace: (allServers: boolean) => void;
   onSelect?: (workspace: Workspace) => void;
   onBrowseFiles?: (workspace: Workspace) => void;
   onReviewChanges?: (workspace: Workspace) => void;
@@ -285,6 +286,9 @@ export function WorkspaceTree({
     shallowEqual,
   );
   const connectionClient = useConnectionClient();
+  const connectedServerCount = s.connections.filter(
+    (connection) => connection.state === "ready",
+  ).length;
   const reviews = useWorkspacePullRequests(connectionClient, s.workspaces);
   const agentOrderStorageKey = connectionStorageKey(
     s.activeConnectionId,
@@ -335,7 +339,6 @@ export function WorkspaceTree({
     allServers && agentListPreferences.sort === "manual"
       ? "workspace"
       : agentListPreferences.sort;
-  const [createOpen, setCreateOpen] = useState(false);
   const [lifecycleWorkspaceId, setLifecycleWorkspaceId] = useState<
     string | null
   >(null);
@@ -656,22 +659,24 @@ export function WorkspaceTree({
       <div className="panel-head">
         <h2>Workspaces</h2>
         <div className="panel-actions">
-          <ThemedSelect
-            className="workspace-scope-control"
-            aria-label="Workspace server scope"
-            value={allServers ? "all" : "current"}
-            options={[
-              { value: "current", label: "Current" },
-              { value: "all", label: "All servers" },
-            ]}
-            onChange={(scope) => {
-              clearWorkspaceDrag();
-              clearAgentDrag();
-              setMenu(null);
-              setAgentMenu(null);
-              setAllServers(scope === "all");
-            }}
-          />
+          {connectedServerCount > 1 ? (
+            <ThemedSelect
+              className="workspace-scope-control"
+              aria-label="Workspace server scope"
+              value={allServers ? "all" : "current"}
+              options={[
+                { value: "current", label: "Current" },
+                { value: "all", label: "All servers" },
+              ]}
+              onChange={(scope) => {
+                clearWorkspaceDrag();
+                clearAgentDrag();
+                setMenu(null);
+                setAgentMenu(null);
+                setAllServers(scope === "all");
+              }}
+            />
+          ) : null}
           {focusedRepoWorkspace ? (
             <button
               type="button"
@@ -688,7 +693,7 @@ export function WorkspaceTree({
           <button
             className="panel-add panel-action-icon"
             title="New workspace"
-            onClick={() => setCreateOpen(true)}
+            onClick={() => onCreateWorkspace(allServers)}
           >
             <Plus size={14} />
           </button>
@@ -1044,11 +1049,6 @@ export function WorkspaceTree({
             store.closePane(pendingClosePane.pane_id);
           }
         }}
-      />
-      <CreateWorkspaceDialog
-        key="create-workspace"
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
       />
       <WorktreeLifecycleDialog
         open={!!lifecycleWorkspaceId}

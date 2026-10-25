@@ -174,7 +174,11 @@ if (process.env.ROAMGATE_SERVER_TREE_DOM_TEST !== "1") {
         })),
       });
       await write(AGENT_LIST_SCOPE_STORAGE_KEY, "all");
-      await act(async () => root.render(createElement(WorkspaceTree)));
+      await act(async () =>
+        root.render(
+          createElement(WorkspaceTree, { onCreateWorkspace: () => {} }),
+        ),
+      );
       expect(container.querySelector(".workspace-server-group")).toBeNull();
       expect(
         container.querySelectorAll(".workspace-server-badge"),
@@ -341,6 +345,23 @@ if (process.env.ROAMGATE_SERVER_TREE_DOM_TEST !== "1") {
           '.workspace-tree-panel [aria-label="Workspace server scope"]',
         ),
       ).not.toBeNull();
+      for (const connectedCount of [1, 0, 2]) {
+        __storeTesting.replaceState({
+          ...store.get(),
+          connections: store.get().connections.map((connection, index) => ({
+            ...connection,
+            state: index < connectedCount ? "ready" : "disconnected",
+          })),
+        });
+        await act(async () =>
+          root.render(
+            createElement(WorkspaceTree, { onCreateWorkspace: () => {} }),
+          ),
+        );
+        expect(
+          !!container.querySelector('[aria-label="Workspace server scope"]'),
+        ).toBe(connectedCount > 1);
+      }
     } finally {
       await act(async () => root.unmount());
       jest.useRealTimers();

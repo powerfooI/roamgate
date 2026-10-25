@@ -131,7 +131,7 @@ if (process.env.ROAMGATE_WORKSPACE_STORAGE_DOM_TEST !== "1") {
           createElement(
             "div",
             null,
-            createElement(WorkspaceTree),
+            createElement(WorkspaceTree, { onCreateWorkspace: () => {} }),
             createElement(Pins),
           ),
         ),

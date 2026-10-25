@@ -3,9 +3,13 @@ import { Folder } from "lucide-react";
 import type { WorkspacePathInfo } from "../../../shared/workspacePath";
 import type { ConnectionClient } from "../api";
 import { luckyWorkspaceName } from "../luckyName";
-import { store, useEndpointCreationReason } from "../store";
-import { useConnectionClient } from "../useConnectionClient";
+import { store, useEndpointCreationReason, useStoreSelector } from "../store";
+import {
+  useConnectionClient,
+  useConnectionReady,
+} from "../useConnectionClient";
 import { CloseButton } from "./CloseButton";
+import { ThemedSelect } from "./ThemedSelect";
 import { focusDialogElement } from "./dialogFocus";
 import { useSuggestedName } from "./useSuggestedName";
 import "./CreateWorkspaceDialog.css";
@@ -14,15 +18,33 @@ export function CreateWorkspaceDialog({
   open,
   initialName,
   initialCwd,
+  allServers = false,
   onClose,
 }: {
   open: boolean;
   initialName?: string;
   initialCwd?: string;
+  allServers?: boolean;
   onClose: () => void;
 }) {
-  const createReason = useEndpointCreationReason("workspace.create");
+  const endpointReason = useEndpointCreationReason("workspace.create");
   const client = useConnectionClient();
+  const ready = useConnectionReady(client);
+  const connections = useStoreSelector((state) => state.connections);
+  const activeConnectionId = useStoreSelector(
+    (state) => state.activeConnectionId,
+  );
+  const connectedServers = connections.filter(
+    (connection) => connection.state === "ready",
+  );
+  const createReason =
+    allServers &&
+    (!ready ||
+      !connectedServers.some(
+        (connection) => connection.id === activeConnectionId,
+      ))
+      ? "Reconnect or switch to a connected server to create a workspace."
+      : endpointReason;
   const labelRef = useRef<HTMLInputElement>(null);
   const [label, setLabel, namePending] = useSuggestedName(
     open,
@@ -140,6 +162,35 @@ export function CreateWorkspaceDialog({
           <h2>Create Workspace</h2>
           <CloseButton onClick={onClose} />
         </div>
+
+        {allServers && connectedServers.length > 1 ? (
+          <div className="form-field">
+            <span>Server</span>
+            <ThemedSelect
+              aria-label="Workspace server"
+              value={activeConnectionId}
+              options={connectedServers.map((connection) => ({
+                value: connection.id,
+                label: connection.label,
+                detail: connection.id,
+              }))}
+              placeholder="Select a connected server"
+              disabled={creating || connectedServers.length === 0}
+              onChange={(connectionId) => {
+                if (
+                  store
+                    .get()
+                    .connections.some(
+                      (connection) =>
+                        connection.id === connectionId &&
+                        connection.state === "ready",
+                    )
+                )
+                  store.selectConnection(connectionId);
+              }}
+            />
+          </div>
+        ) : null}
 
         <label className="form-field">
           <span>Name</span>

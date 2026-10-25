@@ -115,7 +115,10 @@ Inspector state is scoped to each checkout; see
   collects agents in their own panel. Selecting a workspace or agent opens its
   server. Disconnected servers and failed reads remain visible. Other servers'
   context menus offer navigation; switch to their server for workspace and pane
-  actions.
+  actions. Creating a workspace from **All servers** lets you select a connected
+  server in the dialog; choosing one switches the current server and checks the
+  working directory there. The scope and creation server selectors are hidden
+  when fewer than two servers are connected.
 - **Agent History** shows the latest 200 conversation entries with search, a
   minimap, and tool details. The **Chat view** toggle reads them as
   conversation bubbles with rendered replies and collapsible tool-call blocks

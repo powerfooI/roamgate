@@ -41,7 +41,6 @@ import {
 import type { FileExplorerEntry, Pane, Tab, Workspace } from "../types";
 import { basename, shortId } from "../utils";
 import { luckyWorktreeBranchName } from "../luckyName";
-import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
 import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
 import { WorktreeHooksDialog } from "./WorktreeHooksDialog";
 import { WorktreeOpenDialog } from "./WorktreeOpenDialog";
@@ -231,11 +230,13 @@ export function runCommandNumberShortcut<T>(
 }
 
 export function CommandCombobox({
+  onCreateWorkspace,
   onOpenFileExplorer,
   onOpenFile,
   onOpenDiffViewer,
   onShowShortcuts,
 }: {
+  onCreateWorkspace: () => void;
   onOpenFileExplorer?: (workspaceId?: string) => void;
   onOpenFile?: (workspaceId: string, entry: FileExplorerEntry) => void;
   onOpenDiffViewer?: (workspaceId?: string) => void;
@@ -260,7 +261,6 @@ export function CommandCombobox({
   const [search, setSearch] = useState("");
   const [selectedActionValue, setSelectedActionValue] = useState("");
   const [selectedActionSearch, setSelectedActionSearch] = useState("");
-  const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
   const [openWorktreeWorkspaceId, setOpenWorktreeWorkspaceId] = useState<
     string | null
   >(null);
@@ -590,7 +590,7 @@ export function CommandCombobox({
       title: "Create workspace",
       detail: "Open a new Herdr workspace",
       keywords: ["new workspace", "add workspace", "open workspace"],
-      run: () => setCreateWorkspaceOpen(true),
+      run: onCreateWorkspace,
     },
     ...(focusedWorkspace
       ? [
@@ -1117,10 +1117,6 @@ export function CommandCombobox({
         </PopoverContent>
       </Popover>
 
-      <CreateWorkspaceDialog
-        open={createWorkspaceOpen}
-        onClose={() => setCreateWorkspaceOpen(false)}
-      />
       <WorktreeOpenDialog
         open={!!openWorktreeWorkspaceId}
         workspaceId={openWorktreeWorkspaceId}

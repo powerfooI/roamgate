@@ -38,12 +38,12 @@ export default defineConfig({
               // Keep small startup preferences and UI helpers together
               // instead of adding utility-only requests.
               name: "browser-preferences",
-              test: /src[\\/](?:browserStorage|layoutPreferences|shortcutPreferences|uiLocale|luckyName)\.ts$/,
+              test: /src[\\/](?:browserStorage|layoutPreferences|shortcutPreferences|uiLocale|luckyName|systemBack)\.ts$/,
             },
             {
               // Keep startup UI primitives together without loading feature-only icons.
               name: "ui-runtime",
-              test: /(?:vite[\\/]preload-helper\.js|node_modules[\\/](?:lucide-react|react|react-dom|scheduler|@radix-ui|@floating-ui)[\\/]|src[\\/](?:utils\.ts|components[\\/](?:(?:dialogFocus|contextMenuPosition)\.ts|(?:ui[\\/]popover|CloseButton|ModalDialogs)\.tsx))$)/,
+              test: /(?:vite[\\/]preload-helper\.js|node_modules[\\/](?:lucide-react|react|react-dom|scheduler|@radix-ui|@floating-ui)[\\/]|src[\\/](?:utils\.ts|components[\\/](?:(?:dialogFocus|contextMenuPosition)\.ts|(?:ui[\\/](?:popover|command)|CloseButton|ModalDialogs|ThemedSelect)\.tsx))$)/,
               tags: ["$initial"],
             },
             {

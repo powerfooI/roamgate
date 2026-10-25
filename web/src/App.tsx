@@ -103,6 +103,8 @@ import "./components/MobileTabSheet.css";
 import { requestClosePane, requestCloseTab, TabBar } from "./components/TabBar";
 import type { TerminalWorkspaceFileRequest } from "./components/TerminalView";
 import { WorkspaceTree } from "./components/WorkspaceTree";
+import { CreateWorkspaceDialog } from "./components/CreateWorkspaceDialog";
+import { AGENT_LIST_SCOPE_STORAGE_KEY } from "./workspaceAgentLayout";
 import { isIosDevice } from "./downloadFile";
 import { lazyWithReload } from "./lazyWithReload";
 import {
@@ -1247,6 +1249,9 @@ export default function App() {
     s.lastRefresh,
   ]);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
+  const [createWorkspaceScope, setCreateWorkspaceScope] = useState<
+    boolean | null
+  >(null);
   const [mobileView, setMobileView] = useState<MobileView>("session");
   const mobileAgentViewRef = useRef(
     roamgateLocalStorage.getItem("mobileAgentView") === "chat"
@@ -3919,6 +3924,12 @@ export default function App() {
             {!mobile ? assistantEntry : null}
             <CommandCombobox
               key={`${resourceUiKey}:commands`}
+              onCreateWorkspace={() =>
+                setCreateWorkspaceScope(
+                  roamgateLocalStorage.getItem(AGENT_LIST_SCOPE_STORAGE_KEY) ===
+                    "all",
+                )
+              }
               onOpenFileExplorer={openFileExplorer}
               onOpenFile={openFileExplorerFile}
               onOpenDiffViewer={openDiffViewer}
@@ -4212,6 +4223,7 @@ export default function App() {
         <div className="sidebar">
           <div className="sidebar-content">
             <WorkspaceTree
+              onCreateWorkspace={setCreateWorkspaceScope}
               agentsFirst={
                 (mobile
                   ? layoutPreferences.mobileSidebarOrder
@@ -4479,6 +4491,11 @@ export default function App() {
           onMoreOpenChange={setMobileMoreOpen}
         />
       ) : null}
+      <CreateWorkspaceDialog
+        open={createWorkspaceScope !== null}
+        allServers={createWorkspaceScope === true}
+        onClose={() => setCreateWorkspaceScope(null)}
+      />
       {/* Before the tooltip layer, which shares the modal z-index. */}
       {shortcutCheatSheetOpen && !mobile ? (
         <Suspense fallback={null}>
