@@ -54,6 +54,19 @@ test("speaks link labels, image descriptions and hostnames without leaking lengt
   );
 });
 
+test("preserves long Chinese and Japanese prose without spaces", () => {
+  for (const sentence of [
+    "这是一段正常的中文回复，说明问题的原因以及如何处理，并且包含用户真正需要听到的详细内容。",
+    "これは通常の日本語の説明です。設定を変更する前に現在の状態を確認してください。",
+  ]) {
+    const text = sentence.repeat(8);
+    expect(text.length).toBeGreaterThan(240);
+    const spoken = markdownToSpeech(text);
+    expect(spoken).toBe(text);
+    expect(chunkSpeech(spoken).join("")).toBe(text);
+  }
+});
+
 test("omits repeated log lines without discarding distinct information", () => {
   expect(markdownToSpeech("INFO ready\n".repeat(12) + "ERROR failed")).toBe(
     "INFO ready\nRepeated line omitted 11 times.\nERROR failed",

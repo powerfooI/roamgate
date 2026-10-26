@@ -23,6 +23,7 @@ function spokenText(text: string, decodeEntities = true): string {
           (_, name: string) => entities[name.toLowerCase()]!,
         )
     : text;
+  // Only omit long ASCII values; prose in other languages may have no spaces.
   return decoded
     .replace(/https?:\/\/[^\s<>]+/gi, (url) => {
       try {
@@ -32,7 +33,7 @@ function spokenText(text: string, decodeEntities = true): string {
       }
     })
     .replace(/\b[\da-f]{24,}\b/gi, "long hash omitted")
-    .replace(/\S{100,}/gu, "long value omitted")
+    .replace(/[!-~]{100,}/g, "long value omitted")
     .replace(/([^\s])\1{9,}/gu, "$1 repeated")
     .replace(/[\t ]+/g, " ");
 }

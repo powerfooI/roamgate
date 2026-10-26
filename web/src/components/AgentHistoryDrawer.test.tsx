@@ -3,7 +3,7 @@ import * as React from "react";
 import type { Pane } from "../types";
 
 if (process.env.ROAMGATE_HISTORY_DRAWER_DOM_TEST !== "1") {
-  test("history drawer mobile disclosures in an isolated DOM runtime", async () => {
+  test("history drawer disclosures and speech in an isolated DOM runtime", async () => {
     const child = Bun.spawn([process.execPath, "test", import.meta.path], {
       env: { ...process.env, ROAMGATE_HISTORY_DRAWER_DOM_TEST: "1" },
       stdout: "pipe",
@@ -18,7 +18,7 @@ if (process.env.ROAMGATE_HISTORY_DRAWER_DOM_TEST !== "1") {
     expect(code).toBe(0);
   }, 15_000);
 } else {
-  test("mobile session and search start collapsed, remain accessible, and reset per pane", async () => {
+  test("mobile disclosures reset per pane and speech stops per session", async () => {
     const { Window } = await import("happy-dom");
     const browser = new Window({ url: "http://localhost/?layout=mobile" });
     const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -29,6 +29,9 @@ if (process.env.ROAMGATE_HISTORY_DRAWER_DOM_TEST !== "1") {
       HTMLElement: browser.HTMLElement,
       Element: browser.Element,
       Node: browser.Node,
+      DOMParser: browser.DOMParser,
+      NodeFilter: browser.NodeFilter,
+      ResizeObserver: browser.ResizeObserver,
       Event: browser.Event,
       IS_REACT_ACT_ENVIRONMENT: true,
     })) {
@@ -39,12 +42,48 @@ if (process.env.ROAMGATE_HISTORY_DRAWER_DOM_TEST !== "1") {
         writable: true,
       });
     }
+    const cancel = mock(() => {});
+    Object.defineProperty(browser, "speechSynthesis", {
+      value: { getVoices: () => [], speak: () => {}, cancel },
+    });
+    Object.defineProperty(browser, "SpeechSynthesisUtterance", {
+      value: class {
+        constructor(public text: string) {}
+      },
+    });
+    let sessionPath = "/sessions/one.jsonl";
+    let sessionId = "one";
+    let historyRevision = 1;
     const client = {
       isCurrent: () => true,
       call: async (method: string) =>
         method === "agent_session.get"
-          ? { status: "ok", stats: {} }
-          : { status: "ok", mode: "snapshot", messages: [], cursor: null },
+          ? { status: "ok", stats: {}, session: { value: sessionId } }
+          : {
+              status: "ok",
+              agent: "codex",
+              pane_id: "pane-one",
+              workspace_id: "workspace",
+              tab_id: "tab",
+              path: sessionPath,
+              updated_at: "2026-01-01T00:00:00Z",
+              history_version: 2,
+              mode: "snapshot",
+              cursor: {
+                epoch: sessionPath + sessionId,
+                revision: historyRevision,
+              },
+              window_limit: 200,
+              entries: [
+                {
+                  id: sessionId,
+                  role: "assistant",
+                  kind: "message",
+                  text: `Reply from ${sessionPath}. `.repeat(20),
+                  sent_at: "2026-01-01T00:00:00Z",
+                },
+              ],
+            },
     };
     mock.module("../useConnectionClient", () => ({
       useConnectionClient: () => client,
@@ -55,6 +94,7 @@ if (process.env.ROAMGATE_HISTORY_DRAWER_DOM_TEST !== "1") {
       await import("../layoutPreferences");
     initializeLayoutPreferences();
     const { AgentHistoryDrawer } = await import("./AgentHistoryDrawer");
+    const { speechPlayback } = await import("../speechPlayback");
     const { createRoot } = await import("react-dom/client");
     const container = document.createElement("div");
     document.body.append(container);
@@ -89,6 +129,27 @@ if (process.env.ROAMGATE_HISTORY_DRAWER_DOM_TEST !== "1") {
       React.act(async () => element.click());
     try {
       await render();
+      for (const next of [
+        { path: "/sessions/two.jsonl", id: "one" },
+        { path: "/sessions/two.jsonl", id: "two" },
+      ]) {
+        await click(button("Speak assistant message"));
+        expect(speechPlayback.getSnapshot().status).toBe("speaking");
+        const cancellations = cancel.mock.calls.length;
+        historyRevision += 1;
+        await click(button("Refresh session"));
+        expect(speechPlayback.getSnapshot().status).toBe("speaking");
+        expect(cancel.mock.calls.length).toBe(cancellations);
+        sessionPath = next.path;
+        sessionId = next.id;
+        await click(button("Refresh session"));
+        expect(container.textContent).toContain(`Reply from ${sessionPath}.`);
+        expect(speechPlayback.getSnapshot().status).toBe("stopped");
+        expect(cancel.mock.calls.length).toBe(cancellations + 1);
+        expect(
+          container.querySelector('[aria-label="Stop speaking message"]'),
+        ).toBeNull();
+      }
       const header = () =>
         container.querySelector<HTMLElement>(".agent-history-drawer-head")!;
       const toggle = () =>
@@ -194,6 +255,7 @@ if (process.env.ROAMGATE_HISTORY_DRAWER_DOM_TEST !== "1") {
       expect(search()).toBeNull();
     } finally {
       await React.act(async () => root.unmount());
+      speechPlayback.stop();
       container.remove();
       await browser.happyDOM.close();
       for (const [key, descriptor] of originals) {

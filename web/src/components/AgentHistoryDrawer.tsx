@@ -865,7 +865,11 @@ export function AgentHistoryDrawer({
           <AgentHistoryChat
             items={chatItems}
             speechActive={open}
-            speechScopeKey={composerDraftKey}
+            speechScopeKey={JSON.stringify([
+              composerDraftKey,
+              history?.path,
+              session?.session?.value,
+            ])}
             listRef={contentRef}
             contentRef={timelineRef}
             highlightedSequence={highlightedSequence}
