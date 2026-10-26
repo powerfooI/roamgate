@@ -1,0 +1,33 @@
+.speech-settings {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+
+.speech-settings legend {
+  font-weight: 600;
+}
+
+.speech-settings p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.speech-settings select,
+.speech-settings input {
+  width: 100%;
+  min-width: 0;
+}
+
+.speech-settings select {
+  padding: 8px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+}

@@ -113,6 +113,22 @@
   opacity: 1;
 }
 
+.agent-history-chat-meta .agent-history-speak {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.agent-history-chat-meta .agent-history-speak.is-speaking {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.agent-history-speech-status {
+  max-width: 220px;
+  overflow-wrap: anywhere;
+}
+
 .agent-history-chat-tools {
   min-width: 0;
   max-width: min(88%, 680px);
@@ -379,7 +395,7 @@
     max-width: 92%;
   }
 
-  /* Touch devices cannot hover to reveal the copy button. */
+  /* Touch devices cannot hover to reveal message controls. */
   .agent-history-chat-meta .agent-history-copy {
     opacity: 1;
   }

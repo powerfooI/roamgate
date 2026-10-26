@@ -133,6 +133,19 @@ Inspector state is scoped to each checkout; see
   anyway**. The timeline view adds User/Agent/Tool filters. Exports are always
   complete. **Session Inspector** adds metadata, a timeline, raw/ATIF
   transcripts, and export.
+  **Speak** beside an assistant message reads its full text using browser speech
+  synthesis; **Stop**, another message, or closing/switching the chat cancels it.
+  On desktop, Speak appears on hover or keyboard focus, like Copy; Stop remains
+  visible during playback. On mobile, the speech control stays visible.
+  Playback reads a snapshot, never automatically narrates new replies, and is
+  limited to one message per browser tab. Code blocks, Mermaid diagrams, oversized
+  tables, and long hashes/values are omitted or announced instead of read aloud.
+  Simple tables retain column labels. Raw HTML blocks are omitted. Voice and
+  speaking rate are saved for this browser under **Configuration > Behavior >
+  Speech**; unavailable voices fall back to the browser default. Some voices use
+  online services and may send message text to their provider. No microphone or
+  server-side speech software is required. Browser support and voices vary;
+  background and locked-screen playback are not guaranteed, including on iOS.
 - **Menu > Configuration > Integrations** installs, updates, or removes Herdr's
   bundled agent integrations (not the agents themselves). See
   [version lookup](docs/ARCHITECTURE.md#agent-integrations).

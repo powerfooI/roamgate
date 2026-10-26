@@ -46,6 +46,7 @@ import { CloseButton } from "./CloseButton";
 import { TerminalTransportSettings } from "./TerminalTransportSettings";
 import { ConfigurationLoadingDialog } from "./ConfigurationLoadingDialog";
 import { InstanceNameSettings } from "./InstanceNameSettings";
+import { SpeechSettings } from "./SpeechSettings";
 import { MobileSheetHandle } from "./MobileSheetHandle";
 import "./ConfigMenu.css";
 import "./ConfigurationDialog.css";
@@ -441,6 +442,7 @@ export function ConfigurationDialog({
                 Preferences apply to this browser. Push delivery preferences
                 apply to this device.
               </p>
+              {tab === "Behavior" ? <SpeechSettings /> : null}
               <div className="config-preference-row">
                 <span className="config-item-icon">
                   <Download size={15} />

@@ -38,7 +38,7 @@ export default defineConfig({
               // Keep small startup preferences and UI helpers together
               // instead of adding utility-only requests.
               name: "browser-preferences",
-              test: /src[\\/](?:browserStorage|layoutPreferences|shortcutPreferences|uiLocale|luckyName|systemBack)\.ts$/,
+              test: /src[\\/](?:browserStorage|layoutPreferences|shortcutPreferences|speechPreferences|uiLocale|luckyName|systemBack)\.ts$/,
             },
             {
               // Keep startup UI primitives together without loading feature-only icons.
