@@ -45,6 +45,7 @@ import {
   type AssistantThinkingLevel,
   type AssistantWorkspace,
   type AssistantWorkspaceRef,
+  CLAUDE_CODE_PROVIDER,
 } from "../../../shared/assistant";
 import { bridge } from "../api";
 import type { RangerTaskNotificationTarget } from "../taskNotifications";
@@ -168,6 +169,10 @@ function connectionReady(snapshot: AssistantSnapshot) {
 }
 
 function credentialStatus(provider: AssistantSnapshot["providers"][number]) {
+  if (provider.id === CLAUDE_CODE_PROVIDER)
+    return provider.configured
+      ? "Uses the sign-in of claude on the bridge"
+      : "The claude command was not found on the bridge";
   if (!provider.configured) return "No saved credentials";
   return provider.credential_method === "oauth"
     ? "Saved login (OAuth)"

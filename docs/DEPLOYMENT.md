@@ -288,6 +288,11 @@ certificates; services need absolute paths.
 Open **Ranger > Settings**, choose a **Provider**, and **Sign in** or **Enter API
 key**. Then pick a model, allow workspaces under **Workspace access**, and
 **Save settings**.
+- **Claude Code** runs Ranger's turns on the bridge's `claude` command, signed
+  in as it is (a Claude subscription or API key), with the Opus, Sonnet or
+  Haiku model; its effort follows the thinking level. It is listed when
+  `claude` is on the bridge's `PATH`. Claude Code's own tools, MCP servers,
+  skills and hooks are off: it gets only Ranger's tools.
 - **Shared Pi credentials** reuses Pi's `auth.json` and `models.json` for the
   bridge account instead of Ranger's own store.
 - **Custom models** add an OpenAI- or Anthropic-compatible endpoint; use a

@@ -58,6 +58,9 @@ export type AssistantMentionCatalog = {
   truncated?: boolean;
 };
 
+/** The provider whose turns run on the bridge's Claude Code (`claude`). */
+export const CLAUDE_CODE_PROVIDER = "claude-code";
+
 export const ASSISTANT_THINKING_LEVELS = [
   "off",
   "minimal",
