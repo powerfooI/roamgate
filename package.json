@@ -78,6 +78,6 @@
   },
   "overrides": {
     "highlight.js": "11.12.0",
-    "undici": "8.12.2"
+    "undici": "8.12.3"
   }
 }
