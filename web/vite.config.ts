@@ -8,8 +8,21 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: [
+      // Diff viewers expose only Pierre light/dark, not the full theme catalogs.
       {
-        find: /^shiki$/,
+        find: /^@pierre\/theming\/themes$/,
+        replacement: fileURLToPath(
+          new URL("./src/diffThemes.ts", import.meta.url),
+        ),
+      },
+      {
+        find: /^@pierre\/highlights\/themes\/loader$/,
+        replacement: fileURLToPath(
+          new URL("./src/diffHighlightsThemes.ts", import.meta.url),
+        ),
+      },
+      {
+        find: /^shiki(?:\/langs)?$/,
         replacement: fileURLToPath(new URL("./src/shiki.ts", import.meta.url)),
       },
     ],
