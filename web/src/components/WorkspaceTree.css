@@ -345,3 +345,14 @@
   color: color-mix(in srgb, var(--muted) 55%, transparent);
   font-size: 10px;
 }
+
+/* Clipped at the start, the end kept: "…ject-system-iga-184". The text
+   inside stays left to right. */
+.start-ellipsis {
+  direction: rtl;
+  text-align: left;
+}
+
+.start-ellipsis > span {
+  unicode-bidi: isolate;
+}
