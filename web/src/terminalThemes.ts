@@ -17,6 +17,16 @@ const DARK_TERMINAL_THEME: ITheme = {
   selectionBackground: "rgba(110,168,255,0.3)",
 };
 
+// The default dark terminal on a black background, for the app's black
+// background option.
+const BLACK_TERMINAL_THEME: ITheme = {
+  ...DARK_TERMINAL_THEME,
+  background: "#000000",
+  foreground: "#d4d4d4",
+  cursor: "#d4d4d4",
+  selectionBackground: "rgba(255,255,255,0.22)",
+};
+
 // Light mode needs the full 16-color ANSI palette: the dark-oriented default
 // palette (bright blues, greens, yellows) is unreadable on a light background.
 const LIGHT_TERMINAL_THEME: ITheme = {
@@ -66,6 +76,13 @@ export const TERMINAL_THEME_PRESETS: readonly TerminalThemeDefinition[] = [
     variant: "dark",
     builtin: true,
     theme: DARK_TERMINAL_THEME,
+  },
+  {
+    id: "roamgate-black",
+    name: "Roamgate Black",
+    variant: "dark",
+    builtin: true,
+    theme: BLACK_TERMINAL_THEME,
   },
   {
     id: "herdr-light",
@@ -643,7 +660,16 @@ export function resolveTerminalTheme(
   resolvedTheme: ResolvedTheme,
   selection: TerminalThemeSelection,
   customThemes: CustomTerminalTheme[],
+  blackBackground = false,
 ): ITheme {
+  // With a black background, the default dark terminal turns black too; a
+  // terminal theme picked by hand is kept.
+  if (
+    blackBackground &&
+    resolvedTheme === "dark" &&
+    selection.dark === defaultTerminalThemeId("dark")
+  )
+    return BLACK_TERMINAL_THEME;
   return resolveTerminalThemeDefinition(resolvedTheme, selection, customThemes)
     .theme;
 }

@@ -44,6 +44,8 @@
               : "dark";
         document.documentElement.dataset.theme = resolvedTheme;
         document.documentElement.style.colorScheme = resolvedTheme;
+        if (localStorage.getItem("roamgate:blackBackground") === "1")
+          document.documentElement.dataset.black = "";
         // Apply the persisted interface scale too so the first paint matches
         // the Text size preference.
         const storedUiScale =
