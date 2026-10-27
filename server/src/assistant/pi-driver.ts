@@ -848,7 +848,13 @@ export function createPiDriver(
             (automatic && tool.name.startsWith("propose_"))
               ? { executionMode: "sequential" as const }
               : {}),
-            execute: async (params, api, toolContext) => {
+            execute: async (
+              params,
+              api,
+              toolContext,
+            ): Promise<
+              import("@earendil-works/pi-durable").ToolExecutionResult
+            > => {
               try {
                 // Pi starts a separate run for a steer that misses the turn.
                 // That run keeps this turn's tools, so refuse any call outside
@@ -873,7 +879,7 @@ export function createPiDriver(
                 const details: import("@earendil-works/chord").JsonValue =
                   result.sources?.length ? { sources: result.sources } : {};
                 return {
-                  content: [
+                  output: [
                     {
                       type: "text" as const,
                       text: result.sources?.length

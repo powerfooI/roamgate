@@ -308,6 +308,13 @@ before backing it up. **Upgrades can migrate `tasks.sqlite` irreversibly**, so
 older builds cannot open it: back up the directory before upgrading if you may
 roll back.
 
+The Pi SDK 1.4.0 dependency upgrade specifically migrates Durable SQLite
+storage to schema version 2 when opened. Pi Durable 1.3.0 and earlier cannot
+open that migrated database. Before deploying a build with this upgrade, stop
+the bridge and back up the entire assistant directory; rolling back to a build
+with Pi Durable 1.3.0 or earlier requires restoring the pre-upgrade backup too.
+See the [Pi Durable 1.4.0 breaking changes](https://github.com/earendil-works/pi/blob/v1.4.0/packages/durable/CHANGELOG.md#140---2026-10-21).
+
 Unfinished questions and task runs resume after a bridge restart if their
 original connections and workspaces are still the same; confirmed actions are
 never repeated. See [Ranger](../FEATURES.md#ranger) and
