@@ -3,7 +3,6 @@
 ## Project overview
 
 Roamgate is an independent community Web and PWA client for Herdr. It has two parts:
-
 - `server/src`: Bun-powered local bridge server (HTTP + WebSocket) that talks
   to the local Herdr socket.
 - `web/src`: React + Vite frontend. Reusable UI lives in `web/src/components`,
@@ -19,7 +18,6 @@ build artifacts; they must not be edited or committed.
 ## Review priorities
 
 When reviewing pull requests, focus on:
-
 - Correctness of the Bun bridge: HTTP/WebSocket message handling, socket
   lifecycle, reconnection and error paths, and cleanup of listeners, timers,
   and subprocesses.
@@ -50,7 +48,6 @@ Install all workspace dependencies once with `bun install --frozen-lockfile`
 from the repo root. The root `bun.lock` is authoritative.
 
 Changes are expected to pass, from the repo root:
-
 - `bun run format:check`
 - `bun run lint`
 - `bun run test`

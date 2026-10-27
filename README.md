@@ -138,7 +138,6 @@ See [deployment](./docs/DEPLOYMENT.md) for configuration, services, and updates.
 
 **Recommended for daily use:** a separate app window without browser tabs or
 the address bar. Log in to Roamgate, then install:
-
 - **iPhone/iPad Safari:** Share -> Add to Home Screen.
 - **macOS Safari 17+:** File -> Add to Dock.
 - **Chrome/Edge:** browser menu -> Install app.

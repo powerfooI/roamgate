@@ -28,13 +28,13 @@ lockfile changes together.
 On a fresh checkout, run `bun run typecheck` once to generate the web assets that
 process-level tests need. Then iterate with focused checks:
 
-| Check | Command |
-| --- | --- |
-| Format | `bun run format <paths...>` or `bun run format:check` |
-| Types | `bun run typecheck:quick` (no asset rebuild) |
-| Lint | `bun run lint` (Oxlint; rules in `.oxlintrc.json`) |
-| Tests | `bun test <path>`, `bun run test` (serial), or `bun run test:quick` (four workers) |
-| Frontend build | `bun run build:web` (required for frontend changes) |
+| Check          | Command                                                                            |
+| -------------- | ---------------------------------------------------------------------------------- |
+| Format         | `bun run format <paths...>` or `bun run format:check`                              |
+| Types          | `bun run typecheck:quick` (no asset rebuild)                                       |
+| Lint           | `bun run lint` (Oxlint; rules in `.oxlintrc.json`)                                 |
+| Tests          | `bun test <path>`, `bun run test` (serial), or `bun run test:quick` (four workers) |
+| Frontend build | `bun run build:web` (required for frontend changes)                                |
 
 The pre-commit hook runs lint and `bun run typecheck:bun` (Bun's native
 `bun check` across the root, web, and server projects). Let it run instead of
@@ -50,7 +50,6 @@ and the [release policy](AGENTS.md#release-notes).
 
 Automated tests do not launch browsers. For affected UI, check against a real
 backend and record the device/browser and results in the PR:
-
 - Dialog focus and keyboard navigation, scaled layouts, and HTML preview
   isolation (CSP, direct navigation).
 - iOS Safari and Android Chrome: keyboard open/close, IME, selecting while output
@@ -86,7 +85,6 @@ bun test server/src/connections/windows-ssh-live.test.ts
   Nothing auto-merges.
 
 When reviewing updates:
-
 - Review `@xterm/xterm` and `@xterm/addon-fit` together and check terminal
   rendering, sizing, input, and touch scrolling.
 - CodeMirror/Lezer, diff2html/highlight.js, and Radix/cmdk are coupled: check the
@@ -101,13 +99,13 @@ When reviewing updates:
 
 ## Style Organization
 
-| Path under `web/src/` | Responsibility |
-| --- | --- |
-| `styles/tokens.css` | Theme variables (`:root`, `data-theme`, `data-accent`) |
-| `styles/base.css` | Resets and shared primitives: modals, forms, badges, panels |
-| `styles/vendor.css` | Shared syntax/diff overrides |
-| `styles/layout/*.css` | App-shell regions, imported once by `App.tsx` |
-| `components/<Name>.css` | Component styles, imported and deleted with the component |
+| Path under `web/src/`   | Responsibility                                              |
+| ----------------------- | ----------------------------------------------------------- |
+| `styles/tokens.css`     | Theme variables (`:root`, `data-theme`, `data-accent`)      |
+| `styles/base.css`       | Resets and shared primitives: modals, forms, badges, panels |
+| `styles/vendor.css`     | Shared syntax/diff overrides                                |
+| `styles/layout/*.css`   | App-shell regions, imported once by `App.tsx`               |
+| `components/<Name>.css` | Component styles, imported and deleted with the component   |
 
 Prefix classes with the component name and keep media queries beside their
 rules. Lazily loaded features must import the shared styles they need rather

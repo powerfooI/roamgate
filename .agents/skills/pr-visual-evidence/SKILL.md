@@ -1,10 +1,7 @@
 ---
+
 name: pr-visual-evidence
-description:
-  'Create requested PR visual evidence for Roamgate: a leading screenshot and
-  scripted video for animation, transitions, or multi-step interactions. Use
-  when the user requests PR screenshots, before/after, video evidence, or visual
-  guidance. UI changes alone do not require capture or upload.'
+description: "Create requested PR visual evidence for Roamgate: a leading screenshot and scripted video for animation, transitions, or multi-step interactions. Use when the user requests PR screenshots, before/after, video evidence, or visual guidance. UI changes alone do not require capture or upload."
 ---
 
 # Roamgate PR visual evidence
@@ -24,12 +21,12 @@ Read the diff and identify the visible behavior to prove. A backend, CI, docs,
 or tooling change that renders identically needs no image. For visible changes,
 choose the smallest relevant case:
 
-| Roamgate change | Evidence |
-| --- | --- |
-| Layout, theme, copy, file preview or diff rendering | Focused screenshot; labeled before/after when comparison helps. |
-| Dialog, menu, inspector resize, terminal composer or multi-step workflow | Screenshot of the result plus a scripted video of the interaction. |
-| Terminal streaming, connection recovery, agent history or Ranger state | Real Herdr-backed state; preserve relevant loading and reconnect behavior. |
-| Mobile layout or keyboard behavior | Narrow viewport capture; real device verification for platform keyboard, IME, and touch behavior. |
+| Roamgate change                                                          | Evidence                                                                                          |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Layout, theme, copy, file preview or diff rendering                      | Focused screenshot; labeled before/after when comparison helps.                                   |
+| Dialog, menu, inspector resize, terminal composer or multi-step workflow | Screenshot of the result plus a scripted video of the interaction.                                |
+| Terminal streaming, connection recovery, agent history or Ranger state   | Real Herdr-backed state; preserve relevant loading and reconnect behavior.                        |
+| Mobile layout or keyboard behavior                                       | Narrow viewport capture; real device verification for platform keyboard, IME, and touch behavior. |
 
 Keep evidence on the PR's current revision. Record the commit, any uncommitted
 changes, route, browser, viewport, and scenario with the local artifacts. Do not

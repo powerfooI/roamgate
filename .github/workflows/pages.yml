@@ -1,71 +1,71 @@
 name: Deploy Pages
 
 on:
-    push:
-        branches: [main]
-        paths:
-            - site/**
-            - docs/TUTORIAL.md
-            - docs/images/**
-            - scripts/build-pages.ts
-            - scripts/pages-*.test.ts
-            - .github/workflows/pages.yml
-    workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - docs/TUTORIAL.md
+      - docs/images/**
+      - scripts/build-pages.ts
+      - scripts/pages-*.test.ts
+      - .github/workflows/pages.yml
+  workflow_dispatch:
 
 permissions:
-    contents: read
+  contents: read
 
 concurrency:
-    group: pages
-    cancel-in-progress: true
+  group: pages
+  cancel-in-progress: true
 
 jobs:
-    build:
-        permissions:
-            contents: read
-            pages: write
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-              with:
-                  persist-credentials: false
-            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-              with:
-                  bun-version: "1.4.4"
-                  no-cache: true
-            - name: Verify live Roamgate installer
-              run: |
-                  set -eu
-                  status=$(curl --fail --silent --show-error --location \
-                    --proto '=https' --proto-redir '=https' \
-                    --connect-timeout 10 --max-time 60 --output /dev/null \
-                    --write-out '%{http_code}' \
-                    https://github.com/powerfooI/roamgate/releases/latest/download/install-roamgate.sh) \
-                    && [ "$status" = 200 ] \
-                    || { echo 'Publish a Roamgate release as Latest before deploying Pages.' >&2; exit 1; }
-            - name: Configure Pages
-              uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-              with:
-                  enablement: true
-            - name: Test tutorial rendering and site references
-              run: bun test scripts/pages-content.test.ts scripts/pages-workflow.test.ts
-            - name: Build landing page and tutorial
-              run: bun run build:site
-            - name: Upload Pages artifact
-              uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-              with:
-                  path: .pages-dist
+  build:
+    permissions:
+      contents: read
+      pages: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.4"
+          no-cache: true
+      - name: Verify live Roamgate installer
+        run: |
+          set -eu
+          status=$(curl --fail --silent --show-error --location \
+            --proto '=https' --proto-redir '=https' \
+            --connect-timeout 10 --max-time 60 --output /dev/null \
+            --write-out '%{http_code}' \
+            https://github.com/powerfooI/roamgate/releases/latest/download/install-roamgate.sh) \
+            && [ "$status" = 200 ] \
+            || { echo 'Publish a Roamgate release as Latest before deploying Pages.' >&2; exit 1; }
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+        with:
+          enablement: true
+      - name: Test tutorial rendering and site references
+        run: bun test scripts/pages-content.test.ts scripts/pages-workflow.test.ts
+      - name: Build landing page and tutorial
+        run: bun run build:site
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: .pages-dist
 
-    deploy:
-        permissions:
-            pages: write
-            id-token: write
-        environment:
-            name: github-pages
-            url: ${{ steps.deployment.outputs.page_url }}
-        runs-on: ubuntu-latest
-        needs: build
-        steps:
-            - name: Deploy to GitHub Pages
-              id: deployment
-              uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+  deploy:
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

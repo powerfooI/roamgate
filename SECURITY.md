@@ -15,7 +15,6 @@ GitHub-profile contact address.
 **Anyone who can use the UI has the Roamgate user's full authority:**
 terminals, repository hooks, session data, and file uploads/deletions. Roamgate
 is single-user administration, not a sandbox or multi-user permission system.
-
 - The default bind is `127.0.0.1`. **Login is required, including on
   loopback.** The only exception is `NODE_ENV=development` bound to
   `127.0.0.1`, `localhost`, or `::1` (what `bun run dev:server` uses). Never
@@ -54,7 +53,6 @@ including password sessions.
 ### Access and session safety
 
 **Do not expose Roamgate directly to the public internet.** For remote access:
-
 - Prefer `ROAMGATE_PASSWORD` over `--password`, which is visible in process
   arguments.
 - Use [native HTTPS](docs/DEPLOYMENT.md#native-https), an HTTPS proxy, or a

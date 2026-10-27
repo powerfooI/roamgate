@@ -51,10 +51,10 @@ Send `history_version: 2` to `agent_history.get`, optionally with the last
 accepted `cursor: { epoch, revision }`. Legacy callers get conversation-only
 `messages`.
 
-| Mode | Response |
-| --- | --- |
-| `snapshot` | `entries` replaces the window. Returned for a missing session, an invalid or expired cursor, a replaced connection, eviction, or file replacement/truncation. |
-| `delta` | `base_revision`, `upserts`, `removed`, and the full ID `order` only when membership or order changed. An unchanged reply keeps the revision with empty changes. |
+| Mode       | Response                                                                                                                                                        |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `snapshot` | `entries` replaces the window. Returned for a missing session, an invalid or expired cursor, a replaced connection, eviction, or file replacement/truncation.   |
+| `delta`    | `base_revision`, `upserts`, `removed`, and the full ID `order` only when membership or order changed. An unchanged reply keeps the revision with empty changes. |
 
 The window holds the latest **200 conversation entries** (including errors);
 associated tool calls do not count. Raw and ATIF exports stay complete. Entry IDs

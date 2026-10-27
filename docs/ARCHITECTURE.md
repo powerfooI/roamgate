@@ -29,7 +29,6 @@ missed changes but is not a replayable event log.
 `ConnectionManager` owns the shared profiles and one `ConnectionRuntime` per
 profile. Each runtime owns its transport, viewers, subscriptions, caches, and
 reconnect lifecycle. Disconnecting stops the runtime and SSH tunnel, never Herdr.
-
 - Every downstream request carries a connection ID and runtime generation and
   holds a lease on a ready runtime. Replies, events, and frames carry the same
   identity; mismatched or stale identities fail without fallback.
@@ -69,12 +68,12 @@ unknown fails closed. Each viewer crops its pane from the shared tab surface.
 
 Capabilities are negotiated per terminal socket and rechecked at dispatch:
 
-| Capability | Contract |
-| --- | --- |
-| `pane.focus` | Required to attach; no legacy fallback without it. |
-| `pane.scroll` | Gates explicit history scrolling. |
-| `tab.create`, `workspace.create` | Gate creation from the existing endpoint. |
-| `health_check` | Enables ping/pong. |
+| Capability                       | Contract                                           |
+| -------------------------------- | -------------------------------------------------- |
+| `pane.focus`                     | Required to attach; no legacy fallback without it. |
+| `pane.scroll`                    | Gates explicit history scrolling.                  |
+| `tab.create`, `workspace.create` | Gate creation from the existing endpoint.          |
+| `health_check`                   | Enables ping/pong.                                 |
 
 `surface_delta` and `surface_reuse` are requested by default and stored per
 connection (`settings.terminal_transport`). Changing them makes viewers reattach
@@ -88,7 +87,6 @@ shown.
 `terminal.attach` sends the pane's `cols`/`rows` and optionally the tab's
 `surface_cols`/`surface_rows`. Terminals cancel the UI's CSS zoom and scale the
 xterm font instead, so mouse and IME coordinates stay correct.
-
 - Input waits for readiness, revalidates its lease, and is never replayed into a
   replacement terminal.
 - Endpoint keyboard input uses basic CSI-u for ambiguous modified keys
@@ -236,7 +234,6 @@ The bridge runs one Pi Durable assistant service, independent of the selected
 connection and shared by all authenticated browsers through bridge-global
 `bridge.assistant.*` RPC and revisioned snapshot pushes. Reconnecting fetches
 state; sends are never replayed.
-
 - **Tools** are defined in `server/src/assistant/tools.ts` and run through
   `callWorkspaceTool` against the turn's approved scope. Pi's built-in tools,
   extensions, skills, and project instructions are disabled, and workspace
@@ -320,10 +317,10 @@ terminal frames are dropped.
 State-changing HTTP endpoints need authentication plus a marker header; the
 push and settings endpoints also reject cross-site requests:
 
-| Endpoint | Required header |
-| --- | --- |
-| Updates | `x-roamgate-update: 1` (legacy `x-herdr-gui-update: 1` is accepted; the new header wins) |
-| Web Push subscriptions | `x-roamgate-push: 1`, JSON body |
-| Instance settings | `x-roamgate-settings`, JSON body |
+| Endpoint               | Required header                                                                          |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| Updates                | `x-roamgate-update: 1` (legacy `x-herdr-gui-update: 1` is accepted; the new header wins) |
+| Web Push subscriptions | `x-roamgate-push: 1`, JSON body                                                          |
+| Instance settings      | `x-roamgate-settings`, JSON body                                                         |
 
 Login bodies are limited to 16 KiB (`413`). Headers never replace login.

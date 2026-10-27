@@ -19,7 +19,6 @@ Browser / PWA -> Roamgate (HTTP + WebSocket) -> Herdr -> shell / agent
 Herdr owns the terminals, Roamgate is the browser UI, and agents remain CLIs.
 Roamgate does not provide models or install agents. Closing the browser leaves
 terminals running; sleeping or shutting down the host stops them.
-
 1. Start Herdr with a trusted project open ([herdr.dev](https://herdr.dev)), or
    run `roamgate herdr setup` after [installing Roamgate](./DEPLOYMENT.md#install-a-release).
 2. Run `roamgate` (`roamgate.exe` on Windows) on the same computer and leave it
@@ -38,12 +37,12 @@ first.
 
 ![Desktop workspace with project navigation, terminals, and changed files](./images/roamgate-desktop-changes.png)
 
-| Object | Meaning |
-| --- | --- |
+| Object    | Meaning                                            |
+| --------- | -------------------------------------------------- |
 | Workspace | A working environment, usually a project directory |
-| Tab | A layout within a workspace |
-| Pane | One terminal in a tab |
-| Worktree | A separate Git checkout directory and branch |
+| Tab       | A layout within a workspace                        |
+| Pane      | One terminal in a tab                              |
+| Worktree  | A separate Git checkout directory and branch       |
 
 **Splitting panes does not isolate files.** Use worktrees for parallel edits.
 
@@ -122,18 +121,17 @@ Save wanted results before removing a worktree; a
 
 Set up [Tailscale + Serve](#tailscale) first: `127.0.0.1` on a phone means the
 phone itself.
-
 1. Open Roamgate's HTTPS URL on your phone, log in, and select your pane.
 2. Use the floating shortcuts for Ctrl and arrow keys, and open Changes to review
    the diff.
 3. Adjust **Configuration > Appearance** scale or terminal font size if needed,
    then install the PWA:
 
-| Browser | Install action |
-| --- | --- |
+| Browser            | Install action             |
+| ------------------ | -------------------------- |
 | iPhone/iPad Safari | Share > Add to Home Screen |
-| macOS Safari 17+ | File > Add to Dock |
-| Chrome/Edge | Browser menu > Install app |
+| macOS Safari 17+   | File > Add to Dock         |
+| Chrome/Edge        | Browser menu > Install app |
 
 **You are done when:** the home-screen icon opens your project. Install your
 Roamgate URL, not this tutorial site.
@@ -149,12 +147,12 @@ share the URL like a read-only link.
 
 <a id="networking"></a>
 
-| Goal | Route |
-| --- | --- |
-| Regular phone/computer access | [Tailscale + Serve](#tailscale) |
-| Local Roamgate controlling a remote Herdr | [SSH profile](#ssh) (Linux/macOS bridge) |
-| Another computer using a remote Roamgate | [SSH port forwarding](#ssh) |
-| Temporary access between your own computers | [Tailcat](#tailcat) |
+| Goal                                        | Route                                    |
+| ------------------------------------------- | ---------------------------------------- |
+| Regular phone/computer access               | [Tailscale + Serve](#tailscale)          |
+| Local Roamgate controlling a remote Herdr   | [SSH profile](#ssh) (Linux/macOS bridge) |
+| Another computer using a remote Roamgate    | [SSH port forwarding](#ssh)              |
+| Temporary access between your own computers | [Tailcat](#tailcat)                      |
 
 None of these need router port forwarding.
 
@@ -173,7 +171,6 @@ None of these need router port forwarding.
 
 Tailscale connects your devices privately; Serve gives Roamgate an HTTPS address
 reachable only inside your tailnet.
-
 1. Install [Tailscale](https://tailscale.com/download) on both devices, join the
    same tailnet, and check `tailscale status`.
 2. [Restrict access](https://tailscale.com/docs/features/access-control) to the
@@ -219,7 +216,6 @@ loopback.
 
 **Option A: local Roamgate, remote Herdr** (needs a Linux/macOS bridge; the
 remote host can be Unix or Windows).
-
 1. Make sure plain `ssh` works non-interactively, put keys, ports, and jump hosts
    in `~/.ssh/config` (for example alias `workbox`), and start Herdr remotely.
 2. In Roamgate's connection selector, add an SSH profile with destination
@@ -253,7 +249,6 @@ host's credential. Ctrl+C stops forwarding.
 Tailscale tool that connects two computers without a tailnet account. It has no
 access policies and this project has not verified it end to end. Use Tailscale
 for phones.
-
 1. Run Roamgate at `127.0.0.1:8787` on your work computer and check it locally.
 2. In another terminal there, run:
 
@@ -280,7 +275,6 @@ address as a secret: it contains a key. See Tailcat's
 <a id="troubleshooting"></a>
 
 Check in order:
-
 1. On the Roamgate host, run `curl -fsS http://127.0.0.1:8787/healthz`
    (`curl.exe` in PowerShell). If refused, check the process, port, or service.
 2. Open the page locally. If terminals fail, check Herdr, the selected
@@ -290,14 +284,14 @@ Check in order:
 4. If typing fails, check the selected pane and that your proxy supports
    WebSockets.
 
-| Symptom | First check |
-| --- | --- |
-| Phone cannot reach `localhost` | Use Serve's HTTPS hostname. |
-| Password set but no login page | Try a private window; an existing cookie or token URL may have logged you in. |
-| Login returns `429` | Wait for `Retry-After`; clients behind one proxy share [login limits](../SECURITY.md#trust-model). |
-| Address already in use | A service or plugin may already run Roamgate. |
-| SSH history is empty | Check [session lookup limits](../FEATURES.md#agent-awareness-and-session-inspection). |
-| Clipboard or PWA restricted | Use trusted HTTPS without certificate warnings. |
+| Symptom                        | First check                                                                                        |
+| ------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Phone cannot reach `localhost` | Use Serve's HTTPS hostname.                                                                        |
+| Password set but no login page | Try a private window; an existing cookie or token URL may have logged you in.                      |
+| Login returns `429`            | Wait for `Retry-After`; clients behind one proxy share [login limits](../SECURITY.md#trust-model). |
+| Address already in use         | A service or plugin may already run Roamgate.                                                      |
+| SSH history is empty           | Check [session lookup limits](../FEATURES.md#agent-awareness-and-session-inspection).              |
+| Clipboard or PWA restricted    | Use trusted HTTPS without certificate warnings.                                                    |
 
 `roamgate doctor` checks most of this automatically. See
 [Deployment](./DEPLOYMENT.md) for tokens, services, and debug logs. Never

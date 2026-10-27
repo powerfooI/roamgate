@@ -44,7 +44,6 @@ applications, scheduler placement and thermal changes remain uncontrolled.
 Input is a **predecoded, trusted synthetic cell grid**, not captured terminal
 contents. No live sockets, private sessions, service restarts or user settings
 are involved. Timed work is:
-
 1. Crop a pane (Bun imports production `cropFrame`).
 2. Serialize the content-identity fields used by `onSurface`, including cells.
 3. Encode a full ANSI repaint (Bun imports production `frameToAnsi`).
@@ -74,7 +73,6 @@ Sparse frames still traverse and repaint the grid in both implementations.
 ## Results and interpretation
 
 Each fresh output directory contains:
-
 - `metadata.json`: compiler/runtime/host identity, settings and source/fixture hashes.
 - `verification.json` and `fixtures.json`: byte-equivalence evidence and exact inputs.
 - `samples.jsonl`: one raw record per process, preserved as runs complete.

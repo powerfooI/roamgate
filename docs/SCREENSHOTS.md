@@ -28,10 +28,10 @@ mkdir -p /tmp/roamgate-demo
 git clone --branch main https://github.com/powerfooI/northstar-demo.git /tmp/roamgate-demo/northstar
 ```
 
-| Scene | Initial state | Use |
-| --- | --- | --- |
-| Baseline | Clean `main` clone | Give a real agent the task from the README. |
-| Review | `main` plus the example implementation as unstaged changes | Files, diff, preview, annotation, and PR shots. |
+| Scene    | Initial state                                              | Use                                             |
+| -------- | ---------------------------------------------------------- | ----------------------------------------------- |
+| Baseline | Clean `main` clone                                         | Give a real agent the task from the README.     |
+| Review   | `main` plus the example implementation as unstaged changes | Files, diff, preview, annotation, and PR shots. |
 
 For the review scene, run this **only in the fresh clone**:
 
@@ -152,17 +152,17 @@ For the annotation shot, add `Keep the status filter combined with title search.
 Clearing both filters should restore all six tasks.` on new line 27 of
 `tasks.ts`, pin the review panel, and leave the comment as a draft.
 
-| Asset stem | Layout and selection | Ready condition |
-| --- | --- | --- |
-| `roamgate-desktop-changes` | Nested sidebar; Pi in Implementation above Checks; Inspector right (~55%); Working tree, `tasks.ts` | 3+ workspaces and 2+ agent rows visible; Pi running; five files loaded; tests finished. |
-| `roamgate-desktop-files` | Nested sidebar; expanded Inspector; Files, `index.html` Preview scrolled to Release checklist | Styles loaded; heading, filters, and all six cards visible. |
-| `roamgate-desktop-annotations` | Nested sidebar; `tasks.ts` unified diff with the draft | Correct line and full comment visible. |
-| `roamgate-desktop-history` | Agent History, all types enabled | The real task and its test tool call visible. |
-| `roamgate-desktop-ranger` | Ranger pinned beside Northstar | A real answer with sources, using only demo workspaces. |
-| `roamgate-mobile-changes` | Mobile Changes, Working tree, `tasks.ts` | Key changed function readable. |
-| `roamgate-mobile-terminal` | Mobile Checks pane with Composer and shortcuts | Real Git status and test summary visible. |
-| `roamgate-mobile-files` | Mobile Files, `index.html` Preview | Heading, filters, and first card readable. |
-| `roamgate-mobile-ranger` | Mobile Ranger chat | The same real conversation with input and model controls. |
+| Asset stem                     | Layout and selection                                                                                | Ready condition                                                                         |
+| ------------------------------ | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `roamgate-desktop-changes`     | Nested sidebar; Pi in Implementation above Checks; Inspector right (~55%); Working tree, `tasks.ts` | 3+ workspaces and 2+ agent rows visible; Pi running; five files loaded; tests finished. |
+| `roamgate-desktop-files`       | Nested sidebar; expanded Inspector; Files, `index.html` Preview scrolled to Release checklist       | Styles loaded; heading, filters, and all six cards visible.                             |
+| `roamgate-desktop-annotations` | Nested sidebar; `tasks.ts` unified diff with the draft                                              | Correct line and full comment visible.                                                  |
+| `roamgate-desktop-history`     | Agent History, all types enabled                                                                    | The real task and its test tool call visible.                                           |
+| `roamgate-desktop-ranger`      | Ranger pinned beside Northstar                                                                      | A real answer with sources, using only demo workspaces.                                 |
+| `roamgate-mobile-changes`      | Mobile Changes, Working tree, `tasks.ts`                                                            | Key changed function readable.                                                          |
+| `roamgate-mobile-terminal`     | Mobile Checks pane with Composer and shortcuts                                                      | Real Git status and test summary visible.                                               |
+| `roamgate-mobile-files`        | Mobile Files, `index.html` Preview                                                                  | Heading, filters, and first card readable.                                              |
+| `roamgate-mobile-ranger`       | Mobile Ranger chat                                                                                  | The same real conversation with input and model controls.                               |
 
 For Ranger, connect a model in the capture environment, allow only the demo
 workspaces, and ask it to summarize Northstar's uncommitted changes and test

@@ -70,7 +70,6 @@ Herdr 0.9.1+ resolves URLs that wrap across lines. See
 
 Open **Files**, **Changes**, **Commits**, or **Agent History** from the
 Inspector button, shortcuts, or workspace/agent menus.
-
 - Dock right or bottom, resize, or expand. Narrow layouts use drill-down views.
 - Single-click opens a temporary preview tab; double-click keeps it. Open files
   are restored per connection and checkout.
@@ -161,7 +160,6 @@ See [History synchronization](docs/HISTORY.md).
 Ranger is an **experimental** assistant that answers questions about your
 workspaces and can manage them. Open it from the topbar, the mobile **⋮** menu,
 or its shortcut.
-
 - **Setup:** connect a model provider in **Settings** and choose which
   workspaces Ranger may access (none by default). See
   [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
@@ -191,7 +189,6 @@ has the same [full authority](SECURITY.md#trust-model) as any Roamgate user.
 ## Git Worktree Lifecycle
 
 Open **Worktree Lifecycle** from a workspace menu or the command menu to:
-
 - Create a worktree from `origin`'s freshly fetched default branch without
   touching the current checkout. Creation stops if the remote is unavailable.
 - See each worktree's path, branch status, uncommitted changes, and PR/MR badge.
@@ -230,7 +227,6 @@ conflicts are aborted, and nothing is ever pushed.
 ## Review Annotations
 
 Open **Annotations** independently of the Inspector.
-
 1. Comment on diff lines, source lines, rendered Markdown, or selected terminal
    text.
 2. Edit and reorder comments, then copy them or pre-fill an agent's input.
@@ -338,37 +334,37 @@ On desktop, press `Cmd+Shift+K` (`Ctrl+Alt+Shift+K` on Windows/Linux) or choose
 **Menu > Configuration > Behavior > Keyboard shortcuts** (up to three per
 action, with JSON import/export).
 
-| Action | macOS / iOS | Windows / Linux / Android |
-| --- | --- | --- |
-| Command menu | `Cmd+K` | `Ctrl+Alt+K` |
-| Shortcut cheat sheet (desktop) | `Cmd+Shift+K` | `Ctrl+Alt+Shift+K` |
-| Sidebar | `Cmd+B` | `Ctrl+Alt+B` |
-| Workspace Inspector | `Cmd+Shift+B` | `Ctrl+Alt+Shift+B` |
-| Expand / restore Inspector (desktop) | `Cmd+Option+Enter` | `Ctrl+Alt+Shift+Enter` |
-| Annotations | `Cmd+Option+A` | `Ctrl+Alt+A` |
-| Ranger | `Cmd+Option+Shift+A` | `Ctrl+Alt+Shift+A` |
-| Zen mode (desktop) | `Cmd+Shift+Z` | `Ctrl+Alt+Z` |
-| Recent pane switcher | `Ctrl+Tab` | `Ctrl+Alt+J` |
-| Search panes | `Alt+K` | `Alt+K` |
-| Focus terminal input (desktop) | ``Ctrl+` `` | ``Ctrl+` `` |
-| Create / close tab or pane | `Cmd+T` / `Cmd+W` | `Ctrl+Alt+T` / `Ctrl+Alt+W` |
-| Previous / next tab | `Cmd+Option+Left/Right` | `Alt+Shift+Left/Right` |
-| Focus neighboring pane | `Cmd+Ctrl+Arrow` | `Ctrl+Shift+Arrow` |
-| Move pane (swap with neighbor) | `Cmd+Ctrl+Shift+Arrow` | `Ctrl+Alt+Shift+Arrow` |
-| Split right / down | `Cmd+D` / `Cmd+Shift+D` | `Ctrl+Alt+D` / `Ctrl+Alt+Shift+D` |
-| Zoom / restore pane | `Cmd+Shift+Enter` | `Ctrl+Alt+Enter` |
-| Numbered tab | `Ctrl+1…9` | `Ctrl+Alt+1…9` |
-| Numbered command menu action | `Option+1…9` | `Alt+1…9` |
-| Workspaces | `Ctrl+Shift+W` | `Ctrl+Alt+O` |
-| File Explorer | `Cmd+Shift+E` | `Ctrl+Alt+E` |
-| Diff Viewer | `Ctrl+Shift+G` | `Ctrl+Alt+G` |
-| Agent history | `Cmd+Shift+H` | `Ctrl+Alt+H` |
-| Search raw preview / diff | `Cmd+F` | `Ctrl+F` |
-| Send composer / add review comment / pre-fill agent (focused surface) | `Cmd+Enter` | `Ctrl+Enter` |
-| Copy review feedback (in Annotations) | `Cmd+Shift+C` | `Ctrl+Shift+C` |
-| Copy terminal selection | `Cmd+C` | `Ctrl+Shift+C` / `Ctrl+Insert` |
-| Terminal paste | `Cmd+V` | `Ctrl+V` (also `Ctrl+Shift+V` on Linux) |
-| Open terminal links / file paths | `Cmd+Click` | `Ctrl+Click` |
+| Action                                                                | macOS / iOS             | Windows / Linux / Android               |
+| --------------------------------------------------------------------- | ----------------------- | --------------------------------------- |
+| Command menu                                                          | `Cmd+K`                 | `Ctrl+Alt+K`                            |
+| Shortcut cheat sheet (desktop)                                        | `Cmd+Shift+K`           | `Ctrl+Alt+Shift+K`                      |
+| Sidebar                                                               | `Cmd+B`                 | `Ctrl+Alt+B`                            |
+| Workspace Inspector                                                   | `Cmd+Shift+B`           | `Ctrl+Alt+Shift+B`                      |
+| Expand / restore Inspector (desktop)                                  | `Cmd+Option+Enter`      | `Ctrl+Alt+Shift+Enter`                  |
+| Annotations                                                           | `Cmd+Option+A`          | `Ctrl+Alt+A`                            |
+| Ranger                                                                | `Cmd+Option+Shift+A`    | `Ctrl+Alt+Shift+A`                      |
+| Zen mode (desktop)                                                    | `Cmd+Shift+Z`           | `Ctrl+Alt+Z`                            |
+| Recent pane switcher                                                  | `Ctrl+Tab`              | `Ctrl+Alt+J`                            |
+| Search panes                                                          | `Alt+K`                 | `Alt+K`                                 |
+| Focus terminal input (desktop)                                        | ``Ctrl+` ``             | ``Ctrl+` ``                             |
+| Create / close tab or pane                                            | `Cmd+T` / `Cmd+W`       | `Ctrl+Alt+T` / `Ctrl+Alt+W`             |
+| Previous / next tab                                                   | `Cmd+Option+Left/Right` | `Alt+Shift+Left/Right`                  |
+| Focus neighboring pane                                                | `Cmd+Ctrl+Arrow`        | `Ctrl+Shift+Arrow`                      |
+| Move pane (swap with neighbor)                                        | `Cmd+Ctrl+Shift+Arrow`  | `Ctrl+Alt+Shift+Arrow`                  |
+| Split right / down                                                    | `Cmd+D` / `Cmd+Shift+D` | `Ctrl+Alt+D` / `Ctrl+Alt+Shift+D`       |
+| Zoom / restore pane                                                   | `Cmd+Shift+Enter`       | `Ctrl+Alt+Enter`                        |
+| Numbered tab                                                          | `Ctrl+1…9`              | `Ctrl+Alt+1…9`                          |
+| Numbered command menu action                                          | `Option+1…9`            | `Alt+1…9`                               |
+| Workspaces                                                            | `Ctrl+Shift+W`          | `Ctrl+Alt+O`                            |
+| File Explorer                                                         | `Cmd+Shift+E`           | `Ctrl+Alt+E`                            |
+| Diff Viewer                                                           | `Ctrl+Shift+G`          | `Ctrl+Alt+G`                            |
+| Agent history                                                         | `Cmd+Shift+H`           | `Ctrl+Alt+H`                            |
+| Search raw preview / diff                                             | `Cmd+F`                 | `Ctrl+F`                                |
+| Send composer / add review comment / pre-fill agent (focused surface) | `Cmd+Enter`             | `Ctrl+Enter`                            |
+| Copy review feedback (in Annotations)                                 | `Cmd+Shift+C`           | `Ctrl+Shift+C`                          |
+| Copy terminal selection                                               | `Cmd+C`                 | `Ctrl+Shift+C` / `Ctrl+Insert`          |
+| Terminal paste                                                        | `Cmd+V`                 | `Ctrl+V` (also `Ctrl+Shift+V` on Linux) |
+| Open terminal links / file paths                                      | `Cmd+Click`             | `Ctrl+Click`                            |
 
 On Linux/Android, new tab is `Ctrl+Alt+Shift+T`, split right is
 `Ctrl+Alt+Shift+D`, and split down is `Ctrl+Alt+Shift+S`, avoiding

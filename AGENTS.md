@@ -20,7 +20,6 @@ Install all Bun workspace dependencies from the repository root with
 `bun install --frozen-lockfile` (Bun 1.4.4 or newer). The root `bun.lock` is the
 only lockfile; shared TypeScript, Bun types, and lint/format tooling belong in
 the root manifest. Keep runtime dependencies in their owning workspace.
-
 - `bun run dev:web`: start the Vite frontend on port 5173.
 - `bun run dev:server`: start the Bun bridge with hot reload.
 - `bun run build`: build frontend assets and the default standalone server binary.
@@ -105,7 +104,6 @@ from the release notes. Leave detailed records in PRs, external artifacts, or
 Git history.
 
 Stable releases use separate prepare and publish phases:
-
 1. Run the **Prepare Release** workflow with `X.Y.Z` or
    `patch`/`minor`/`major`. It updates the three `package.json` versions plus
    `herdr-plugin.toml` and opens a normal release PR.
