@@ -55,6 +55,8 @@ export function remoteTerminalCleanupScript(retentionMinutes: number) {
   return `set -eu
 umask 077
 case "\${TMPDIR:-/tmp}" in /*) temp_root="\${TMPDIR:-/tmp}" ;; *) temp_root=/tmp ;; esac
+# macOS's TMPDIR ends with a slash: keep the paths sent to agents clean.
+while [ "\${temp_root%/}" != "$temp_root" ]; do temp_root=\${temp_root%/}; done
 root="$temp_root/roamgate-uploads-$(id -u)"
 [ ! -L "$root" ] || exit 1
 mkdir -m 700 -p "$root"

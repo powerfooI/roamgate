@@ -1,11 +1,13 @@
 /**
  * An image Roamgate uploaded for a message: the composer puts its path in the
- * text (see terminal-upload), in the system temporary directory.
+ * text (see terminal-upload), in the system temporary directory. A remote
+ * host's path may double a slash (macOS's TMPDIR ends with one): uploads made
+ * before the script dropped it still show as images.
  */
 // A whole path: it starts a word (or follows an opening quote or bracket)
 // and ends one (or comes before punctuation).
 const UPLOADED_IMAGE =
-  /(?<![^\s"'`(<[])(?:[a-z]:)?[\\/](?:[^\s\\/]+[\\/])*roamgate-uploads-[^\s\\/]+[\\/](?:[^\s\\/]+[\\/])*[^\s\\/]+\.(?:png|jpe?g|gif|webp|avif|bmp)(?=[.,;:!?]*(?:[\s)\]>"'`]|$))/gi;
+  /(?<![^\s"'`(<[])(?:[a-z]:)?[\\/](?:[^\s\\/]+[\\/]+)*roamgate-uploads-[^\s\\/]+[\\/]+(?:[^\s\\/]+[\\/]+)*[^\s\\/]+\.(?:png|jpe?g|gif|webp|avif|bmp)(?=[.,;:!?]*(?:[\s)\]>"'`]|$))/gi;
 
 export type MessagePiece =
   | { text: string }
