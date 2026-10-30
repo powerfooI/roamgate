@@ -46,6 +46,79 @@ describe("agent session trajectory projection", () => {
       "Hi there",
     ]);
   });
+  test.each([
+    [
+      "the original draft",
+      {
+        name: "review",
+        args: "expanded args",
+        prompt: "/skill:review this change\nplease",
+      },
+      "/skill:review this change\nplease",
+    ],
+    [
+      "legacy arguments",
+      { name: "review", args: "this change\nplease" },
+      "/skill:review this change\nplease",
+    ],
+    ["no arguments", { name: "review" }, "/skill:review"],
+  ] as const)(
+    "preserves OMP user skill prompts with %s",
+    (_label, details, expected) => {
+      const trajectory = projectAgentTrajectory("omp", sessionFile, [
+        {
+          type: "custom_message",
+          timestamp: "2026-07-07T00:00:01.000Z",
+          customType: "skill-prompt",
+          attribution: "user",
+          display: true,
+          content:
+            "<skill>Expanded instructions are not the user's draft</skill>",
+          details,
+        },
+        {
+          type: "custom_message",
+          customType: "skill-prompt",
+          attribution: "agent",
+          display: true,
+          content: "Automatically loaded skill instructions",
+          details: { name: "autoload" },
+        },
+        {
+          type: "custom_message",
+          customType: "other-extension",
+          attribution: "user",
+          content: "Extension context",
+          details: { name: "other" },
+        },
+        {
+          type: "message",
+          timestamp: "2026-07-07T00:00:02.000Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Reviewed." }],
+          },
+        },
+      ]);
+
+      expect(
+        trajectory.steps.map((step) => [step.source, step.message]),
+      ).toEqual([
+        ["user", expected],
+        ["agent", "Reviewed."],
+      ]);
+      expect(trajectory.steps[0]?.timestamp).toBe("2026-07-07T00:00:01.000Z");
+      expect(
+        historyEntriesFromTrajectory(sessionFile, trajectory).map((entry) => [
+          entry.role,
+          entry.text,
+        ]),
+      ).toEqual([
+        ["user", expected],
+        ["assistant", "Reviewed."],
+      ]);
+    },
+  );
   test("projects Codex sessions without duplicating user messages", () => {
     const trajectory = projectAgentTrajectory("codex", sessionFile, [
       {

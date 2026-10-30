@@ -558,6 +558,28 @@ function projectPiTrajectory(
       modelName = stringValue(record.modelId) || modelName;
       return;
     }
+    if (
+      agent === "omp" &&
+      type === "custom_message" &&
+      record.customType === "skill-prompt" &&
+      record.attribution === "user"
+    ) {
+      const details = isRecord(record.details) ? record.details : {};
+      const name = stringValue(details.name);
+      const args = stringValue(details.args);
+      const text =
+        stringValue(details.prompt).trim() ||
+        (name ? `/skill:${name}${args ? ` ${args}` : ""}` : "");
+      if (text) {
+        steps.push({
+          timestamp: messageTime(record, file.mtimeMs, index),
+          source: "user",
+          message: text,
+          extra: { record_type: type },
+        });
+      }
+      return;
+    }
     if (type !== "message" || !isRecord(record.message)) return;
 
     const message = record.message;

@@ -163,10 +163,24 @@ describe("Pi agent sessions", () => {
       },
     ]);
   });
-  test("returns persisted OMP execution messages in endpoint history", async () => {
+  test("returns persisted OMP skill prompts and execution messages in history and summaries", async () => {
     const path = remotePiSessionPath;
     const records = [
       { type: "session", version: 3, id: "omp-session", cwd: "/tmp/project" },
+      {
+        type: "custom_message",
+        id: "skill-1",
+        timestamp: "2026-07-24T00:00:00.000Z",
+        customType: "skill-prompt",
+        attribution: "user",
+        display: true,
+        content: "<skill>Expanded instructions</skill>",
+        details: {
+          name: "review",
+          args: "this change",
+          prompt: "/skill:review this change",
+        },
+      },
       {
         type: "message",
         id: "execution-1",
@@ -208,8 +222,13 @@ describe("Pi agent sessions", () => {
 
     if (!("mode" in history) || history.mode !== "snapshot")
       throw new Error("Expected history snapshot");
-    expect(history.entries).toHaveLength(1);
+    expect(history.entries).toHaveLength(2);
     expect(history.entries[0]).toMatchObject({
+      role: "user",
+      kind: "message",
+      text: "/skill:review this change",
+    });
+    expect(history.entries[1]).toMatchObject({
       role: "tool",
       kind: "tool_result",
       tool_name: "bash",
@@ -219,11 +238,21 @@ describe("Pi agent sessions", () => {
     const entry = await handlers.readEntry({
       pane_id: "p1",
       agent: "omp",
-      entry_id: history.entries[0]!.id,
+      entry_id: history.entries[1]!.id,
     });
     expect(entry.text).toBe(
       "Ran `false`\n\nOutput:\nfailure-output\n\nCommand exited with code 1",
     );
+    const summary = await handlers.readSummary({
+      pane_id: "p1",
+      agent: "omp",
+      include_trajectory: true,
+    });
+    expect(summary.stats.turns).toBe(1);
+    expect(summary.trajectory?.steps[0]).toMatchObject({
+      source: "user",
+      message: "/skill:review this change",
+    });
   });
 
   test("includes Pi statistics and ATIF in Session Inspect", async () => {
