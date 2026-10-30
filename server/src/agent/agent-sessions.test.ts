@@ -163,6 +163,68 @@ describe("Pi agent sessions", () => {
       },
     ]);
   });
+  test("returns persisted OMP execution messages in endpoint history", async () => {
+    const path = remotePiSessionPath;
+    const records = [
+      { type: "session", version: 3, id: "omp-session", cwd: "/tmp/project" },
+      {
+        type: "message",
+        id: "execution-1",
+        timestamp: "2026-07-24T00:00:01.000Z",
+        message: {
+          role: "bashExecution",
+          command: "false",
+          output: "failure-output",
+          exitCode: 1,
+          cancelled: false,
+          timestamp: 1,
+        },
+      },
+    ];
+    const handlers = createAgentSessionHandlers({
+      herdrCall: async () => ({
+        agent: {
+          agent: "omp",
+          workspace_id: "w1",
+          tab_id: "t1",
+          cwd: "/tmp/project",
+          agent_session: {
+            source: "herdr:omp",
+            agent: "omp",
+            kind: "path",
+            value: path,
+          },
+        },
+      }),
+      files: remotePiFiles(
+        `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+      ),
+    });
+    const history = await handlers.readHistory({
+      pane_id: "p1",
+      agent: "omp",
+      history_version: 2,
+    });
+
+    if (!("mode" in history) || history.mode !== "snapshot")
+      throw new Error("Expected history snapshot");
+    expect(history.entries).toHaveLength(1);
+    expect(history.entries[0]).toMatchObject({
+      role: "tool",
+      kind: "tool_result",
+      tool_name: "bash",
+      is_error: true,
+      text: "",
+    });
+    const entry = await handlers.readEntry({
+      pane_id: "p1",
+      agent: "omp",
+      entry_id: history.entries[0]!.id,
+    });
+    expect(entry.text).toBe(
+      "Ran `false`\n\nOutput:\nfailure-output\n\nCommand exited with code 1",
+    );
+  });
 
   test("includes Pi statistics and ATIF in Session Inspect", async () => {
     const path = await createPiSession();

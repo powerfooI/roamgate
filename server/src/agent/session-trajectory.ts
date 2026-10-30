@@ -599,6 +599,51 @@ function projectPiTrajectory(
       });
       return;
     }
+    if (role === "bashExecution" || role === "pythonExecution") {
+      const isBash = role === "bashExecution";
+      const command = stringValue(message.command);
+      const code = stringValue(message.code);
+      const output = toolOutputText(message.output);
+      const exitCode =
+        typeof message.exitCode === "number" ? message.exitCode : undefined;
+      const cancelled = message.cancelled === true;
+      const execution = isBash ? "Command" : "Execution";
+      const failed = cancelled || (exitCode !== undefined && exitCode !== 0);
+      const status = cancelled
+        ? `${execution} cancelled`
+        : exitCode !== undefined && exitCode !== 0
+          ? `${execution} exited with code ${exitCode}`
+          : "";
+      const sourceText = isBash
+        ? `Ran \`${command}\``
+        : `Ran Python:\n\`\`\`python\n${code}\n\`\`\``;
+      const outputText = output ? `Output:\n${output}` : "(no output)";
+      const content = [sourceText, outputText, status]
+        .filter(Boolean)
+        .join("\n\n");
+      steps.push({
+        timestamp,
+        source: "system",
+        message: content,
+        observation: {
+          results: [
+            {
+              content,
+              extra: {
+                tool_name: isBash ? "bash" : "python",
+                command: isBash ? command : undefined,
+                code: isBash ? undefined : code,
+                exit_code: exitCode,
+                cancelled: cancelled || undefined,
+                is_error: failed || undefined,
+              },
+            },
+          ],
+        },
+        extra: { record_type: type, role },
+      });
+      return;
+    }
     if (role !== "assistant") return;
 
     modelName = stringValue(message.model) || modelName;

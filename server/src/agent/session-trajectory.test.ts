@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { historyEntriesFromTrajectory } from "./session-history";
 import { projectAgentTrajectory } from "./session-trajectory";
 import type { SessionFile } from "./session-types";
 
@@ -408,6 +409,98 @@ describe("agent session trajectory projection", () => {
       stop_reason: "error",
       error_message: "429 rate limit exceeded",
     });
+  });
+  test("projects OMP bash and Python execution messages with output and status", () => {
+    const trajectory = projectAgentTrajectory("omp", sessionFile, [
+      {
+        type: "message",
+        id: "bash-1",
+        timestamp: "2026-07-07T00:00:01.000Z",
+        message: {
+          role: "bashExecution",
+          command: "false",
+          output: "failed",
+          exitCode: 1,
+          cancelled: false,
+        },
+      },
+      {
+        type: "message",
+        id: "python-1",
+        timestamp: "2026-07-07T00:00:02.000Z",
+        message: {
+          role: "pythonExecution",
+          code: "print('hello')",
+          output: "hello",
+          exitCode: 0,
+          cancelled: false,
+        },
+      },
+      {
+        type: "message",
+        id: "python-2",
+        timestamp: "2026-07-07T00:00:03.000Z",
+        message: {
+          role: "pythonExecution",
+          code: "raise SystemExit()",
+          output: "",
+          exitCode: 0,
+          cancelled: true,
+        },
+      },
+    ]);
+
+    expect(trajectory.steps.map((step) => step.source)).toEqual([
+      "system",
+      "system",
+      "system",
+    ]);
+    expect(trajectory.steps.map((step) => step.message)).toEqual([
+      "Ran `false`\n\nOutput:\nfailed\n\nCommand exited with code 1",
+      "Ran Python:\n```python\nprint('hello')\n```\n\nOutput:\nhello",
+      "Ran Python:\n```python\nraise SystemExit()\n```\n\n(no output)\n\nExecution cancelled",
+    ]);
+    expect(trajectory.steps[0]?.observation?.results[0]).toMatchObject({
+      content: "Ran `false`\n\nOutput:\nfailed\n\nCommand exited with code 1",
+      extra: {
+        tool_name: "bash",
+        command: "false",
+        exit_code: 1,
+        is_error: true,
+      },
+    });
+    expect(trajectory.steps[1]?.observation?.results[0]).toMatchObject({
+      content: "Ran Python:\n```python\nprint('hello')\n```\n\nOutput:\nhello",
+      extra: { tool_name: "python", code: "print('hello')", exit_code: 0 },
+    });
+    expect(trajectory.steps[2]?.observation?.results[0]?.extra).toMatchObject({
+      cancelled: true,
+      is_error: true,
+    });
+    expect(historyEntriesFromTrajectory(sessionFile, trajectory)).toMatchObject(
+      [
+        {
+          kind: "tool_result",
+          role: "tool",
+          tool_name: "bash",
+          text: "Ran `false`\n\nOutput:\nfailed\n\nCommand exited with code 1",
+          is_error: true,
+        },
+        {
+          kind: "tool_result",
+          role: "tool",
+          tool_name: "python",
+          text: "Ran Python:\n```python\nprint('hello')\n```\n\nOutput:\nhello",
+        },
+        {
+          kind: "tool_result",
+          role: "tool",
+          tool_name: "python",
+          text: "Ran Python:\n```python\nraise SystemExit()\n```\n\n(no output)\n\nExecution cancelled",
+          is_error: true,
+        },
+      ],
+    );
   });
 
   test("projects Grok Build chat history into ATIF", () => {

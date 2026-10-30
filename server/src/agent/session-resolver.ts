@@ -160,7 +160,8 @@ async function findOmpSession(
   context: AgentSessionResolverContext,
 ) {
   return resolveCachedSessionPath(context, `omp:${id}`, async () => {
-    const ompRoot = join(homedir(), ".omp");
+    const configuredRoot = process.env.PI_CONFIG_DIR || ".omp";
+    const ompRoot = join(homedir(), configuredRoot);
     const roots = new Set([join(ompRoot, "agent", "sessions")]);
     const xdgDataHome = process.env.XDG_DATA_HOME?.trim();
     if (xdgDataHome) {

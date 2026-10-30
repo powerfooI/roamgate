@@ -13,6 +13,7 @@ const tempDirectories: string[] = [];
 const originalHome = process.env.HOME;
 const originalXdgDataHome = process.env.XDG_DATA_HOME;
 const originalPiDirectory = process.env.PI_CODING_AGENT_DIR;
+const originalPiConfigDir = process.env.PI_CONFIG_DIR;
 
 afterEach(async () => {
   if (originalHome === undefined) delete process.env.HOME;
@@ -21,6 +22,8 @@ afterEach(async () => {
   else process.env.XDG_DATA_HOME = originalXdgDataHome;
   if (originalPiDirectory === undefined) delete process.env.PI_CODING_AGENT_DIR;
   else process.env.PI_CODING_AGENT_DIR = originalPiDirectory;
+  if (originalPiConfigDir === undefined) delete process.env.PI_CONFIG_DIR;
+  else process.env.PI_CONFIG_DIR = originalPiConfigDir;
   await Promise.all(
     tempDirectories.splice(0).map((path) => rm(path, { recursive: true })),
   );
@@ -104,6 +107,7 @@ describe("agent session resolver context", () => {
 
 describe("OMP session resolution", () => {
   test("finds ids in the default OMP session directory", async () => {
+    delete process.env.PI_CONFIG_DIR;
     const root = await mkdtemp(join(tmpdir(), "roamgate-omp-"));
     tempDirectories.push(root);
     process.env.HOME = root;
@@ -143,10 +147,31 @@ describe("OMP session resolution", () => {
     expect(result.path).toBe(sessionPath);
   });
 
+  test.each([".omp-custom", "/absolute-omp-custom"])(
+    "finds sessions under PI_CONFIG_DIR=%s relative to home",
+    async (configDir) => {
+      const root = await mkdtemp(join(tmpdir(), "roamgate-omp-config-root-"));
+      tempDirectories.push(root);
+      process.env.HOME = root;
+      delete process.env.PI_CODING_AGENT_DIR;
+      delete process.env.XDG_DATA_HOME;
+      process.env.PI_CONFIG_DIR = configDir;
+      const sessionId = `session-${crypto.randomUUID()}`;
+      const sessionDirectory = join(root, configDir, "agent", "sessions");
+      const sessionPath = join(sessionDirectory, `${sessionId}.jsonl`);
+      await mkdir(sessionDirectory, { recursive: true });
+      await writeFile(sessionPath, "{}\n");
+      const result = resolveOmpSessionInFreshProcess(sessionId);
+      expect(result.status).toBe("ok");
+      expect(result.path).toBe(sessionPath);
+    },
+  );
+
   test("finds ids under a profile agent session directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "roamgate-omp-profile-"));
     tempDirectories.push(root);
     process.env.HOME = root;
+    delete process.env.PI_CONFIG_DIR;
     delete process.env.PI_CODING_AGENT_DIR;
     const sessionId = `session-${crypto.randomUUID()}`;
     const sessionDirectory = join(
