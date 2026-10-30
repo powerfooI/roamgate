@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { SessionFile } from "./session-types";
 import { projectAgentTrajectory } from "./session-trajectory";
+import type { SessionFile } from "./session-types";
 
 const sessionFile: SessionFile = {
   path: "/tmp/session.jsonl",
@@ -9,6 +9,42 @@ const sessionFile: SessionFile = {
 };
 
 describe("agent session trajectory projection", () => {
+  test("projects OMP Pi-format sessions with header identity and version semantics", () => {
+    const trajectory = projectAgentTrajectory("omp", sessionFile, [
+      {
+        type: "session",
+        version: 3,
+        id: "header-session-id",
+        timestamp: "2026-07-07T00:00:00.000Z",
+        cwd: "/tmp/project",
+      },
+      {
+        type: "message",
+        id: "user-1",
+        timestamp: "2026-07-07T00:00:01.000Z",
+        message: { role: "user", content: "hello" },
+      },
+      {
+        type: "message",
+        id: "assistant-1",
+        timestamp: "2026-07-07T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Hi there" }],
+          model: "test-model",
+        },
+      },
+    ]);
+
+    expect(trajectory.agent.name).toBe("omp");
+    expect(trajectory.agent.version).toBe("unknown");
+    expect(trajectory.session_id).toBe("header-session-id");
+    expect(trajectory.trajectory_id).toBe("header-session-id");
+    expect(trajectory.steps.map((step) => step.message)).toEqual([
+      "hello",
+      "Hi there",
+    ]);
+  });
   test("projects Codex sessions without duplicating user messages", () => {
     const trajectory = projectAgentTrajectory("codex", sessionFile, [
       {

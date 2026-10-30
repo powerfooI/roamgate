@@ -33,7 +33,7 @@ function agentVersionFromRecords(
     const payload = isRecord(record.payload) ? record.payload : null;
     const version =
       stringValue(record.cli_version) ||
-      (agent === "pi" && record.type === "session"
+      ((agent === "pi" || agent === "omp") && record.type === "session"
         ? ""
         : stringValue(record.version)) ||
       stringValue(record.originator) ||
@@ -102,7 +102,7 @@ function createTrajectory(
     session_id: sessionId,
     trajectory_id:
       file.sessionId ||
-      (agent === "pi"
+      (agent === "pi" || agent === "omp"
         ? sessionId
         : basename(file.path).replace(/\.[^.]+$/, "")),
     agent: {
@@ -547,6 +547,7 @@ function projectKimiTrajectory(
 function projectPiTrajectory(
   file: SessionFile,
   records: Record<string, unknown>[],
+  agent = "pi",
 ) {
   const steps: Omit<AtifStep, "step_id">[] = [];
   let modelName = file.modelName || "";
@@ -715,7 +716,7 @@ function projectPiTrajectory(
   });
 
   return createTrajectory(
-    "pi",
+    agent,
     modelName ? { ...file, modelName } : file,
     records,
     steps,
@@ -1119,7 +1120,8 @@ export function projectAgentTrajectory(
   if (agent === "claude") return projectClaudeTrajectory(file, records);
   if (agent === "kimi") return projectKimiTrajectory(file, records);
   if (agent === "grok") return projectGrokTrajectory(file, records);
-  if (agent === "pi") return projectPiTrajectory(file, records);
+  if (agent === "pi" || agent === "omp")
+    return projectPiTrajectory(file, records, agent);
   if (agent === "muse") return projectMuseTrajectory(file, records);
   if (agent === "agy") return projectAntigravityTrajectory(file, records);
   return createTrajectory(agent, file, records, []);
