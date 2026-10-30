@@ -33,7 +33,7 @@ function agentVersionFromRecords(
     const payload = isRecord(record.payload) ? record.payload : null;
     const version =
       stringValue(record.cli_version) ||
-      (agent === "pi" && record.type === "session"
+      ((agent === "pi" || agent === "omp") && record.type === "session"
         ? ""
         : stringValue(record.version)) ||
       stringValue(record.originator) ||
@@ -102,7 +102,7 @@ function createTrajectory(
     session_id: sessionId,
     trajectory_id:
       file.sessionId ||
-      (agent === "pi"
+      (agent === "pi" || agent === "omp"
         ? sessionId
         : basename(file.path).replace(/\.[^.]+$/, "")),
     agent: {
@@ -547,6 +547,7 @@ function projectKimiTrajectory(
 function projectPiTrajectory(
   file: SessionFile,
   records: Record<string, unknown>[],
+  agent = "pi",
 ) {
   const steps: Omit<AtifStep, "step_id">[] = [];
   let modelName = file.modelName || "";
@@ -555,6 +556,28 @@ function projectPiTrajectory(
     const type = stringValue(record.type);
     if (type === "model_change") {
       modelName = stringValue(record.modelId) || modelName;
+      return;
+    }
+    if (
+      agent === "omp" &&
+      type === "custom_message" &&
+      record.customType === "skill-prompt" &&
+      record.attribution === "user"
+    ) {
+      const details = isRecord(record.details) ? record.details : {};
+      const name = stringValue(details.name);
+      const args = stringValue(details.args);
+      const text =
+        stringValue(details.prompt).trim() ||
+        (name ? `/skill:${name}${args ? ` ${args}` : ""}` : "");
+      if (text) {
+        steps.push({
+          timestamp: messageTime(record, file.mtimeMs, index),
+          source: "user",
+          message: text,
+          extra: { record_type: type },
+        });
+      }
       return;
     }
     if (type !== "message" || !isRecord(record.message)) return;
@@ -595,6 +618,51 @@ function projectPiTrajectory(
           ],
         },
         extra: { record_type: type },
+      });
+      return;
+    }
+    if (role === "bashExecution" || role === "pythonExecution") {
+      const isBash = role === "bashExecution";
+      const command = stringValue(message.command);
+      const code = stringValue(message.code);
+      const output = toolOutputText(message.output);
+      const exitCode =
+        typeof message.exitCode === "number" ? message.exitCode : undefined;
+      const cancelled = message.cancelled === true;
+      const execution = isBash ? "Command" : "Execution";
+      const failed = cancelled || (exitCode !== undefined && exitCode !== 0);
+      const status = cancelled
+        ? `${execution} cancelled`
+        : exitCode !== undefined && exitCode !== 0
+          ? `${execution} exited with code ${exitCode}`
+          : "";
+      const sourceText = isBash
+        ? `Ran \`${command}\``
+        : `Ran Python:\n\`\`\`python\n${code}\n\`\`\``;
+      const outputText = output ? `Output:\n${output}` : "(no output)";
+      const content = [sourceText, outputText, status]
+        .filter(Boolean)
+        .join("\n\n");
+      steps.push({
+        timestamp,
+        source: "system",
+        message: content,
+        observation: {
+          results: [
+            {
+              content,
+              extra: {
+                tool_name: isBash ? "bash" : "python",
+                command: isBash ? command : undefined,
+                code: isBash ? undefined : code,
+                exit_code: exitCode,
+                cancelled: cancelled || undefined,
+                is_error: failed || undefined,
+              },
+            },
+          ],
+        },
+        extra: { record_type: type, role },
       });
       return;
     }
@@ -715,7 +783,7 @@ function projectPiTrajectory(
   });
 
   return createTrajectory(
-    "pi",
+    agent,
     modelName ? { ...file, modelName } : file,
     records,
     steps,
@@ -1119,7 +1187,8 @@ export function projectAgentTrajectory(
   if (agent === "claude") return projectClaudeTrajectory(file, records);
   if (agent === "kimi") return projectKimiTrajectory(file, records);
   if (agent === "grok") return projectGrokTrajectory(file, records);
-  if (agent === "pi") return projectPiTrajectory(file, records);
+  if (agent === "pi" || agent === "omp")
+    return projectPiTrajectory(file, records, agent);
   if (agent === "muse") return projectMuseTrajectory(file, records);
   if (agent === "agy") return projectAntigravityTrajectory(file, records);
   return createTrajectory(agent, file, records, []);

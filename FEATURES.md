@@ -158,11 +158,15 @@ Inspector state is scoped to each checkout; see
   bundled agent integrations (not the agents themselves). See
   [version lookup](docs/ARCHITECTURE.md#agent-integrations).
 
-Session inspection supports **Codex, Claude, Kimi, Grok Build, Pi, Muse Code,
-and Antigravity CLI**. Transcripts must be readable by the bridge. Over SSH,
-Roamgate reads the session path Herdr reports; it never searches local files for
-a remote pane. Muse needs session logging enabled (no `--no-session-log`).
-See [History synchronization](docs/HISTORY.md).
+- Session inspection supports **Codex, Claude, Kimi, Grok Build, Pi, OMP, Muse
+  Code, and Antigravity CLI**. OMP sessions are discovered across local profiles
+  and configured roots, including `PI_CONFIG_DIR` (resolved relative to the
+  user's home directory). Remote panes must report the transcript path because
+  local profile discovery is never used over SSH. Transcripts must be readable
+  by the bridge. Over SSH, Roamgate reads the session path Herdr reports; it
+  never searches local files for a remote pane. Muse needs session logging
+  enabled (no `--no-session-log`). See
+  [History synchronization](docs/HISTORY.md).
 
 ## Ranger
 
