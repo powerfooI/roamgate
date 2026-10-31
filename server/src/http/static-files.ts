@@ -118,7 +118,10 @@ function responseHeaders(pathname: string): Record<string, string> {
 }
 
 function contentType(pathname: string): string {
-  if (pathname.endsWith(".js")) return "text/javascript; charset=utf-8";
+  // .mjs: modules shipped as such (the PDF.js worker); a module of any
+  // other type is refused by the browser.
+  if (pathname.endsWith(".js") || pathname.endsWith(".mjs"))
+    return "text/javascript; charset=utf-8";
   if (pathname.endsWith(".css")) return "text/css; charset=utf-8";
   if (pathname.endsWith(".html")) return "text/html; charset=utf-8";
   if (pathname.endsWith(".json") || pathname.endsWith(".map")) {

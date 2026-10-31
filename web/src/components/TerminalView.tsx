@@ -178,6 +178,7 @@ import {
 } from "../terminalScroll";
 import { TerminalSelectionDragGuard } from "../terminalSelectionGuard";
 import { applyTerminalTheme } from "../terminalThemes";
+import { useTerminalOptionAsMeta } from "../terminalOptionKey";
 import {
   agentPromptWarning,
   agentStateKind,
@@ -495,6 +496,8 @@ export function TerminalView({
   const [termInstance, setTermInstance] = useState<Terminal | null>(null);
   // Theme changes update xterm in place without recreating the terminal.
   const terminalThemeRef = useRef(terminalTheme);
+  const optionAsMeta = useTerminalOptionAsMeta();
+  const optionAsMetaRef = useRef(optionAsMeta);
   const terminalFontFamilyRef = useRef(terminalFontFamily);
   const terminalFontScaleRef = useRef(terminalFontScale);
   const fitRef = useRef<FitAddon | null>(null);
@@ -1081,6 +1084,9 @@ export function TerminalView({
       ...terminalDensity(terminalFontScaleRef.current),
       theme: terminalThemeRef.current,
       allowProposedApi: true,
+      // macOS composes Option+<key> into a character (Option+F types "ƒ"),
+      // so Alt bindings never reach the shell unless the user opts in.
+      macOptionIsMeta: optionAsMetaRef.current,
       linkHandler: {
         // Opt in only to route local file URIs below; all other schemes stay inert.
         allowNonHttpProtocols: true,
@@ -3250,6 +3256,11 @@ export function TerminalView({
     terminalThemeRef.current = terminalTheme;
     if (termInstance) applyTerminalTheme(termInstance, terminalTheme);
   }, [terminalTheme, termInstance]);
+
+  useEffect(() => {
+    optionAsMetaRef.current = optionAsMeta;
+    if (termInstance) termInstance.options.macOptionIsMeta = optionAsMeta;
+  }, [optionAsMeta, termInstance]);
 
   // Mobile browsers freeze the page while hidden: the socket can die
   // silently, rendering pauses, and composited content may come back blank.

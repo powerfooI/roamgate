@@ -191,3 +191,18 @@ test("a fresh source build serves instance metadata without generated web assets
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("module files (.mjs) are served as JavaScript, so browsers run them", async () => {
+  const root = await mkdtemp(join(tmpdir(), "roamgate-static-mjs-"));
+  try {
+    await writeFile(join(root, "worker.mjs"), "export {};\n");
+    const response = await serveStatic(
+      new Request("https://roamgate.example/worker.mjs"),
+      root,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/javascript");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

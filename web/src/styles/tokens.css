@@ -78,6 +78,43 @@
   --modal-backdrop: rgba(0, 0, 0, 0.56);
 }
 
+/* The black background option: the dark theme on pure black with neutral
+   greys instead of blue-grey surfaces. Accents and syntax colors are kept. */
+:root[data-theme="dark"][data-black] {
+  --bg: #000000;
+  --topbar: #000000;
+  --panel: #000000;
+  --panel-2: #1c1c1c;
+  --input-bg: #141414;
+  --terminal-bg: #000000;
+  --terminal-fg: #d4d4d4;
+  --border: #2a2a2a;
+  --border-soft: rgba(255, 255, 255, 0.08);
+  --text: #e6e6e6;
+  --text-strong: #ffffff;
+  --text-code: #dedede;
+  --muted: #8c8c8c;
+  --diff-bg: #000000;
+  --diff-line-bg: #0a0a0a;
+  --diff-text: #dedede;
+  --syntax-comment: #7a7a7a;
+  --syntax-variable: #d4d4d4;
+  --syntax-punctuation: #b3b3b3;
+  --syntax-meta: #8c8c8c;
+  --modal-backdrop: rgba(0, 0, 0, 0.7);
+}
+
+/* With the default accent, black stays free of blue too: highlights and
+   selections are light grey. */
+:root[data-theme="dark"][data-black][data-accent="neutral"] {
+  --accent: #d4d4d4;
+  --accent-2: #a3a3a3;
+  --accent-soft: rgba(255, 255, 255, 0.1);
+  --accent-hover: rgba(255, 255, 255, 0.16);
+  --accent-active: rgba(255, 255, 255, 0.26);
+  --accent-contrast: #000000;
+}
+
 :root[data-theme="light"] {
   color-scheme: light;
   --bg: #e1e2e7;

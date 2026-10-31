@@ -1,7 +1,7 @@
 {
   "name": "roamgate-web",
   "private": true,
-  "version": "0.8.12",
+  "version": "0.8.13",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -55,6 +55,7 @@
     "lucide-react": "^1.61.0",
     "marked": "^18.0.14",
     "minimatch": "10.2.6",
+    "pdfjs-dist": "6.4.299",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "shiki": "^4.5.0",

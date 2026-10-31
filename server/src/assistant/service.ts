@@ -200,6 +200,22 @@ function restoredMentions(
   });
 }
 
+/**
+ * Whether two Ranger configurations are the same, whatever the order of
+ * their fields: a configuration saved after a permission change keeps its
+ * fields in another order than one read back from disk.
+ */
+export function sameAssistantConfig(a: AssistantConfig, b: AssistantConfig) {
+  try {
+    return (
+      JSON.stringify(config(a as Record<string, unknown>)) ===
+      JSON.stringify(config(b as Record<string, unknown>))
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function assistantDirectory() {
   return roamgateEnv("ASSISTANT_DIR") ?? join(dataRoot(), "assistant");
 }
@@ -695,7 +711,7 @@ export function createAssistantService(options: {
   }
   if (
     options.taskRun &&
-    JSON.stringify(state.config) !== JSON.stringify(options.taskRun.config)
+    !sameAssistantConfig(state.config, options.taskRun.config)
   ) {
     activeRun = undefined;
     awaitingRecovery = false;

@@ -56,6 +56,9 @@ any order. Enter switches, opening another server's agent on its server;
   multiline paste.
 - Scroll with wheel, trackpad, touch, or page shortcuts. Mouse-aware apps
   receive clicks and drags; hold Option (macOS) or Shift to select text instead.
+- On macOS, Option types characters (`@`, `[`, `~` on many layouts) by default.
+  **Menu > Configuration > Behavior > Option key as Alt in terminals** makes it
+  send Alt-modified keys instead, for shell and Herdr Alt bindings.
 - Paste images or drop files onto a pane to upload them to that pane's host and
   insert their quoted paths (without pressing Enter). Dropping explorer rows
   inserts paths without uploading. Uploads expire after 24 hours by default.
@@ -232,7 +235,8 @@ conflicts are aborted, and nothing is ever pushed.
 - **Browse filesystem** opens read-only browsing outside the checkout.
 - Preview text with highlighting and search, Markdown (with Mermaid diagrams),
   static HTML (workspace CSS/images/fonts; scripts blocked; 512 KiB limit),
-  images, PDFs, and audio up to 25 MiB.
+  images, PDFs, and audio up to 25 MiB. Browsers without a native PDF viewer
+  use a responsive three-page window with previous/next navigation.
 - Upload by drag and drop, download files or folders (`.tar.gz`), copy paths,
   create folders, move files by dragging, and delete with confirmation. All of
   this works over SSH (moves need `python3` on the remote host).
@@ -335,8 +339,14 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
   closed. Delivery is best-effort.
 - Themes, accents, interface scale (80–150%), terminal font, font size, and
   terminal color themes. Preferences sync across tabs in the same browser.
+- A black background option turns the dark theme pure black with neutral
+  greys, and the default dark terminal with it; with the default accent,
+  highlights are grey too.
 - Run as a [user service](docs/DEPLOYMENT.md#run-as-a-user-service) with
   checksum-verified updates, and probe `/health` or `/healthz`.
+- An open page reloads itself when the server it reconnects to, or comes back
+  to, serves another frontend build. It waits for editable fields to be cleared,
+  dialogs to close, and pending uploads and message submissions to finish.
 - [Command-line tools](docs/DEPLOYMENT.md#command-line-management) such as
   `roamgate doctor`, `url --qr`, `config`, `auth`, and `connections`.
 
@@ -350,6 +360,11 @@ On desktop, press `Cmd+Shift+K` (`Ctrl+Alt+Shift+K` on Windows/Linux) or choose
 **Menu > Shortcut cheat sheet** for a filterable overview. Edit bindings under
 **Menu > Configuration > Behavior > Keyboard shortcuts** (up to three per
 action, with JSON import/export).
+
+Presets live on the Roamgate server, so every browser you open shares them and
+a change reaches the others at once; each browser keeps a copy so bindings work
+before the connection is up. A preset records the platform it was written for
+and is skipped, with a note, on a browser that does not match.
 
 | Action                                                                | macOS / iOS             | Windows / Linux / Android               |
 | --------------------------------------------------------------------- | ----------------------- | --------------------------------------- |

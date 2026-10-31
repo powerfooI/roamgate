@@ -34,6 +34,7 @@ function autoSyncSettings() {
       },
     },
     custom: {},
+    ui: {},
   };
 }
 
@@ -258,6 +259,7 @@ describe("workspace auto-sync lifecycle", () => {
         },
       },
       custom: {},
+      ui: {},
     };
 
     for (const connectionId of ["alpha", "beta"]) {
