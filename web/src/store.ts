@@ -60,6 +60,12 @@ import {
   migrateLegacyConnectionStorage,
 } from "./connectionStorage";
 import { disposeTerminalConnection } from "./terminalConnection";
+import {
+  adoptShortcutPreferences,
+  connectShortcutPreferences,
+  disconnectShortcutPreferences,
+  SHORTCUT_SETTING_KEY,
+} from "./shortcutPreferences";
 import { isReconnectRetryableError } from "./reconnectRetry";
 import { publishLastStepCompletion } from "./lastStepCompletionStore";
 import {
@@ -1311,6 +1317,35 @@ function settlePendingFocusWorkspace(seq: number): void {
   set({ pendingFocusWorkspaceSettledAt: Date.now() });
 }
 
+/**
+ * Reads interface preferences from the Roamgate server and installs the write
+ * path. Preferences are server-wide, not per Herdr connection, so this runs
+ * once per socket rather than per connection selection. Both `hello` and the
+ * connected status trigger it because either can win the race on a fresh
+ * socket, and a failed attempt leaves the flag clear so the other retries.
+ */
+let uiSettingsHydrated = false;
+async function hydrateUiSettings() {
+  if (uiSettingsHydrated) return;
+  uiSettingsHydrated = true;
+  const client = bridge.connection();
+  try {
+    const result = await client.call("settings.get");
+    const ui = (result?.settings as { ui?: Record<string, unknown> })?.ui ?? {};
+    connectShortcutPreferences(async (preferences) => {
+      await bridge.connection().call("settings.ui.update", {
+        key: SHORTCUT_SETTING_KEY,
+        value: preferences,
+      });
+    }, ui[SHORTCUT_SETTING_KEY]);
+  } catch {
+    // Either the call lost a race with connection setup, or this is an older
+    // bridge without the RPC. Clear the flag so the next trigger retries; the
+    // browser cache keeps the bindings working meanwhile.
+    uiSettingsHydrated = false;
+  }
+}
+
 async function refreshNow(lease = captureConnectionLease()) {
   if (
     state.connectionPaused ||
@@ -2175,11 +2210,15 @@ function handleBridgeHello(hello: { default_connection_id: string }) {
   if (state.status === "connected" && !state.connectionPaused) {
     void refreshConnectionCatalog();
   }
+  void hydrateUiSettings();
 }
 
 function handleBridgeStatus(s: ConnectionStatus) {
+  if (s === "connected") void hydrateUiSettings();
   if (s === "disconnected") {
     set({ tabMoveSupported: false, endpointAvailability: {} });
+    uiSettingsHydrated = false;
+    disconnectShortcutPreferences();
     catalogReadyForConnection = false;
     terminalReattachPending = true;
     bridge.setConnectionRuntimeGenerations([]);
@@ -2539,6 +2578,10 @@ export const store = {
     void store.restoreTaskNotifications();
     subscribeLocalStorage(handlePreferenceStorageChange);
     bridge.onHello(handleBridgeHello);
+    bridge.onUiSetting((push) => {
+      if (push.key === SHORTCUT_SETTING_KEY)
+        adoptShortcutPreferences(push.value);
+    });
     bridge.onStatus(handleBridgeStatus);
     bridge.onEvent(handleHerdrEvent);
     bridge.onAssistantNotification(notifyRangerTask);

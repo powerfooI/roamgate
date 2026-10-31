@@ -596,6 +596,15 @@ function runtimeFactoryForProfile(
             });
           }
         },
+        onUiSettingChanged: (key, value) => {
+          // Interface preferences belong to this Roamgate server, not to any
+          // one Herdr connection, so the push carries no connection envelope
+          // and reaches every open browser.
+          const line = JSON.stringify({
+            ui_settings: { key, value: value ?? null },
+          });
+          for (const ws of clients) safeSend(ws, line, "ui-settings");
+        },
         onTransportExit: profileConfig.sshHost
           ? (error) => {
               if (!context.isCurrent()) return;

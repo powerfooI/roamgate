@@ -24,6 +24,7 @@ function settings(
         [repoSettingsKey(path, undefined, connectionId)]: parentWorkspaceId,
       },
     },
+    ui: {},
   };
 }
 
@@ -92,6 +93,7 @@ describe("worktree parent metadata", () => {
       repositories: {},
       workspace_auto_sync: {},
       custom: {},
+      ui: {},
     };
     const addGate = deferred();
     const addQueued = deferred();

@@ -17,6 +17,8 @@ import {
   readGuiSettings,
   repoWorktreeHooksEnabled,
   terminalSurfaceCodecsEnabled,
+  uiSettingKeyIsValid,
+  uiSettingValueError,
   updateGuiSettings,
   workspaceAutoSyncSettingsKey,
   workspaceRepoSettingsKey,
@@ -45,6 +47,8 @@ export function createSettingsRpcHandler(args: {
   workspaceAutoSyncIsRunning: (key: string) => boolean;
   onWorkspaceAutoSyncSettingsChanged: (key: string, enabled: boolean) => void;
   onTerminalTransportSettingsChanged?: (enabled: boolean) => void;
+  /** Tells every other browser that an interface preference moved. */
+  onUiSettingChanged?: (key: string, value: unknown) => void;
   safeSend: (
     ws: ServerWebSocket<unknown>,
     payload: string,
@@ -371,6 +375,28 @@ export function createSettingsRpcHandler(args: {
         }, requestIsCurrent);
         const next = settings.repositories[key];
         return reply({ settings, repo: next, key });
+      }
+      if (method === "settings.ui.update") {
+        const key = params.key;
+        if (!uiSettingKeyIsValid(key)) {
+          return fail(
+            "settings.ui.update requires key matching [A-Za-z][A-Za-z0-9_.-]{0,63}",
+          );
+        }
+        // A missing `value` clears the preference; JSON has no `undefined`, so
+        // callers send no value at all rather than null (a legitimate value).
+        const clearing = !Object.prototype.hasOwnProperty.call(params, "value");
+        const value = clearing ? undefined : params.value;
+        const valueError = uiSettingValueError(value);
+        if (valueError) return fail(valueError);
+        const settings = await updateSettings((current) => {
+          const ui = { ...current.ui };
+          if (clearing) delete ui[key];
+          else ui[key] = value;
+          return { ...current, ui };
+        }, requestIsCurrent);
+        args.onUiSettingChanged?.(key, clearing ? undefined : value);
+        return reply({ key, value: settings.ui[key] ?? null, settings });
       }
       return fail(`unknown settings method: ${method}`);
     } catch (e) {
