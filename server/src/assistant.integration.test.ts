@@ -499,3 +499,61 @@ test("Ranger mention discovery is bridge-global, permission-bound and available 
     await f.dispose();
   }
 }, 20_000);
+
+test("UI settings sync globally while the selected Herdr connection is offline", async () => {
+  if (process.platform === "win32") return;
+  const f = await fixture();
+  try {
+    const login = await fetch(`${f.base}/api/login`, {
+      method: "POST",
+      body: JSON.stringify({ password: PASSWORD }),
+    });
+    const cookie = login.headers.get("set-cookie")!.split(";", 1)[0]!;
+    const first = await browser(f.base, cookie, f.browsers);
+    const second = await browser(f.base, cookie, f.browsers);
+    expect(first.hello.default_connection_id).toBe("offline");
+    const initial = await first.rpc("bridge.ui_settings.get");
+    expect(initial.connection_id).toBeUndefined();
+    expect(initial.result.ui).toEqual({});
+    const delivered = Promise.withResolvers<any>();
+    const own: any[] = [];
+    f.browsers[0]!.addEventListener("message", (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.ui_settings) own.push(message);
+    });
+    f.browsers[1]!.addEventListener("message", (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.ui_settings) delivered.resolve(message);
+    });
+    const value = { version: 1, active: "windows", presets: [] };
+    const result = await first.rpc("bridge.ui_settings.update", {
+      key: "keyboardShortcuts",
+      value,
+    });
+    expect(result.error).toBeUndefined();
+    const deadline = setTimeout(
+      () => delivered.reject(new Error("UI settings push timed out")),
+      3000,
+    );
+    const push = await delivered.promise.finally(() => clearTimeout(deadline));
+    expect(push).toEqual({ ui_settings: { key: "keyboardShortcuts", value } });
+    await first.rpc("bridge.ping");
+    expect(own).toEqual([]);
+    expect(
+      (await second.rpc("bridge.ui_settings.get")).result.ui.keyboardShortcuts,
+    ).toEqual(value);
+    expect(
+      (
+        await first.rpc(
+          "bridge.ui_settings.get",
+          {},
+          { connection_id: "offline" },
+        )
+      ).error.message,
+    ).toContain("bridge-global");
+    await first.rpc("bridge.ui_settings.update", { key: "keyboardShortcuts" });
+    expect((await second.rpc("bridge.ui_settings.get")).result.ui).toEqual({});
+  } finally {
+    await f.dispose();
+  }
+}, 15000);

@@ -37,7 +37,41 @@ export type GuiSettings = {
   workspace_auto_sync: Record<string, GuiWorkspaceAutoSyncSettings>;
   terminal_transport?: Record<string, { surface_codecs: boolean }>;
   custom: Record<string, unknown>;
+  /**
+   * Browser-agnostic interface preferences, namespaced by key (for example
+   * `keyboardShortcuts`). The server never interprets a value: the frontend
+   * owns each schema and validates on read, so a preference can change shape
+   * without a server release. Kept here rather than in `localStorage` so one
+   * user carries the same interface across every browser they open.
+   */
+  ui: Record<string, unknown>;
 };
+
+/** Namespaces are addressed by RPC, so keep them to unmistakable identifiers. */
+const UI_SETTING_KEY_RE = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+/** A preference is configuration, not storage; refuse anything of size. */
+export const UI_SETTING_MAX_BYTES = 64 * 1024;
+
+export function uiSettingKeyIsValid(key: unknown): key is string {
+  return typeof key === "string" && UI_SETTING_KEY_RE.test(key);
+}
+
+/** Rejects values that cannot round-trip through settings.json, or are huge. */
+export function uiSettingValueError(value: unknown): string | null {
+  if (value === undefined) return null;
+  let encoded: string;
+  try {
+    encoded = JSON.stringify(value) ?? "";
+  } catch {
+    return "Preference value must be JSON-serializable.";
+  }
+  if (!encoded) return "Preference value must be JSON-serializable.";
+  const bytes = Buffer.byteLength(encoded, "utf8");
+  if (bytes > UI_SETTING_MAX_BYTES) {
+    return `Preference value is ${bytes} bytes; the limit is ${UI_SETTING_MAX_BYTES}.`;
+  }
+  return null;
+}
 
 export const DEFAULT_WORKSPACE_AUTO_SYNC_INTERVAL_MINUTES = 10;
 
@@ -57,6 +91,7 @@ function defaultGuiSettings(): GuiSettings {
     workspace_auto_sync: {},
     terminal_transport: {},
     custom: {},
+    ui: {},
   };
 }
 
@@ -153,6 +188,15 @@ function normalizeGuiSettings(raw: unknown): GuiSettings {
     custom:
       obj.custom && typeof obj.custom === "object"
         ? (obj.custom as Record<string, unknown>)
+        : {},
+    ui:
+      obj.ui && typeof obj.ui === "object" && !Array.isArray(obj.ui)
+        ? Object.fromEntries(
+            Object.entries(obj.ui as Record<string, unknown>).filter(
+              ([key, value]) =>
+                uiSettingKeyIsValid(key) && uiSettingValueError(value) === null,
+            ),
+          )
         : {},
   };
 }

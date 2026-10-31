@@ -3,6 +3,7 @@ import { Command as CommandPrimitive } from "cmdk";
 
 import { cn } from "../../utils";
 import "./command.css";
+import { passwordManagerIgnore } from "../../passwordManagerIgnore";
 
 const Command = ({
   className,
@@ -14,11 +15,21 @@ Command.displayName = CommandPrimitive.displayName;
 
 const CommandInput = ({
   className,
+  ref,
   ...props
 }: React.ComponentPropsWithRef<typeof CommandPrimitive.Input>) => (
   <CommandPrimitive.Input
     className={cn("command-input", className)}
+    autoComplete="off"
+    {...passwordManagerIgnore}
     {...props}
+    ref={(input: HTMLInputElement | null) => {
+      // cmdk renders type="text" over ours; a search field is what keeps
+      // Bitwarden's menu away.
+      if (input) input.type = passwordManagerIgnore.type;
+      if (typeof ref === "function") ref(input);
+      else if (ref) ref.current = input;
+    }}
   />
 );
 CommandInput.displayName = CommandPrimitive.Input.displayName;

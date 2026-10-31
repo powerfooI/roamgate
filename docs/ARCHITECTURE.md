@@ -66,7 +66,14 @@ require generation 1 and the exact codecs `shell.snapshot.v1`,
 `shell.surface.v1`, `shell.input.semantic.v1`, and `shell.blob.v1`; anything
 unknown fails closed. Each viewer crops its pane from the shared tab surface.
 
-Capabilities are negotiated per terminal socket and rechecked at dispatch:
+An endpoint stream whose last viewer detaches stays warm, even with no browser
+connected, and replays its latest frame to a returning viewer. Each runtime keeps
+the 20 most recently viewed, and closes any that nobody returns to within 10
+minutes. Legacy direct attaches close immediately because they hold Herdr's
+resize lock.
+
+Capabilities are negotiated per terminal socket (again when a stream
+reconnects) and rechecked at dispatch:
 
 | Capability                       | Contract                                           |
 | -------------------------------- | -------------------------------------------------- |

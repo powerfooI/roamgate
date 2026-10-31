@@ -357,6 +357,8 @@ async function registerDomTests() {
             },
             customTerminalThemes: [],
             onThemeChange: noop,
+            blackBackground: false,
+            onBlackBackgroundChange: noop,
             onAccentColorChange: noop,
             onUiScaleChange: noop,
             onTerminalFontScaleChange: noop,
