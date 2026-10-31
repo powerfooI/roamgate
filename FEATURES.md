@@ -178,9 +178,12 @@ Inspector state is scoped to each checkout; see
 Ranger is an **experimental** assistant that answers questions about your
 workspaces and can manage them. Open it from the topbar, the mobile **⋮** menu,
 or its shortcut.
-- **Setup:** connect a model provider in **Settings** and choose which
+- **Setup:** connect a model provider in **Settings** (or pick Claude Code,
+  which uses the bridge's `claude` sign-in) and choose which
   workspaces Ranger may access (none by default). See
-  [model setup](docs/DEPLOYMENT.md#ranger-model-connection).
+  [model setup](docs/DEPLOYMENT.md#ranger-model-connection). Interrupted Claude
+  Code turns stop without automatic retry: review action receipts before
+  sending a new question.
 - **Ask:** Ranger reads workspace status, agent history, diffs, and terminal
   output, and cites its sources. Type **@** to point it at a workspace or agent.
   When the model shares its reasoning, a collapsible **Thinking** section shows

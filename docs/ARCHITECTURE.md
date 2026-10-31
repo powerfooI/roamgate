@@ -241,6 +241,18 @@ The bridge runs one Pi Durable assistant service, independent of the selected
 connection and shared by all authenticated browsers through bridge-global
 `bridge.assistant.*` RPC and revisioned snapshot pushes. Reconnecting fetches
 state; sends are never replayed.
+- **Drivers:** `ranger-driver.ts` sends the Claude Code provider's turns to
+  `claude-driver.ts` and every other provider's to Pi. A Claude Code turn is
+  one `claude -p` run resumed from the session the last turn saved, with
+  built-in tools, other MCP servers, skills and hooks off. Ranger's tools
+  reach it over MCP (`claude-mcp.ts`): plain HTTP on 127.0.0.1, with a bearer
+  token valid only while the turn runs, read from a temporary mode-0600 config
+  file rather than process arguments. MCP tool calls run serially. Interrupted
+  Claude Code turns are stopped without replay and their CLI context is cleared,
+  because a session pointer cannot prove whether an MCP operation completed.
+  The user reviews action receipts before sending a new question.
+  A chat that changes driver starts
+  afresh, and input sent during a Claude Code turn waits as a follow-up.
 - **Tools** are defined in `server/src/assistant/tools.ts` and run through
   `callWorkspaceTool` against the turn's approved scope. Pi's built-in tools,
   extensions, skills, and project instructions are disabled, and workspace
@@ -268,7 +280,8 @@ state; sends are never replayed.
   request decides when the next follow-up goes.
 - **Persistence:** conversations and execution checkpoints live in the assistant
   directory; one bridge process must own it. After a restart, a turn resumes
-  only after its endpoints, Herdr boot IDs, and workspaces are re-verified.
+  only after its endpoints, Herdr boot IDs, and workspaces are re-verified;
+  Claude Code turns instead stop without replay as described above.
 - **Tasks** live in `tasks.sqlite`; each state change commits before it is
   published. One scheduled run executes at a time, overdue occurrences are
   combined, and runs re-verify identities and permissions. Run results emit an

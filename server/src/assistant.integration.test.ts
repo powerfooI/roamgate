@@ -381,9 +381,11 @@ test("authenticated bridge-global assistant routes preserve global replies and p
       running: false,
       config: { provider: "", model: "", allowed_workspaces: [] },
     });
+    // Claude Code is ready wherever `claude` is installed; no other is.
     expect(
       state.result.providers.every(
-        (entry: { configured: boolean }) => !entry.configured,
+        (entry: { id: string; configured: boolean }) =>
+          entry.id === "claude-code" || !entry.configured,
       ),
     ).toBe(true);
     expect(

@@ -36,6 +36,8 @@ import {
   sameAssistantConfig,
 } from "./service";
 import type { PreparedAssistantAction } from "./actions";
+import { createClaudeCodeDriver } from "./claude-driver";
+import { createRangerMcp } from "./claude-mcp";
 
 const workspace: AssistantWorkspace = {
   connection_id: "local",
@@ -6310,4 +6312,90 @@ test("a task's configuration is the same whatever the order of its fields", () =
   expect(
     sameAssistantConfig(saved, { ...loaded, allowed_workspaces: [] }),
   ).toBe(false);
+});
+
+test("an interrupted Claude turn fails closed through service recovery and holds queued messages", async () => {
+  const stopped = Promise.withResolvers<void>();
+  const pointer = [
+    { type: "ranger-claude", session: "0b0e8a52-7a4b-4c55-9d3e-2f4a8a1c9d10" },
+  ];
+  const f = setup({
+    catalog: async () => ({
+      providers: [
+        {
+          id: "claude-code",
+          label: "Claude Code",
+          configured: true,
+          methods: [],
+        },
+      ],
+      models: [{ provider: "claude-code", id: "opus", label: "Opus" }],
+    }),
+    run: async (input) => {
+      input.checkpoint?.(pointer);
+      await stopped.promise;
+      return pointer;
+    },
+    dispose: async () => {
+      stopped.resolve();
+    },
+  });
+  stableTaskIdentity(f.context);
+  await f.service.handle("configure", {
+    ...configured,
+    provider: "claude-code",
+    model: "opus",
+  });
+  await f.service.handle("send", {
+    request_id: "interrupted-claude",
+    text: "Perform the operation",
+  });
+  await until(
+    () =>
+      JSON.parse(readFileSync(join(f.directory, "state.json"), "utf8"))
+        .entries?.[0]?.type === "ranger-claude",
+  );
+  await f.service.handle("send", {
+    request_id: "queued-claude",
+    text: "Then continue",
+    when_busy: "queue",
+  });
+  await f.service.dispose();
+  let spawned = 0;
+  const mcp = createRangerMcp(() => {
+    throw new Error("must not open MCP during recovery");
+  });
+  const claude = createClaudeCodeDriver({
+    directory: f.directory,
+    mcp,
+    spawn: () => {
+      spawned++;
+      throw new Error("must not replay");
+    },
+    available: () => true,
+  });
+  const restored = createAssistantService({
+    directory: f.directory,
+    context: f.context,
+    publish: () => {},
+    driver: {
+      ...f.driver,
+      run: claude.run,
+      dispose: claude.dispose,
+      stop: claude.stop,
+    },
+  });
+  services.push(restored);
+  await restored.resume();
+  await until(() => !restored.peek().running);
+  expect(restored.peek().error).toContain("was not retried");
+  expect(restored.peek().queue_held).toBe(true);
+  expect(spawned).toBe(0);
+  const saved = JSON.parse(
+    readFileSync(join(f.directory, "state.json"), "utf8"),
+  );
+  expect(saved.entries).toEqual([]);
+  expect(saved.active_run).toBeUndefined();
+  expect(f.reads).toHaveLength(0);
+  mcp.stop();
 });

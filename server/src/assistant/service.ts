@@ -50,7 +50,8 @@ import {
   AssistantRecoveryNotReadyError,
   type RecoveryTarget,
 } from "./context";
-import { type AssistantDriver, createPiDriver } from "./pi-driver";
+import type { AssistantDriver } from "./pi-driver";
+import { createRangerDriver } from "./ranger-driver";
 import type { PreparedAssistantAction } from "./actions";
 import { AssistantUserError } from "./errors";
 import type { NotificationToolSender } from "./tools";
@@ -348,7 +349,7 @@ export function createAssistantService(options: {
   const driver =
     options.driver ??
     options.createDriver?.(directory, directory) ??
-    createPiDriver(directory);
+    createRangerDriver(directory);
   let tasks: ReturnType<typeof createAssistantTasks> | undefined;
   const taskConfirmations = new Set<{ id: string; sessionId: string }>();
   const baseContext = options.context;
@@ -2067,10 +2068,12 @@ export function createAssistantService(options: {
               "The model request failed. Check the provider connection and try again.";
           },
         });
-      } catch {
+      } catch (error) {
         if (!disposed && !controller.signal.aborted)
           state.error =
-            "The Ranger request failed. Check the provider connection and try again.";
+            error instanceof AssistantUserError
+              ? error.message
+              : "The Ranger request failed. Check the provider connection and try again.";
       } finally {
         if (!disposed) {
           activeRun = undefined;
@@ -2458,7 +2461,7 @@ export function createAssistantService(options: {
             tasks!.notificationHistory(taskRun.task_id, taskRun.id),
           driver:
             options.createDriver?.(childDirectory, directory) ??
-            createPiDriver(childDirectory, undefined, directory),
+            createRangerDriver(childDirectory, directory),
           publish: onSnapshot,
         });
         return {
