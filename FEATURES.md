@@ -356,6 +356,11 @@ On desktop, press `Cmd+Shift+K` (`Ctrl+Alt+Shift+K` on Windows/Linux) or choose
 **Menu > Configuration > Behavior > Keyboard shortcuts** (up to three per
 action, with JSON import/export).
 
+Presets live on the Roamgate server, so every browser you open shares them and
+a change reaches the others at once; each browser keeps a copy so bindings work
+before the connection is up. A preset records the platform it was written for
+and is skipped, with a note, on a browser that does not match.
+
 | Action                                                                | macOS / iOS             | Windows / Linux / Android               |
 | --------------------------------------------------------------------- | ----------------------- | --------------------------------------- |
 | Command menu                                                          | `Cmd+K`                 | `Ctrl+Alt+K`                            |

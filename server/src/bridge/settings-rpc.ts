@@ -17,6 +17,8 @@ import {
   readGuiSettings,
   repoWorktreeHooksEnabled,
   terminalSurfaceCodecsEnabled,
+  uiSettingKeyIsValid,
+  uiSettingValueError,
   updateGuiSettings,
   workspaceAutoSyncSettingsKey,
   workspaceRepoSettingsKey,
@@ -376,5 +378,36 @@ export function createSettingsRpcHandler(args: {
     } catch (e) {
       return fail((e as Error).message);
     }
+  };
+}
+
+/** Server-wide preferences remain available without a ready Herdr connection. */
+export function createUiSettingsRpcHandler(
+  args: {
+    readSettings?: typeof readGuiSettings;
+    updateSettings?: typeof updateGuiSettings;
+  } = {},
+) {
+  const readSettings = args.readSettings ?? readGuiSettings;
+  const updateSettings = args.updateSettings ?? updateGuiSettings;
+  return async (method: string, params: Record<string, unknown>) => {
+    if (method === "bridge.ui_settings.get")
+      return { ui: (await readSettings()).ui };
+    if (method !== "bridge.ui_settings.update")
+      throw new Error("Unknown UI settings method");
+    const key = params.key;
+    if (!uiSettingKeyIsValid(key))
+      throw new Error(
+        "UI settings require key matching [A-Za-z][A-Za-z0-9_.-]{0,63}",
+      );
+    const valueError = uiSettingValueError(params.value);
+    if (valueError) throw new Error(valueError);
+    const settings = await updateSettings((current) => {
+      const ui = { ...current.ui };
+      if (params.value === undefined) delete ui[key];
+      else ui[key] = params.value;
+      return { ...current, ui };
+    });
+    return { key, value: settings.ui[key] ?? null };
   };
 }
