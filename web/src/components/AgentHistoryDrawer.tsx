@@ -723,6 +723,7 @@ export function AgentHistoryDrawer({
     error ||
     "No readable session transcript was reported for this agent.";
   const unavailableCommand = session?.command || history?.command;
+  const sessionTitle = session?.title || null;
   // A pane's chat waits quietly while the transcript cannot be read (a
   // server restart, an agent not yet started): the poll keeps trying, and
   // the reason shows only once it has lasted.
@@ -1515,13 +1516,20 @@ export function AgentHistoryDrawer({
           hidden={mobile && !paneChat && !headerExpanded}
         >
           {paneChat ? (
-            <AgentIcon agent={pane.agent} />
+            <>
+              <AgentIcon agent={pane.agent} />
+              {sessionTitle ? (
+                <span className="agent-chat-title" title={sessionTitle}>
+                  {sessionTitle}
+                </span>
+              ) : null}
+            </>
           ) : (
             <div className="agent-history-identity">
               <AgentIcon agent={pane.agent} />
               <div className="agent-history-title">
                 <strong>
-                  Session
+                  {sessionTitle ?? "Session"}
                   {messages.length > 0 ? (
                     <span
                       className="agent-history-count"

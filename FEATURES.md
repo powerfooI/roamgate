@@ -191,7 +191,9 @@ Inspector state is scoped to each checkout; see
   the chat button in the pane's toolbar, Ctrl+Cmd+M (Ctrl+Alt+M elsewhere), or
   on a phone **Chat in pane** in More options (the bottom bar's **Chat** opens
   Agent History instead). The chat takes the whole pane, with one slim row for
-  the agent's status, search, **Stop** (Esc in the terminal) and the way back
+  the agent's icon, what a Claude session is about (its `/rename` name, else
+  the title Claude Code gives it, also shown as Agent History's heading), its
+  status, search, **Stop** (Esc in the terminal) and the way back
   to the terminal; on a phone that row stands for the top bar, which hides,
   and the message box sits in the bottom bar, taking the whole width while
   you write. Below the conversation, a working agent shows its own word for

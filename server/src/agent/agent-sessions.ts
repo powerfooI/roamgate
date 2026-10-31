@@ -192,6 +192,7 @@ export async function readAgentSessionSummary(
     return {
       ...resolved,
       stats: { turns: 0, records: 0, token_usage: null },
+      title: null,
       text: null,
       truncated: false,
       trajectory: null,
@@ -234,6 +235,7 @@ export async function readAgentSessionSummary(
     file: projected.file,
     updated_at: new Date(projected.file.mtimeMs).toISOString(),
     stats,
+    title: projected.title,
     text,
     truncated,
     trajectory,

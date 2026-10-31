@@ -562,3 +562,44 @@ describe("Claude session commands", () => {
     });
   });
 });
+
+describe("Claude session title", () => {
+  test("agent_session.get carries the /rename name, else Claude's title", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "roamgate-claude-title-"));
+    tempDirectories.push(directory);
+    const path = join(directory, "session.jsonl");
+    const write = (records: Record<string, unknown>[]) =>
+      writeFile(
+        path,
+        `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+      );
+    const herdrCall: HerdrCall = async () => ({
+      agent: {
+        agent: "claude",
+        workspace_id: "w1",
+        tab_id: "t1",
+        cwd: directory,
+        agent_session: { agent: "claude", kind: "path", value: path },
+      },
+    });
+    const user = { type: "user", message: { role: "user", content: "hi" } };
+    await write([user, { type: "ai-title", aiTitle: "Fix the login form" }]);
+    const first = createAgentSessionHandlers({
+      herdrCall,
+      files: localAgentSessionFiles,
+    });
+    expect((await first.readSummary({ pane_id: "p1" })).title).toBe(
+      "Fix the login form",
+    );
+    await write([
+      user,
+      { type: "ai-title", aiTitle: "Fix the login form" },
+      { type: "custom-title", customTitle: "login" },
+    ]);
+    const second = createAgentSessionHandlers({
+      herdrCall,
+      files: localAgentSessionFiles,
+    });
+    expect((await second.readSummary({ pane_id: "p1" })).title).toBe("login");
+  });
+});

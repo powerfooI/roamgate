@@ -711,6 +711,17 @@
   padding: 4px 8px;
 }
 
+/* What the session is about, beside the agent's icon. */
+.agent-chat-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .agent-history-drawer.is-pane-chat .agent-history-actions {
   margin-left: auto;
 }
