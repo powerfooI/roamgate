@@ -101,7 +101,12 @@ import {
 } from "./components/fileExplorerResources";
 import { type ActiveFilePreviewSelection } from "./components/FilePreviewContent";
 import { AnnotationPanel } from "./components/AnnotationPanel";
-import { assistantActionExecuting, useAssistantState } from "./assistant";
+import {
+  assistantActionExecuting,
+  onAssistantShow,
+  useAssistantState,
+} from "./assistant";
+
 import type { AssistantSource } from "../../shared/assistant";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import "./components/MobileTabSheet.css";
@@ -1239,6 +1244,18 @@ function TerminalPaneLayout({
 }
 
 export default function App() {
+  // Ranger showing a workspace or session switches this browser to it.
+  useEffect(
+    () =>
+      onAssistantShow((show) => {
+        void store.jumpToConnectionWorkspace(
+          show.connection_id,
+          show.workspace_id,
+          show.pane_id,
+        );
+      }),
+    [],
+  );
   useShortcutPreferences();
   const { snapshot: assistantSnapshot } = useAssistantState();
   const s = useStoreSelector(

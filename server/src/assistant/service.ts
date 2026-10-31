@@ -1672,6 +1672,9 @@ export function createAssistantService(options: {
     const turnConfig = pending.config;
     // Each placed steer starts a new reply; output always goes to the newest.
     let draft = state.messages.find((item) => item.id === pending.draft_id)!;
+    // The request the newest reply answers: the browser that sent it is the
+    // one a show_in_roamgate call switches.
+    let draftRequest = pending.request_id;
     const drafts = [draft];
     activeScope = captured;
     async function guardReferencedAgent(
@@ -1791,12 +1794,44 @@ export function createAssistantService(options: {
               }
             }
             draft = next;
+            draftRequest = requestId ?? draftRequest;
             if (!drafts.includes(next)) drafts.push(next);
             finalizedText = "";
             streamedText = "";
             publish(true);
           },
           recover,
+          // A scheduled run has no browser to show anything in.
+          show: options.taskRun
+            ? undefined
+            : async (target, signal) => {
+                const combined = signal
+                  ? AbortSignal.any([signal, controller.signal])
+                  : controller.signal;
+                combined.throwIfAborted();
+                if (disposed || activeRun !== pending || !state.running)
+                  throw new Error("This Ranger turn is no longer active.");
+                if (
+                  !captured.some(
+                    (ref) =>
+                      ref.connection_id === target.connection_id &&
+                      ref.workspace_id === target.workspace_id,
+                  )
+                )
+                  throw new AssistantUserError(
+                    "That workspace is outside this question's authorized scope.",
+                  );
+                draft.show = {
+                  connection_id: target.connection_id,
+                  workspace_id: target.workspace_id,
+                  ...(target.pane_id ? { pane_id: target.pane_id } : {}),
+                  request_id: draftRequest,
+                };
+                publish(true);
+                return {
+                  text: "Shown in the user's Roamgate window.",
+                };
+              },
           notify:
             options.taskRun && options.sendNotification
               ? async (notification, signal) => {

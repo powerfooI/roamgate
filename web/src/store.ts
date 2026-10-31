@@ -1356,6 +1356,29 @@ async function hydrateUiSettings() {
   }
 }
 
+/**
+ * Whether a pane belongs to a workspace on the active connection. A target
+ * that names both (Ranger's show_in_roamgate) is only trusted for the
+ * workspace, which the server checked against the question's scope.
+ */
+async function paneIsInWorkspace(
+  lease: StoreConnectionLease,
+  paneId: string,
+  workspaceId: string,
+): Promise<boolean> {
+  try {
+    const result = await lease.client.call("pane.get", { pane_id: paneId });
+    const pane = result?.pane ?? result;
+    return (
+      leaseIsCurrent(lease) &&
+      pane?.pane_id === paneId &&
+      pane?.workspace_id === workspaceId
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function refreshNow(lease = captureConnectionLease()) {
   if (
     state.connectionPaused ||
@@ -2925,6 +2948,37 @@ export const store = {
         retryOnReconnect: true,
       },
     );
+  },
+
+  /**
+   * Switches to another connection when needed, waits for its workspaces to
+   * load, then focuses a workspace there, or one of its panes. Ranger's
+   * show_in_roamgate targets can live on a connection other than the active
+   * one.
+   */
+  async jumpToConnectionWorkspace(
+    connectionId: string,
+    workspaceId: string,
+    paneId?: string,
+  ) {
+    // Another connection chosen meanwhile decides what is shown: a target
+    // checked on one connection must not be focused on another.
+    if (state.activeConnectionId !== connectionId) {
+      if (!selectConnectionNow(connectionId)) return;
+      const switched = captureConnectionLease();
+      await refreshNow(switched);
+      if (!isStoreConnectionLeaseCurrent(state, switched)) return;
+    }
+    if (paneId) {
+      const lease = captureConnectionLease();
+      const inWorkspace = await paneIsInWorkspace(lease, paneId, workspaceId);
+      if (!leaseIsCurrent(lease)) return;
+      if (inWorkspace) {
+        void store.focusPane(paneId);
+        return;
+      }
+    }
+    void store.focusWorkspace(workspaceId);
   },
 
   focusTaskNotificationTarget(target: TaskNotificationTarget) {

@@ -314,6 +314,49 @@ export const actionTools = [
   },
 ] as const;
 
+export type ShowToolHandler = (
+  params: { connection_id: string; workspace_id: string; pane_id?: string },
+  signal?: AbortSignal,
+) => Promise<WorkspaceToolResult>;
+
+export const showTools = [
+  {
+    name: "show_in_roamgate",
+    kind: "show",
+    label: "Show in Roamgate",
+    description:
+      "Show an authorized workspace, or one of its panes, in the user's Roamgate window, the browser this question came from, switching connection when needed. Use it when the user asks to go to, open, switch to or look at a workspace or agent session. It only changes what is on screen: nothing runs and no confirmation is needed. Use identifiers from workspace_status.",
+    parameters: Type.Object(
+      { ...actionTarget, pane_id: Type.Optional(Type.String()) },
+      { additionalProperties: false },
+    ),
+  },
+] as const;
+
+/** The handler must be bound to the current turn and its browser. */
+export async function callShowTool(
+  name: string,
+  params: unknown,
+  show: ShowToolHandler,
+  signal?: AbortSignal,
+): Promise<WorkspaceToolResult> {
+  const tool = showTools.find((entry) => entry.name === name);
+  if (!tool) throw new Error("Unknown show tool.");
+  if (!Value.Check(tool.parameters, params))
+    throw new AssistantUserError("Invalid show tool parameters.");
+  try {
+    signal?.throwIfAborted();
+    const result = await show(params as Parameters<ShowToolHandler>[0], signal);
+    signal?.throwIfAborted();
+    return result;
+  } catch (error) {
+    surfaceAssistantUserError(
+      error,
+      "That workspace cannot be shown, or is outside the authorized scope.",
+    );
+  }
+}
+
 /** The reader must be bound to the current turn's authorized scope and leases. */
 export async function callWorkspaceTool(
   name: string,

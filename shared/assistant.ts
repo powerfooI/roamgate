@@ -209,6 +209,17 @@ export type AssistantMessage = {
   sources: AssistantSource[];
   actions?: AssistantAction[];
   task_proposals?: AssistantTaskProposal[];
+  /** What the reply put on screen, for the browser that asked. */
+  show?: AssistantShow;
+};
+
+/**
+ * A workspace, or a pane in it, a reply showed in Roamgate: only the browser
+ * that sent `request_id` switches to it.
+ */
+export type AssistantShow = AssistantWorkspaceRef & {
+  pane_id?: string;
+  request_id: string;
 };
 
 export type AssistantTaskSchedule =
@@ -715,9 +726,23 @@ function action(value: unknown): value is AssistantAction {
   );
 }
 
+export function isAssistantShow(value: unknown): value is AssistantShow {
+  return (
+    record(value) &&
+    text(value.connection_id) &&
+    text(value.workspace_id) &&
+    (value.pane_id === undefined || text(value.pane_id)) &&
+    text(value.request_id) &&
+    Object.keys(value).every((key) =>
+      ["connection_id", "workspace_id", "pane_id", "request_id"].includes(key),
+    )
+  );
+}
+
 export function isAssistantMessage(value: unknown): value is AssistantMessage {
   return (
     record(value) &&
+    (value.show === undefined || isAssistantShow(value.show)) &&
     text(value.id) &&
     (value.role === "user" || value.role === "assistant") &&
     text(value.text) &&

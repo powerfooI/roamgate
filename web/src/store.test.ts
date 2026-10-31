@@ -2309,3 +2309,122 @@ describe("Herdr task notifications", () => {
     }
   });
 });
+
+describe("jumping to another connection's workspace", () => {
+  test("lands on a pane only when it is in the named workspace", async () => {
+    const originalConnection = bridge.connection;
+    const calls: string[] = [];
+    bridge.connection = ((connectionId = "alpha") => ({
+      connectionId,
+      generation: 10,
+      isCurrent: () => true,
+      call: (async (method: string) => {
+        calls.push(`${connectionId}:${method}`);
+        if (method === "pane.get") return { pane: pane("alpha", "idle") };
+        return {};
+      }) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    try {
+      __storeTesting.replaceState(partitionState());
+      // The pane lives in same-workspace: a target naming another workspace
+      // only focuses that workspace.
+      await store.jumpToConnectionWorkspace(
+        "alpha",
+        "other-workspace",
+        "same-pane",
+      );
+      await Promise.resolve();
+      expect(calls).toEqual(["alpha:pane.get", "alpha:workspace.focus"]);
+
+      calls.length = 0;
+      await store.jumpToConnectionWorkspace(
+        "alpha",
+        "same-workspace",
+        "same-pane",
+      );
+      await Promise.resolve();
+      expect(calls[0]).toBe("alpha:pane.get");
+      expect(calls.slice(-2)).toEqual([
+        "alpha:workspace.focus",
+        "alpha:tab.focus",
+      ]);
+    } finally {
+      bridge.connection = originalConnection;
+    }
+  });
+});
+
+describe("jumping to a workspace while the connection changes", () => {
+  function mockConnections(
+    onCall?: (connectionId: string, method: string) => void,
+  ) {
+    const originalConnection = bridge.connection;
+    const calls: string[] = [];
+    bridge.connection = ((connectionId = "alpha") => ({
+      connectionId,
+      generation: 10,
+      isCurrent: () => true,
+      call: (async (method: string) => {
+        calls.push(`${connectionId}:${method}`);
+        onCall?.(connectionId, method);
+        const listed = session(connectionId);
+        if (method === "pane.get") return { pane: listed.panes[0] };
+        if (method === "workspace.list")
+          return { workspaces: listed.workspaces };
+        if (method === "tab.list") return { tabs: listed.tabs };
+        if (method === "pane.list") return { panes: listed.panes };
+        return {};
+      }) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    return {
+      calls,
+      restore: () => {
+        bridge.connection = originalConnection;
+      },
+    };
+  }
+
+  test("focuses nothing when another connection is chosen during the pane check", async () => {
+    const { calls, restore } = mockConnections((_connection, method) => {
+      if (method === "pane.get")
+        __storeTesting.replaceState({
+          ...partitionState(),
+          activeConnectionId: "beta",
+          connectionGeneration: 11,
+        });
+    });
+    try {
+      __storeTesting.replaceState(partitionState());
+      await store.jumpToConnectionWorkspace(
+        "alpha",
+        "same-workspace",
+        "same-pane",
+      );
+      await Promise.resolve();
+      expect(calls).toEqual(["alpha:pane.get"]);
+    } finally {
+      restore();
+    }
+  });
+
+  test("switches to the target's connection and focuses there", async () => {
+    const { calls, restore } = mockConnections();
+    try {
+      __storeTesting.replaceState(partitionState());
+      await store.jumpToConnectionWorkspace(
+        "beta",
+        "same-workspace",
+        "same-pane",
+      );
+      await Promise.resolve();
+      expect(calls).toContain("beta:pane.get");
+      expect(calls.slice(-2)).toEqual([
+        "beta:workspace.focus",
+        "beta:tab.focus",
+      ]);
+      expect(calls.some((call) => call.startsWith("alpha:"))).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+});

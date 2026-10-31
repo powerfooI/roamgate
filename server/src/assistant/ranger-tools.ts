@@ -4,10 +4,13 @@ import {
   actionTools,
   callActionTool,
   callNotificationTool,
+  callShowTool,
   callTaskTool,
   callWorkspaceTool,
   type NotificationToolSender,
   notificationTools,
+  type ShowToolHandler,
+  showTools,
   type TaskToolHandler,
   taskTools,
   type WorkspaceToolReader,
@@ -57,12 +60,14 @@ export function rangerTools(
     propose?: ActionToolProposer;
     task?: TaskToolHandler;
     notify?: NotificationToolSender;
+    show?: ShowToolHandler;
   },
   automatic: boolean,
 ): RangerTool[] {
   const propose = input.propose;
   const task = input.task;
   const notify = input.notify;
+  const show = input.show;
   return [
     ...workspaceTools.map((tool) => ({
       ...tool,
@@ -103,6 +108,14 @@ export function rangerTools(
           replay: "unsafe" as const,
           call: (params: unknown, signal?: AbortSignal) =>
             callNotificationTool(tool.name, params, notify, signal),
+        }))
+      : []),
+    ...(show
+      ? showTools.map((tool) => ({
+          ...tool,
+          replay: "safe" as const,
+          call: (params: unknown, signal?: AbortSignal) =>
+            callShowTool(tool.name, params, show, signal),
         }))
       : []),
   ].map((tool) => ({
