@@ -104,6 +104,18 @@ export function createAgentSessionHandlers(args: {
         text_hash: historyTextHash(entry.text),
       };
     },
+    /** The skills and custom commands a Claude session offers as /name. */
+    readCommands: async (params: Record<string, unknown>) => {
+      const resolved = await resolveAgentSession(
+        params,
+        args.herdrCall,
+        args.files,
+        resolverContext,
+      );
+      if (!resolved.file) return { commands: [] };
+      const projection = await cache.get(resolved);
+      return { commands: projection.commands };
+    },
     readSummary: (params: Record<string, unknown>) =>
       readAgentSessionSummary(
         params,

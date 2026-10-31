@@ -38,6 +38,7 @@ import {
 } from "../terminalComposer";
 import { uploadTerminalImage } from "../terminalImageUpload";
 import type { AgentActivity, AgentPrompt } from "../agentPrompt";
+import { useAgentCommands } from "../claudeCommands";
 import type { Pane } from "../types";
 import {
   DEFAULT_INSPECTOR_NAVIGATION_RATIO,
@@ -202,6 +203,7 @@ export function AgentHistoryDrawer({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [view, setView] = useState<AgentHistoryView>(readAgentHistoryView);
   const chatView = !!paneChat || view === "chat";
+  const agentCommands = useAgentCommands(pane, open);
   const [previewPane, setPreviewPane] = useState<Pane | null>(null);
   const [previewSummary, setPreviewSummary] =
     useState<AgentSessionSummary | null>(null);
@@ -1040,6 +1042,7 @@ export function AgentHistoryDrawer({
       stateSeq={pane.state_change_seq}
       onSend={sendFromBox}
       onUploadImage={(file) => uploadTerminalImage(connectionClient, file)}
+      commands={agentCommands}
       onError={notifyComposerError}
     />
   );

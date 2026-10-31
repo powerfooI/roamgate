@@ -9,7 +9,10 @@ import {
   readAgentMessageHistory,
   readAgentSessionSummary,
 } from "./agent-sessions";
-import type { AgentSessionFileAccess } from "./session-file-access";
+import {
+  type AgentSessionFileAccess,
+  localAgentSessionFiles,
+} from "./session-file-access";
 import type { HerdrCall } from "./session-types";
 
 const tempDirectories: string[] = [];
@@ -514,6 +517,48 @@ describe("Pi agent sessions", () => {
       schema_version: "ATIF-v1.7",
       session_id: sessionId,
       agent: { name: "antigravity-cli" },
+    });
+  });
+});
+
+describe("Claude session commands", () => {
+  test("agent_commands.get lists the session's skills from its transcript", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "roamgate-claude-commands-"),
+    );
+    tempDirectories.push(directory);
+    const path = join(directory, "session.jsonl");
+    await writeFile(
+      path,
+      `${[
+        { type: "user", message: { role: "user", content: "hello" } },
+        {
+          type: "attachment",
+          attachment: {
+            type: "skill_listing",
+            names: ["commit"],
+            content: "- commit: Write a commit message",
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")}\n`,
+    );
+    const herdrCall: HerdrCall = async () => ({
+      agent: {
+        agent: "claude",
+        workspace_id: "w1",
+        tab_id: "t1",
+        cwd: directory,
+        agent_session: { agent: "claude", kind: "path", value: path },
+      },
+    });
+    const handlers = createAgentSessionHandlers({
+      herdrCall,
+      files: localAgentSessionFiles,
+    });
+    expect(await handlers.readCommands({ pane_id: "p1" })).toEqual({
+      commands: [{ name: "commit", description: "Write a commit message" }],
     });
   });
 });

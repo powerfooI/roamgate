@@ -37,6 +37,7 @@ import {
   rememberComposerAttachment,
   withoutAttachment,
 } from "../composerAttachments";
+import { type AgentCommand, matchCommands } from "../claudeCommands";
 import { agentPromptWarning, agentStateKind } from "./agentSession";
 import { useTouchReleaseSubmit } from "./useTouchReleaseSubmit";
 import "./AgentHistoryComposer.css";
@@ -63,6 +64,7 @@ export function AgentHistoryComposer({
   stateSeq,
   onSend,
   onUploadImage,
+  commands = [],
   onError,
 }: {
   draftKey: string;
@@ -72,6 +74,8 @@ export function AgentHistoryComposer({
   stateSeq?: number;
   onSend: (text: string) => Promise<void>;
   onUploadImage: (file: File) => Promise<string>;
+  /** The agent's /commands, offered while one is being typed. */
+  commands?: AgentCommand[];
   onError: (message: string) => void;
 }) {
   useShortcutPreferences();
@@ -254,9 +258,88 @@ export function AgentHistoryComposer({
     : "Send to the agent's terminal (Enter); Shift+Enter for a new line";
   const name = agent?.trim();
   const shown = attachmentDisplay(text);
+  // A /command being typed: the matching commands, until Esc puts them away
+  // for this draft.
+  const [focused, setFocused] = useState(false);
+  const [commandIndex, setCommandIndex] = useState(0);
+  const [commandsDismissed, setCommandsDismissed] = useState<string | null>(
+    null,
+  );
+  const commandMatches =
+    focused && commandsDismissed !== text ? matchCommands(text, commands) : [];
+  const commandSelected =
+    commandMatches[Math.min(commandIndex, commandMatches.length - 1)];
+  const completeCommand = (command: AgentCommand) => {
+    const draft = `/${command.name} `;
+    writeTerminalComposerDraft(draftKey, draft);
+    writeTerminalComposerSelection(draftKey, draft.length, draft.length);
+    setCommandIndex(0);
+  };
+  // Keys for the list, ahead of the box: arrows move, Tab
+  // completes, Enter completes unless the name is already whole, Esc closes.
+  const onCommandKeys = (event: React.KeyboardEvent) => {
+    if (!commandMatches.length || event.nativeEvent.isComposing) return;
+    const exact = commandMatches.some((each) => `/${each.name}` === text);
+    const plain =
+      !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
+    let handled = true;
+    if (event.key === "ArrowDown" && plain)
+      setCommandIndex((index) => (index + 1) % commandMatches.length);
+    else if (event.key === "ArrowUp" && plain)
+      setCommandIndex(
+        (index) => (index - 1 + commandMatches.length) % commandMatches.length,
+      );
+    else if (event.key === "Tab" && plain && commandSelected)
+      completeCommand(commandSelected);
+    else if (event.key === "Enter" && plain && !exact && commandSelected)
+      completeCommand(commandSelected);
+    else if (event.key === "Escape") {
+      // The box still gets its Esc.
+      setCommandsDismissed(text);
+      return;
+    } else handled = false;
+    if (!handled) return;
+    event.preventDefault();
+    event.nativeEvent.stopPropagation();
+  };
 
   return (
-    <div className="agent-history-composer">
+    <div
+      className="agent-history-composer"
+      onKeyDownCapture={onCommandKeys}
+      onFocus={() => setFocused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+          setFocused(false);
+      }}
+    >
+      {commandMatches.length ? (
+        <ul
+          className="agent-history-composer-commands"
+          role="listbox"
+          aria-label="Commands"
+        >
+          {commandMatches.map((command) => (
+            <li key={command.name}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={command === commandSelected}
+                className={command === commandSelected ? "is-selected" : ""}
+                // Keep the box focused, and its keyboard up on a phone.
+                onMouseDown={(event) => event.preventDefault()}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => completeCommand(command)}
+              >
+                <strong>/{command.name}</strong>
+                {command.description ? (
+                  <span>{command.description}</span>
+                ) : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {confirming ? (
         <div className="agent-history-composer-warning" role="alert">
           <TriangleAlert size={14} aria-hidden="true" />

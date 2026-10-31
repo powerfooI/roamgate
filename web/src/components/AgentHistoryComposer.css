@@ -116,3 +116,58 @@
   background: transparent;
   color: var(--muted);
 }
+
+/* A /command being typed: the matching commands above the box. */
+.agent-history-composer-commands {
+  display: flex;
+  flex-direction: column;
+  max-height: min(40vh, 280px);
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  list-style: none;
+  overscroll-behavior: contain;
+}
+
+.agent-history-composer-commands button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.agent-history-composer-commands button.is-selected,
+.agent-history-composer-commands button:hover {
+  background: var(--accent-soft);
+}
+
+.agent-history-composer-commands strong {
+  flex: none;
+  font-family: var(--mono-font);
+  font-size: 12px;
+}
+
+.agent-history-composer-commands span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .agent-history-composer-commands button {
+    min-height: 40px;
+  }
+}
