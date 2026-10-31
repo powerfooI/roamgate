@@ -787,6 +787,7 @@ let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 const refreshingConnectionKeys = new Set<string>();
 const queuedConnectionKeys = new Set<string>();
 let initialized = false;
+let initialConnectionSelectionPending = true;
 let catalogRequestSeq = 0;
 let appliedCatalogRequestSeq = 0;
 let catalogReadyForConnection = false;
@@ -2163,6 +2164,19 @@ export function worktreeRemovalCompletionNotice(
   };
 }
 
+function handleBridgeHello(hello: { default_connection_id: string }) {
+  const defaultConnectionId = hello.default_connection_id;
+  set({ defaultConnectionId });
+  if (initialConnectionSelectionPending) {
+    initialConnectionSelectionPending = false;
+    if (state.activeConnectionId === LEGACY_DEFAULT_CONNECTION_ID)
+      selectConnectionNow(preferredConnectionId(defaultConnectionId), false);
+  }
+  if (state.status === "connected" && !state.connectionPaused) {
+    void refreshConnectionCatalog();
+  }
+}
+
 function handleBridgeStatus(s: ConnectionStatus) {
   if (s === "disconnected") {
     set({ tabMoveSupported: false, endpointAvailability: {} });
@@ -2524,19 +2538,7 @@ export const store = {
     initialized = true;
     void store.restoreTaskNotifications();
     subscribeLocalStorage(handlePreferenceStorageChange);
-    bridge.onHello((hello) => {
-      const defaultConnectionId = hello.default_connection_id;
-      set({ defaultConnectionId });
-      if (
-        state.activeConnectionId === LEGACY_DEFAULT_CONNECTION_ID &&
-        defaultConnectionId !== state.activeConnectionId
-      ) {
-        selectConnectionNow(preferredConnectionId(defaultConnectionId), false);
-      }
-      if (state.status === "connected" && !state.connectionPaused) {
-        void refreshConnectionCatalog();
-      }
-    });
+    bridge.onHello(handleBridgeHello);
     bridge.onStatus(handleBridgeStatus);
     bridge.onEvent(handleHerdrEvent);
     bridge.onAssistantNotification(notifyRangerTask);
@@ -4136,6 +4138,7 @@ export const store = {
 export const __storeTesting = {
   reloadWhenUpdatedServerIsReady,
   notifyRangerTask,
+  handleBridgeHello,
   handleBridgeStatus,
   handleHerdrEvent,
   startUpdatePolling,
@@ -4150,6 +4153,7 @@ export const __storeTesting = {
   rearmTerminalAttachmentsAfterCatalog,
   replaceState(snapshot: State) {
     stopPolling();
+    initialConnectionSelectionPending = true;
     refreshingConnectionKeys.clear();
     queuedConnectionKeys.clear();
     focusActionChain = Promise.resolve();

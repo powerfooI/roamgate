@@ -906,6 +906,23 @@ describe("connection-partitioned store state", () => {
       expect(stored.get("roamgate:lastConnection")).toBe("alpha");
       store.selectConnection("beta");
       expect(stored.get("roamgate:lastConnection")).toBe("beta");
+
+      __storeTesting.replaceState({
+        ...partitionState(),
+        activeConnectionId: "legacy-default",
+        connections: [],
+      });
+      __storeTesting.handleBridgeHello({
+        default_connection_id: "legacy-default",
+      });
+      expect(store.get().activeConnectionId).toBe("beta");
+      // Reconnecting preserves this tab's choice even if another tab switched.
+      store.selectConnection("legacy-default");
+      stored.set("roamgate:lastConnection", "beta");
+      __storeTesting.handleBridgeHello({
+        default_connection_id: "legacy-default",
+      });
+      expect(store.get().activeConnectionId).toBe("legacy-default");
     } finally {
       bridge.setActiveConnection = originalSetActiveConnection;
       Object.defineProperty(globalThis, "localStorage", {
