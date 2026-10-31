@@ -62,6 +62,7 @@ import {
 } from "./connections/profiles";
 import { createSshProfileRuntimeConfig } from "./connections/ssh-profile-runtime";
 import {
+  CONNECTION_CHANGED_DURING_REQUEST,
   ConnectionRoutingError,
   createConnectionReplyPublisher,
   createLegacyRoutingLogger,
@@ -1382,25 +1383,29 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     }
     return;
   }
-  if (PANE_INPUT_METHODS.has(method) && typeof params?.pane_id === "string") {
-    // Typing through the pane API (the composer, the key buttons) counts as
-    // input for clipboard writes, as typing into the terminal does. The
-    // lookup runs beside the input rather than before it, so sending never
-    // waits for an extra round trip: the command's clipboard write comes
-    // back through its output, in practice well after the lookup answers.
-    void herdr
-      .call("pane.get", { pane_id: params.pane_id }, 2000)
-      .then((pane: { pane?: { terminal_id?: unknown } } | null) => {
-        const terminalId = pane?.pane?.terminal_id;
-        if (typeof terminalId === "string")
-          terminalBridge.noteTerminalInput(ws, terminalId);
-      })
-      .catch(() => {
-        // The input itself still goes through; only its clipboard is lost.
-      });
+  const isPaneInput = PANE_INPUT_METHODS.has(method);
+  let inputTerminalId: string | undefined;
+  if (isPaneInput && typeof params?.pane_id === "string") {
+    // Resolve the recipient before input can produce a clipboard write.
+    try {
+      const pane = await herdr.call(
+        "pane.get",
+        { pane_id: params.pane_id },
+        2000,
+      );
+      if (typeof pane?.pane?.terminal_id === "string")
+        inputTerminalId = pane.pane.terminal_id;
+    } catch {
+      // A failed lookup must not prevent input.
+    }
   }
   try {
-    const rawResult = await herdr.call(method, params ?? {});
+    const rawResult = await herdr.call(method, params ?? {}, undefined, () => {
+      if (isPaneInput && !requestIsCurrent())
+        throw new Error(CONNECTION_CHANGED_DURING_REQUEST);
+      if (inputTerminalId)
+        terminalBridge.noteTerminalInput(ws, inputTerminalId);
+    });
     let result = rawResult;
     if (
       method === "integration.list" &&
