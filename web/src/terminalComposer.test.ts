@@ -366,6 +366,20 @@ describe("uploaded image paths in composer text", () => {
     ]);
   });
 
+  test("keeps uploaded paths quoted for apostrophes intact", () => {
+    for (const quotedPath of [
+      '"C:/Users/O\'Brien/AppData/Local/Temp/roamgate-uploads-501/upload-abc/img.png"',
+      "'/tmp/O'\\''Brien/roamgate-uploads-501/upload-abc/img.png'",
+      "'C:/Users/O''Brien$/Temp/roamgate-uploads-501/upload-abc/img.png'",
+    ]) {
+      expect(uploadedPathPieces(`see ${quotedPath} please`)).toEqual([
+        { text: "see ", path: false },
+        { text: quotedPath, path: true },
+        { text: " please", path: false },
+      ]);
+    }
+  });
+
   test("each image is its own paste, with a pause, before the text goes on", async () => {
     const calls: unknown[] = [];
     const client = {

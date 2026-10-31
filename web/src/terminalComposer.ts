@@ -637,11 +637,10 @@ export function terminalComposerRequest(
   };
 }
 
-// An image path the server's upload put in the text, quoted when it needs to
-// be (see terminal-path-text). Punctuation right after an unquoted path ends
-// the sentence, not the path.
-const UPLOADED_PATH =
-  /'[^']*[\\/]roamgate-uploads-[^']*'|[^\s'"]*[\\/]roamgate-uploads-[^\s'"]*[^\s'".,;:!?)\]]/g;
+// Keep adjacent quoted segments and escaped characters in one shell word,
+// including the Unix and PowerShell apostrophe forms from terminal-path-text.
+const COMPOSER_WORD = /(?:'[^']*'|"[^"]*"|\\.|[^\s'"\\])+/g;
+const UPLOADED_PATH = /[\\/]roamgate-uploads-[^\\/\s]+[\\/]/;
 /**
  * How long an agent gets to take a pasted image in before what follows it.
  * Claude Code reads a pasted image path into an attachment and drops an
@@ -655,11 +654,16 @@ export function uploadedPathPieces(
 ): Array<{ text: string; path: boolean }> {
   const pieces: Array<{ text: string; path: boolean }> = [];
   let last = 0;
-  for (const match of text.matchAll(UPLOADED_PATH)) {
+  for (const match of text.matchAll(COMPOSER_WORD)) {
+    const word = match[0];
+    if (!/^['"]?(?:[a-z]:[\\/]|\/)/i.test(word) || !UPLOADED_PATH.test(word))
+      continue;
+    // Quoted names retain punctuation; unquoted sentence endings stay text.
+    const path = /['"]/.test(word) ? word : word.replace(/[.,;:!?)\]]+$/, "");
     if (match.index > last)
       pieces.push({ text: text.slice(last, match.index), path: false });
-    pieces.push({ text: match[0], path: true });
-    last = match.index + match[0].length;
+    pieces.push({ text: path, path: true });
+    last = match.index + path.length;
   }
   if (last < text.length) pieces.push({ text: text.slice(last), path: false });
   return pieces;
