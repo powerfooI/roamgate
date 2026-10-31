@@ -1543,6 +1543,17 @@ export function createTerminalBridge(args: {
     restoreClipboardRelaySize(ws);
   }
 
+  /**
+   * Records input a browser sent to one of its terminals another way than
+   * terminal.input (the composer types through Herdr's pane API), so a
+   * clipboard write the command makes goes back to that browser.
+   */
+  function noteTerminalInput(ws: ServerWebSocket<unknown>, terminalId: string) {
+    const session = sharedTerminals.get(terminalId);
+    if (!session || !terminalViewers.get(ws)?.has(terminalId)) return;
+    clipboardTarget = { ws, terminalId, inputAt: Date.now(), session };
+  }
+
   function viewedTerminals(ws: ServerWebSocket<unknown>): string[] {
     return Array.from(terminalViewers.get(ws)?.keys() ?? []);
   }
@@ -1602,6 +1613,7 @@ export function createTerminalBridge(args: {
     endpointAvailability,
     handleTerminalRpc,
     cleanupWs,
+    noteTerminalInput,
     viewedTerminals,
     statusTerminals,
     browserClientCountChanged,

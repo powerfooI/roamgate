@@ -610,6 +610,65 @@ describe("terminal bridge sharing", () => {
     },
   );
 
+  test("input typed through the pane API makes its browser the clipboard owner", async () => {
+    const clipboardData = "cGFuZSBjb3B5";
+    const socketPath = await startThinServer({
+      clipboardData,
+      clipboardDelayMs: 40,
+    });
+    const terminal = {} as ServerWebSocket<unknown>;
+    const composer = {} as ServerWebSocket<unknown>;
+    const stranger = {} as ServerWebSocket<unknown>;
+    const messages = new Map<ServerWebSocket<unknown>, string[]>([
+      [terminal, []],
+      [composer, []],
+      [stranger, []],
+    ]);
+    const clipboardOf = (ws: ServerWebSocket<unknown>) =>
+      messages
+        .get(ws)!
+        .map((message) => JSON.parse(message))
+        .find((message) => message.terminal_clipboard)?.terminal_clipboard;
+    const bridge = createTerminalBridge({
+      clientSocketPath: socketPath,
+      herdrProtocol: async () => 17,
+      safeSend: (ws, payload) => {
+        messages.get(ws)?.push(payload);
+        return true;
+      },
+      clientLabel: () => "browser",
+      markRpcError: () => undefined,
+    });
+    for (const ws of [terminal, composer])
+      await bridge.handleTerminalRpc(ws, "attach", "terminal.attach", {
+        terminal_id: "term_1",
+        cols: 100,
+        rows: 30,
+      });
+
+    // The clipboard write comes after the composer's input, which goes
+    // through Herdr's pane API rather than terminal.input.
+    await bridge.handleTerminalRpc(terminal, "input", "terminal.input", {
+      terminal_id: "term_1",
+      data: Buffer.from("x").toString("base64"),
+    });
+    bridge.noteTerminalInput(composer, "term_1");
+    // A browser not showing the terminal never becomes its owner.
+    bridge.noteTerminalInput(stranger, "term_1");
+    await waitForCondition(
+      () => clipboardOf(composer) !== undefined,
+      "timed out waiting for the composer's clipboard message",
+    );
+    expect(clipboardOf(composer)).toEqual({
+      terminal_id: "term_1",
+      data: clipboardData,
+    });
+    expect(clipboardOf(terminal)).toBeUndefined();
+    expect(clipboardOf(stranger)).toBeUndefined();
+    bridge.cleanupWs(terminal);
+    bridge.cleanupWs(composer);
+  });
+
   test("isolates duplicate terminal ids, operations, frames, and clipboard by connection", async () => {
     const alphaTracker = {
       appConnects: 0,

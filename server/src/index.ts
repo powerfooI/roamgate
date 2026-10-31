@@ -62,6 +62,7 @@ import {
 } from "./connections/profiles";
 import { createSshProfileRuntimeConfig } from "./connections/ssh-profile-runtime";
 import {
+  CONNECTION_CHANGED_DURING_REQUEST,
   ConnectionRoutingError,
   createConnectionReplyPublisher,
   createLegacyRoutingLogger,
@@ -678,6 +679,12 @@ function safeSend(
       }),
   });
 }
+
+const PANE_INPUT_METHODS = new Set([
+  "pane.send_input",
+  "pane.send_text",
+  "pane.send_keys",
+]);
 
 async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
   let parsed: unknown;
@@ -1376,8 +1383,29 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     }
     return;
   }
+  const isPaneInput = PANE_INPUT_METHODS.has(method);
+  let inputTerminalId: string | undefined;
+  if (isPaneInput && typeof params?.pane_id === "string") {
+    // Resolve the recipient before input can produce a clipboard write.
+    try {
+      const pane = await herdr.call(
+        "pane.get",
+        { pane_id: params.pane_id },
+        2000,
+      );
+      if (typeof pane?.pane?.terminal_id === "string")
+        inputTerminalId = pane.pane.terminal_id;
+    } catch {
+      // A failed lookup must not prevent input.
+    }
+  }
   try {
-    const rawResult = await herdr.call(method, params ?? {});
+    const rawResult = await herdr.call(method, params ?? {}, undefined, () => {
+      if (isPaneInput && !requestIsCurrent())
+        throw new Error(CONNECTION_CHANGED_DURING_REQUEST);
+      if (inputTerminalId)
+        terminalBridge.noteTerminalInput(ws, inputTerminalId);
+    });
     let result = rawResult;
     if (
       method === "integration.list" &&
