@@ -34,7 +34,7 @@ export function ShortcutLookupDialog({
   open: boolean;
   onClose: () => void;
 }) {
-  const { preferences, platform, preset, storageError } =
+  const { preferences, platform, preset, storageError, platformMismatch } =
     useShortcutPreferences();
   const dialogRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -306,6 +306,14 @@ export function ShortcutLookupDialog({
           {error || storageError ? (
             <p className="keybinding-error" role="alert">
               {error || storageError}
+            </p>
+          ) : null}
+          {platformMismatch ? (
+            <p className="keybinding-note" role="status">
+              <strong>{platformMismatch.name}</strong> was written for{" "}
+              {SHORTCUT_PLATFORMS[platformMismatch.base]}, so this browser is
+              using the {SHORTCUT_PLATFORMS[platform]} defaults instead. Edit it
+              here to save a set that applies on this platform too.
             </p>
           ) : null}
         </div>

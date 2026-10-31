@@ -1,5 +1,5 @@
-import { afterEach, expect, test } from "bun:test";
-import { Window as BrowserWindow } from "happy-dom";
+import { afterEach, expect, test, jest } from "bun:test";
+import { Window as BrowserWindow, Event as BrowserEvent } from "happy-dom";
 import { entryScript, startFrontendFreshness } from "./frontendFreshness";
 
 test("the entry script is the hashed index chunk", () => {
@@ -14,6 +14,13 @@ test("the entry script is the hashed index chunk", () => {
   // Vite's development page has none.
   expect(entryScript('<script type="module" src="/src/main.tsx">')).toBeNull();
 });
+
+import {
+  activateTerminalComposerDraftScope,
+  beginTerminalComposerUpload,
+  finishTerminalComposerUpload,
+  terminalComposerDraftKey,
+} from "./terminalComposer";
 
 const globalsUsed = [
   "document",
@@ -94,7 +101,7 @@ test("a reconnect to a server with another build reloads the page", async () => 
   expect(tab.reloads()).toBe(1);
 });
 
-test("unsent text delays the reload until its field is left", async () => {
+test("unsent text delays the reload after blur until cleared", async () => {
   const tab = page("/assets/index-old.js");
   tab.box.value = "half a sentence";
   tab.box.focus();
@@ -104,6 +111,10 @@ test("unsent text delays the reload until its field is left", async () => {
 
   tab.box.blur();
   await tab.settle();
+  expect(tab.reloads()).toBe(0);
+  tab.box.value = "";
+  tab.box.dispatchEvent(new BrowserEvent("input", { bubbles: true }));
+  await tab.settle();
   expect(tab.reloads()).toBe(1);
 });
 
@@ -112,4 +123,81 @@ test("a development page without a hashed entry never reloads", async () => {
   tab.serve("/assets/index-new.js");
   await tab.reconnect();
   expect(tab.reloads()).toBe(0);
+});
+
+test("an unfocused API key survives a stale build until its dialog closes", async () => {
+  const tab = page("/assets/index-old.js");
+  const dialog = document.createElement("section");
+  dialog.setAttribute("role", "dialog");
+  const key = document.createElement("input");
+  key.type = "password";
+  key.value = "unsaved-key";
+  dialog.append(key);
+  document.body.append(dialog);
+  tab.serve("/assets/index-new.js");
+  await tab.reconnect();
+  key.focus();
+  key.blur();
+  await tab.settle();
+  expect(tab.reloads()).toBe(0);
+  dialog.remove();
+  jest.useFakeTimers();
+  try {
+    tab.box.dispatchEvent(new BrowserEvent("input", { bubbles: true }));
+    jest.advanceTimersByTime(1);
+    expect(tab.reloads()).toBe(1);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("pending uploads delay a reload even with an empty composer", async () => {
+  const tab = page("/assets/index-old.js");
+  activateTerminalComposerDraftScope("freshness", 1);
+  const key = terminalComposerDraftKey("freshness", 1, "pane");
+  expect(beginTerminalComposerUpload(key)).toBe(true);
+  jest.useFakeTimers();
+  try {
+    tab.serve("/assets/index-new.js");
+    // reconnect settles with zero-delay timers, so drive those explicitly.
+    const reconnect = tab.reconnect();
+    await Promise.resolve();
+    jest.advanceTimersByTime(1);
+    await Promise.resolve();
+    jest.advanceTimersByTime(1);
+    await reconnect;
+    expect(tab.reloads()).toBe(0);
+    finishTerminalComposerUpload(key);
+    jest.advanceTimersByTime(1000);
+    expect(tab.reloads()).toBe(1);
+  } finally {
+    finishTerminalComposerUpload(key);
+    jest.useRealTimers();
+  }
+});
+
+test("cleanup prevents an in-flight check from reloading", async () => {
+  page("/assets/index-old.js");
+  for (const stop of stops.splice(0)) stop();
+  let connect = () => {};
+  let resolve!: (html: string) => void;
+  let reloads = 0;
+  const stop = startFrontendFreshness({
+    onConnected: (callback) => {
+      connect = callback;
+      return () => {};
+    },
+    fetchIndex: () =>
+      new Promise<string>((done) => {
+        resolve = done;
+      }),
+    reload: () => {
+      reloads++;
+    },
+  });
+  connect();
+  stop();
+  resolve('<script src="/assets/index-new.js"></script>');
+  await Promise.resolve();
+  expect(reloads).toBe(0);
 });

@@ -39,6 +39,16 @@ export function resolveSystemTheme(
   return media.matches ? "light" : "dark";
 }
 
+// Black background swaps the dark theme's blue-grey surfaces for pure black
+// and neutral greys. It only changes the dark theme; light stays as it is.
+export function normalizeBlackBackground(value: string | null): boolean {
+  return value === "1";
+}
+
+export function serializeBlackBackground(value: boolean): string {
+  return value ? "1" : "0";
+}
+
 export const SYSTEM_THEME_QUERY = "(prefers-color-scheme: light)";
 
 export const UI_SCALE_DEFAULT = 100;

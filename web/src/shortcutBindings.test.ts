@@ -19,6 +19,7 @@ import {
   importShortcutPreset,
   parseShortcutPreferences,
   resolveShortcutPreset,
+  shortcutPresetPlatformMismatch,
   validateShortcutPreset,
 } from "./shortcutPreferences";
 import { tabShortcutAction } from "./tabShortcuts";
@@ -135,7 +136,7 @@ describe("platform shortcut maps", () => {
         expect(shortcutConflicts(id, bindings[id], bindings)).toEqual([]);
     }
   });
-  test("automatic follows the current device while explicit and custom choices persist", () => {
+  test("automatic follows the current device while an explicit choice persists", () => {
     const prefs = { version: 1 as const, active: "auto", presets: [preset()] };
     expect(resolveShortcutPreset(prefs, "mac").bindings["tab.create"]).toEqual([
       "Meta+T",
@@ -143,12 +144,30 @@ describe("platform shortcut maps", () => {
     expect(
       resolveShortcutPreset(prefs, "windows").bindings["tab.create"],
     ).toEqual(["Ctrl+Alt+T"]);
+    // Selecting another platform's map is deliberate and still honoured.
     expect(
       resolveShortcutPreset({ ...prefs, active: "mac" }, "linux").base,
     ).toBe("mac");
-    expect(
-      resolveShortcutPreset({ ...prefs, active: "custom-test" }, "mac").name,
-    ).toBe("My keyboard");
+  });
+  test("a custom preset applies on its own platform and is skipped on others", () => {
+    // Presets now travel between a user's browsers, so a Linux-based set must
+    // not land on a Mac as Cmd bindings that never fire: that browser falls
+    // back to its own defaults and reports the mismatch instead.
+    const prefs = {
+      version: 1 as const,
+      active: "custom-test",
+      presets: [preset()],
+    };
+    expect(resolveShortcutPreset(prefs, "linux").name).toBe("My keyboard");
+    expect(shortcutPresetPlatformMismatch(prefs, "linux")).toBeNull();
+
+    const onMac = resolveShortcutPreset(prefs, "mac");
+    expect(onMac.id).toBe("auto");
+    expect(onMac.base).toBe("mac");
+    expect(onMac.bindings["tab.create"]).toEqual(["Meta+T"]);
+    expect(shortcutPresetPlatformMismatch(prefs, "mac")?.name).toBe(
+      "My keyboard",
+    );
   });
   test("formats modifiers for the device, including intentionally selected foreign presets", () => {
     expect(formatShortcut("Alt+Meta+ArrowLeft", "mac")).toBe("Option+Cmd+Left");

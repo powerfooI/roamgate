@@ -23,6 +23,7 @@ import {
   type ReviewAnnotation,
 } from "./annotations";
 import { roamgateLocalStorage, subscribeLocalStorage } from "./browserStorage";
+import { passwordManagerIgnore } from "./passwordManagerIgnore";
 import { LAYOUT_CHANGE_EVENT, useLayoutPreferences } from "./layoutPreferences";
 import { useSystemBack } from "./systemBack";
 import { startFrontendFreshness } from "./frontendFreshness";
@@ -69,7 +70,9 @@ import {
   terminalFontFamilyStack,
   normalizeThemePreference,
   normalizeUiScale,
+  normalizeBlackBackground,
   normalizeZenMode,
+  serializeBlackBackground,
   serializeZenMode,
   UI_SCALE_DEFAULT,
   type ResolvedTheme,
@@ -244,6 +247,7 @@ const UI_SCALE_KEY = "uiScale";
 const TERMINAL_FONT_SCALE_KEY = "terminalFontScale";
 const TERMINAL_FONT_FAMILY_KEY = "terminalFontFamily";
 const ZEN_MODE_KEY = "zenMode";
+const BLACK_BACKGROUND_KEY = "blackBackground";
 const LazyTerminalView = lazyWithReload("terminal-view", () =>
   import("./components/TerminalView").then((module) => ({
     default: module.TerminalView,
@@ -414,6 +418,12 @@ function loadTerminalFontScale(): number {
 function loadTerminalFontFamily(): string {
   return normalizeTerminalFontFamily(
     roamgateLocalStorage.getItem(TERMINAL_FONT_FAMILY_KEY),
+  );
+}
+
+function loadBlackBackground(): boolean {
+  return normalizeBlackBackground(
+    roamgateLocalStorage.getItem(BLACK_BACKGROUND_KEY),
   );
 }
 
@@ -748,10 +758,10 @@ function PaneJumpOverlay({
             <input
               ref={searchInputRef}
               className="pane-jump-search"
-              type="text"
               value={search}
               spellCheck={false}
               autoComplete="off"
+              {...passwordManagerIgnore}
               placeholder="Workspace, tab, server, directory, or agent"
               role="combobox"
               aria-label="Search panes"
@@ -1321,6 +1331,7 @@ export default function App() {
     loadSystemTheme(),
   );
   const resolvedTheme: ResolvedTheme = theme === "system" ? systemTheme : theme;
+  const [blackBackground, setBlackBackground] = useState(loadBlackBackground);
   const [accentColor, setAccentColor] = useState<AccentColor>(() =>
     loadAccentColor(),
   );
@@ -1348,8 +1359,14 @@ export default function App() {
         resolvedTheme,
         terminalThemeSelection,
         customTerminalThemes,
+        blackBackground,
       ),
-    [resolvedTheme, terminalThemeSelection, customTerminalThemes],
+    [
+      resolvedTheme,
+      terminalThemeSelection,
+      customTerminalThemes,
+      blackBackground,
+    ],
   );
   const [zenMode, setZenMode] = useState(loadZenMode);
   const [shortcutCheatSheetOpen, setShortcutCheatSheetOpen] = useState(false);
@@ -3534,6 +3551,8 @@ export default function App() {
     document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.style.colorScheme = resolvedTheme;
     document.documentElement.dataset.accent = accentColor;
+    if (blackBackground) document.documentElement.dataset.black = "";
+    else delete document.documentElement.dataset.black;
     document.documentElement.style.zoom =
       uiScale === UI_SCALE_DEFAULT ? "" : String(uiScale / 100);
     if (uiScale === UI_SCALE_DEFAULT) {
@@ -3567,10 +3586,16 @@ export default function App() {
       document.documentElement.style.removeProperty("--popover-portal-zoom");
       document.documentElement.style.removeProperty("--popover-content-zoom");
     }
-  }, [accentColor, resolvedTheme, theme, uiScale]);
+  }, [accentColor, blackBackground, resolvedTheme, theme, uiScale]);
   useEffect(() => {
     roamgateLocalStorage.setItem(THEME_KEY, theme);
   }, [theme]);
+  useEffect(() => {
+    roamgateLocalStorage.setItem(
+      BLACK_BACKGROUND_KEY,
+      serializeBlackBackground(blackBackground),
+    );
+  }, [blackBackground]);
   useEffect(() => {
     roamgateLocalStorage.setItem(ACCENT_COLOR_KEY, accentColor);
   }, [accentColor]);
@@ -3617,6 +3642,8 @@ export default function App() {
     () =>
       subscribeLocalStorage((key) => {
         if (key === null || key === THEME_KEY) setTheme(loadTheme());
+        if (key === null || key === BLACK_BACKGROUND_KEY)
+          setBlackBackground(loadBlackBackground());
         if (key === null || key === ACCENT_COLOR_KEY)
           setAccentColor(loadAccentColor());
         if (key === null || key === UI_SCALE_KEY) setUiScale(loadUiScale());
@@ -4005,6 +4032,8 @@ export default function App() {
               terminalThemeSelection={terminalThemeSelection}
               customTerminalThemes={customTerminalThemes}
               onThemeChange={setTheme}
+              blackBackground={blackBackground}
+              onBlackBackgroundChange={setBlackBackground}
               onAccentColorChange={setAccentColor}
               uiScale={uiScale}
               onUiScaleChange={setUiScale}

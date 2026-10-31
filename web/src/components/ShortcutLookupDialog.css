@@ -165,6 +165,15 @@
   gap: 6px;
 }
 
+.keybinding-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.keybinding-note strong {
+  color: var(--text);
+}
 .keybinding-error {
   color: var(--danger, #e87979);
 }

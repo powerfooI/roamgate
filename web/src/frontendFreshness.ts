@@ -1,4 +1,5 @@
 import { bridge } from "./api";
+import { terminalComposerBusy } from "./terminalComposer";
 
 /** The hashed entry script an index page loads, e.g. `/assets/index-Ab12.js`. */
 export function entryScript(html: string): string | null {
@@ -21,19 +22,32 @@ async function fetchServedIndex() {
   return response.ok ? response.text() : null;
 }
 
-/** True while the focused field holds text the user has not sent yet. */
+/** Blurring a field does not save its contents. */
 function writing() {
-  const active = document.activeElement;
-  if (!(active instanceof HTMLElement)) return false;
-  const editable =
-    active.isContentEditable ||
-    active.tagName === "TEXTAREA" ||
-    active.tagName === "INPUT";
-  const text =
-    active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement
-      ? active.value
-      : (active.textContent ?? "");
-  return editable && text.trim() !== "";
+  if (terminalComposerBusy()) return true;
+  if (document.querySelector('[role="dialog"], [role="alertdialog"]'))
+    return true;
+  return [
+    ...document.querySelectorAll("input, textarea, [contenteditable]"),
+  ].some((field) => {
+    if (
+      field instanceof HTMLInputElement ||
+      field instanceof HTMLTextAreaElement
+    ) {
+      if (field.disabled || field.readOnly) return false;
+      if (
+        field instanceof HTMLInputElement &&
+        /^(button|submit|reset|checkbox|radio|range|color|hidden)$/.test(
+          field.type,
+        )
+      )
+        return false;
+      return field.value !== "";
+    }
+    return (
+      field.getAttribute("contenteditable") !== "false" && !!field.textContent
+    );
+  });
 }
 
 /**
@@ -44,7 +58,7 @@ function writing() {
  * reconnects (a restart drops it) and when the page comes back to the
  * foreground (a phone reopening its installed app restores the page without
  * reloading it). A field holding unsent text delays the reload until it is
- * emptied or left.
+ * emptied or saved. Uploads and submissions must also finish first.
  */
 export function startFrontendFreshness({
   onConnected = (callback) =>
@@ -64,12 +78,16 @@ export function startFrontendFreshness({
   let checking = false;
   let stale = false;
   let reloading = false;
+  let disposed = false;
+  let retry: ReturnType<typeof setInterval> | undefined;
   const reloadWhenFree = () => {
-    if (reloading) return;
+    if (disposed || reloading) return;
     if (writing()) {
       stale = true;
+      retry ??= setInterval(reloadWhenFree, 1000);
       return;
     }
+    clearInterval(retry);
     reloading = true;
     reload();
   };
@@ -79,7 +97,7 @@ export function startFrontendFreshness({
   document.addEventListener("focusout", onWritingEnds, true);
   document.addEventListener("input", onWritingEnds, true);
   const check = async () => {
-    if (checking || reloading) return;
+    if (disposed || checking || reloading) return;
     checking = true;
     try {
       const html = await fetchIndex();
@@ -97,6 +115,8 @@ export function startFrontendFreshness({
   };
   document.addEventListener("visibilitychange", onVisible);
   return () => {
+    disposed = true;
+    clearInterval(retry);
     offConnected();
     document.removeEventListener("visibilitychange", onVisible);
     document.removeEventListener("focusout", onWritingEnds, true);
