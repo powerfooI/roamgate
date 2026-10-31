@@ -34,6 +34,9 @@ describe("secure SSH command construction", () => {
     expect(argv).toContain("RequestTTY=no");
     expect(argv).toContain("PermitLocalCommand=no");
     expect(argv).toContain("ControlMaster=no");
+    // A session that stalls after connecting ends instead of hanging.
+    expect(argv).toContain("ServerAliveInterval=10");
+    expect(argv).toContain("ServerAliveCountMax=3");
     expect(argv).not.toContain("StrictHostKeyChecking=no");
     expect(argv).not.toContain("UserKnownHostsFile=/dev/null");
     expect(argv.slice(-3)).toEqual(["--", "operator@dev-box", "printf ok"]);
@@ -46,6 +49,10 @@ describe("secure SSH command construction", () => {
     ]);
     expect(argv).toContain("ExitOnForwardFailure=yes");
     expect(argv).toContain("StreamLocalBindMask=0177");
+    expect(argv.filter((value) => value.startsWith("ServerAlive"))).toEqual([
+      "ServerAliveInterval=10",
+      "ServerAliveCountMax=3",
+    ]);
     expect(argv.slice(-2)).toEqual(["--", "dev-box"]);
     expect(argv.filter((value) => value === "-L")).toHaveLength(2);
   });

@@ -154,6 +154,7 @@ export type SshTunnelConfig = {
 export type RunProcess = (
   argv: string[],
   input?: string,
+  options?: { timeoutMs?: number },
 ) => Promise<{ stdout: string; stderr: string }>;
 
 type TunnelProcess = {
@@ -177,6 +178,10 @@ export type SshTunnelManager = {
   startAutoSshTunnel(): Promise<void>;
   cleanupAutoSshTunnel(): Promise<void>;
 };
+
+// Hard cap on the HOME probe: a stuck probe blocks the whole connection from
+// ever leaving "connecting", and nothing retries while it is pending.
+const REMOTE_HOME_PROBE_TIMEOUT_MS = 20_000;
 
 export function createSshTunnelManager(args: {
   connectionId?: string;
@@ -259,6 +264,8 @@ export function createSshTunnelManager(args: {
     if (cachedRemoteHome?.host === host) return cachedRemoteHome.home;
     const { stdout } = await args.runProcess(
       sshCommandArgv(host, `printf %s "$HOME"`),
+      undefined,
+      { timeoutMs: REMOTE_HOME_PROBE_TIMEOUT_MS },
     );
     const home = stdout.trim();
     if (!home.startsWith("/")) {

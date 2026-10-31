@@ -12,13 +12,6 @@ import {
   type SshTunnelManager,
 } from "./ssh-tunnel";
 
-const SSH_KEEPALIVE_ARGS = [
-  "-o",
-  "ServerAliveInterval=20",
-  "-o",
-  "ServerAliveCountMax=3",
-] as const;
-
 export function powershellCommand(script: string): string {
   return `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
 }
@@ -118,7 +111,7 @@ export function createWindowsSshTunnel(args: {
     );
     try {
       const { stdout } = await args.runProcess(
-        sshCommandArgv(config.sshHost!, command, SSH_KEEPALIVE_ARGS),
+        sshCommandArgv(config.sshHost!, command),
       );
       const encoded = stdout
         .split(/\r?\n/)
@@ -176,11 +169,7 @@ export function createWindowsSshTunnel(args: {
       }
       sockets.add(socket);
       socket.on("error", () => socket.destroy());
-      const [program, ...argv] = sshCommandArgv(
-        config.sshHost!,
-        command,
-        SSH_KEEPALIVE_ARGS,
-      );
+      const [program, ...argv] = sshCommandArgv(config.sshHost!, command);
       const child = args.spawnBridge
         ? args.spawnBridge([program, ...argv])
         : spawn(program, argv, {
