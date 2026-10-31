@@ -44,88 +44,130 @@ async function startServer(
   return socketPath;
 }
 
-describe("HerdrClient one-shot lifecycle", () => {
-  test("rechecks authorization after socket connection and sends no revoked request", async () => {
-    let received = false;
-    let checked = false;
-    let allowed = true;
-    const closed = Promise.withResolvers<void>();
-    const client = new HerdrClient(
-      await startServer(() => {
-        received = true;
-      }),
-    );
-    servers
-      .at(-1)!
-      .once("connection", (socket) => socket.once("close", closed.resolve));
-    const pending = client.call("workspace.create", {}, 8000, () => {
-      checked = true;
-      if (!allowed) throw new Error("Approval revoked");
-    });
-    allowed = false;
-    await expect(pending).rejects.toThrow("Approval revoked");
-    await closed.promise;
-    expect(checked).toBe(true);
-    expect(received).toBe(false);
-  });
+for (const [transport, useBunSocket] of [
+  ["Bun.connect", true],
+  ["node:net", false],
+] as const) {
+  describe(`HerdrClient one-shot lifecycle over ${transport}`, () => {
+    const oneShot = (socketPath: string) =>
+      new HerdrClient(socketPath, useBunSocket);
 
-  test("rejects mismatched and malformed one-shot response envelopes", async () => {
-    const wrongId = new HerdrClient(
-      await startServer((socket) => {
-        socket.end(`${JSON.stringify({ id: "wrong", result: {} })}\n`);
-      }),
-    );
-    await expect(wrongId.call("ping")).rejects.toThrow(
-      "invalid response envelope",
-    );
-
-    const mixedEnvelope = new HerdrClient(
-      await startServer((socket, data) => {
-        const request = JSON.parse(data.toString("utf8"));
-        socket.end(
-          `${JSON.stringify({ id: request.id, result: {}, error: {} })}\n`,
-        );
-      }),
-    );
-    await expect(mixedEnvelope.call("ping")).rejects.toThrow(
-      "invalid response envelope",
-    );
-  });
-
-  test("bounds a one-shot response without a newline", async () => {
-    const client = new HerdrClient(
-      await startServer((socket) => {
-        socket.write("x".repeat(1024 * 1024 + 1));
-      }),
-    );
-
-    await expect(client.call("ping")).rejects.toThrow(
-      "response line is too large",
-    );
-  });
-
-  test("destroys a half-open socket when a call times out", async () => {
-    let resolveClosed!: () => void;
-    const closed = new Promise<void>((resolve) => {
-      resolveClosed = resolve;
-    });
-    const client = new HerdrClient(
-      await startServer((socket) => {
-        socket.once("close", () => resolveClosed());
-      }),
-    );
-
-    await expect(client.call("ping", {}, 25)).rejects.toThrow("timeout: ping");
-    await expect(
-      Promise.race([
-        closed,
-        Bun.sleep(500).then(() => {
-          throw new Error("server did not observe client closure");
+    test("rechecks authorization after socket connection and sends no revoked request", async () => {
+      let received = false;
+      let checked = false;
+      let allowed = true;
+      const closed = Promise.withResolvers<void>();
+      const client = oneShot(
+        await startServer(() => {
+          received = true;
         }),
-      ]),
-    ).resolves.toBeUndefined();
+      );
+      servers
+        .at(-1)!
+        .once("connection", (socket) => socket.once("close", closed.resolve));
+      const pending = client.call("workspace.create", {}, 8000, () => {
+        checked = true;
+        if (!allowed) throw new Error("Approval revoked");
+      });
+      allowed = false;
+      await expect(pending).rejects.toThrow("Approval revoked");
+      await closed.promise;
+      expect(checked).toBe(true);
+      expect(received).toBe(false);
+    });
+
+    test("rejects mismatched and malformed one-shot response envelopes", async () => {
+      const wrongId = oneShot(
+        await startServer((socket) => {
+          socket.end(`${JSON.stringify({ id: "wrong", result: {} })}\n`);
+        }),
+      );
+      await expect(wrongId.call("ping")).rejects.toThrow(
+        "invalid response envelope",
+      );
+
+      const mixedEnvelope = oneShot(
+        await startServer((socket, data) => {
+          const request = JSON.parse(data.toString("utf8"));
+          socket.end(
+            `${JSON.stringify({ id: request.id, result: {}, error: {} })}\n`,
+          );
+        }),
+      );
+      await expect(mixedEnvelope.call("ping")).rejects.toThrow(
+        "invalid response envelope",
+      );
+    });
+
+    test("sends a request too large for one socket write", async () => {
+      const socketPath = join(
+        tmpdir(),
+        `herdr-gui-herdr-client-${process.pid}-${crypto.randomUUID()}.sock`,
+      );
+      const server = net.createServer((socket) => {
+        sockets.add(socket);
+        socket.on("close", () => sockets.delete(socket));
+        let received = "";
+        socket.on("data", (data) => {
+          received += data.toString("utf8");
+          const end = received.indexOf("\n");
+          if (end < 0) return;
+          const request = JSON.parse(received.slice(0, end));
+          socket.end(
+            `${JSON.stringify({ id: request.id, result: { length: request.params.text.length } })}\n`,
+          );
+        });
+      });
+      servers.push(server);
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(socketPath, resolve);
+      });
+      // Larger than a unix socket buffer, so one write cannot take it all.
+      const text = "long message ".repeat(70_000);
+      const result = await oneShot(socketPath).call("pane.send_input", {
+        text,
+      });
+      expect(result).toEqual({ length: text.length });
+    });
+
+    test("bounds a one-shot response without a newline", async () => {
+      const client = oneShot(
+        await startServer((socket) => {
+          socket.write("x".repeat(1024 * 1024 + 1));
+        }),
+      );
+
+      await expect(client.call("ping")).rejects.toThrow(
+        "response line is too large",
+      );
+    });
+
+    test("destroys a half-open socket when a call times out", async () => {
+      let resolveClosed!: () => void;
+      const closed = new Promise<void>((resolve) => {
+        resolveClosed = resolve;
+      });
+      const client = oneShot(
+        await startServer((socket) => {
+          socket.once("close", () => resolveClosed());
+        }),
+      );
+
+      await expect(client.call("ping", {}, 25)).rejects.toThrow(
+        "timeout: ping",
+      );
+      await expect(
+        Promise.race([
+          closed,
+          Bun.sleep(500).then(() => {
+            throw new Error("server did not observe client closure");
+          }),
+        ]),
+      ).resolves.toBeUndefined();
+    });
   });
-});
+}
 
 describe("HerdrClient subscription lifecycle", () => {
   test("close before acknowledgement rejects ready and resolves closed", async () => {
