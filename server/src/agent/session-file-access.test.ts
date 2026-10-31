@@ -77,4 +77,24 @@ describe("agent session file access", () => {
     expect(await files.statFile(remotePath)).toBeNull();
     expect(await files.findPiSessionById("missing")).toBeNull();
   });
+
+  test("finds a remote Claude session by ID, following linked project folders", async () => {
+    const commands: string[] = [];
+    const files = createAgentSessionFileAccess({
+      sshHost: "operator@example.com",
+      shQuote: quote,
+      async runBinaryProcessWithTimeout(argv) {
+        commands.push(argv.at(-1) ?? "");
+        return { code: 44, stdout: Buffer.alloc(0), stderr: "" };
+      },
+    });
+    expect(
+      await files.findClaudeSessionById("8b7109b8-e5d2-4744-ac9a-9a8c7d2dd3dc"),
+    ).toBeNull();
+    expect(commands[0]).toContain("find -L ");
+    expect(commands[0]).toContain("CLAUDE_CONFIG_DIR");
+    // Not a UUID: never put in a command.
+    expect(await files.findClaudeSessionById("../x")).toBeNull();
+    expect(commands).toHaveLength(1);
+  });
 });
