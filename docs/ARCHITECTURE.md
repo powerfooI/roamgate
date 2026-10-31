@@ -234,6 +234,13 @@ The bridge runs one Pi Durable assistant service, independent of the selected
 connection and shared by all authenticated browsers through bridge-global
 `bridge.assistant.*` RPC and revisioned snapshot pushes. Reconnecting fetches
 state; sends are never replayed.
+- **Drivers:** `ranger-driver.ts` sends the Claude Code provider's turns to
+  `claude-driver.ts` and every other provider's to Pi. A Claude Code turn is
+  one `claude -p` run resumed from the session the last turn saved, with
+  built-in tools, other MCP servers, skills and hooks off. Ranger's tools
+  reach it over MCP (`claude-mcp.ts`): plain HTTP on 127.0.0.1, with a bearer
+  token valid only while the turn runs. A chat that changes driver starts
+  afresh, and input sent during a Claude Code turn waits as a follow-up.
 - **Tools** are defined in `server/src/assistant/tools.ts` and run through
   `callWorkspaceTool` against the turn's approved scope. Pi's built-in tools,
   extensions, skills, and project instructions are disabled, and workspace
