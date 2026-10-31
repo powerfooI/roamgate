@@ -23,6 +23,7 @@ import {
   type ReviewAnnotation,
 } from "./annotations";
 import { roamgateLocalStorage, subscribeLocalStorage } from "./browserStorage";
+import { passwordManagerIgnore } from "./passwordManagerIgnore";
 import { LAYOUT_CHANGE_EVENT, useLayoutPreferences } from "./layoutPreferences";
 import { useSystemBack } from "./systemBack";
 import {
@@ -756,10 +757,10 @@ function PaneJumpOverlay({
             <input
               ref={searchInputRef}
               className="pane-jump-search"
-              type="text"
               value={search}
               spellCheck={false}
               autoComplete="off"
+              {...passwordManagerIgnore}
               placeholder="Workspace, tab, server, directory, or agent"
               role="combobox"
               aria-label="Search panes"

@@ -1477,7 +1477,108 @@ test("terminal bridge carries endpoint mouse state and targets each attached ter
   }
 });
 
-test("split tab reattach uses the full surface in every endpoint hello", async () => {
+test("keeps the 20 most recently viewed streams warm", async () => {
+  let connections = 0;
+  const socketPath = await startSessionServer({
+    surfaceForHello: (cols, rows) => {
+      connections += 1;
+      return splitSurface(cols, rows);
+    },
+  });
+  const ws = {} as ServerWebSocket<unknown>;
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 22,
+    lookupPaneId: async () => "w1:p1",
+    safeSend: () => true,
+    clientLabel: () => "test",
+    markRpcError: () => undefined,
+  });
+  const visit = async (id: string) => {
+    await bridge.handleTerminalRpc(ws, "attach", "terminal.attach", {
+      terminal_id: id,
+      cols: 134,
+      rows: 69,
+      surface_cols: 274,
+      surface_rows: 71,
+      relay_active: false,
+    });
+    await bridge.handleTerminalRpc(ws, "detach", "terminal.detach", {
+      terminal_id: id,
+    });
+  };
+  try {
+    const ids = Array.from({ length: 21 }, (_, i) => `term${i}`);
+    for (const id of ids) await visit(id);
+    const warm = bridge.statusTerminals().map((t) => t.terminal_id);
+    expect(warm).toHaveLength(20);
+    expect(warm).not.toContain("term0");
+    // Revisiting a warm stream reuses its connection.
+    await visit("term20");
+    expect(connections).toBe(21);
+    await visit("term0");
+    expect(connections).toBe(22);
+  } finally {
+    bridge.dispose();
+  }
+});
+
+test("closes a warm stream nobody returns to within ten minutes", async () => {
+  let connections = 0;
+  const socketPath = await startSessionServer({
+    surfaceForHello: (cols, rows) => {
+      connections += 1;
+      return splitSurface(cols, rows);
+    },
+  });
+  const ws = {} as ServerWebSocket<unknown>;
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 22,
+    lookupPaneId: async () => "w1:p1",
+    safeSend: () => true,
+    clientLabel: () => "test",
+    markRpcError: () => undefined,
+  });
+  const attach = (id: string) =>
+    bridge.handleTerminalRpc(ws, "attach", "terminal.attach", {
+      terminal_id: id,
+      cols: 134,
+      rows: 69,
+      surface_cols: 274,
+      surface_rows: 71,
+      relay_active: false,
+    });
+  const detach = (id: string) =>
+    bridge.handleTerminalRpc(ws, "detach", "terminal.detach", {
+      terminal_id: id,
+    });
+  try {
+    await attach("stale");
+    await attach("fresh");
+    jest.useFakeTimers();
+    try {
+      await detach("stale");
+      jest.advanceTimersByTime(9 * 60_000);
+      await detach("fresh");
+      jest.advanceTimersByTime(60_000);
+      expect(bridge.statusTerminals().map((t) => t.terminal_id)).toEqual([
+        "fresh",
+      ]);
+      jest.advanceTimersByTime(9 * 60_000);
+      expect(bridge.statusTerminals()).toEqual([]);
+    } finally {
+      jest.useRealTimers();
+    }
+    // Coming back after the TTL opens a new stream.
+    await attach("stale");
+    expect(connections).toBe(3);
+  } finally {
+    bridge.dispose();
+  }
+});
+
+test("split tab reattach reuses warm streams sized to the full surface", async () => {
   const hellos: Array<[number, number]> = [];
   const resizes: Array<[number, number]> = [];
   const socketPath = await startSessionServer({
@@ -1535,8 +1636,20 @@ test("split tab reattach uses the full surface in every endpoint hello", async (
       }
       frames.length = 0;
     }
-    expect(hellos).toEqual(Array.from({ length: 4 }, () => [274, 71]));
+    // The second visit reuses both warm streams: no new hello, and the
+    // replayed frame needs no repaint from Herdr.
+    expect(hellos).toEqual(Array.from({ length: 2 }, () => [274, 71]));
     expect(resizes).toEqual([]);
+    expect(bridge.endpointAvailability()).toEqual({});
+    expect(
+      bridge
+        .statusTerminals()
+        .map((t) => t.terminal_id)
+        .sort(),
+    ).toEqual(["left", "right"]);
+    // Warm streams outlive browser disconnects for an immediate return.
+    bridge.browserClientCountChanged(0);
+    expect(bridge.statusTerminals()).toHaveLength(2);
   } finally {
     bridge.dispose();
   }
@@ -3396,6 +3509,8 @@ test("reconnect replaces advertisements while other connection runtimes retain t
       terminal_id: "term1",
     });
     expect(a.bridge.endpointAvailability()).toEqual({});
+    // Close the warm stream so the reattach renegotiates on a new socket.
+    a.bridge.refreshSurfaceCodecs();
     await a.attach("reattach");
     expect(a.bridge.endpointAvailability().term1?.capabilities).toEqual([]);
     expect(b.bridge.endpointAvailability().term1?.capabilities).toEqual([]);
