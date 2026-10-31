@@ -31,6 +31,17 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
   agents, and opens typed file paths.
 - Desktop **Zen mode** hides app chrome so the terminal fills the window.
 
+When a pane on an SSH connection prints a `localhost` URL, clicking it offers to
+**forward the port** over SSH (to the same port number when free) and opens the
+forwarded address. **Forward a port** in the command menu does the same. The
+connection switcher lists the ports your own processes listen on, on either
+side, and forwards either way: a remote port brought here, or a local one exposed
+to the remote so processes there, agents included, can reach it. Active forwards
+are listed with a stop button. Forwards bind loopback here and ask for loopback
+on the remote (a remote sshd with `GatewayPorts yes` binds every interface
+instead), close with their connection, and are offered only when Roamgate runs
+on the machine you browse from.
+
 Each browser keeps its own workspace and tab selection on endpoint connections;
 older (legacy) connections share navigation. Pane focus, layout, and terminal
 sizes within a tab are always shared. See

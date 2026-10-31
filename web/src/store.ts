@@ -47,6 +47,7 @@ import {
 } from "./browserNavigation";
 import { useRef, useSyncExternalStore } from "react";
 import {
+  type ForwardRecord,
   bridge,
   type ConnectionClient,
   type ConnectionStatus,
@@ -119,6 +120,12 @@ export type WorkspaceSourceTarget = Omit<TaskNotificationTarget, "paneId"> & {
   paneId?: string;
 };
 
+export interface ForwardListeners {
+  connectionId: string;
+  remote: { port: number; process?: string }[];
+  local: { port: number; process?: string }[];
+}
+
 export interface State extends ServerSessionState {
   status: ConnectionStatus;
   connectionPaused: boolean;
@@ -128,6 +135,21 @@ export interface State extends ServerSessionState {
   activeConnectionId: string;
   connectionGeneration: number;
   sessionsByConnectionId: Record<string, ServerSessionState>;
+  /**
+   * Machine-wide SSH port forwards, mirrored from the server's registry.
+   * Not per-connection session state: a forward binds a local port, and the
+   * machine has one of those whichever connection asked for it.
+   */
+  forwards: ForwardRecord[];
+  /**
+   * The last port scan, for the connection it was made on: `remote` is what
+   * the far host listens on (a local forward could bring it here), `local`
+   * what this machine does (a remote forward could put it there). Asked for
+   * rather than polled, so null until someone looks.
+   */
+  listeners: ForwardListeners | null;
+  /** A scan is in flight; a newer one supersedes it rather than waiting. */
+  listenersBusy: boolean;
   notice: Notice | null;
   taskNotificationsEnabled: boolean;
   taskNotificationPreferences: TaskNotificationPreferences;
@@ -349,6 +371,9 @@ const initial: State = {
     [LEGACY_DEFAULT_CONNECTION_ID]: initialSession,
   },
   ...initialSession,
+  forwards: [],
+  listeners: null,
+  listenersBusy: false,
   notice: null,
   taskNotificationsEnabled: storedTaskNotificationsEnabled(),
   taskNotificationPreferences: storedTaskNotificationPreferences(),
@@ -1356,6 +1381,26 @@ async function hydrateUiSettings() {
   }
 }
 
+/**
+ * Reads the server's forward registry once a socket is up. Without this the
+ * list is only ever learned from the change push, so a reloaded page shows
+ * nothing forwarded and offers to forward ports that already are.
+ */
+let listenersScan = 0;
+
+async function hydrateForwards() {
+  try {
+    const result = await action((lease) => lease.client.call("forward.list"), {
+      refresh: "none",
+    });
+    const forwards = result?.forwards as ForwardRecord[] | undefined;
+    if (Array.isArray(forwards)) set({ forwards });
+  } catch {
+    // An older bridge has no forward.list; the push still fills the list if
+    // anything changes, and nothing else depends on it.
+  }
+}
+
 async function refreshNow(lease = captureConnectionLease()) {
   if (
     state.connectionPaused ||
@@ -2221,10 +2266,14 @@ function handleBridgeHello(hello: { default_connection_id: string }) {
     void refreshConnectionCatalog();
   }
   void hydrateUiSettings();
+  void hydrateForwards();
 }
 
 function handleBridgeStatus(s: ConnectionStatus) {
-  if (s === "connected") void hydrateUiSettings();
+  if (s === "connected") {
+    void hydrateUiSettings();
+    void hydrateForwards();
+  }
   if (s === "disconnected") {
     set({ tabMoveSupported: false, endpointAvailability: {} });
     uiSettingsEpoch += 1;
@@ -2589,6 +2638,7 @@ export const store = {
     void store.restoreTaskNotifications();
     subscribeLocalStorage(handlePreferenceStorageChange);
     bridge.onHello(handleBridgeHello);
+    bridge.onForwards((forwards) => set({ forwards }));
     bridge.onUiSetting((push) => {
       if (push.key === SHORTCUT_SETTING_KEY) {
         uiSettingsPushVersion += 1;
@@ -2925,6 +2975,89 @@ export const store = {
         retryOnReconnect: true,
       },
     );
+  },
+
+  /**
+   * Opens an on-demand SSH forward for the active connection and answers with
+   * the local port, which may not be the one that was asked for. Forwards are
+   * machine-wide, so the push updates every tab.
+   */
+  async openForward(
+    port: number,
+    options: { direction?: "local" | "remote"; label?: string } = {},
+  ) {
+    // Through a lease like every other RPC: the lease carries the runtime
+    // generation from the catalog, which bridge.connection() alone does not
+    // know and rejects the call without.
+    const result = await action(
+      (lease) =>
+        lease.client.call("forward.open", {
+          remote_port: port,
+          direction: options.direction ?? "local",
+          label: options.label,
+        }),
+      { refresh: "none" },
+    );
+    const forward = result?.forward as ForwardRecord | undefined;
+    if (forward) {
+      set({
+        forwards: [
+          ...state.forwards.filter((entry) => entry.id !== forward.id),
+          forward,
+        ],
+      });
+    }
+    return forward ?? null;
+  },
+
+  /**
+   * Asks the remote what it is listening on. Printed URLs only ever name one
+   * port, a dev server announces its page and says nothing about the
+   * websocket beside it, so the list has to come from the host itself.
+   */
+  async refreshListeners() {
+    // The scan answers for the connection it was asked on, and the latest
+    // request wins: reopening the list rescans instead of being ignored, and
+    // a slow scan of a connection left behind cannot overwrite a newer one.
+    const connectionId = state.activeConnectionId;
+    const scan = ++listenersScan;
+    set({ listenersBusy: true });
+    try {
+      // Settled separately: one side failing must not blank the other.
+      const [remote, local] = await Promise.allSettled([
+        action((lease) => lease.client.call("forward.candidates"), {
+          refresh: "none",
+        }),
+        action(
+          (lease) =>
+            lease.client.call("forward.candidates", { direction: "remote" }),
+          { refresh: "none" },
+        ),
+      ]);
+      const ports = (
+        result: PromiseSettledResult<{ candidates?: unknown } | undefined>,
+      ) =>
+        result.status === "fulfilled" && Array.isArray(result.value?.candidates)
+          ? (result.value.candidates as { port: number; process?: string }[])
+          : [];
+      if (scan === listenersScan)
+        set({
+          listeners: {
+            connectionId,
+            remote: ports(remote),
+            local: ports(local),
+          },
+        });
+    } finally {
+      if (scan === listenersScan) set({ listenersBusy: false });
+    }
+  },
+
+  async closeForward(id: string) {
+    await action((lease) => lease.client.call("forward.close", { id }), {
+      refresh: "none",
+    });
+    set({ forwards: state.forwards.filter((entry) => entry.id !== id) });
   },
 
   focusTaskNotificationTarget(target: TaskNotificationTarget) {
