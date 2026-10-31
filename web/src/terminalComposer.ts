@@ -637,13 +637,32 @@ export function terminalComposerRequest(
   };
 }
 
+// An image path the server's upload put in the text.
+const UPLOADED_PATH = /[\\/]roamgate-uploads-[^\\/\s]+[\\/]/;
+/**
+ * How long an agent gets to take a pasted image in before Enter. Claude Code
+ * reads a pasted image path into an attachment and drops an Enter that
+ * arrives meanwhile, leaving the message unsent.
+ */
+export const IMAGE_SETTLE_MS = 400;
+
 /** Types composer text into a pane, optionally followed by Enter. */
 export async function sendTerminalComposerText(
   client: Pick<ConnectionClient, "call">,
   paneId: string,
   text: string,
   submit: boolean,
+  wait: (ms: number) => Promise<void> = (ms) =>
+    new Promise((resolve) => setTimeout(resolve, ms)),
 ): Promise<void> {
+  if (submit && UPLOADED_PATH.test(text)) {
+    const typed = terminalComposerRequest(paneId, text, false);
+    await client.call(typed.method, typed.params);
+    await wait(IMAGE_SETTLE_MS);
+    const enter = terminalComposerRequest(paneId, "", true);
+    await client.call(enter.method, enter.params);
+    return;
+  }
   const request = terminalComposerRequest(paneId, text, submit);
   await client.call(request.method, request.params);
 }
