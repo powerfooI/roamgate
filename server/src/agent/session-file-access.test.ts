@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createAgentSessionFileAccess } from "./session-file-access";
 
 const remotePath = "/srv/herdr-gui-test/sessions/pi-session.jsonl";
@@ -96,5 +99,77 @@ describe("agent session file access", () => {
     // Not a UUID: never put in a command.
     expect(await files.findClaudeSessionById("../x")).toBeNull();
     expect(commands).toHaveLength(1);
+  });
+
+  // The "host" is this machine: the remote commands run here, through bash.
+  function localHost(outputs: number[], keptTextBytes?: number) {
+    return createAgentSessionFileAccess({
+      sshHost: "operator@example.com",
+      shQuote: quote,
+      keptTextBytes,
+      async runBinaryProcessWithTimeout(argv) {
+        const command = (argv.at(-1) ?? "").replace(/^bash -lc /, "");
+        const proc = Bun.spawn(["bash", "-c", `eval ${command}`], {
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const stdout = Buffer.from(
+          await new Response(proc.stdout).arrayBuffer(),
+        );
+        outputs.push(stdout.length);
+        return {
+          code: await proc.exited,
+          stdout,
+          stderr: await new Response(proc.stderr).text(),
+        };
+      },
+    });
+  }
+
+  test("reads again only what was appended to a remote transcript", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "roamgate-remote-read-"));
+    const path = join(dir, "session.jsonl");
+    const outputs: number[] = [];
+    const files = localHost(outputs);
+    try {
+      const first = `${'{"text":"\u00e9"}\n'.repeat(1000)}`;
+      writeFileSync(path, first);
+      expect(await files.readText(path)).toBe(first);
+      appendFileSync(path, '{"text":"more"}\n');
+      expect(await files.readText(path)).toBe(`${first}{"text":"more"}\n`);
+      // The second read fetched the checked end and the new line only.
+      expect(outputs[1]).toBeLessThan(5000);
+      // Rewritten in place: the end no longer matches, so it is read whole.
+      const rewritten = first.replaceAll("\u00e9", "e");
+      writeFileSync(path, rewritten);
+      expect(await files.readText(path)).toBe(rewritten);
+      // Cut shorter: read whole too.
+      writeFileSync(path, '{"text":"short"}\n');
+      expect(await files.readText(path)).toBe('{"text":"short"}\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps remote transcripts within its byte budget", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "roamgate-remote-budget-"));
+    const a = join(dir, "a.jsonl");
+    const b = join(dir, "b.jsonl");
+    const outputs: number[] = [];
+    // Room for one 6 KB transcript, not two.
+    const files = localHost(outputs, 10_000);
+    try {
+      writeFileSync(a, "a".repeat(6000));
+      writeFileSync(b, "b".repeat(6000));
+      await files.readText(a);
+      await files.readText(b);
+      // a was dropped to keep b, so it is read whole again, then kept.
+      await files.readText(a);
+      expect(outputs[2]).toBeGreaterThan(6000);
+      await files.readText(a);
+      expect(outputs[3]).toBeLessThan(5000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
