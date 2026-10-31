@@ -342,6 +342,9 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
   highlights are grey too.
 - Run as a [user service](docs/DEPLOYMENT.md#run-as-a-user-service) with
   checksum-verified updates, and probe `/health` or `/healthz`.
+- An open page reloads itself when the server it reconnects to, or comes back
+  to, serves another frontend build. It waits for editable fields to be cleared,
+  dialogs to close, and pending uploads and message submissions to finish.
 - [Command-line tools](docs/DEPLOYMENT.md#command-line-management) such as
   `roamgate doctor`, `url --qr`, `config`, `auth`, and `connections`.
 

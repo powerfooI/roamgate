@@ -321,6 +321,11 @@ export function finishTerminalComposerSubmission(key: string): void {
   notifyTerminalComposerSubmission(key, false);
 }
 
+/** Async work can still own a draft after its textarea has been cleared. */
+export function terminalComposerBusy(): boolean {
+  return pendingSubmissions.size > 0 || pendingUploads.size > 0;
+}
+
 export function subscribeTerminalComposerSubmission(
   key: string,
   listener: TerminalComposerSubmissionListener,
