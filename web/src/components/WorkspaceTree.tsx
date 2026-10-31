@@ -221,7 +221,9 @@ function GitStatusBadges({
   return (
     <span className="git-status" title={gitStatusTitle(status)}>
       {showBranch ? (
-        <span className="git-badge git-branch">{branch}</span>
+        <span className="git-badge git-branch start-ellipsis">
+          <span dir="ltr">{branch}</span>
+        </span>
       ) : null}
       {changed > 0 ? (
         <span className="git-badge git-dirty">Δ{changed}</span>
@@ -1603,8 +1605,13 @@ function WorkspaceRow({
         ) : (
           <span className="twisty" aria-hidden="true" />
         )}
-        <strong className="ws-label" title={workspaceDisplayName(w)}>
-          {workspaceDisplayName(w)}
+        <strong
+          // A worktree's name mostly repeats its repository's: what tells it
+          // apart is its end.
+          className={`ws-label${isChild ? " start-ellipsis" : ""}`}
+          title={workspaceDisplayName(w)}
+        >
+          <span dir="ltr">{workspaceDisplayName(w)}</span>
         </strong>
         {tabCountVisible && !tabChipsVisible ? (
           <span
