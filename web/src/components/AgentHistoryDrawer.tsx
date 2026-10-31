@@ -11,6 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { workspaceFileUrl } from "../workspaceFileUrl";
 import {
   Check,
   Copy,
@@ -173,6 +174,14 @@ export function AgentHistoryDrawer({
     (state) => state.connectionGeneration,
   );
   const connectionClient = useConnectionClient();
+  // Images the user uploaded load from the pane's host.
+  const imageUrl = useCallback(
+    (path: string) =>
+      workspaceFileUrl(connectionClient, pane.workspace_id, path, {
+        inline: true,
+      }),
+    [connectionClient, pane.workspace_id],
+  );
   const workspaceLabel =
     workspaces.find((workspace) => workspace.workspace_id === pane.workspace_id)
       ?.label ?? pane.workspace_id;
@@ -1332,6 +1341,7 @@ export function AgentHistoryDrawer({
             toolLoading={toolEntryLoading}
             onLoadTool={loadToolEntry}
             onOpen={setExpandedMessage}
+            imageUrl={imageUrl}
             outbox={paneOutbox}
             onRetrySend={retrySend}
             onDiscardSend={discardSend}

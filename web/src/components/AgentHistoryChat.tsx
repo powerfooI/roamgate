@@ -42,6 +42,8 @@ import {
 } from "./agentHistoryView";
 import { formatBytes } from "./agentSession";
 import { MarkdownPreview } from "./markdown";
+import { messageImagePieces } from "../chatImages";
+import { ImageLightbox } from "./ImageLightbox";
 import "./AgentHistoryChat.css";
 
 // Treat the list as pinned while the reader is within this distance of the
@@ -58,6 +60,7 @@ type BubbleProps = {
   highlighted: boolean;
   speech: ReturnType<typeof useChatSpeech>;
   onOpen: (entry: HistoryEntry) => void;
+  imageUrl?: (path: string) => string;
 };
 // A history refresh hands over new entry objects even for messages that did
 // not change: a bubble re-renders only when what it shows changed.
@@ -69,6 +72,7 @@ function sameBubble(a: BubbleProps, b: BubbleProps): boolean {
     a.highlighted === b.highlighted &&
     a.speech === b.speech &&
     a.onOpen === b.onOpen &&
+    a.imageUrl === b.imageUrl &&
     (x === y ||
       (x.id === y.id &&
         x.text === y.text &&
@@ -88,6 +92,7 @@ const ChatBubble = memo(function ChatBubble({
   highlighted,
   speech,
   onOpen,
+  imageUrl,
 }: BubbleProps) {
   // A compaction summary is long and written by Claude Code, not the user:
   // one line, with the summary a tap away.
@@ -123,7 +128,11 @@ const ChatBubble = memo(function ChatBubble({
     >
       <div className="agent-history-chat-bubble">
         {entry.role === "user" ? (
-          <p>{preview}</p>
+          imageUrl ? (
+            <UserText text={preview} imageUrl={imageUrl} />
+          ) : (
+            <p>{preview}</p>
+          )
         ) : (
           <MarkdownPreview
             text={preview}
@@ -192,6 +201,67 @@ const ChatBubble = memo(function ChatBubble({
     </article>
   );
 }, sameBubble);
+
+/** A message of the user's, with the images it sent shown, not their paths. */
+function UserText({
+  text,
+  imageUrl,
+}: {
+  text: string;
+  imageUrl: (path: string) => string;
+}) {
+  const [shown, setShown] = useState<string | null>(null);
+  const pieces = messageImagePieces(text);
+  if (!pieces.some((piece) => "image" in piece)) return <p>{text}</p>;
+  const nameOf = (path: string) => path.split(/[\\/]/).pop() ?? path;
+  return (
+    <>
+      {pieces.map((piece, index) =>
+        "image" in piece ? (
+          <a
+            // The pieces of a message never move.
+            key={index}
+            className="agent-history-chat-image"
+            href={imageUrl(piece.image)}
+            target="_blank"
+            rel="noreferrer"
+            title={piece.image}
+            onClick={(event) => {
+              // Cmd / Ctrl / Shift / middle click still open a tab.
+              if (
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey
+              )
+                return;
+              event.preventDefault();
+              setShown(piece.image);
+            }}
+          >
+            <img
+              src={imageUrl(piece.image)}
+              alt={nameOf(piece.image)}
+              loading="lazy"
+            />
+          </a>
+        ) : (
+          <p key={index}>{piece.text}</p>
+        ),
+      )}
+      {shown ? (
+        <ImageLightbox
+          src={imageUrl(shown)}
+          name={nameOf(shown)}
+          onClose={() => setShown(null)}
+          // Focus left in the list would stop the chat following new messages.
+          returnFocus={false}
+        />
+      ) : null}
+    </>
+  );
+}
 
 // A message sent from the chat that the transcript does not show yet: on its
 // way (dashed and dimmed, like a queued one) until its entry replaces it, or
@@ -591,6 +661,7 @@ export const AgentHistoryChat = memo(function AgentHistoryChat({
   outbox = NO_OUTBOX,
   onRetrySend,
   onDiscardSend,
+  imageUrl,
 }: {
   items: HistoryChatItem[];
   listRef: RefObject<HTMLDivElement | null>;
@@ -608,6 +679,8 @@ export const AgentHistoryChat = memo(function AgentHistoryChat({
   outbox?: readonly OutboxMessage[];
   onRetrySend?: (message: OutboxMessage) => void;
   onDiscardSend?: (message: OutboxMessage) => void;
+  /** Where an image the user uploaded loads from; none shows the path. */
+  imageUrl?: (path: string) => string;
 }) {
   const speech = useChatSpeech(speechActive, speechScopeKey);
   const followRef = useRef(true);
@@ -707,6 +780,7 @@ export const AgentHistoryChat = memo(function AgentHistoryChat({
               highlighted={highlightedSequence === item.sequence}
               speech={speech}
               onOpen={onOpen}
+              imageUrl={imageUrl}
             />
           ) : (
             <ToolBlock

@@ -166,3 +166,28 @@ test("messages not in the transcript yet follow the conversation, in order", () 
   expect(html).toContain('aria-label="Send this message again"');
   expect(html.match(/is-outbox/g)).toHaveLength(3);
 });
+
+test("an image the user sent shows instead of its uploaded path", () => {
+  const path = "/tmp/roamgate-uploads-501/upload-x/img-1.png";
+  const items = groupHistoryChatItems([
+    entry("1", "user", { text: `${path} what is wrong here?` }),
+    entry("2", "user", { text: "/tmp/shot.png stays a path" }),
+  ]);
+  const render = (imageUrl?: (path: string) => string) =>
+    renderToStaticMarkup(
+      createElement(AgentHistoryChat, {
+        items,
+        listRef: createRef<HTMLDivElement>(),
+        contentRef: createRef<HTMLDivElement>(),
+        onOpen() {},
+        imageUrl,
+      }),
+    );
+  const markup = render((file) => `/file/download?path=${file}`);
+  expect(markup).toContain(`<img src="/file/download?path=${path}"`);
+  expect(markup).toContain('alt="img-1.png"');
+  expect(markup).toContain("<p>what is wrong here?</p>");
+  expect(markup).toContain("<p>/tmp/shot.png stays a path</p>");
+  // Without a place to load it from, the path shows as sent.
+  expect(render()).toContain(`<p>${path} what is wrong here?</p>`);
+});
