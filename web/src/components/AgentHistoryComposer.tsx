@@ -7,7 +7,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { ImagePlus, Send, TriangleAlert } from "lucide-react";
+import { ImagePlus, Send, TriangleAlert, X } from "lucide-react";
 import { useLayoutPreferences } from "../layoutPreferences";
 import {
   shortcutLabel,
@@ -32,6 +32,11 @@ import {
   writeTerminalComposerSelection,
 } from "../terminalComposer";
 import { terminalUploadedPathsText } from "../terminalFileDrop";
+import {
+  attachmentDisplay,
+  rememberComposerAttachment,
+  withoutAttachment,
+} from "../composerAttachments";
 import { agentPromptWarning, agentStateKind } from "./agentSession";
 import { useTouchReleaseSubmit } from "./useTouchReleaseSubmit";
 import "./AgentHistoryComposer.css";
@@ -143,7 +148,14 @@ export function AgentHistoryComposer({
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, MAX_INPUT_HEIGHT_PX)}px`;
     const selection = readTerminalComposerSelection(draftKey);
-    if (selection) textarea.setSelectionRange(selection.start, selection.end);
+    if (selection) {
+      // The shared selection is in the draft; the box shows attachments short.
+      const shown = attachmentDisplay(text);
+      textarea.setSelectionRange(
+        shown.shownOffset(selection.start),
+        shown.shownOffset(selection.end),
+      );
+    }
   }, [draftKey, text]);
 
   const busy = submissionPending || uploadCount > 0;
@@ -163,7 +175,9 @@ export function AgentHistoryComposer({
       for (const file of files) {
         if (file.type && !file.type.startsWith("image/"))
           throw new Error("Choose an image to attach.");
-        paths.push(await onUploadImage(file));
+        const path = await onUploadImage(file);
+        rememberComposerAttachment(path, file);
+        paths.push(path);
       }
     } catch (error) {
       failed = true;
@@ -239,6 +253,7 @@ export function AgentHistoryComposer({
     ? `Send to the agent's terminal (${sendShortcut})`
     : "Send to the agent's terminal (Enter); Shift+Enter for a new line";
   const name = agent?.trim();
+  const shown = attachmentDisplay(text);
 
   return (
     <div className="agent-history-composer">
@@ -266,6 +281,31 @@ export function AgentHistoryComposer({
           </div>
         </div>
       ) : null}
+      {shown.attachments.length ? (
+        <div className="agent-history-composer-attachments">
+          {shown.attachments.map((attachment, index) => (
+            <span key={attachment.path} title={attachment.name}>
+              {attachment.url ? (
+                <img src={attachment.url} alt={attachment.name} />
+              ) : null}
+              <span>#{index + 1}</span>
+              <button
+                type="button"
+                aria-label={`Remove image ${index + 1}`}
+                onMouseDown={keepTextareaFocus}
+                onClick={() =>
+                  writeTerminalComposerDraft(
+                    draftKey,
+                    withoutAttachment(text, attachment.path),
+                  )
+                }
+              >
+                <X size={12} aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
       <div className="agent-history-composer-row">
         <button
           type="button"
@@ -280,7 +320,7 @@ export function AgentHistoryComposer({
         </button>
         <textarea
           ref={textareaRef}
-          value={text}
+          value={shown.text}
           rows={1}
           aria-label={`Message ${name || "agent"}`}
           placeholder={name ? `Message ${name}...` : "Message..."}
@@ -288,11 +328,13 @@ export function AgentHistoryComposer({
           autoComplete="off"
           onChange={(event) => {
             const textarea = event.currentTarget;
-            writeTerminalComposerDraft(draftKey, textarea.value);
+            const draft = shown.toDraft(textarea.value);
+            const next = attachmentDisplay(draft);
+            writeTerminalComposerDraft(draftKey, draft);
             writeTerminalComposerSelection(
               draftKey,
-              textarea.selectionStart,
-              textarea.selectionEnd,
+              next.draftOffset(textarea.value, textarea.selectionStart),
+              next.draftOffset(textarea.value, textarea.selectionEnd),
             );
           }}
           onPaste={(event) => {
@@ -311,11 +353,14 @@ export function AgentHistoryComposer({
           onSelect={(event) => {
             const textarea = event.currentTarget;
             // Skip selections of a value the shared draft has not committed.
-            if (textarea.value !== readTerminalComposerDraft(draftKey)) return;
+            const committed = attachmentDisplay(
+              readTerminalComposerDraft(draftKey),
+            );
+            if (textarea.value !== committed.text) return;
             writeTerminalComposerSelection(
               draftKey,
-              textarea.selectionStart,
-              textarea.selectionEnd,
+              committed.draftOffset(textarea.value, textarea.selectionStart),
+              committed.draftOffset(textarea.value, textarea.selectionEnd),
             );
           }}
           onCompositionStart={() => {

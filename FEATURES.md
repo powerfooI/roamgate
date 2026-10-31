@@ -148,8 +148,9 @@ Inspector state is scoped to each checkout; see
   conversation bubbles with rendered replies and collapsible tool-call blocks
   that follow new output, plus a message box that types into the agent's
   terminal and shares the pane's terminal composer draft. Paste images or use
-  **Add images** to choose them on desktop or mobile; uploaded image paths stay
-  in the draft until you send. Enter sends and Shift+Enter adds a line; on
+  **Add images** to choose them on desktop or mobile; the box shows each as
+  `[Image #N]` with a thumbnail above it (and a button to remove it) while the
+  draft keeps its uploaded path, which is what the agent gets. Enter sends and Shift+Enter adds a line; on
   touch keyboards Enter adds a line and the Send
   button sends. On phones the box replaces the terminal composer dock while
   the chat is open. Sending to an agent that is working, blocked, or in an

@@ -464,6 +464,10 @@
     margin: 0;
   }
 
+  .mobile-bottom-input > .agent-history-composer-attachments {
+    padding-bottom: 4px;
+  }
+
   /* Its icon says Send; the word would take the message's room. */
   .mobile-bottom-input > .agent-history-composer .agent-history-composer-send {
     font-size: 0;
