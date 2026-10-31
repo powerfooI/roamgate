@@ -153,3 +153,49 @@ describe("Ranger's MCP server for Claude Code", () => {
     expect(ran).toBe(0);
   });
 });
+
+test.each(["finish", "abort", "close"])(
+  "queued tools respect sequential execution and lease revocation: %s",
+  async (end) => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const calls: string[] = [];
+    let active = 0;
+    let peak = 0;
+    const first = tool("first", async () => {
+      calls.push("first");
+      peak = Math.max(peak, ++active);
+      entered.resolve();
+      await release.promise;
+      active--;
+      return { text: "done" };
+    });
+    first.sequential = true;
+    const second = tool("second", async () => {
+      calls.push("second");
+      peak = Math.max(peak, ++active);
+      active--;
+      return { text: "done" };
+    });
+    const { rpc, controller, lease, mcp } = setup([first, second]);
+    const call = (name: string, id: number) =>
+      rpc({
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: { name, arguments: {} },
+      });
+    const one = call("first", 1);
+    await entered.promise;
+    const two = call("second", 2);
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(calls).toEqual(["first"]);
+    if (end === "abort") controller.abort();
+    if (end === "close") lease.close();
+    release.resolve();
+    await Promise.all([one, two]);
+    expect(calls).toEqual(end === "finish" ? ["first", "second"] : ["first"]);
+    expect(peak).toBe(1);
+    mcp.stop();
+  },
+);

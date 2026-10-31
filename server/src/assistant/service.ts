@@ -2068,10 +2068,12 @@ export function createAssistantService(options: {
               "The model request failed. Check the provider connection and try again.";
           },
         });
-      } catch {
+      } catch (error) {
         if (!disposed && !controller.signal.aborted)
           state.error =
-            "The Ranger request failed. Check the provider connection and try again.";
+            error instanceof AssistantUserError
+              ? error.message
+              : "The Ranger request failed. Check the provider connection and try again.";
       } finally {
         if (!disposed) {
           activeRun = undefined;

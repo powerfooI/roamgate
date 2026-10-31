@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  readFileSync,
+  statSync,
+  existsSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AssistantConfig } from "../../../shared/assistant";
@@ -87,9 +93,19 @@ function fakeClaude(events: unknown[], exit = 0) {
     cwd: string;
     written: string[];
     killed: boolean;
+    mcp: string;
+    mode: number;
   }[] = [];
   const spawn = (args: string[], cwd: string): ClaudeCodeProcess => {
-    const run = { args, cwd, written: [] as string[], killed: false };
+    const path = args[args.indexOf("--mcp-config") + 1]!;
+    const run = {
+      args,
+      cwd,
+      written: [] as string[],
+      killed: false,
+      mcp: readFileSync(path, "utf8"),
+      mode: statSync(path).mode & 0o777,
+    };
     runs.push(run);
     let release: () => void = () => {};
     const killed = new Promise<void>((resolve) => {
@@ -221,9 +237,10 @@ describe("the Claude Code driver", () => {
     expect(run!.args).toContain("--strict-mcp-config");
     expect(arg("--allowedTools")).toBe("mcp__ranger");
     expect(JSON.parse(arg("--settings")!)).toEqual({ disableAllHooks: true });
-    expect(JSON.parse(arg("--mcp-config")!).mcpServers.ranger.type).toBe(
-      "http",
-    );
+    expect(JSON.parse(run!.mcp).mcpServers.ranger.type).toBe("http");
+    expect(run!.args.join(" ")).not.toContain("Bearer ");
+    if (process.platform !== "win32") expect(run!.mode).toBe(0o600);
+    expect(existsSync(arg("--mcp-config")!)).toBe(false);
     expect(arg("--system-prompt")).toStartWith("You are Ranger");
     expect(run!.written).toEqual([
       `${JSON.stringify({ type: "user", message: { role: "user", content: "What is w7 doing?" } })}\n`,
@@ -307,6 +324,9 @@ describe("the Claude Code driver", () => {
     await driver.stop();
     const entries = await running;
     expect(runs[0]!.killed).toBe(true);
+    expect(
+      existsSync(runs[0]!.args[runs[0]!.args.indexOf("--mcp-config") + 1]!),
+    ).toBe(false);
     expect(entries).toEqual([
       { type: "ranger-claude", session: expect.any(String) },
     ]);
@@ -335,4 +355,82 @@ describe("the Claude Code driver", () => {
     ).rejects.toThrow("Invalid Claude Code context");
     done();
   });
+});
+
+test("recovery clears the CLI context without respawning or replaying tools", async () => {
+  const { driver, runs, done } = driverFor(TOOL_ROUND);
+  const { calls, input } = recorder();
+  let reads = 0;
+  try {
+    await expect(
+      driver.run({
+        ...input,
+        config: config({ approval_mode: "auto" }),
+        entries: [
+          {
+            type: "ranger-claude",
+            session: "0b0e8a52-7a4b-4c55-9d3e-2f4a8a1c9d10",
+          },
+        ],
+        recover: true,
+        text: "Perform the operation",
+        signal: new AbortController().signal,
+        read: async () => {
+          reads++;
+          return { text: "" };
+        },
+      }),
+    ).rejects.toThrow("was not retried");
+    expect(runs).toHaveLength(0);
+    expect(reads).toBe(0);
+    expect(calls).toEqual([["checkpoint", []]]);
+  } finally {
+    done();
+  }
+});
+
+test("a spawn failure removes the private MCP configuration", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "ranger-claude-failed-"));
+  let path = "";
+  const mcp = createRangerMcp(() => ({
+    url: "http://127.0.0.1:1/mcp",
+    stop() {},
+  }));
+  const driver = createClaudeCodeDriver({
+    directory,
+    mcp,
+    spawn(args) {
+      path = args[args.indexOf("--mcp-config") + 1]!;
+      expect(existsSync(path)).toBe(true);
+      throw new Error("spawn failed");
+    },
+  });
+  try {
+    await expect(
+      driver.run({
+        ...recorder().input,
+        config: config(),
+        entries: [],
+        text: "Hi",
+        signal: new AbortController().signal,
+        read,
+      }),
+    ).rejects.toThrow("spawn failed");
+    expect(existsSync(path)).toBe(false);
+    const privateConfig = { jsonrpc: "2.0", id: 1, method: "tools/list" };
+    expect(
+      (
+        await mcp.handle(
+          new Request("http://127.0.0.1:1/mcp", {
+            method: "POST",
+            headers: { authorization: "Bearer expired" },
+            body: JSON.stringify(privateConfig),
+          }),
+        )
+      ).status,
+    ).toBe(401);
+  } finally {
+    mcp.stop();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

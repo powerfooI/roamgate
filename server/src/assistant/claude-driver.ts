@@ -5,12 +5,13 @@ import {
   type AssistantSnapshot,
 } from "../../../shared/assistant";
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "../agent/session-utils";
 import { assertSafeDataPath } from "../config/data-paths";
 import { RANGER_MCP_SERVER, type RangerMcp } from "./claude-mcp";
 import type { AssistantDriver } from "./pi-driver";
+import { AssistantUserError } from "./errors";
 import { rangerSystemPrompt, rangerTools } from "./ranger-tools";
 
 export { CLAUDE_CODE_PROVIDER };
@@ -178,13 +179,18 @@ export function createClaudeCodeDriver(options: {
       if (active) throw new Error("Ranger is already running");
       const finished = Promise.withResolvers<void>();
       let child: ClaudeCodeProcess | undefined;
+      let exited = false;
+      let configPath: string | undefined;
+      const controller = new AbortController();
       const running = {
         stopped: false,
-        kill: () => child?.kill(),
+        kill: () => {
+          controller.abort(new Error("Ranger stopped"));
+          child?.kill();
+        },
         done: finished.promise,
       };
       active = running;
-      const controller = new AbortController();
       const abort = () => {
         running.stopped = true;
         controller.abort(new Error("Ranger stopped"));
@@ -198,6 +204,15 @@ export function createClaudeCodeDriver(options: {
         : [];
       try {
         input.signal.throwIfAborted();
+        if (input.recover) {
+          // A CLI session pointer has no durable MCP result journal. Resending
+          // the interrupted prompt could repeat an already executed operation.
+          retained = [];
+          input.checkpoint?.([]);
+          throw new AssistantUserError(
+            "The Claude Code turn was interrupted. It was not retried because an operation may already have run. Review the action receipts and send a new question.",
+          );
+        }
         if (
           !CLAUDE_CODE_MODELS.some((model) => model.id === input.config.model)
         )
@@ -223,6 +238,8 @@ export function createClaudeCodeDriver(options: {
           signal: controller.signal,
           sources: (sources) => input.sources?.(sources),
         });
+        configPath = join(cwd, `mcp-${randomUUID()}.json`);
+        writeFileSync(configPath, lease.config, { flag: "wx", mode: 0o600 });
         const args = [
           "-p",
           "--input-format",
@@ -241,7 +258,7 @@ export function createClaudeCodeDriver(options: {
           "",
           "--strict-mcp-config",
           "--mcp-config",
-          lease.config,
+          configPath,
           "--allowedTools",
           `mcp__${RANGER_MCP_SERVER}`,
           "--disable-slash-commands",
@@ -358,6 +375,7 @@ export function createClaudeCodeDriver(options: {
           }
         }
         const code = await child.exited;
+        exited = true;
         if (running.stopped) return retained;
         if (failed || !answered || code !== 0) input.error();
         return retained;
@@ -368,13 +386,18 @@ export function createClaudeCodeDriver(options: {
         input.signal.removeEventListener("abort", abort);
         controller.abort(new Error("The Ranger turn ended"));
         lease?.close();
+        if (child && !exited) {
+          child.kill();
+          await child.exited.catch(() => {});
+        }
+        if (configPath) rmSync(configPath, { force: true });
         if (active === running) active = undefined;
         finished.resolve();
       }
     },
 
     stop,
-    /** A turn cut short by shutdown is run again on recovery. */
+    /** Recovery refuses to replay a turn without a durable tool journal. */
     dispose: stop,
   };
   return driver;

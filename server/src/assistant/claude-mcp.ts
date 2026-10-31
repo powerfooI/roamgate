@@ -23,6 +23,8 @@ export type RangerMcpLease = {
   close(): void;
 };
 
+type ActiveTurn = RangerMcpTurn & { queue: Promise<void>; closed: boolean };
+
 type Listener = { url: string; stop(): void };
 type Listen = (fetch: (req: Request) => Promise<Response>) => Listener;
 
@@ -41,10 +43,10 @@ export function createRangerMcp(
     };
   },
 ) {
-  const turns = new Map<string, RangerMcpTurn>();
+  const turns = new Map<string, ActiveTurn>();
   let listener: Listener | null = null;
 
-  async function call(turn: RangerMcpTurn, message: Record<string, unknown>) {
+  async function call(turn: ActiveTurn, message: Record<string, unknown>) {
     const params = (message.params ?? {}) as Record<string, unknown>;
     switch (message.method) {
       case "initialize":
@@ -69,7 +71,14 @@ export function createRangerMcp(
       case "tools/call": {
         const tool = turn.tools.find((entry) => entry.name === params.name);
         if (!tool) throw new RpcError(-32602, "Unknown tool");
+        // Serialize the entire tool round, including readers. A sequential
+        // operation must never overlap any other call in this turn.
+        const previous = turn.queue;
+        const release = Promise.withResolvers<void>();
+        turn.queue = release.promise;
+        await previous;
         try {
+          if (turn.closed) throw new Error("The Ranger turn ended");
           turn.signal.throwIfAborted();
           const result = await tool.call(params.arguments ?? {}, turn.signal);
           const sources = (result.sources ?? []) as AssistantSource[];
@@ -92,6 +101,8 @@ export function createRangerMcp(
             text = (surfaced as Error).message;
           }
           return { content: [{ type: "text", text }], isError: true };
+        } finally {
+          release.resolve();
         }
       }
       default:
@@ -138,7 +149,12 @@ export function createRangerMcp(
     open(turn: RangerMcpTurn): RangerMcpLease {
       listener ??= listen(handle);
       const token = randomUUID();
-      turns.set(token, turn);
+      const active: ActiveTurn = {
+        ...turn,
+        queue: Promise.resolve(),
+        closed: false,
+      };
+      turns.set(token, active);
       return {
         config: JSON.stringify({
           mcpServers: {
@@ -150,6 +166,7 @@ export function createRangerMcp(
           },
         }),
         close: () => {
+          active.closed = true;
           turns.delete(token);
         },
       };
@@ -157,6 +174,7 @@ export function createRangerMcp(
     /** For tests: the handler the listener serves. */
     handle,
     stop() {
+      for (const turn of turns.values()) turn.closed = true;
       turns.clear();
       listener?.stop();
       listener = null;
