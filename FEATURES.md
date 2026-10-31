@@ -56,6 +56,9 @@ any order. Enter switches, opening another server's agent on its server;
   multiline paste.
 - Scroll with wheel, trackpad, touch, or page shortcuts. Mouse-aware apps
   receive clicks and drags; hold Option (macOS) or Shift to select text instead.
+- On macOS, Option types characters (`@`, `[`, `~` on many layouts) by default.
+  **Menu > Configuration > Behavior > Option key as Alt in terminals** makes it
+  send Alt-modified keys instead, for shell and Herdr Alt bindings.
 - Paste images or drop files onto a pane to upload them to that pane's host and
   insert their quoted paths (without pressing Enter). Dropping explorer rows
   inserts paths without uploading. Uploads expire after 24 hours by default.
