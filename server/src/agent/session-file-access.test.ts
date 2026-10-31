@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAgentSessionFileAccess } from "./session-file-access";
+import {
+  createAgentSessionFileAccess,
+  piSessionDirectoryName,
+} from "./session-file-access";
 
 const remotePath = "/srv/herdr-gui-test/sessions/pi-session.jsonl";
 const metadata = `42\t1784872800\t${Buffer.from(remotePath).toString("base64")}\t1:42\t1784872800.123:1784872800.456\n`;
@@ -172,4 +175,29 @@ describe("agent session file access", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+test("a remote Pi directory search names only a safe directory", async () => {
+  const commands: string[] = [];
+  const files = createAgentSessionFileAccess({
+    sshHost: "operator@example.com",
+    shQuote: quote,
+    async runBinaryProcessWithTimeout(argv) {
+      commands.push(argv.at(-1) ?? "");
+      return { code: 44, stdout: Buffer.alloc(0), stderr: "" };
+    },
+  });
+  expect(await files.findPiSessionForCwd("/a/$(rm -rf ~)")).toBeNull();
+  expect(commands).toEqual([]);
+  expect(await files.findPiSessionForCwd("/srv/app")).toBeNull();
+  expect(commands[0]).toContain("/sessions/--srv-app--");
+});
+
+test("Pi names a directory's sessions after its path", () => {
+  expect(piSessionDirectoryName("/home/user/src/my-app.example.com/pi")).toBe(
+    "--home-user-src-my-app.example.com-pi--",
+  );
+  expect(piSessionDirectoryName("relative/path")).toBeNull();
+  expect(piSessionDirectoryName('/a/"b')).toBeNull();
+  expect(piSessionDirectoryName("/a/$(rm)")).toBeNull();
 });

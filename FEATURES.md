@@ -184,7 +184,9 @@ Inspector state is scoped to each checkout; see
   searches local files for a remote Claude, Codex or Pi pane. A Claude session
   that went on in a new transcript (a resume or `/clear` that Herdr still
   reports under the old ID) is followed there. Session folders that are
-  symbolic links are followed. Muse needs session logging
+  symbolic links are followed. A Pi pane whose session Herdr does not report
+  (no Pi integration) shows the newest session Pi keeps for the pane's
+  directory, on this machine or the SSH host. Muse needs session logging
   enabled (no `--no-session-log`). See
   [History synchronization](docs/HISTORY.md).
 
