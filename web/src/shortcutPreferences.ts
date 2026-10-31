@@ -264,8 +264,12 @@ export function initializeShortcutPreferences() {
   serverKnown = readStored(SERVER_SEEN_KEY) === "1";
   publish(pending ? parseShortcutPreferences(pending) : read());
   subscribeLocalStorage((key) => {
-    if (!localChangePending && (key === SHORTCUT_STORAGE_KEY || key === null))
-      publish(read());
+    if (key !== SHORTCUT_STORAGE_KEY && key !== null) return;
+    // An explicit storage clear discards the pending edit as well as its cache.
+    if (localChangePending && readStored(PENDING_KEY) !== null) return;
+    localChangePending = false;
+    revision++;
+    publish(read());
   });
 }
 /** Mirrors the preference locally so the first keypress after a reload uses
