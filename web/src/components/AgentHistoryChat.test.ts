@@ -5,6 +5,7 @@ import { AgentHistoryChat } from "./AgentHistoryChat";
 import { HISTORY_PREVIEW_CHARS } from "./AgentHistoryCard";
 import type { HistoryEntry } from "./agentHistory";
 import { groupHistoryChatItems } from "./agentHistoryView";
+import type { OutboxMessage } from "./chatOutbox";
 
 function entry(
   id: string,
@@ -113,4 +114,55 @@ test("queued messages are marked and a compaction summary is one line", () => {
   expect(markup).not.toContain(summary);
   expect(markup.match(/is-queued/g)).toHaveLength(1);
   expect(markup.match(/>Queued</g)).toHaveLength(1);
+});
+
+test("messages not in the transcript yet follow the conversation, in order", () => {
+  const outbox: OutboxMessage[] = [
+    {
+      id: "o1",
+      paneId: "p1",
+      text: "first in flight",
+      sentAtMs: 0,
+      before: new Set(),
+      state: "sent",
+    },
+    {
+      id: "o2",
+      paneId: "p1",
+      text: "second in flight",
+      sentAtMs: 1,
+      before: new Set(),
+      state: "sending",
+    },
+    {
+      id: "o3",
+      paneId: "p1",
+      text: "lost one",
+      sentAtMs: 2,
+      before: new Set(),
+      state: "failed",
+      reason: "pane closed",
+    },
+  ];
+  const html = renderToStaticMarkup(
+    createElement(AgentHistoryChat, {
+      items: groupHistoryChatItems([entry("a", "user")]),
+      listRef: createRef<HTMLDivElement>(),
+      contentRef: createRef<HTMLDivElement>(),
+      onOpen: () => {},
+      outbox,
+      onRetrySend: () => {},
+      onDiscardSend: () => {},
+    }),
+  );
+  const at = (text: string) => html.indexOf(text);
+  expect(at("user a")).toBeLessThan(at("first in flight"));
+  expect(at("first in flight")).toBeLessThan(at("second in flight"));
+  expect(at("second in flight")).toBeLessThan(at("lost one"));
+  expect(html).toContain("On its way");
+  expect(html).toContain("Sending…");
+  expect(html).toContain("Not delivered");
+  expect(html).toContain('title="pane closed"');
+  expect(html).toContain('aria-label="Send this message again"');
+  expect(html.match(/is-outbox/g)).toHaveLength(3);
 });

@@ -196,6 +196,14 @@ Inspector state is scoped to each checkout; see
   remembers its view; **Open agents as a chat** in Configuration > Behavior
   (off by default) opens agent panes as a chat until switched. Review
   feedback sent to a pane shown as a chat is pre-filled in its message box.
+- A message sent from a chat's message box (in a pane or in Agent History)
+  shows at once at the end of the conversation, dimmed with **Sending...**,
+  then **On its way** once the pane took it, until the transcript's own entry
+  replaces it. One the pane refused, or that the transcript has not shown 90
+  seconds later, stays marked **Not delivered** with **Send again** and
+  **Discard**, also after switching the pane to its terminal and back; it is
+  still replaced if its entry shows up later. Answers typed into a question,
+  `/commands` and `!` lines are sent as before.
 - **Menu > Configuration > Integrations** installs, updates, or removes Herdr's
   bundled agent integrations (not the agents themselves). See
   [version lookup](docs/ARCHITECTURE.md#agent-integrations).

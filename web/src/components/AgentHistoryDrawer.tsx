@@ -5,6 +5,7 @@ import {
   useId,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
@@ -81,6 +82,15 @@ import {
   formatTokenTotal,
   tokenUsage,
 } from "./agentSession";
+import {
+  newOutboxMessage,
+  nextOutboxDeadline,
+  type OutboxMessage,
+  readOutbox,
+  settleOutbox,
+  subscribeOutbox,
+  updateOutbox,
+} from "./chatOutbox";
 import { promptKeyInput } from "./promptKeys";
 import "./AgentHistoryDrawer.css";
 
@@ -912,6 +922,95 @@ export function AgentHistoryDrawer({
     },
     [connectionClient, loadHistory, pane.pane_id, paneChat?.prompt],
   );
+  // Messages sent from the box that the transcript does not show yet
+  // (chatOutbox): shown on their way, then replaced by their entries. Kept
+  // per pane outside this chat, which a switch to the terminal unmounts.
+  const outboxKey = terminalComposerDraftKey(
+    activeConnectionId,
+    connectionGeneration,
+    pane.pane_id,
+    pane.terminal_id,
+  );
+  const paneOutbox = useSyncExternalStore(subscribeOutbox, () =>
+    readOutbox(outboxKey),
+  );
+  const historyMessagesRef = useRef(history?.messages ?? []);
+  historyMessagesRef.current = history?.messages ?? [];
+  const settlePaneOutbox = useCallback(
+    (entries: readonly AgentHistoryEntry[]) =>
+      updateOutbox(outboxKey, (current) =>
+        settleOutbox(current, entries, Date.now()),
+      ),
+    [outboxKey],
+  );
+  useEffect(() => {
+    // Not before the history is read: a message would time out against an
+    // empty one.
+    if (history) settlePaneOutbox(history.messages);
+  }, [history, settlePaneOutbox]);
+  useEffect(() => {
+    const deadline = nextOutboxDeadline(paneOutbox);
+    if (deadline === null) return;
+    const timer = window.setTimeout(
+      () => settlePaneOutbox(historyMessagesRef.current),
+      Math.max(0, deadline - Date.now()) + 50,
+    );
+    return () => window.clearTimeout(timer);
+  }, [paneOutbox, settlePaneOutbox]);
+  const sendFromBox = useCallback(
+    async (text: string, replacing?: string) => {
+      // An answer typed into a question, a /command or a ! shell line is
+      // not recorded as the user's message: those are sent as before.
+      const answering = paneChat?.prompt?.options.some(
+        (option) => option.cursor && option.freeText,
+      );
+      if (answering || /^\s*[/!]/.test(text)) {
+        await sendMessage(text);
+        return;
+      }
+      // The pane's outbox at the time of sending, whatever this chat shows
+      // by the time the send settles.
+      const key = outboxKey;
+      const message = newOutboxMessage(
+        pane.pane_id,
+        text,
+        historyMessagesRef.current,
+        Date.now(),
+      );
+      const update = (patch: Partial<OutboxMessage>) =>
+        updateOutbox(key, (current) =>
+          current.map((each) =>
+            each.id === message.id ? { ...each, ...patch } : each,
+          ),
+        );
+      updateOutbox(key, (current) => [
+        ...current.filter((each) => each.id !== replacing),
+        message,
+      ]);
+      try {
+        await sendMessage(text);
+        update({ state: "sent", sentAtMs: Date.now() });
+      } catch (error) {
+        // Kept in the chat, marked, rather than put back in the box.
+        update({
+          state: "failed",
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    [outboxKey, pane.pane_id, paneChat?.prompt, sendMessage],
+  );
+  const retrySend = useCallback(
+    (message: OutboxMessage) => void sendFromBox(message.text, message.id),
+    [sendFromBox],
+  );
+  const discardSend = useCallback(
+    (message: OutboxMessage) =>
+      updateOutbox(outboxKey, (current) =>
+        current.filter((each) => each.id !== message.id),
+      ),
+    [outboxKey],
+  );
   const notifyComposerError = useCallback((detail: string) => {
     store.notify({ kind: "error", message: "Message input failed", detail });
   }, []);
@@ -930,7 +1029,7 @@ export function AgentHistoryDrawer({
       agent={pane.agent}
       status={pane.agent_status}
       stateSeq={pane.state_change_seq}
-      onSend={sendMessage}
+      onSend={sendFromBox}
       onUploadImage={(file) => uploadTerminalImage(connectionClient, file)}
       onError={notifyComposerError}
     />
@@ -1216,7 +1315,7 @@ export function AgentHistoryDrawer({
       }}
     >
       {!paneChat || searchOpen || query ? historySearch : null}
-      {historyEmptyState ?? (
+      {(paneOutbox.length ? null : historyEmptyState) ?? (
         <div className="agent-history-chat-frame">
           <AgentHistoryChat
             items={chatItems}
@@ -1233,6 +1332,9 @@ export function AgentHistoryDrawer({
             toolLoading={toolEntryLoading}
             onLoadTool={loadToolEntry}
             onOpen={setExpandedMessage}
+            outbox={paneOutbox}
+            onRetrySend={retrySend}
+            onDiscardSend={discardSend}
           />
           {historyMinimap("auto")}
         </div>

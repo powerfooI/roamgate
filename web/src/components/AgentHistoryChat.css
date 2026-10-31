@@ -435,6 +435,45 @@
   opacity: 0.7;
 }
 
+.agent-history-chat-message.is-outbox .agent-history-chat-bubble {
+  border-style: dashed;
+  opacity: 0.6;
+}
+
+.agent-history-chat-message.is-outbox.is-failed .agent-history-chat-bubble {
+  border-color: var(--red);
+  opacity: 0.85;
+}
+
+.agent-history-chat-sending {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* The same pulse as the agent's activity line. */
+.agent-history-chat-sending-mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: agent-chat-activity-pulse 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-history-chat-sending-mark {
+    animation: none;
+  }
+}
+
+.agent-history-chat-undelivered {
+  color: var(--danger-text);
+  font-weight: 600;
+  cursor: help;
+}
+
 .agent-history-chat-queued {
   padding: 0 5px;
   border: 1px solid var(--border-soft);

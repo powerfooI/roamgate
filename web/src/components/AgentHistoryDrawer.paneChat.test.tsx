@@ -32,6 +32,9 @@ if (process.env.ROAMGATE_PANE_CHAT_DOM_TEST !== "1") {
       NodeFilter: browser.NodeFilter,
       ResizeObserver: browser.ResizeObserver,
       Event: browser.Event,
+      matchMedia: () => ({ matches: false }),
+      HTMLTextAreaElement: browser.HTMLTextAreaElement,
+      KeyboardEvent: browser.KeyboardEvent,
       requestAnimationFrame: (callback: FrameRequestCallback) =>
         setTimeout(() => callback(0), 0),
       IS_REACT_ACT_ENVIRONMENT: true,
@@ -44,30 +47,32 @@ if (process.env.ROAMGATE_PANE_CHAT_DOM_TEST !== "1") {
     const client = {
       isCurrent: () => true,
       call: async (method: string) =>
-        method === "agent_session.get"
-          ? { status: "ok", stats: {}, session: { value: "s1" } }
-          : {
-              status: "ok",
-              agent: "claude",
-              pane_id: "pane-one",
-              workspace_id: "workspace",
-              tab_id: "tab",
-              path: "/sessions/s1.jsonl",
-              updated_at: "2026-01-01T00:00:00Z",
-              history_version: 2,
-              mode: "snapshot",
-              cursor: { epoch: "e", revision: 1 },
-              window_limit: 200,
-              entries: [
-                {
-                  id: "m1",
-                  role: "user",
-                  kind: "message",
-                  text: "Run the tests",
-                  sent_at: "2026-01-01T00:00:00Z",
-                },
-              ],
-            },
+        !method.startsWith("agent_")
+          ? Promise.reject(new Error("pane closed"))
+          : method === "agent_session.get"
+            ? { status: "ok", stats: {}, session: { value: "s1" } }
+            : {
+                status: "ok",
+                agent: "claude",
+                pane_id: "pane-one",
+                workspace_id: "workspace",
+                tab_id: "tab",
+                path: "/sessions/s1.jsonl",
+                updated_at: "2026-01-01T00:00:00Z",
+                history_version: 2,
+                mode: "snapshot",
+                cursor: { epoch: "e", revision: 1 },
+                window_limit: 200,
+                entries: [
+                  {
+                    id: "m1",
+                    role: "user",
+                    kind: "message",
+                    text: "Run the tests",
+                    sent_at: "2026-01-01T00:00:00Z",
+                  },
+                ],
+              },
     };
     mock.module("../useConnectionClient", () => ({
       useConnectionClient: () => client,
@@ -211,6 +216,37 @@ if (process.env.ROAMGATE_PANE_CHAT_DOM_TEST !== "1") {
       expect(yes.getAttribute("aria-current")).toBe("true");
       await click(yes);
       expect(activeKeys.mock.calls).toEqual([["2"], ["1"]]);
+
+      // A message the pane refused stays in the chat, marked, and is still
+      // there after the pane went to its terminal and back.
+      await render("idle");
+      const box = container.querySelector("textarea")!;
+      await React.act(async () => {
+        Object.getOwnPropertyDescriptor(
+          browser.HTMLTextAreaElement.prototype,
+          "value",
+        )!.set!.call(box, "Also check the docs");
+        box.dispatchEvent(new window.Event("input", { bubbles: true }));
+      });
+      await React.act(async () => {
+        box.dispatchEvent(
+          new window.KeyboardEvent("keydown", {
+            key: "Enter",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(container.textContent).toContain("Not delivered");
+      await React.act(async () => root.render(null));
+      expect(container.textContent).not.toContain("Not delivered");
+      await render("idle");
+      expect(container.textContent).toContain("Also check the docs");
+      expect(container.textContent).toContain("Not delivered");
+      expect(button("Send this message again")).not.toBeNull();
+      await click(button("Discard this message")!);
+      expect(container.textContent).not.toContain("Not delivered");
     } finally {
       await React.act(async () => root.unmount());
       await browser.happyDOM.close();

@@ -13,6 +13,7 @@ import {
   Check,
   ChevronRight,
   Copy,
+  RotateCw,
   Square,
   Volume2,
   Wrench,
@@ -22,6 +23,7 @@ import { useChatSpeech } from "../useChatSpeech";
 import { copyTextWithFeedback } from "../copyText";
 import { formatUiDateTime } from "../uiLocale";
 import { HISTORY_PREVIEW_CHARS } from "./AgentHistoryCard";
+import type { OutboxMessage } from "./chatOutbox";
 import {
   historyEntryLabel,
   isToolContentPending,
@@ -48,6 +50,7 @@ const FOLLOW_THRESHOLD_PX = 48;
 
 const EMPTY_LOADING: ReadonlySet<string> = new Set();
 const noop = () => {};
+const NO_OUTBOX: readonly OutboxMessage[] = [];
 
 type BubbleProps = {
   entry: HistoryEntry;
@@ -189,6 +192,90 @@ const ChatBubble = memo(function ChatBubble({
     </article>
   );
 }, sameBubble);
+
+// A message sent from the chat that the transcript does not show yet: on its
+// way (dashed and dimmed, like a queued one) until its entry replaces it, or
+// not delivered, with the ways out.
+function OutboxBubble({
+  message,
+  onRetry,
+  onDiscard,
+}: {
+  message: OutboxMessage;
+  onRetry?: (message: OutboxMessage) => void;
+  onDiscard?: (message: OutboxMessage) => void;
+}) {
+  const failed = message.state === "failed";
+  return (
+    <article
+      className={`agent-history-chat-message is-user is-outbox is-${message.state}`}
+      data-outbox-id={message.id}
+    >
+      <div className="agent-history-chat-bubble">
+        <p>{message.text.slice(0, HISTORY_PREVIEW_CHARS)}</p>
+      </div>
+      <div className="agent-history-chat-meta">
+        {failed ? (
+          <>
+            <span
+              className="agent-history-chat-undelivered"
+              title={message.reason}
+            >
+              Not delivered
+            </span>
+            {onRetry ? (
+              <button
+                type="button"
+                className="agent-history-copy"
+                onClick={() => onRetry(message)}
+                aria-label="Send this message again"
+                title="Send again"
+              >
+                <RotateCw size={12} />
+              </button>
+            ) : null}
+            {onDiscard ? (
+              <button
+                type="button"
+                className="agent-history-copy"
+                onClick={() => onDiscard(message)}
+                aria-label="Discard this message"
+                title="Discard"
+              >
+                <X size={12} />
+              </button>
+            ) : null}
+          </>
+        ) : (
+          <span
+            className="agent-history-chat-sending"
+            role="status"
+            title={
+              message.state === "sending"
+                ? "Sending it to the agent"
+                : "Sent: waiting for the agent's session to show it"
+            }
+          >
+            <span
+              className="agent-history-chat-sending-mark"
+              aria-hidden="true"
+            />
+            {message.state === "sending" ? "Sending…" : "On its way"}
+          </span>
+        )}
+        <button
+          type="button"
+          className="agent-history-copy"
+          onClick={() => void copyTextWithFeedback(message.text)}
+          aria-label="Copy the message"
+          title="Copy"
+        >
+          <Copy size={12} />
+        </button>
+      </div>
+    </article>
+  );
+}
 
 // Opening a block fetches small arguments so each row can show a headline;
 // larger payloads (e.g. whole-file writes) wait until their step is opened.
@@ -501,6 +588,9 @@ export const AgentHistoryChat = memo(function AgentHistoryChat({
   speechActive = true,
   speechScopeKey = "",
   onOpen,
+  outbox = NO_OUTBOX,
+  onRetrySend,
+  onDiscardSend,
 }: {
   items: HistoryChatItem[];
   listRef: RefObject<HTMLDivElement | null>;
@@ -514,6 +604,10 @@ export const AgentHistoryChat = memo(function AgentHistoryChat({
   speechActive?: boolean;
   speechScopeKey?: string;
   onOpen: (entry: HistoryEntry) => void;
+  /** Messages sent that the transcript does not show yet, oldest first. */
+  outbox?: readonly OutboxMessage[];
+  onRetrySend?: (message: OutboxMessage) => void;
+  onDiscardSend?: (message: OutboxMessage) => void;
 }) {
   const speech = useChatSpeech(speechActive, speechScopeKey);
   const followRef = useRef(true);
@@ -563,6 +657,15 @@ export const AgentHistoryChat = memo(function AgentHistoryChat({
     const list = listRef.current;
     if (list && followRef.current) list.scrollTop = list.scrollHeight;
   }, [items, listRef]);
+
+  // A message just sent is shown where the conversation goes on.
+  const lastOutboxId = outbox[outbox.length - 1]?.id;
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list || !lastOutboxId) return;
+    followRef.current = true;
+    list.scrollTop = list.scrollHeight;
+  }, [lastOutboxId, listRef]);
 
   // Re-pin after layout changes the list did not cause itself: the inspector
   // revealing a hidden view, a resized pane, or lazy markdown (diagrams,
@@ -615,6 +718,14 @@ export const AgentHistoryChat = memo(function AgentHistoryChat({
             />
           ),
         )}
+        {outbox.map((message) => (
+          <OutboxBubble
+            key={message.id}
+            message={message}
+            onRetry={onRetrySend}
+            onDiscard={onDiscardSend}
+          />
+        ))}
       </div>
     </div>
   );
