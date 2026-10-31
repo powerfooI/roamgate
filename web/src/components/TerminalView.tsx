@@ -197,6 +197,12 @@ import {
   paneHasAgentHistory,
 } from "./agentSession";
 import { AgentHistoryDrawer } from "./AgentHistoryDrawer";
+import {
+  type AgentActivity,
+  type AgentPrompt,
+  parseAgentActivity,
+  parseAgentPrompt,
+} from "../agentPrompt";
 import { setPaneView, togglePaneView, usePaneView } from "../paneView";
 import { ConfirmDialog, MessageDialog } from "./ModalDialogs";
 import {
@@ -341,6 +347,17 @@ export type TerminalWorkspaceFileRequest = {
   paneId?: string;
   path: string;
 };
+
+/** The bottom screen of a terminal, as text, whatever is scrolled into view. */
+function terminalScreenLines(term: Terminal): string[] {
+  const buffer = term.buffer.active;
+  const lines: string[] = [];
+  for (let row = 0; row < term.rows; row++)
+    lines.push(
+      buffer.getLine(buffer.baseY + row)?.translateToString(true) ?? "",
+    );
+  return lines;
+}
 
 export function TerminalView({
   paneId,
@@ -630,11 +647,73 @@ export function TerminalView({
   const chatShown =
     usePaneView(s.activeConnectionId, pane?.pane_id) === "chat" &&
     chatAvailable;
+  // Not working: blocked on a question, or one Herdr does not report yet (a
+  // new session's "trust this folder?", before Claude's hooks run).
+  const agentWaiting =
+    chatShown && pane?.agent_status.toLowerCase() !== "working";
   const chatShownRef = useRef(chatShown);
   chatShownRef.current = chatShown;
   useEffect(() => {
     if (chatShown) termRef.current?.textarea?.blur();
   }, [chatShown]);
+  const agentWorking =
+    chatShown && pane?.agent_status.toLowerCase() === "working";
+  const [agentPrompt, setAgentPrompt] = useState<AgentPrompt | null>(null);
+  const [agentActivity, setAgentActivity] = useState<AgentActivity | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!agentWaiting && !agentWorking) {
+      setAgentPrompt(null);
+      setAgentActivity(null);
+      return;
+    }
+    // What the agent asks, and what it says it is doing, are only on its
+    // screen, and change as it goes.
+    const read = () => {
+      const term = termRef.current;
+      if (!term) return;
+      const screen = terminalScreenLines(term);
+      // A menu can be up while the agent still counts as working (its
+      // question before the hooks say it waits): read both then.
+      setAgentPrompt((current) => {
+        const buffer = term.buffer.active;
+        const next = parseAgentPrompt(screen, (row, column) => {
+          const cell = buffer.getLine(buffer.baseY + row)?.getCell(column);
+          return !!cell && !cell.isBgDefault();
+        });
+        return JSON.stringify(current) === JSON.stringify(next)
+          ? current
+          : next;
+      });
+      if (agentWorking)
+        setAgentActivity((current) => {
+          const next = parseAgentActivity(screen);
+          return current?.word === next?.word &&
+            current?.detail === next?.detail
+            ? current
+            : next;
+        });
+    };
+    read();
+    // Read again as soon as the screen changes (a key moved the menu's
+    // cursor), once a frame at most; the timer catches a terminal attached
+    // later.
+    let frame: number | null = null;
+    const written = termRef.current?.onWriteParsed(() => {
+      if (frame === null)
+        frame = requestAnimationFrame(() => {
+          frame = null;
+          read();
+        });
+    });
+    const timer = window.setInterval(read, 1000);
+    return () => {
+      window.clearInterval(timer);
+      written?.dispose();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [agentWaiting, agentWorking]);
   const canClosePane = !!pane && paneCanClose(s.panes, pane.pane_id);
   const paneZoomed =
     s.layout?.zoomed === true && s.layout.focused_pane_id === pane?.pane_id;
@@ -3967,6 +4046,9 @@ export function TerminalView({
                 open
                 embedded
                 paneChat={{
+                  prompt: agentPrompt,
+                  activity: agentActivity,
+                  active: isActivePane,
                   onShowTerminal: () => {
                     setPaneView(s.activeConnectionId, pane.pane_id, "terminal");
                     focusTerminalSoon();

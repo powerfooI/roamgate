@@ -32,6 +32,8 @@ if (process.env.ROAMGATE_PANE_CHAT_DOM_TEST !== "1") {
       NodeFilter: browser.NodeFilter,
       ResizeObserver: browser.ResizeObserver,
       Event: browser.Event,
+      requestAnimationFrame: (callback: FrameRequestCallback) =>
+        setTimeout(() => callback(0), 0),
       IS_REACT_ACT_ENVIRONMENT: true,
     }))
       Object.defineProperty(globalThis, key, {
@@ -134,7 +136,7 @@ if (process.env.ROAMGATE_PANE_CHAT_DOM_TEST !== "1") {
         container.querySelectorAll<HTMLButtonElement>(
           ".agent-chat-prompt button",
         ),
-      ).find((each) => each.textContent?.includes("Show the terminal"))!;
+      ).find((each) => each.textContent?.trim() === "Terminal")!;
       await click(toTerminal);
       await click(button("Show the terminal")!);
       expect(onShowTerminal).toHaveBeenCalledTimes(2);
@@ -142,6 +144,73 @@ if (process.env.ROAMGATE_PANE_CHAT_DOM_TEST !== "1") {
       await render("idle");
       expect(container.querySelector(".agent-chat-prompt")).toBeNull();
       expect(container.querySelector(".agent-chat-activity")).toBeNull();
+
+      // Two blocked agents side by side: their questions show as buttons,
+      // and a key typed with nothing focused answers the active pane only.
+      const prompt = {
+        lines: ["Run the tests?"],
+        options: [
+          { key: "1", label: "Yes", input: "1", cursor: true },
+          { key: "2", label: "No", input: "2" },
+        ],
+      };
+      const activeKeys = mock<(text: string) => void>(() => {});
+      const otherKeys = mock<(text: string) => void>(() => {});
+      await React.act(async () => {
+        root.render(
+          <>
+            <AgentHistoryDrawer
+              pane={{ ...pane, agent_status: "blocked" }}
+              open
+              embedded
+              paneChat={{
+                prompt,
+                active: true,
+                onKeys: activeKeys,
+                onShowTerminal,
+              }}
+              onOpenChange={() => {}}
+            />
+            <AgentHistoryDrawer
+              pane={{
+                ...pane,
+                pane_id: "pane-two",
+                terminal_id: "term-two",
+                agent_status: "blocked",
+              }}
+              open
+              embedded
+              paneChat={{
+                prompt,
+                active: false,
+                onKeys: otherKeys,
+                onShowTerminal,
+              }}
+              onOpenChange={() => {}}
+            />
+          </>,
+        );
+      });
+      // A choice only: the message box steps aside.
+      expect(
+        container.querySelectorAll(".agent-history-composer"),
+      ).toHaveLength(0);
+      (document.activeElement as HTMLElement | null)?.blur();
+      await React.act(async () => {
+        document.body.dispatchEvent(
+          new window.KeyboardEvent("keydown", { key: "2", bubbles: true }),
+        );
+      });
+      expect(activeKeys.mock.calls).toEqual([["2"]]);
+      expect(otherKeys.mock.calls).toEqual([]);
+      const yes = Array.from(
+        container.querySelectorAll<HTMLButtonElement>(
+          ".agent-chat-prompt-actions button",
+        ),
+      ).find((each) => each.textContent?.includes("Yes"))!;
+      expect(yes.getAttribute("aria-current")).toBe("true");
+      await click(yes);
+      expect(activeKeys.mock.calls).toEqual([["2"], ["1"]]);
     } finally {
       await React.act(async () => root.unmount());
       await browser.happyDOM.close();

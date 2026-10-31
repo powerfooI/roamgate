@@ -184,8 +184,15 @@ Inspector state is scoped to each checkout; see
   the agent's status, search, **Stop** (Esc in the terminal) and the way back
   to the terminal; on a phone that row stands for the top bar, which hides,
   and the message box sits in the bottom bar, taking the whole width while
-  you write. Below the conversation, a working agent shows **Working...** and
-  a blocked one says it waits, with a button to its terminal. Each pane
+  you write. Below the conversation, a working agent shows its own word for
+  what it does, read from its screen (Claude Code's "Sublimating... (1m 5s)"),
+  and an agent asking something shows its question with its choices as
+  buttons. The question takes the keys its terminal menu does: the arrows or
+  `j`/`k` (`h`/`l` between questions), 1 to 9, Tab, Enter, Esc and Space; the
+  choice the agent's cursor is on is marked. The message box steps aside
+  while only a choice is asked, and comes back for a "Type something." answer.
+  A menu shows as a question even before the agent's hooks report it blocked
+  (a new session asking to trust its folder). Each pane
   remembers its view; **Open agents as a chat** in Configuration > Behavior
   (off by default) opens agent panes as a chat until switched. Review
   feedback sent to a pane shown as a chat is pre-filled in its message box.
