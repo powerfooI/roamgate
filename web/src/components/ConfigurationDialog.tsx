@@ -29,6 +29,7 @@ import {
 } from "../appearance";
 import { lazyWithReload } from "../lazyWithReload";
 import { setDefaultPaneView, useDefaultPaneView } from "../paneView";
+import { setComposerVimKeys, useComposerVimKeys } from "../composerVim";
 import {
   mobileTerminalShortcutCount,
   type MobileTerminalShortcutRows,
@@ -146,6 +147,7 @@ export function ConfigurationDialog({
   const connectionClient = useConnectionClient();
   const [tab, setTab] = useState<ConfigurationTab>(initialTab);
   const defaultPaneView = useDefaultPaneView();
+  const composerVim = useComposerVimKeys();
   const [detail, setDetail] = useState<Detail | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
@@ -534,6 +536,29 @@ export function ConfigurationDialog({
                       defaultPaneView === "chat" ? "terminal" : "chat",
                     )
                   }
+                >
+                  <span />
+                </button>
+              </div>
+              <div className="config-preference-row">
+                <span className="config-item-icon">
+                  <Keyboard size={15} />
+                </span>
+                <div className="config-item-copy">
+                  <strong>Vim keys in agent chats</strong>
+                  <span>
+                    {composerVim
+                      ? "Message boxes start in insert mode; :w sends"
+                      : "Message boxes are plain text boxes"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label="Vim keys in agent chats"
+                  aria-checked={composerVim}
+                  className={"settings-switch" + (composerVim ? " is-on" : "")}
+                  onClick={() => setComposerVimKeys(!composerVim)}
                 >
                   <span />
                 </button>

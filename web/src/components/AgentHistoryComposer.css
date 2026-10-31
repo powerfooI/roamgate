@@ -27,7 +27,8 @@
 }
 
 .agent-history-composer-send,
-.agent-history-composer-attach {
+.agent-history-composer-attach,
+.agent-history-composer-escape {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -37,9 +38,16 @@
   font-size: 11px;
 }
 
-.agent-history-composer-attach {
+.agent-history-composer-attach,
+.agent-history-composer-escape {
   min-width: 36px;
   padding: 0;
+}
+
+.agent-history-composer-escape {
+  padding: 0 8px;
+  font-family: var(--mono-font);
+  font-weight: 600;
 }
 
 .agent-history-composer-warning {
@@ -170,4 +178,45 @@
   .agent-history-composer-commands button {
     min-height: 40px;
   }
+}
+
+/* The box with Vim keys: CodeMirror, dressed as the plain box. */
+.agent-history-composer-editor {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.agent-history-composer-editor .cm-editor {
+  max-height: 160px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.agent-history-composer-editor .cm-editor.cm-focused {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.agent-history-composer-editor .cm-scroller {
+  overflow: auto;
+  font-family: inherit;
+}
+
+.agent-history-composer-editor .cm-content {
+  min-height: 34px;
+  padding: 7px 8px;
+  caret-color: var(--text);
+}
+
+.agent-history-composer-editor .cm-fat-cursor {
+  background: var(--accent) !important;
+  opacity: 0.6;
+}
+
+.agent-history-composer-editor .cm-placeholder {
+  color: var(--muted);
 }

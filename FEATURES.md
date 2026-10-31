@@ -159,7 +159,10 @@ Inspector state is scoped to each checkout; see
   commands that match what follows (Claude Code's own, then the session's
   skills and custom commands, read from its transcript); a click, or the
   arrows and Tab or Enter, fill in `/name`, Enter on a whole name sends it,
-  and Esc closes the list. Enter sends and Shift+Enter adds a line; on
+  and Esc closes the list. **Vim keys in agent chats** in Configuration >
+  Behavior (off by default) makes chat message boxes Vim editors: insert mode
+  first, `:w` sends, PageUp/PageDown scroll the conversation, and on touch
+  screens an **Esc** button stands in for the missing key. Enter sends and Shift+Enter adds a line; on
   touch keyboards Enter adds a line and the Send
   button sends. On phones the box replaces the terminal composer dock while
   the chat is open. Sending to an agent that is working, blocked, or in an
