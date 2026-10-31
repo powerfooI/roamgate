@@ -74,6 +74,10 @@ export function cleanMessageText(value: string) {
     .replace(/<command-message>[\s\S]*?<\/command-message>/g, "")
     .replace(/<command-name>[\s\S]*?<\/command-name>/g, "")
     .replace(/<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g, "")
+    // Claude Code's own notes in the user's turn: a background task ending,
+    // reminders to the model. Not the user's words.
+    .replace(/<task-notification>[\s\S]*?<\/task-notification>/g, "")
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
     .replace(/\r\n/g, "\n")
     .trim();
   if (text === "[Request interrupted by user]") return "";
