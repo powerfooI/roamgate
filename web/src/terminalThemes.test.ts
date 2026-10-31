@@ -302,6 +302,24 @@ describe("terminal theme selection", () => {
       ).id,
     ).toBe("herdr-light");
   });
+
+  test("turns the default dark terminal black with a black background", () => {
+    const selection = { dark: "herdr-dark", light: "herdr-light" };
+    expect(resolveTerminalTheme("dark", selection, [], true).background).toBe(
+      "#000000",
+    );
+    expect(resolveTerminalTheme("light", selection, [], true).background).toBe(
+      "#f6f7f9",
+    );
+    expect(
+      resolveTerminalTheme(
+        "dark",
+        { dark: "dracula", light: "herdr-light" },
+        [],
+        true,
+      ).background,
+    ).toBe("#282a36");
+  });
 });
 
 describe("terminal color helpers", () => {

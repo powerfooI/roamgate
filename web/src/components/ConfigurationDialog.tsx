@@ -89,6 +89,8 @@ export type ConfigurationProps = {
   terminalThemeSelection: TerminalThemeSelection;
   customTerminalThemes: CustomTerminalTheme[];
   onThemeChange: (theme: Theme) => void;
+  blackBackground: boolean;
+  onBlackBackgroundChange: (blackBackground: boolean) => void;
   onAccentColorChange: (accentColor: AccentColor) => void;
   onUiScaleChange: (scale: number) => void;
   onTerminalFontScaleChange: (scale: number) => void;
@@ -303,6 +305,29 @@ export function ConfigurationDialog({
                     </button>
                   ))}
                 </div>
+              </div>
+              <div className="config-preference-row">
+                <span className="config-item-icon">
+                  <Moon size={15} />
+                </span>
+                <div className="config-item-copy">
+                  <strong>Black background</strong>
+                  <span>Pure black instead of blue-grey in the dark theme</span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label="Black background"
+                  aria-checked={props.blackBackground}
+                  className={
+                    "settings-switch" + (props.blackBackground ? " is-on" : "")
+                  }
+                  onClick={() =>
+                    props.onBlackBackgroundChange(!props.blackBackground)
+                  }
+                >
+                  <span />
+                </button>
               </div>
               <div className="config-preference-row">
                 <span className="config-item-icon">
