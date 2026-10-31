@@ -451,6 +451,68 @@ characters in the branch name replaced by `-`. The directory must be absolute.
 It is stored per repository as `worktree_directory` in `settings.json`; clear it
 to return to Herdr's default.
 
+## Worktree command
+
+To create worktrees with your own tool instead of Herdr, set a command in
+**Configuration > Instance** (the default) or in a repository's worktree
+dialog (**Worktree command**, which wins). For example:
+
+```sh
+git recworktree add {path} --branch {branch} --base {base}
+```
+
+Roamgate runs the command with `sh` (over SSH, `sh -c` whatever the login
+shell), from the source repository on the workspace's host, for up to five
+minutes. `{path}` (the new checkout), `{branch}`, `{base}` (the commit fetched
+from `origin`) and `{repo}` (the source repository) stand for the variables
+`ROAMGATE_WORKTREE_PATH`, `ROAMGATE_WORKTREE_BRANCH`, `ROAMGATE_WORKTREE_BASE`
+and `ROAMGATE_WORKTREE_REPO`, which Roamgate exports first: each placeholder
+becomes `"$ROAMGATE_WORKTREE_..."`, so a value is never read as shell syntax.
+Do not quote placeholders yourself; a command with a placeholder inside quotes
+is refused. Branch names must be valid for git and free of spaces and shell
+syntax characters (`$`, backquote, quotes, `\`, `;`, `|`, `&`, `<`, `>`,
+parentheses, braces, `!`).
+
+When a worktree location is set, the path is that directory plus the branch
+name with every run of characters other than letters, digits, `.`, `_` and
+`-` replaced by `-` (`feature/x` becomes `<location>/feature-x`). Otherwise it
+is Roamgate's reproduction of Herdr's default,
+`~/.herdr/worktrees/<repo>/<branch slug>`, with the branch lowercased and runs
+of other characters replaced by `-`; set a location if Herdr's
+`[worktrees] directory` is customized. Roamgate then opens the checkout in
+Herdr and runs the setup hook. A checkout Herdr already had open fails
+creation instead of running the setup hook again.
+
+Before running the command, Roamgate checks that its first program is
+installed on that host (`command -v`; for `git <subcommand>`, also that git
+knows the subcommand as a builtin, an installed `git-<subcommand>` or an
+alias). If it is not, or the host has no `sh`, Herdr creates the worktree as
+without a command and the result says so. Once the command runs, any non-zero
+exit, 127 included, fails creation with the command's output. It is stored as
+`worktree_command` at the top of `settings.json` and per repository; leave it
+empty to let Herdr create worktrees. A repository cannot opt out of a global
+default: leave the default empty and set the command per repository instead.
+
+A **remove command** works the same way for removal, set beside it:
+
+```sh
+git recworktree remove {path} {force}
+```
+
+`{path}` (the checkout) and `{repo}` (the source repository) stand for the
+same exported variables, and `{force}` is `--force` when you force the
+removal, otherwise nothing. Forcing a removal discards the checkout's
+uncommitted and untracked changes, and with `git recworktree` those of its
+nested checkouts too: put `{force}` only where your tool means that. The
+command runs from the source repository on the workspace's host, after the
+teardown hook; when it succeeds Herdr closes the workspace, as its own removal
+would, and the removed hook runs. Not installed on that host, Herdr removes
+the worktree and the result says so. A failure that leaves a stale checkout
+behind ("is not a working tree") gets the same recovery as Herdr's removal;
+any other failure stops the removal with the command's output. It is stored
+as `worktree_remove_command`, at the top of `settings.json` and per
+repository.
+
 ## Worktree hooks
 
 Configure hooks in `roamgate.json` at the repository root:

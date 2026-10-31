@@ -3,6 +3,11 @@ import { realpath, rename } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { sshCommandArgv } from "../bridge/ssh-command";
 import { serverLogger } from "../utils/logger";
+import {
+  missingWorktreeCommand,
+  worktreeCommandScript,
+  worktreeShellArgv,
+} from "./command-template";
 
 type RunProcessWithCodeTimeout = (
   argv: string[],
@@ -31,6 +36,8 @@ export interface WorktreeRemovalCleanup {
 export interface WorktreeRemovalOutcome {
   result: any;
   cleanup?: WorktreeRemovalCleanup;
+  /** Why the configured remove command was not used, when it was not. */
+  commandFallback?: string;
 }
 
 export interface WorktreeRemovalRuntime {
@@ -91,7 +98,8 @@ export function parseCheckoutProcessIds(
 export function isNotWorkingTreeRemoveError(error: unknown): boolean {
   const message = errorMessage(error).toLowerCase();
   return (
-    message.includes("worktree_remove_failed:") &&
+    (message.includes("worktree_remove_failed:") ||
+      message.startsWith("worktree remove command failed")) &&
     (message.includes("is not a working tree") ||
       message.includes("is not a worktree"))
   );
@@ -152,9 +160,12 @@ async function finalizeSuccessfulRemoval({
   terminated,
   recovered = false,
   preservedPath,
+  remover = "Herdr",
   log,
 }: {
   result: any;
+  /** Who removed the checkout, for the warnings. */
+  remover?: string;
   cleanupPath?: string;
   runtime: WorktreeRemovalRuntime;
   terminated: Set<number>;
@@ -177,14 +188,14 @@ async function finalizeSuccessfulRemoval({
           )) ?? preservedPath;
         recovered = true;
       } catch (cleanupError) {
-        warning = `Herdr removed the worktree, but stale checkout cleanup failed: ${errorMessage(cleanupError)}`;
+        warning = `${remover} removed the worktree, but stale checkout cleanup failed: ${errorMessage(cleanupError)}`;
         log(`[bridge] ${warning}`);
       }
     } else if (finalState === "clean" || finalState === "dirty") {
-      warning = `Herdr reported success, but the checkout is still a ${finalState} working tree at ${cleanupPath}`;
+      warning = `${remover} reported success, but the checkout is still a ${finalState} working tree at ${cleanupPath}`;
       log(`[bridge] ${warning}`);
     } else if (finalState === "unknown") {
-      warning = `Herdr reported success, but the checkout removal could not be verified at ${cleanupPath}`;
+      warning = `${remover} reported success, but the checkout removal could not be verified at ${cleanupPath}`;
       log(`[bridge] ${warning}`);
     }
   }
@@ -201,11 +212,66 @@ async function finalizeSuccessfulRemoval({
   return { result, cleanup };
 }
 
+/**
+ * The script that runs a removal template: `{path}` and `{repo}` become the
+ * exported `$ROAMGATE_WORKTREE_PATH` and `$ROAMGATE_WORKTREE_REPO`, `{force}`
+ * is `--force` or nothing.
+ */
+export function renderWorktreeRemoveCommand(
+  template: string,
+  values: { path: string; repo: string; force: boolean },
+) {
+  const script = worktreeCommandScript(template, values);
+  return `${script.exports}; cd "$ROAMGATE_WORKTREE_REPO" && ${script.command}`;
+}
+
+/**
+ * Removes a checkout with the configured command, from its source repository
+ * on the workspace's host. Resolves to null once removed, or to a sentence
+ * saying the command is not installed there (checked apart from the command,
+ * which then does not run); throws with its output when it fails.
+ */
+export async function runWorktreeRemoveCommand({
+  template,
+  checkoutPath,
+  sourceCheckoutPath,
+  force,
+  host,
+  runProcess,
+}: {
+  template: string;
+  checkoutPath: string;
+  sourceCheckoutPath: string;
+  force: boolean;
+  host?: string;
+  runProcess: RunProcessWithCodeTimeout;
+}): Promise<string | null> {
+  const missing = await missingWorktreeCommand({ template, host, runProcess });
+  if (missing) return missing;
+  const shellCommand = renderWorktreeRemoveCommand(template, {
+    path: checkoutPath,
+    repo: sourceCheckoutPath,
+    force,
+  });
+  const run = await runProcess(
+    worktreeShellArgv(host, shellCommand),
+    WORKTREE_REMOVE_TIMEOUT_MS,
+  );
+  if (run.code !== 0) {
+    const output = (run.stderr.trim() || run.stdout.trim()).slice(-2000);
+    throw new Error(
+      `Worktree remove command failed (exit ${run.code})${output ? `: ${output}` : "."}`,
+    );
+  }
+  return null;
+}
+
 export async function removeWorktreeWithRecovery({
   call,
   params,
   checkoutPath,
   runtime,
+  removeWithCommand,
   log = (message) =>
     serverLogger
       .child("worktree")
@@ -215,6 +281,12 @@ export async function removeWorktreeWithRecovery({
   params: Record<string, unknown>;
   checkoutPath?: string;
   runtime: WorktreeRemovalRuntime;
+  /**
+   * Removes the checkout with the configured command; resolves to a reply of
+   * the shape of Herdr's worktree.remove, or to why the command was not used
+   * (Herdr then removes the checkout).
+   */
+  removeWithCommand?: () => Promise<{ result: any } | { fallback: string }>;
   log?: (message: string) => void;
 }): Promise<WorktreeRemovalOutcome> {
   const terminated = new Set<number>();
@@ -223,15 +295,27 @@ export async function removeWorktreeWithRecovery({
     log(`[bridge] refusing worktree cleanup for unsafe path: ${checkoutPath}`);
   }
 
+  let commandFallback: string | undefined;
+  const withFallback = (outcome: WorktreeRemovalOutcome) =>
+    commandFallback ? { ...outcome, commandFallback } : outcome;
   try {
-    const result = await call("worktree.remove", params);
-    return finalizeSuccessfulRemoval({
-      result,
-      cleanupPath,
-      runtime,
-      terminated,
-      log,
-    });
+    // A failing command gets the same recovery as a failing Herdr removal.
+    const command = removeWithCommand ? await removeWithCommand() : undefined;
+    if (command && "fallback" in command) commandFallback = command.fallback;
+    const byCommand = command && "result" in command;
+    const result = byCommand
+      ? command.result
+      : await call("worktree.remove", params);
+    return withFallback(
+      await finalizeSuccessfulRemoval({
+        result,
+        remover: byCommand ? "The worktree remove command" : "Herdr",
+        cleanupPath,
+        runtime,
+        terminated,
+        log,
+      }),
+    );
   } catch (error) {
     if (!cleanupPath || !isNotWorkingTreeRemoveError(error)) {
       throw error;
@@ -271,15 +355,17 @@ export async function removeWorktreeWithRecovery({
         ...params,
         force: true,
       });
-      return finalizeSuccessfulRemoval({
-        result,
-        cleanupPath,
-        runtime,
-        terminated,
-        recovered: true,
-        preservedPath,
-        log,
-      });
+      return withFallback(
+        await finalizeSuccessfulRemoval({
+          result,
+          cleanupPath,
+          runtime,
+          terminated,
+          recovered: true,
+          preservedPath,
+          log,
+        }),
+      );
     } catch (retryError) {
       const preserved = preservedPath
         ? `; stale files were preserved at ${preservedPath}`

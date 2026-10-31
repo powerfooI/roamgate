@@ -7,9 +7,11 @@ import type {
 } from "../../../shared/assistant";
 import { isRecord } from "../agent/session-utils";
 import {
+  readGuiSettings,
   repoWorktreeDirectory,
   repoWorktreeHooksEnabled,
   workspaceRepoSettingsKey,
+  worktreeCommandFor,
 } from "../config/gui-settings";
 import { validateConnectionId } from "../connections/protocol";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
@@ -325,9 +327,12 @@ export async function prepareAssistantAction(args: {
       target.connection_id,
     );
     const enabled = await read(() => repoWorktreeHooksEnabled(key));
-    // The repository's worktree location decides the new checkout's path.
+    // The repository's worktree location decides the new checkout's path,
+    // and the configured command, if any, creates it instead of Herdr.
     const directory = (await read(() => repoWorktreeDirectory(key))) ?? null;
-    return { command, enabled, directory };
+    const worktreeCommand =
+      worktreeCommandFor(await read(() => readGuiSettings()), key) ?? null;
+    return { command, enabled, directory, worktreeCommand };
   }
 
   try {
@@ -637,9 +642,11 @@ export async function prepareAssistantAction(args: {
         base: "Latest origin default branch (fetched at confirmation)",
         setup_hook: hooks.command ?? "(none configured)",
         setup_hook_enabled: String(hooks.enabled),
+        worktree_command:
+          hooks.worktreeCommand ?? "(none configured: Herdr creates it)",
       };
       summary =
-        "Fetch origin's default branch, create its worktree, save the source relationship, and run the displayed setup hook if enabled. Focus will stay unchanged.";
+        "Fetch origin's default branch, create its worktree (with the displayed worktree command if one is configured and installed on the host, otherwise with Herdr), save the source relationship, and run the displayed setup hook if enabled. Focus will stay unchanged.";
       perform = async (dispatch, isCurrent) => {
         const actualRoot = await read(() =>
           runtime.files.resolveWorkspaceGitRoot({
@@ -652,7 +659,7 @@ export async function prepareAssistantAction(args: {
             JSON.stringify(hooks)
         )
           throw new Error(
-            "Worktree source, setup hook or worktree location changed",
+            "Worktree source, setup hook, location or command changed",
           );
         if ((await worktrees()).some((item) => item.branch === branch))
           return {
@@ -673,6 +680,7 @@ export async function prepareAssistantAction(args: {
               expected_setup_hook: hooks.command,
               expected_hooks_enabled: hooks.enabled,
               expected_source_root: root,
+              expected_worktree_command: hooks.worktreeCommand,
             },
             isCurrent,
             beforeDispatch,

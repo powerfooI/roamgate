@@ -17,6 +17,10 @@ export type WorktreeHookInfo = {
   key: string | null;
   enabled: boolean;
   worktree_directory?: string | null;
+  worktree_command?: string | null;
+  default_worktree_command?: string | null;
+  worktree_remove_command?: string | null;
+  default_worktree_remove_command?: string | null;
   repo_name?: string;
   repo_root?: string;
   checkout_path?: string;
