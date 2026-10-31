@@ -3541,6 +3541,17 @@ export const store = {
     });
   },
 
+  setRepoWorktreeDirectory(key: string, directory: string) {
+    return action(async (lease) => {
+      const result = await lease.client.call("settings.update_repo", {
+        key,
+        settings: { worktree_directory: directory },
+      });
+      await refreshNow(lease);
+      return result;
+    });
+  },
+
   setWorkspaceAutoSyncEnabled(workspaceId: string, enabled: boolean) {
     return action(
       async (lease) => {

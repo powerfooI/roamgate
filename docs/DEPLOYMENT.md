@@ -442,6 +442,15 @@ all viewers. Set it before installing the PWA; already installed apps (especiall
 on Android) may keep the old name until the browser updates the manifest or you
 reinstall.
 
+## Worktree location
+
+By default Herdr chooses where a new worktree is created. Set a repository's
+worktree location in the worktree dialog (**Worktree location**) to make every
+new worktree land in `<directory>/<branch>` instead, with `/` and other unsafe
+characters in the branch name replaced by `-`. The directory must be absolute.
+It is stored per repository as `worktree_directory` in `settings.json`; clear it
+to return to Herdr's default.
+
 ## Worktree hooks
 
 Configure hooks in `roamgate.json` at the repository root:

@@ -127,6 +127,7 @@ export function WorktreeLifecycleDialog({
   const [newWorktreeOpen, setNewWorktreeOpen] = useState(false);
   const [openWorktreeOpen, setOpenWorktreeOpen] = useState(false);
   const [hooksOpen, setHooksOpen] = useState(false);
+  const [directoryOpen, setDirectoryOpen] = useState(false);
   const [removeRow, setRemoveRow] = useState<WorktreeLifecycleRow | null>(null);
   const requestId = useRef(0);
   const inFlightLoad = useRef<{
@@ -369,6 +370,19 @@ export function WorktreeLifecycleDialog({
     void runOperation("hooks", "Updating hook policy", () =>
       store.setRepoWorktreeHooksEnabled(hooks.key!, enabled),
     );
+  };
+
+  const setWorktreeDirectory = (directory: string) => {
+    if (!hooks?.key) return;
+    setDirectoryOpen(false);
+    void runOperation("directory", "Updating worktree location", async () => {
+      const result = await store.setRepoWorktreeDirectory(
+        hooks.key!,
+        directory.trim(),
+      );
+      await load(false, true);
+      return result;
+    });
   };
 
   const openWorktree = (row: WorktreeLifecycleRow, focus = true) => {
@@ -632,6 +646,29 @@ export function WorktreeLifecycleDialog({
                 </button>
               </section>
 
+              <section className="lifecycle-policy">
+                <div className="lifecycle-policy-main">
+                  <span className="lifecycle-policy-icon">
+                    <Settings size={16} />
+                  </span>
+                  <div>
+                    <strong>Worktree location</strong>
+                    <span title={hooks?.worktree_directory ?? undefined}>
+                      {hooks?.worktree_directory
+                        ? hooks.worktree_directory
+                        : "Default (chosen by Herdr)"}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={!hooks?.key || operationRunning}
+                  onClick={() => setDirectoryOpen(true)}
+                >
+                  Change
+                </button>
+              </section>
+
               {error ? <p className="modal-error">{error}</p> : null}
               <div className="lifecycle-list" role="list">
                 {rows.map((row) => {
@@ -679,6 +716,16 @@ export function WorktreeLifecycleDialog({
         submitLabel="Create"
         onClose={() => setNewWorktreeOpen(false)}
         onSubmit={createWorktree}
+      />
+      <TextInputDialog
+        open={directoryOpen}
+        title="Worktree Location"
+        label="Directory (empty for default)"
+        initialValue={hooks?.worktree_directory ?? ""}
+        placeholder="/path/to/worktrees"
+        submitLabel="Save"
+        onClose={() => setDirectoryOpen(false)}
+        onSubmit={setWorktreeDirectory}
       />
       <WorktreeOpenDialog
         open={openWorktreeOpen}

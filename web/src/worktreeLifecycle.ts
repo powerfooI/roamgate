@@ -16,6 +16,7 @@ export type WorktreeHookName = "setup" | "opened" | "teardown" | "removed";
 export type WorktreeHookInfo = {
   key: string | null;
   enabled: boolean;
+  worktree_directory?: string | null;
   repo_name?: string;
   repo_root?: string;
   checkout_path?: string;

@@ -15,6 +15,8 @@ import {
   type GuiRepoSettings,
   guiSettingsPath,
   readGuiSettings,
+  normalizeWorktreeDirectory,
+  repoWorktreeDirectory,
   repoWorktreeHooksEnabled,
   terminalSurfaceCodecsEnabled,
   uiSettingKeyIsValid,
@@ -147,6 +149,21 @@ export function createSettingsRpcHandler(args: {
         const settings = await readSettings();
         return reply({ settings, path: guiSettingsPath() });
       }
+      if (method === "settings.worktree_directory.get") {
+        const workspaceId = String(params.workspace_id ?? "");
+        if (!workspaceId) {
+          return fail("settings.worktree_directory.get requires workspace_id");
+        }
+        const workspaceResult = await args.herdr.call("workspace.get", {
+          workspace_id: workspaceId,
+        });
+        const key = repoSettingsKey(workspaceResult?.workspace);
+        return reply({
+          workspace_id: workspaceId,
+          key,
+          worktree_directory: (await repoWorktreeDirectory(key)) ?? null,
+        });
+      }
       if (method === "settings.worktree_hooks.get") {
         const workspaceId = String(params.workspace_id ?? "");
         if (!workspaceId) {
@@ -193,6 +210,7 @@ export function createSettingsRpcHandler(args: {
           workspace_id: workspaceId,
           key,
           enabled: await repoWorktreeHooksEnabled(key),
+          worktree_directory: (await repoWorktreeDirectory(key)) ?? null,
           repo_name: workspace.worktree.repo_name,
           repo_root: workspace.worktree.repo_root,
           checkout_path: checkoutPath,
@@ -354,11 +372,22 @@ export function createSettingsRpcHandler(args: {
           params.settings && typeof params.settings === "object"
             ? (params.settings as Partial<GuiRepoSettings>)
             : {};
+        let directory: string | undefined;
+        if (patch.worktree_directory !== undefined) {
+          const raw = String(patch.worktree_directory ?? "").trim();
+          directory = normalizeWorktreeDirectory(raw);
+          if (raw && !directory) {
+            return fail("worktree_directory must be an absolute path");
+          }
+        }
         const settings = await updateSettings((current) => {
           const existing = current.repositories[key] ?? {};
           const next: GuiRepoSettings = { ...existing };
           if (typeof patch.worktree_hooks_enabled === "boolean") {
             next.worktree_hooks_enabled = patch.worktree_hooks_enabled;
+          }
+          if (patch.worktree_directory !== undefined) {
+            next.worktree_directory = directory;
           }
           if (patch.custom && typeof patch.custom === "object") {
             next.custom = { ...(existing.custom ?? {}), ...patch.custom };

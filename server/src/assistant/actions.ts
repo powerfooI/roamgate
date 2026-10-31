@@ -7,6 +7,7 @@ import type {
 } from "../../../shared/assistant";
 import { isRecord } from "../agent/session-utils";
 import {
+  repoWorktreeDirectory,
   repoWorktreeHooksEnabled,
   workspaceRepoSettingsKey,
 } from "../config/gui-settings";
@@ -15,6 +16,7 @@ import type { LegacyConnectionRuntime } from "../connections/runtime";
 import { assertUnixHost } from "../connections/unix-only";
 import { inspectWorkspacePath } from "../workspace/path";
 import { checkoutPath } from "../workspace/utils";
+import { worktreeCheckoutPath } from "../worktree/create";
 import { surfaceAssistantUserError } from "./errors";
 
 export type AssistantActionPreview = Omit<
@@ -317,16 +319,15 @@ export async function prepareAssistantAction(args: {
       (typeof command !== "string" || command.length > 20_000)
     )
       throw new Error("Cannot preview this setup hook");
-    const enabled = await read(() =>
-      repoWorktreeHooksEnabled(
-        workspaceRepoSettingsKey(
-          source,
-          runtime.sshHost(),
-          target.connection_id,
-        ),
-      ),
+    const key = workspaceRepoSettingsKey(
+      source,
+      runtime.sshHost(),
+      target.connection_id,
     );
-    return { command, enabled };
+    const enabled = await read(() => repoWorktreeHooksEnabled(key));
+    // The repository's worktree location decides the new checkout's path.
+    const directory = (await read(() => repoWorktreeDirectory(key))) ?? null;
+    return { command, enabled, directory };
   }
 
   try {
@@ -625,10 +626,14 @@ export async function prepareAssistantAction(args: {
       );
       const root = absolutePath(resolved.root);
       const hooks = await hookState(current, root);
+      const path = hooks.directory
+        ? worktreeCheckoutPath(hooks.directory, branch)
+        : undefined;
       previewParams = {
         branch,
         ...(label ? { label } : {}),
         cwd: root,
+        path: path ?? "(Herdr's default worktree location)",
         base: "Latest origin default branch (fetched at confirmation)",
         setup_hook: hooks.command ?? "(none configured)",
         setup_hook_enabled: String(hooks.enabled),
@@ -646,7 +651,9 @@ export async function prepareAssistantAction(args: {
           JSON.stringify(await hookState(await workspace(), root)) !==
             JSON.stringify(hooks)
         )
-          throw new Error("Worktree source or setup hook changed");
+          throw new Error(
+            "Worktree source, setup hook or worktree location changed",
+          );
         if ((await worktrees()).some((item) => item.branch === branch))
           return {
             status: "failed",
@@ -660,6 +667,8 @@ export async function prepareAssistantAction(args: {
               workspace_id: target.workspace_id,
               branch,
               ...(label ? { label } : {}),
+              // The previewed path, not one recomputed at dispatch.
+              ...(path ? { path } : {}),
               focus: false,
               expected_setup_hook: hooks.command,
               expected_hooks_enabled: hooks.enabled,
