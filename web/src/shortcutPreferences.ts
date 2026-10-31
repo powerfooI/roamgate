@@ -199,6 +199,30 @@ let serverKnown = false;
 /** Set when this browser changed its bindings without reaching the server
  * (disconnected, or the write failed); the next connection sends them. */
 let localChangePending = false;
+let revision = 0;
+let writeQueue = Promise.resolve();
+const PENDING_KEY = "keyboardShortcuts.pending.v1";
+const SERVER_SEEN_KEY = "keyboardShortcuts.serverSeen.v1";
+function readStored(key: string) {
+  return roamgateLocalStorage.getItem(key);
+}
+function rememberServer() {
+  serverKnown = true;
+  try {
+    roamgateLocalStorage.setItem(SERVER_SEEN_KEY, "1");
+  } catch {
+    /* Memory still works. */
+  }
+}
+function clearPending(preferences: ShortcutPreferences) {
+  localChangePending = false;
+  try {
+    if (readStored(PENDING_KEY) === JSON.stringify(preferences))
+      roamgateLocalStorage.removeItem(PENDING_KEY);
+  } catch {
+    /* The next connection can safely resend the same value. */
+  }
+}
 
 let platform = detectShortcutPlatform();
 let snapshot = {
@@ -235,9 +259,13 @@ export function initializeShortcutPreferences() {
   if (initialized || typeof window === "undefined") return;
   initialized = true;
   platform = detectShortcutPlatform();
-  publish(read());
+  const pending = readStored(PENDING_KEY);
+  localChangePending = pending !== null;
+  serverKnown = readStored(SERVER_SEEN_KEY) === "1";
+  publish(pending ? parseShortcutPreferences(pending) : read());
   subscribeLocalStorage((key) => {
-    if (key === SHORTCUT_STORAGE_KEY || key === null) publish(read());
+    if (!localChangePending && (key === SHORTCUT_STORAGE_KEY || key === null))
+      publish(read());
   });
 }
 /** Mirrors the preference locally so the first keypress after a reload uses
@@ -256,20 +284,40 @@ function cache(preferences: ShortcutPreferences): string {
 }
 
 function save(preferences: ShortcutPreferences) {
+  const current = ++revision;
+  localChangePending = true;
+  try {
+    roamgateLocalStorage.setItem(PENDING_KEY, JSON.stringify(preferences));
+  } catch {
+    /* Retain the in-memory edit. */
+  }
   const cacheError = cache(preferences);
   publish(preferences, transport ? cacheError : cacheError || offlineNotice());
-  if (!transport) {
-    localChangePending = true;
-    return;
-  }
-  serverKnown = true;
-  void transport(preferences).catch((error: unknown) => {
-    localChangePending = true;
-    publish(
-      preferences,
-      `Saved in this browser only: ${error instanceof Error ? error.message : String(error)}`,
-    );
+  const send = transport;
+  if (!send) return;
+  // Keep this browser's writes ordered and skip edits superseded before dispatch.
+  const write = writeQueue.then(async () => {
+    if (current !== revision || transport !== send) return false;
+    await send(preferences);
+    return true;
   });
+  writeQueue = write.then(
+    () => {},
+    () => {},
+  );
+  void write
+    .then((sent) => {
+      if (!sent || current !== revision) return;
+      clearPending(preferences);
+      rememberServer();
+    })
+    .catch((error: unknown) => {
+      if (current !== revision) return;
+      publish(
+        preferences,
+        `Saved in this browser only: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
 }
 
 function offlineNotice() {
@@ -289,48 +337,50 @@ export function connectShortcutPreferences(
 ): void {
   initializeShortcutPreferences();
   transport = send;
-  if (localChangePending) {
-    // The user changed bindings here while the server could not hear it; that
-    // choice is newer than whatever the server holds.
-    localChangePending = false;
-    serverKnown = true;
-    const local = snapshot.preferences;
-    publish(local);
-    void send(local).catch(() => {
-      localChangePending = true;
-    });
+  const pending = readStored(PENDING_KEY);
+  if (localChangePending || pending !== null) {
+    save(
+      localChangePending
+        ? snapshot.preferences
+        : parseShortcutPreferences(pending),
+    );
     return;
   }
-  const hasStored = stored !== undefined && stored !== null;
-  if (hasStored) {
-    serverKnown = true;
-    publish(parseShortcutPreferences(JSON.stringify(stored)));
+  if (stored !== undefined && stored !== null) {
+    const next = parseShortcutPreferences(JSON.stringify(stored));
+    rememberServer();
+    publish(next, cache(next));
     return;
   }
   const local = snapshot.preferences;
-  publish(local);
-  // Promote anything the user actually chose: a custom preset, or an explicit
-  // platform pick. Only an untouched "auto" with no presets is left alone, so
-  // a pristine browser cannot claim the server's empty slot.
-  if (serverKnown || (local.presets.length === 0 && local.active === "auto"))
+  if (!serverKnown && (local.presets.length > 0 || local.active !== "auto")) {
+    save(local);
     return;
-  serverKnown = true;
-  void send(local).catch(() => {
-    /* The next edit retries; the cache still holds the preference. */
-  });
+  }
+  rememberServer();
+  publish(defaults, cache(defaults));
 }
 
 /** Drops the write path when the socket goes away, so later edits say so. */
 export function disconnectShortcutPreferences(): void {
   transport = null;
-  serverKnown = false;
+  revision += 1;
+  serverKnown = readStored(SERVER_SEEN_KEY) === "1";
 }
 
 /** Applies a preference another browser changed. */
 export function adoptShortcutPreferences(stored: unknown): void {
   initializeShortcutPreferences();
-  // A newer change from another browser supersedes an unsent local one.
+  // A pending local edit is committed after the server state already in flight.
+  if (localChangePending && transport) return;
+  revision += 1;
   localChangePending = false;
+  try {
+    roamgateLocalStorage.removeItem(PENDING_KEY);
+  } catch {
+    /* Cache may be blocked. */
+  }
+  rememberServer();
   const next =
     stored === undefined || stored === null
       ? defaults

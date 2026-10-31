@@ -58,6 +58,8 @@ beforeEach(() => {
   installMemoryStorage();
   disconnectShortcutPreferences();
   adoptShortcutPreferences(null);
+  localStorage.clear();
+  disconnectShortcutPreferences();
 });
 
 describe("shortcut preferences across browsers", () => {
@@ -79,12 +81,14 @@ describe("shortcut preferences across browsers", () => {
     const local = preferences("custom-local", preset("custom-local", "linux"));
     localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(local));
     adoptShortcutPreferences(local);
+    localStorage.removeItem("roamgate:keyboardShortcuts.serverSeen.v1");
+    disconnectShortcutPreferences();
 
     const sent: unknown[] = [];
     connectShortcutPreferences(async (value) => {
       sent.push(value);
     }, undefined);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(sent).toHaveLength(1);
     expect((sent[0] as typeof local).active).toBe("custom-local");
@@ -94,7 +98,7 @@ describe("shortcut preferences across browsers", () => {
     connectShortcutPreferences(async (value) => {
       sent.push(value);
     }, local);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(sent).toHaveLength(1);
   });
 
@@ -103,18 +107,19 @@ describe("shortcut preferences across browsers", () => {
     connectShortcutPreferences(async (value) => {
       sent.push(value);
     }, undefined);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(sent).toEqual([]);
   });
 
   test("an explicit platform choice is promoted even without a custom preset", async () => {
     adoptShortcutPreferences({ version: 1, active: "windows", presets: [] });
+    localStorage.removeItem("roamgate:keyboardShortcuts.serverSeen.v1");
     const sent: Array<{ active: string }> = [];
     disconnectShortcutPreferences();
     connectShortcutPreferences(async (value) => {
       sent.push(value as { active: string });
     }, undefined);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(sent.map((value) => value.active)).toEqual(["windows"]);
   });
 
@@ -129,7 +134,7 @@ describe("shortcut preferences across browsers", () => {
     connectShortcutPreferences(async (value) => {
       sent.push(value as { active: string });
     }, server);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(getShortcutSnapshot().preferences.active).toBe(offline);
     expect(sent.map((value) => value.active)).toEqual([offline]);
@@ -140,7 +145,7 @@ describe("shortcut preferences across browsers", () => {
       throw new Error("bridge restarting");
     }, undefined);
     const retried = saveAndSelect("Retry");
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(getShortcutSnapshot().storageError).toContain("bridge restarting");
 
     disconnectShortcutPreferences();
@@ -151,7 +156,7 @@ describe("shortcut preferences across browsers", () => {
       },
       preferences("custom-older", preset("custom-older", "linux")),
     );
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(sent.map((value) => value.active)).toEqual([retried]);
   });
 
@@ -210,4 +215,69 @@ describe("cross-platform guard", () => {
     );
     expect(snapshot.platformMismatch?.id).toBe("custom-mac-tweaks");
   });
+});
+
+test("initial server hydration updates the browser cache", () => {
+  adoptShortcutPreferences(
+    preferences("custom-local", preset("custom-local", "linux")),
+  );
+  connectShortcutPreferences(
+    async () => {},
+    preferences("custom-server", preset("custom-server", "linux")),
+  );
+  expect(
+    JSON.parse(roamgateLocalStorage.getItem(SHORTCUT_STORAGE_KEY)!).active,
+  ).toBe("custom-server");
+});
+
+test("an old failed save never rolls back a newer edit", async () => {
+  const first = Promise.withResolvers<void>(),
+    started = Promise.withResolvers<void>();
+  let count = 0;
+  connectShortcutPreferences(() => {
+    if (++count === 1) {
+      started.resolve();
+      return first.promise;
+    }
+    return Promise.resolve();
+  }, null);
+  saveAndSelect("First edit");
+  await started.promise;
+  const latest = saveAndSelect("Latest edit");
+  first.reject(new Error("old request failed"));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(getShortcutSnapshot().preferences.active).toBe(latest);
+  expect(getShortcutSnapshot().storageError).toBe("");
+});
+
+test("offline edits survive a page reload and stale pushes", async () => {
+  const active = saveAndSelect("Offline reload");
+  const fresh = await import(
+    `./shortcutPreferences.ts?reload=${crypto.randomUUID()}`
+  );
+  const sent: string[] = [];
+  fresh.connectShortcutPreferences(
+    async (value: { active: string }) => {
+      sent.push(value.active);
+    },
+    { version: 1, active: "auto", presets: [] },
+  );
+  fresh.adoptShortcutPreferences({ version: 1, active: "auto", presets: [] });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(sent).toEqual([active]);
+  expect(fresh.getShortcutSnapshot().preferences.active).toBe(active);
+  fresh.disconnectShortcutPreferences();
+});
+
+test("a previously synchronized browser does not resurrect a server-cleared preset", async () => {
+  const local = preferences("custom-gone", preset("custom-gone", "linux"));
+  connectShortcutPreferences(async () => {}, local);
+  disconnectShortcutPreferences();
+  const sent: unknown[] = [];
+  connectShortcutPreferences(async (value) => {
+    sent.push(value);
+  }, null);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(sent).toEqual([]);
+  expect(getShortcutSnapshot().preferences.active).toBe("auto");
 });

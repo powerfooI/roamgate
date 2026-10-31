@@ -1,3 +1,4 @@
+import { createUiSettingsRpcHandler } from "./bridge/settings-rpc";
 import { loadOrCreateSessionSecret } from "./config/session-secret";
 import {
   authTokenPrintCommand,
@@ -596,15 +597,6 @@ function runtimeFactoryForProfile(
             });
           }
         },
-        onUiSettingChanged: (key, value) => {
-          // Interface preferences belong to this Roamgate server, not to any
-          // one Herdr connection, so the push carries no connection envelope
-          // and reaches every open browser.
-          const line = JSON.stringify({
-            ui_settings: { key, value: value ?? null },
-          });
-          for (const ws of clients) safeSend(ws, line, "ui-settings");
-        },
         onTransportExit: profileConfig.sshHost
           ? (error) => {
               if (!context.isCurrent()) return;
@@ -694,6 +686,8 @@ const PANE_INPUT_METHODS = new Set([
   "pane.send_text",
   "pane.send_keys",
 ]);
+
+const handleUiSettingsRpc = createUiSettingsRpcHandler();
 
 async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
   let parsed: unknown;
@@ -825,6 +819,23 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     markRpcError(ws, id, message);
     sendReply({ id, error: { message } }, context);
   };
+  if (
+    method === "bridge.ui_settings.get" ||
+    method === "bridge.ui_settings.update"
+  ) {
+    try {
+      const result = await handleUiSettingsRpc(method, params ?? {});
+      if (method === "bridge.ui_settings.update") {
+        const line = JSON.stringify({ ui_settings: result });
+        for (const client of clients)
+          if (client !== ws) safeSend(client, line, "ui-settings");
+      }
+      sendReply({ id, result }, "ui-settings");
+    } catch (error) {
+      sendError("ui-settings-error", error);
+    }
+    return;
+  }
   if (method === "bridge.ping") {
     sendReply({ id, result: { ok: true } }, "bridge-ping");
     return;

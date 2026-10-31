@@ -1325,24 +1325,34 @@ function settlePendingFocusWorkspace(seq: number): void {
  * socket, and a failed attempt leaves the flag clear so the other retries.
  */
 let uiSettingsHydrated = false;
+let uiSettingsEpoch = 0;
+let uiSettingsPushVersion = 0;
+let latestShortcutPush: unknown;
 async function hydrateUiSettings() {
   if (uiSettingsHydrated) return;
   uiSettingsHydrated = true;
-  const client = bridge.connection();
+  const epoch = uiSettingsEpoch;
+  const pushVersion = uiSettingsPushVersion;
   try {
-    const result = await client.call("settings.get");
-    const ui = (result?.settings as { ui?: Record<string, unknown> })?.ui ?? {};
-    connectShortcutPreferences(async (preferences) => {
-      await bridge.connection().call("settings.ui.update", {
-        key: SHORTCUT_SETTING_KEY,
-        value: preferences,
-      });
-    }, ui[SHORTCUT_SETTING_KEY]);
+    const result = await bridge.call("bridge.ui_settings.get");
+    if (epoch !== uiSettingsEpoch) return;
+    const ui = (result?.ui as Record<string, unknown>) ?? {};
+    connectShortcutPreferences(
+      async (preferences) => {
+        await bridge.call("bridge.ui_settings.update", {
+          key: SHORTCUT_SETTING_KEY,
+          value: preferences,
+        });
+      },
+      pushVersion === uiSettingsPushVersion
+        ? ui[SHORTCUT_SETTING_KEY]
+        : latestShortcutPush,
+    );
   } catch {
     // Either the call lost a race with connection setup, or this is an older
     // bridge without the RPC. Clear the flag so the next trigger retries; the
     // browser cache keeps the bindings working meanwhile.
-    uiSettingsHydrated = false;
+    if (epoch === uiSettingsEpoch) uiSettingsHydrated = false;
   }
 }
 
@@ -2217,6 +2227,7 @@ function handleBridgeStatus(s: ConnectionStatus) {
   if (s === "connected") void hydrateUiSettings();
   if (s === "disconnected") {
     set({ tabMoveSupported: false, endpointAvailability: {} });
+    uiSettingsEpoch += 1;
     uiSettingsHydrated = false;
     disconnectShortcutPreferences();
     catalogReadyForConnection = false;
@@ -2579,8 +2590,11 @@ export const store = {
     subscribeLocalStorage(handlePreferenceStorageChange);
     bridge.onHello(handleBridgeHello);
     bridge.onUiSetting((push) => {
-      if (push.key === SHORTCUT_SETTING_KEY)
+      if (push.key === SHORTCUT_SETTING_KEY) {
+        uiSettingsPushVersion += 1;
+        latestShortcutPush = push.value;
         adoptShortcutPreferences(push.value);
+      }
     });
     bridge.onStatus(handleBridgeStatus);
     bridge.onEvent(handleHerdrEvent);

@@ -3,7 +3,10 @@ import type { ServerWebSocket } from "bun";
 import type { GuiSettings } from "../config/gui-settings";
 import type { HerdrClient } from "./herdr-client";
 import { WorktreeHookConfigError } from "../worktree/worktree-hooks";
-import { createSettingsRpcHandler } from "./settings-rpc";
+import {
+  createSettingsRpcHandler,
+  createUiSettingsRpcHandler,
+} from "./settings-rpc";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -387,58 +390,33 @@ test("hook settings expose selected config and errors without mislabeling native
   }
 });
 
-test("interface preferences are stored, cleared, and announced to every browser", async () => {
+test("server-wide interface preferences can be read, stored and cleared", async () => {
   let settings: GuiSettings = {
-    version: 1 as const,
+    version: 1,
     repositories: {},
     workspace_auto_sync: {},
     custom: {},
     ui: {},
   };
-  const messages: any[] = [];
-  const announced: Array<{ key: string; value: unknown }> = [];
-  const handler = createSettingsRpcHandler({
-    connectionId: "alpha",
-    herdr: {} as HerdrClient,
-    sshHost: () => undefined,
-    readWorktreeHooks: async () => null,
-    resolveWorkspaceGitRoot: async () => ({ workspace: {}, root: "/tmp" }),
-    workspaceAutoSyncIsRunning: () => false,
-    onWorkspaceAutoSyncSettingsChanged: () => undefined,
-    onUiSettingChanged: (key, value) => announced.push({ key, value }),
+  const handler = createUiSettingsRpcHandler({
     readSettings: async () => settings,
-    updateSettings: async (update) => {
-      settings = await update(settings);
-      return settings;
-    },
-    safeSend: (_ws, payload) => {
-      messages.push(JSON.parse(payload));
-      return true;
-    },
-    markRpcError: () => undefined,
+    updateSettings: async (update) => (settings = await update(settings)),
   });
-  const ws = {} as ServerWebSocket<unknown>;
-  const preferences = { version: 1, active: "mine", presets: [] };
-
-  await handler(ws, "1", "settings.ui.update", {
-    key: "keyboardShortcuts",
-    value: preferences,
-  });
-  expect(settings.ui.keyboardShortcuts).toEqual(preferences);
-  expect(announced).toEqual([{ key: "keyboardShortcuts", value: preferences }]);
-
-  // Omitting `value` clears it: JSON has no undefined, and null is a value.
-  await handler(ws, "2", "settings.ui.update", { key: "keyboardShortcuts" });
-  expect("keyboardShortcuts" in settings.ui).toBe(false);
-  expect(announced[1]).toEqual({ key: "keyboardShortcuts", value: undefined });
-
-  await handler(ws, "3", "settings.ui.update", { key: "../escape", value: 1 });
-  expect(messages[2].error.message).toContain(
-    "settings.ui.update requires key",
-  );
-  expect(announced).toHaveLength(2);
-
-  // Other connections share one settings file: a preference is not namespaced
-  // by connection the way repository settings are.
+  expect(await handler("bridge.ui_settings.get", {})).toEqual({ ui: {} });
+  const value = { version: 1, active: "mine", presets: [] };
+  expect(
+    await handler("bridge.ui_settings.update", {
+      key: "keyboardShortcuts",
+      value,
+    }),
+  ).toEqual({ key: "keyboardShortcuts", value });
+  expect(settings.ui.keyboardShortcuts).toEqual(value);
+  expect(
+    await handler("bridge.ui_settings.update", { key: "keyboardShortcuts" }),
+  ).toEqual({ key: "keyboardShortcuts", value: null });
+  expect(settings.ui).toEqual({});
+  await expect(
+    handler("bridge.ui_settings.update", { key: "../escape", value: 1 }),
+  ).rejects.toThrow("require key");
   expect(settings.repositories).toEqual({});
 });

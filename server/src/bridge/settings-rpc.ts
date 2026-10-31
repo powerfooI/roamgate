@@ -47,8 +47,6 @@ export function createSettingsRpcHandler(args: {
   workspaceAutoSyncIsRunning: (key: string) => boolean;
   onWorkspaceAutoSyncSettingsChanged: (key: string, enabled: boolean) => void;
   onTerminalTransportSettingsChanged?: (enabled: boolean) => void;
-  /** Tells every other browser that an interface preference moved. */
-  onUiSettingChanged?: (key: string, value: unknown) => void;
   safeSend: (
     ws: ServerWebSocket<unknown>,
     payload: string,
@@ -376,31 +374,40 @@ export function createSettingsRpcHandler(args: {
         const next = settings.repositories[key];
         return reply({ settings, repo: next, key });
       }
-      if (method === "settings.ui.update") {
-        const key = params.key;
-        if (!uiSettingKeyIsValid(key)) {
-          return fail(
-            "settings.ui.update requires key matching [A-Za-z][A-Za-z0-9_.-]{0,63}",
-          );
-        }
-        // A missing `value` clears the preference; JSON has no `undefined`, so
-        // callers send no value at all rather than null (a legitimate value).
-        const clearing = !Object.prototype.hasOwnProperty.call(params, "value");
-        const value = clearing ? undefined : params.value;
-        const valueError = uiSettingValueError(value);
-        if (valueError) return fail(valueError);
-        const settings = await updateSettings((current) => {
-          const ui = { ...current.ui };
-          if (clearing) delete ui[key];
-          else ui[key] = value;
-          return { ...current, ui };
-        }, requestIsCurrent);
-        args.onUiSettingChanged?.(key, clearing ? undefined : value);
-        return reply({ key, value: settings.ui[key] ?? null, settings });
-      }
       return fail(`unknown settings method: ${method}`);
     } catch (e) {
       return fail((e as Error).message);
     }
+  };
+}
+
+/** Server-wide preferences remain available without a ready Herdr connection. */
+export function createUiSettingsRpcHandler(
+  args: {
+    readSettings?: typeof readGuiSettings;
+    updateSettings?: typeof updateGuiSettings;
+  } = {},
+) {
+  const readSettings = args.readSettings ?? readGuiSettings;
+  const updateSettings = args.updateSettings ?? updateGuiSettings;
+  return async (method: string, params: Record<string, unknown>) => {
+    if (method === "bridge.ui_settings.get")
+      return { ui: (await readSettings()).ui };
+    if (method !== "bridge.ui_settings.update")
+      throw new Error("Unknown UI settings method");
+    const key = params.key;
+    if (!uiSettingKeyIsValid(key))
+      throw new Error(
+        "UI settings require key matching [A-Za-z][A-Za-z0-9_.-]{0,63}",
+      );
+    const valueError = uiSettingValueError(params.value);
+    if (valueError) throw new Error(valueError);
+    const settings = await updateSettings((current) => {
+      const ui = { ...current.ui };
+      if (params.value === undefined) delete ui[key];
+      else ui[key] = params.value;
+      return { ...current, ui };
+    });
+    return { key, value: settings.ui[key] ?? null };
   };
 }

@@ -116,6 +116,9 @@ async function registerDomTests() {
       const input = document.querySelector<HTMLInputElement>("[cmdk-input]")!;
       expect(input).not.toBeNull();
       expect(inputRef.current).toBe(input);
+      // Password managers leave search fields alone.
+      expect(input.type).toBe("search");
+      expect(input.getAttribute("name")).toBe("search");
       expect(contentRef.current).toBe(
         document.querySelector(".popover-content"),
       );
