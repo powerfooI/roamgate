@@ -1,5 +1,6 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readdir,
@@ -9,8 +10,13 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  GIT_DIFF_MAX_BYTES,
+  GIT_UNTRACKED_NUMSTAT_BATCH_SIZE,
+  GIT_UNTRACKED_NUMSTAT_CONCURRENCY,
+  GIT_UNTRACKED_NUMSTAT_MAX_FILES,
+} from "./file-constants";
 import type { RunProcessWithCodeTimeout } from "./file-types";
-import { GIT_DIFF_MAX_BYTES } from "./file-constants";
 import { LARGE_DIFF_PATCH_BYTES } from "../../../shared/gitDiffLimits";
 import {
   createLastStepBaselineStore,
@@ -582,6 +588,164 @@ describe("git diff summary parsing", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  test("counts untracked files with one command per batch", async () => {
+    const commands: string[] = [];
+    const paths = ["a.txt", "b.txt", "c.txt"];
+    const summary = await readDiffSummary({
+      workspaceId: "batched",
+      workspace: { label: "Repo" },
+      root: "/repo",
+      params: { mode: "working" },
+      shQuote,
+      runProcessWithCodeTimeout: async (argv) => {
+        const command = argv.join(" ");
+        commands.push(command);
+        if (command.includes("status --porcelain")) {
+          return {
+            code: 0,
+            stdout: paths.map((path) => `?? ${path}\n`).join(""),
+            stderr: "",
+          };
+        }
+        if (command.includes("--no-index")) {
+          return {
+            code: 0,
+            stdout: "1\t0\ta.txt\n2\t0\tb.txt\n3\t0\tc.txt\n",
+            stderr: "",
+          };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+
+    const numstat = commands.filter((command) =>
+      command.includes("--no-index"),
+    );
+    expect(numstat).toHaveLength(1);
+    for (const path of paths) expect(numstat[0]).toContain(path);
+    expect(
+      summary.entries.map((entry) => [entry.path, entry.additions]),
+    ).toEqual([
+      ["a.txt", 1],
+      ["b.txt", 2],
+      ["c.txt", 3],
+    ]);
+  });
+
+  test("keeps a batch's counts when one of its files cannot be read", async () => {
+    const root = await initRepository();
+    try {
+      await writeFile(join(root, "a.txt"), "one\n");
+      await writeFile(join(root, "b.txt"), "one\ntwo\n");
+      // Counted last in the batch; git exits 128 on a file it cannot read.
+      await writeFile(join(root, "zz-locked.txt"), "one\n");
+      await chmod(join(root, "zz-locked.txt"), 0o000);
+      const summary = await readDiffSummary({
+        workspaceId: "unreadable",
+        workspace: {},
+        root,
+        params: { mode: "working" },
+        shQuote,
+        runProcessWithCodeTimeout,
+      });
+      const additions = new Map(
+        summary.entries.map((entry) => [entry.path, entry.additions]),
+      );
+      expect(additions.get("a.txt")).toBe(1);
+      expect(additions.get("b.txt")).toBe(2);
+      expect(additions.has("zz-locked.txt")).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("lists untracked files without line counts past the cap", async () => {
+    const commands: string[] = [];
+    const paths = Array.from(
+      { length: GIT_UNTRACKED_NUMSTAT_MAX_FILES + 1 },
+      (_, index) => `build/file-${index}.bin`,
+    );
+    const summary = await readDiffSummary({
+      workspaceId: "capped",
+      workspace: { label: "Repo" },
+      root: "/repo",
+      params: { mode: "working" },
+      shQuote,
+      runProcessWithCodeTimeout: async (argv) => {
+        const command = argv.join(" ");
+        commands.push(command);
+        if (command.includes("status --porcelain")) {
+          return {
+            code: 0,
+            stdout: paths.map((path) => `?? ${path}\n`).join(""),
+            stderr: "",
+          };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+
+    expect(commands.some((command) => command.includes("--no-index"))).toBe(
+      false,
+    );
+    expect(summary.entries).toHaveLength(paths.length);
+    expect(
+      summary.entries.every((entry) => entry.additions === undefined),
+    ).toBe(true);
+  });
+
+  test("overlapping refreshes each return complete untracked counts", async () => {
+    const paths = Array.from(
+      { length: GIT_UNTRACKED_NUMSTAT_MAX_FILES },
+      (_, index) => `pending/file-${index}.txt`,
+    );
+    const status = paths.map((path) => `?? ${path}\n`).join("");
+    const view = {
+      workspaceId: "superseded",
+      workspace: { label: "Repo" },
+      root: "/repo",
+      params: { mode: "working" },
+      shQuote,
+    };
+    let numstatCommands = 0;
+    let newerRefresh: Promise<unknown> | null = null;
+
+    const summary = await readDiffSummary({
+      ...view,
+      runProcessWithCodeTimeout: async (argv) => {
+        const command = argv.join(" ");
+        if (command.includes("status --porcelain")) {
+          return { code: 0, stdout: status, stderr: "" };
+        }
+        if (command.includes("--no-index")) {
+          numstatCommands += 1;
+          // Another browser still needs its own complete response.
+          newerRefresh ??= readDiffSummary({
+            ...view,
+            runProcessWithCodeTimeout: async () => ({
+              code: 0,
+              stdout: "",
+              stderr: "",
+            }),
+          });
+          await newerRefresh;
+          return {
+            code: 0,
+            stdout: paths.map((path) => `1\t0\t${path}\n`).join(""),
+            stderr: "",
+          };
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+
+    const batches = Math.ceil(paths.length / GIT_UNTRACKED_NUMSTAT_BATCH_SIZE);
+    expect(batches).toBeGreaterThan(GIT_UNTRACKED_NUMSTAT_CONCURRENCY);
+    expect(numstatCommands).toBe(batches);
+    expect(summary.entries).toHaveLength(paths.length);
+    expect(summary.entries.every((entry) => entry.additions === 1)).toBe(true);
   });
 });
 
