@@ -38,6 +38,8 @@ import {
 } from "../terminalComposer";
 import { uploadTerminalImage } from "../terminalImageUpload";
 import type { AgentActivity, AgentPrompt } from "../agentPrompt";
+import { AgentArtifactsMenu } from "./AgentArtifactsMenu";
+import { useAgentArtifacts } from "../agentArtifacts";
 import { useAgentCommands } from "../claudeCommands";
 import type { Pane } from "../types";
 import {
@@ -204,6 +206,7 @@ export function AgentHistoryDrawer({
   const [view, setView] = useState<AgentHistoryView>(readAgentHistoryView);
   const chatView = !!paneChat || view === "chat";
   const agentCommands = useAgentCommands(pane, open);
+  const artifacts = useAgentArtifacts(pane, !!paneChat && open);
   const [previewPane, setPreviewPane] = useState<Pane | null>(null);
   const [previewSummary, setPreviewSummary] =
     useState<AgentSessionSummary | null>(null);
@@ -1557,6 +1560,7 @@ export function AgentHistoryDrawer({
           <div className="agent-history-actions">
             {paneChat ? (
               <>
+                <AgentArtifactsMenu artifacts={artifacts} />
                 <button
                   type="button"
                   className="agent-history-icon"

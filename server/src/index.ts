@@ -1019,7 +1019,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
   const connection = route.runtime;
   if (
     connection.remotePlatform === "windows" &&
-    /^(?:file\.|git\.|worktree\.|agent_history\.|agent_session\.|agent_commands\.|settings\.(?:workspace_auto_sync|worktree_hooks)\.)/.test(
+    /^(?:file\.|git\.|worktree\.|agent_history\.|agent_session\.|agent_commands\.|agent_artifacts\.|settings\.(?:workspace_auto_sync|worktree_hooks)\.)/.test(
       method,
     )
   ) {
@@ -1072,6 +1072,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     readSummary: readAgentSessionSummary,
     readEntry: readAgentHistoryEntry,
     readCommands: readAgentCommands,
+    readArtifacts: readAgentArtifacts,
   } = connection.agentSessions;
 
   if (
@@ -1172,6 +1173,14 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       sendReply({ id, result }, "agent-history-get");
     } catch (e) {
       sendError("agent-history-get-error", e);
+    }
+    return;
+  }
+  if (method === "agent_artifacts.get") {
+    try {
+      sendReply({ id, result: await readAgentArtifacts(params ?? {}) }, method);
+    } catch (e) {
+      sendError(`${method}-error`, e);
     }
     return;
   }

@@ -131,6 +131,51 @@ test("a Claude compaction summary is flagged, not a plain user message", () => {
   ]);
 });
 
+test("an Artifact result keeps the page it published when redacted", () => {
+  const trajectory = projectAgentTrajectory("claude", file, [
+    {
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "a1",
+            name: "Artifact",
+            input: { file_path: "/tmp/notes.html" },
+          },
+        ],
+      },
+    },
+    {
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "a1",
+            content:
+              "Published /tmp/notes.html at https://claude.ai/artifact/N1",
+          },
+        ],
+      },
+    },
+  ]);
+  const update = redactHistoryUpdate({
+    history_version: 2,
+    cursor: { epoch: "e", revision: 1 },
+    window_limit: HISTORY_WINDOW_LIMIT,
+    mode: "snapshot",
+    entries: historyEntriesFromTrajectory(file, trajectory),
+  });
+  const entries = update.mode === "snapshot" ? update.entries : [];
+  expect(entries.find((entry) => entry.kind === "tool_result")).toMatchObject({
+    text: "",
+    artifact: { url: "https://claude.ai/artifact/N1", title: "notes" },
+  });
+});
+
 test("Claude messages still in its queue show as queued until they land", () => {
   const op = (operation: string, content?: string) => ({
     type: "queue-operation",

@@ -603,3 +603,63 @@ describe("Claude session title", () => {
     expect((await second.readSummary({ pane_id: "p1" })).title).toBe("login");
   });
 });
+
+describe("Claude session artifacts", () => {
+  test("agent_artifacts.get lists the pages the session published", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "roamgate-claude-artifacts-"),
+    );
+    tempDirectories.push(directory);
+    const path = join(directory, "session.jsonl");
+    const call = (id: string, input: Record<string, unknown>) => ({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "tool_use", id, name: "Artifact", input }],
+      },
+    });
+    const result = (id: string, text: string) => ({
+      type: "user",
+      timestamp: "2026-10-30T10:00:00.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: id, content: text }],
+      },
+    });
+    await writeFile(
+      path,
+      `${[
+        call("t1", { file_path: "/tmp/report/index.html", title: "Report" }),
+        result(
+          "t1",
+          "Created a new Artifact at https://claude.ai/artifact/abc-1",
+        ),
+        call("t2", { file_path: "/tmp/evil.html" }),
+        result("t2", "Created a new Artifact at javascript:alert(1)"),
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")}\n`,
+    );
+    const handlers = createAgentSessionHandlers({
+      herdrCall: async () => ({
+        agent: {
+          agent: "claude",
+          workspace_id: "w1",
+          tab_id: "t1",
+          cwd: directory,
+          agent_session: { agent: "claude", kind: "path", value: path },
+        },
+      }),
+      files: localAgentSessionFiles,
+    });
+    expect(await handlers.readArtifacts({ pane_id: "p1" })).toEqual({
+      artifacts: [
+        {
+          url: "https://claude.ai/artifact/abc-1",
+          title: "Report",
+          published_at: "2026-10-30T10:00:00.000Z",
+        },
+      ],
+    });
+  });
+});

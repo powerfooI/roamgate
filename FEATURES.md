@@ -193,7 +193,9 @@ Inspector state is scoped to each checkout; see
   Agent History instead). The chat takes the whole pane, with one slim row for
   the agent's icon, what a Claude session is about (its `/rename` name, else
   the title Claude Code gives it, also shown as Agent History's heading), its
-  status, search, **Stop** (Esc in the terminal) and the way back
+  status, the pages the session published with Claude Code's Artifact tool
+  (a list to open or copy each link; each publish also links under the tool
+  calls that made it), search, **Stop** (Esc in the terminal) and the way back
   to the terminal; on a phone that row stands for the top bar, which hides,
   and the message box sits in the bottom bar, taking the whole width while
   you write. Below the conversation, a working agent shows its own word for

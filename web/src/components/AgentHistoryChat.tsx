@@ -13,6 +13,7 @@ import {
   Check,
   ChevronRight,
   Copy,
+  ExternalLink,
   RotateCw,
   Square,
   Volume2,
@@ -543,6 +544,14 @@ function ToolBlock({
   onToggle: () => void;
   onOpen: (entry: HistoryEntry) => void;
 }) {
+  // The pages these calls published, the latest version of each.
+  const artifacts = [
+    ...new Map(
+      entries.flatMap((entry) =>
+        entry.artifact ? [[entry.artifact.url, entry.artifact] as const] : [],
+      ),
+    ).values(),
+  ];
   const [open, setOpen] = useState(false);
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
   const listId = useId();
@@ -618,6 +627,26 @@ function ToolBlock({
           ) : null}
         </span>
       </button>
+      {artifacts.length ? (
+        <div className="agent-history-chat-artifacts">
+          {artifacts.map((artifact) => (
+            <a
+              key={artifact.url}
+              className="agent-history-chat-artifact"
+              href={artifact.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={artifact.url}
+            >
+              <ExternalLink size={12} aria-hidden="true" />
+              <span>{artifact.title}</span>
+              <span className="agent-history-chat-artifact-version">
+                {artifact.version ? `v${artifact.version}` : "New"}
+              </span>
+            </a>
+          ))}
+        </div>
+      ) : null}
       {open ? (
         <ul id={listId} className="agent-history-chat-tools-list">
           {steps.map((step) => (

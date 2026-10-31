@@ -499,3 +499,35 @@
   color: var(--muted);
   font-weight: 600;
 }
+
+/* Pages a block's calls published with the Artifact tool. */
+.agent-history-chat-artifacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px 6px;
+}
+
+.agent-history-chat-artifact {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border-soft));
+  border-radius: 8px;
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.agent-history-chat-artifact > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-history-chat-artifact-version {
+  flex: none;
+  color: var(--muted);
+}
