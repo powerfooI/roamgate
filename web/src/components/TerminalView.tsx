@@ -21,6 +21,7 @@ import { useSystemBack } from "../systemBack";
 import {
   getShortcutSnapshot,
   shortcutMatches,
+  shortcutTitle,
   terminalLinkModifierMatches,
 } from "../shortcutPreferences";
 import {
@@ -36,6 +37,7 @@ import {
   Columns2,
   Keyboard,
   Maximize2,
+  MessagesSquare,
   Minimize2,
   Rows2,
   X,
@@ -194,6 +196,8 @@ import {
   agentStateKind,
   paneHasAgentHistory,
 } from "./agentSession";
+import { AgentHistoryDrawer } from "./AgentHistoryDrawer";
+import { setPaneView, togglePaneView, usePaneView } from "../paneView";
 import { ConfirmDialog, MessageDialog } from "./ModalDialogs";
 import {
   readTerminalComposerShortcutsOpen,
@@ -620,6 +624,17 @@ export function TerminalView({
   forwardsRef.current = s.forwards;
   const forwardableRef = useRef(false);
   forwardableRef.current = canForwardPorts(forwardConnection?.type);
+  // An agent pane can show its conversation as a chat instead of its
+  // terminal, which keeps running underneath.
+  const chatAvailable = !!pane && paneHasAgentHistory(pane);
+  const chatShown =
+    usePaneView(s.activeConnectionId, pane?.pane_id) === "chat" &&
+    chatAvailable;
+  const chatShownRef = useRef(chatShown);
+  chatShownRef.current = chatShown;
+  useEffect(() => {
+    if (chatShown) termRef.current?.textarea?.blur();
+  }, [chatShown]);
   const canClosePane = !!pane && paneCanClose(s.panes, pane.pane_id);
   const paneZoomed =
     s.layout?.zoomed === true && s.layout.focused_pane_id === pane?.pane_id;
@@ -867,6 +882,7 @@ export function TerminalView({
   const focusTerminalSoon = useCallback(
     (reason?: "output") => {
       if (
+        chatShownRef.current ||
         !isActivePaneRef.current ||
         composerEditingRef.current ||
         touchSelectionRef.current?.active === true
@@ -903,6 +919,56 @@ export function TerminalView({
     },
     [connectionClient],
   );
+  // A pane shown as a chat takes the keyboard in its message box, on
+  // activation as a terminal would: not on a phone (the keyboard would
+  // pop up), nor away from another field or an open overlay.
+  const chatLayerRef = useRef<HTMLDivElement | null>(null);
+  // The pane's buttons float over the chat's header, which keeps clear of
+  // them: their width, as --pane-toolbar-width on the pane.
+  const paneToolbarRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const toolbar = paneToolbarRef.current;
+    const shell = toolbar?.parentElement;
+    if (!toolbar || !shell) return;
+    const observer = new ResizeObserver(() =>
+      shell.style.setProperty(
+        "--pane-toolbar-width",
+        `${toolbar.offsetWidth}px`,
+      ),
+    );
+    observer.observe(toolbar);
+    return () => observer.disconnect();
+  }, []);
+  const focusChatSoon = useCallback(() => {
+    if (!isActivePaneRef.current || shouldAvoidVirtualKeyboard()) return;
+    let tries = 0;
+    const attempt = () => {
+      if (
+        !connectionClient.isCurrent() ||
+        !isActivePaneRef.current ||
+        !chatShownRef.current
+      )
+        return;
+      const layer = chatLayerRef.current;
+      const active = document.activeElement;
+      const activeElement = active instanceof HTMLElement ? active : null;
+      if (!layer || layer.contains(activeElement)) return;
+      // Another pane's terminal or message box gives way; other fields not.
+      const fromPane = !!activeElement?.closest(".xterm, .terminal-chat-layer");
+      if (isEditableElement(active) && !fromPane) return;
+      if (terminalFocusBlockedByOverlay(activeElement, document)) return;
+      const box = layer.querySelector<HTMLElement>(
+        '.agent-history-composer textarea, .agent-history-composer [contenteditable="true"]',
+      );
+      // The box may still be loading.
+      if (!box) {
+        if ((tries += 1) < 20) window.setTimeout(attempt, 50);
+        return;
+      }
+      box.focus();
+    };
+    requestAnimationFrame(() => window.setTimeout(attempt, 0));
+  }, [connectionClient]);
   const focusEndpoint = useCallback(() => {
     focusTerminalEndpoint(connectionClient, paneTerminalIdRef.current);
   }, [connectionClient]);
@@ -958,8 +1024,10 @@ export function TerminalView({
     [terminalIdentity],
   );
   useEffect(() => {
-    if (isActivePane) focusTerminalSoon();
-  }, [focusTerminalSoon, isActivePane]);
+    if (!isActivePane) return;
+    if (chatShown) focusChatSoon();
+    else focusTerminalSoon();
+  }, [focusChatSoon, focusTerminalSoon, isActivePane, chatShown]);
   useEffect(() => watchTerminalOverlayPointer(document), []);
   useEffect(() => {
     if (!canShowAgentHistory && agentHistoryOpen) setAgentHistoryOpen(false);
@@ -994,6 +1062,25 @@ export function TerminalView({
     setAgentHistoryOpen,
   ]);
 
+  useEffect(() => {
+    if (!isActivePane || !chatAvailable || !pane) return;
+    const paneId = pane.pane_id;
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        e.defaultPrevented ||
+        !shortcutMatches(e, "pane.chat") ||
+        document.querySelector(".modal-backdrop, .command-popover")
+      )
+        return;
+      e.preventDefault();
+      e.stopPropagation();
+      togglePaneView(s.activeConnectionId, paneId);
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () =>
+      window.removeEventListener("keydown", onKey, { capture: true });
+  }, [chatAvailable, isActivePane, pane, s.activeConnectionId]);
+
   const blurTerminalInput = () => {
     termRef.current?.textarea?.blur();
   };
@@ -1002,6 +1089,7 @@ export function TerminalView({
     const term = termRef.current;
     if (
       !term ||
+      chatShownRef.current ||
       composerEditingRef.current ||
       !connectionClient.isCurrent() ||
       !isActivePaneRef.current ||
@@ -3860,17 +3948,42 @@ export function TerminalView({
           layout={s.layout}
           onPointerDown={preventPaneActionFocus}
         />
-        <div className="terminal-main">
+        <div className={`terminal-main${chatShown ? " is-chat" : ""}`}>
           <div
             ref={containerRef}
             className="terminal-view"
+            // Under a chat, the terminal must never take the keyboard: what
+            // is typed would go to the agent unseen.
+            inert={chatShown || undefined}
             tabIndex={-1}
             onFocus={(event) => {
               if (event.target === event.currentTarget) focusTerminalInput();
             }}
           />
+          {chatShown ? (
+            <div className="terminal-chat-layer" ref={chatLayerRef}>
+              <AgentHistoryDrawer
+                pane={pane}
+                open
+                embedded
+                paneChat={{
+                  onShowTerminal: () => {
+                    setPaneView(s.activeConnectionId, pane.pane_id, "terminal");
+                    focusTerminalSoon();
+                  },
+                  onKeys: (text) => void store.sendText(pane.pane_id, text),
+                  composerTarget:
+                    isMobileLayout() && isActivePane ? mobileInputTarget : null,
+                }}
+                onOpenChange={() => {}}
+              />
+            </div>
+          ) : null}
 
-          {!isMobileLayout() && touchHandles.length === 0 && isActivePane ? (
+          {!isMobileLayout() &&
+          touchHandles.length === 0 &&
+          isActivePane &&
+          !chatShown ? (
             <div
               className="terminal-mobile-input-actions"
               aria-label="Terminal input"
@@ -3935,6 +4048,7 @@ export function TerminalView({
         {visible &&
         touchHandles.length === 0 &&
         !composerShortcutsVisible &&
+        !chatShown &&
         showMobileKeys &&
         hasMobileShortcuts ? (
           <div
@@ -4010,14 +4124,35 @@ export function TerminalView({
             </div>
           </div>
         ) : null}
-        {isMobileLayout() && mobileInputTarget
-          ? isActivePane
-            ? createPortal(terminalComposer, mobileInputTarget)
-            : null
-          : composerOpen
-            ? terminalComposer
-            : null}
-        <div className="terminal-pane-toolbar" aria-label="Pane actions">
+        {chatShown
+          ? null
+          : isMobileLayout() && mobileInputTarget
+            ? isActivePane
+              ? createPortal(terminalComposer, mobileInputTarget)
+              : null
+            : composerOpen
+              ? terminalComposer
+              : null}
+        <div
+          ref={paneToolbarRef}
+          className={`terminal-pane-toolbar${chatShown ? " is-over-chat" : ""}`}
+          aria-label="Pane actions"
+        >
+          {/* Over a chat, its own top row shows the terminal. */}
+          {chatAvailable && !chatShown ? (
+            <button
+              type="button"
+              className="terminal-pane-action"
+              title={shortcutTitle("Show as a chat", "pane.chat")}
+              aria-label="Show as a chat"
+              onPointerDown={preventPaneActionFocus}
+              onClick={() =>
+                setPaneView(s.activeConnectionId, pane.pane_id, "chat")
+              }
+            >
+              <MessagesSquare size={14} />
+            </button>
+          ) : null}
           {s.endpointAvailability[pane.terminal_id] &&
           store.terminalScrollReason(pane.terminal_id) ? (
             <span
@@ -4095,7 +4230,7 @@ export function TerminalView({
           >
             <span>{terminalAttachError}</span>
           </div>
-        ) : terminalLoadingSpinner || pasteLoading ? (
+        ) : (terminalLoadingSpinner && !chatShown) || pasteLoading ? (
           <div className="terminal-loading" role="status" aria-live="polite">
             <span className="terminal-loading-dot" />
             <span>{pasteLoading ? "Pasting..." : "Loading terminal"}</span>

@@ -366,6 +366,114 @@
     min-width: 0;
   }
 
+  /* A chat is the phone's zen: its own slim row stands for the top bar, so
+     the conversation gets the screen between it and the bottom bar. The top
+     bar comes back with the terminal. */
+  .app:has(.terminal-chat-layer) .topbar {
+    display: none;
+  }
+
+  .terminal-chat-layer .agent-history-drawer-head {
+    padding-top: calc(4px + env(safe-area-inset-top, 0px));
+  }
+
+  /* An agent pane shown as a chat puts its message box here, beside the
+     navigation, the way the terminal's Message box sits. */
+  .mobile-bottom-input > .agent-history-composer {
+    padding: 0
+      calc(var(--mobile-navigation-slots, 2) * var(--mobile-control-size) + 4px)
+      0 0;
+    border-top: 0;
+  }
+
+  .mobile-bottom-input > .agent-history-composer textarea {
+    min-height: max(44px, calc(44px / var(--ui-scale, 1)));
+    padding: 11px 14px;
+    border-radius: 22px;
+    font-size: 16px;
+  }
+
+  .mobile-bottom-input > .agent-history-composer .agent-history-composer-attach,
+  .mobile-bottom-input > .agent-history-composer .agent-history-composer-send {
+    height: max(44px, calc(44px / var(--ui-scale, 1)));
+    min-width: max(44px, calc(44px / var(--ui-scale, 1)));
+    padding: 0;
+    border-radius: 22px;
+  }
+
+  .mobile-bottom-input > .agent-history-composer textarea::placeholder {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Writing: the box spans the width with Send at its right; its other
+     buttons share the line below with the navigation, which stays, all a
+     size smaller. */
+  .mobile-bottom-input > .agent-history-composer:focus-within {
+    gap: 4px;
+    padding-right: 0;
+  }
+
+  .mobile-bottom-input
+    > .agent-history-composer:focus-within
+    .agent-history-composer-row {
+    row-gap: 4px;
+  }
+
+  .mobile-bottom-input
+    > .agent-history-composer:focus-within
+    :is(.agent-history-composer-attach, .agent-history-composer-send) {
+    height: 36px;
+    min-width: 36px;
+  }
+
+  /* Not writing: the box alone beside the navigation. */
+  .mobile-bottom-input
+    > .agent-history-composer:not(:focus-within)
+    .agent-history-composer-attach {
+    display: none;
+  }
+
+  /* Writing: the box and Send fill the first line, a few lines high; the
+     other buttons wrap below. */
+  .mobile-bottom-input
+    > .agent-history-composer:focus-within
+    .agent-history-composer-row {
+    flex-wrap: wrap;
+  }
+
+  .mobile-bottom-input
+    > .agent-history-composer:focus-within
+    .agent-history-composer-row
+    > textarea {
+    /* Send (36px) and the row gap (6px) beside it. */
+    flex: 1 0 calc(100% - 42px);
+    order: -2;
+  }
+
+  .mobile-bottom-input > .agent-history-composer:focus-within textarea {
+    /* One line to start; it grows with the text. */
+    min-height: 0;
+  }
+
+  .mobile-bottom-input
+    > .agent-history-composer:focus-within
+    .agent-history-composer-send {
+    order: -1;
+    margin: 0;
+  }
+
+  /* Its icon says Send; the word would take the message's room. */
+  .mobile-bottom-input > .agent-history-composer .agent-history-composer-send {
+    font-size: 0;
+  }
+
+  .mobile-bottom-input > .agent-history-composer svg {
+    width: 18px;
+    height: 18px;
+  }
+
   .mobile-appbar {
     position: absolute;
     right: calc(8px + env(safe-area-inset-right, 0px));
@@ -410,6 +518,21 @@
     background: transparent;
     color: var(--text-strong);
     touch-action: manipulation;
+  }
+
+  /* Writing in an agent chat: the navigation a size smaller, on the line
+     of the box's buttons. */
+  .mobile-bottom-bar:has(.agent-history-composer:focus-within) .mobile-appbar {
+    bottom: calc(4px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .mobile-bottom-bar:has(.agent-history-composer:focus-within)
+    .mobile-appbar
+    button {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
   }
 
   .mobile-appbar button:disabled {

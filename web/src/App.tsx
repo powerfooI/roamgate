@@ -29,6 +29,12 @@ import { LAYOUT_CHANGE_EVENT, useLayoutPreferences } from "./layoutPreferences";
 import { useSystemBack } from "./systemBack";
 import { startFrontendFreshness } from "./frontendFreshness";
 import {
+  defaultPaneView,
+  paneView,
+  togglePaneView,
+  usePaneView,
+} from "./paneView";
+import {
   shortcutMatches,
   shortcutTitle,
   useShortcutPreferences,
@@ -179,6 +185,7 @@ import { copyTextFromUserGesture } from "./terminalClipboard";
 import { terminalPasteRequest } from "./terminalPaste";
 import {
   activateTerminalComposerDraftScope,
+  appendToPaneComposerDraft,
   terminalComposerDraftKey,
 } from "./terminalComposer";
 import { terminalMountKey } from "./terminalConnection";
@@ -326,8 +333,25 @@ function TerminalLoadingFallback({
 }
 
 function TerminalView(props: TerminalViewProps) {
+  // A pane that opens as a chat never says it loads a terminal; nor does one
+  // not known yet, which may be one when agents open as a chat.
+  const chat = useStoreSelector((state) => {
+    if (state.panes.length === 0) return defaultPaneView() === "chat";
+    const selected =
+      state.selectedPaneId &&
+      state.layout?.panes.some((p) => p.pane_id === state.selectedPaneId)
+        ? state.selectedPaneId
+        : null;
+    const paneId =
+      props.paneId ?? selected ?? state.layout?.focused_pane_id ?? null;
+    const pane = state.panes.find((p) => p.pane_id === paneId);
+    return (
+      paneHasAgentHistory(pane) &&
+      paneView(state.activeConnectionId, pane.pane_id) === "chat"
+    );
+  });
   return (
-    <Suspense fallback={<TerminalLoadingFallback />}>
+    <Suspense fallback={chat ? null : <TerminalLoadingFallback />}>
       <LazyTerminalView {...props} />
     </Suspense>
   );
@@ -699,6 +723,20 @@ function isEditableElement(target: EventTarget | null) {
   if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return true;
   if (target.closest(".file-preview-code .cm-editor")) return false;
   return target.isContentEditable;
+}
+
+/**
+ * Typing where the navigation shortcuts (switching panes, tabs and
+ * workspaces) must not fire. An agent chat's message box stands for the
+ * agent's terminal, which takes them, so it does too.
+ */
+function blocksNavigationShortcuts(target: EventTarget | null) {
+  if (
+    target instanceof HTMLElement &&
+    target.closest(".agent-history-composer")
+  )
+    return false;
+  return isEditableElement(target);
 }
 
 function tabShortcutIndex(e: KeyboardEvent) {
@@ -1632,6 +1670,8 @@ export default function App() {
     s.workspaces,
   ]);
   const activePaneHasAgent = paneHasAgentHistory(activePane);
+  const activePaneChat =
+    usePaneView(s.activeConnectionId, activePane?.pane_id) === "chat";
   const historyInspectorOpen =
     inspectorState?.open === true && inspectorState.view === "history";
   const historyInspectorVisible =
@@ -2189,9 +2229,23 @@ export default function App() {
       }
       const deliverySession = annotationSessionRef.current;
       setAnnotationDeliveryBusy(true);
+      // An agent shown as a chat: pre-filled in its message box, where it
+      // shows, rather than in the terminal under it.
+      const inChat = !!document.querySelector(
+        `.terminal-shell[data-pane-id="${CSS.escape(target.pane_id)}"] .terminal-chat-layer`,
+      );
       try {
-        const request = terminalPasteRequest(target.pane_id, message);
-        await connectionClient.call(request.method, request.params);
+        if (inChat) {
+          appendToPaneComposerDraft(
+            connectionClient.connectionId,
+            connectionClient.generation,
+            target,
+            message,
+          );
+        } else {
+          const request = terminalPasteRequest(target.pane_id, message);
+          await connectionClient.call(request.method, request.params);
+        }
         if (!connectionClient.isCurrent()) return;
         const draftActive =
           deliverySession !== null &&
@@ -2204,10 +2258,16 @@ export default function App() {
         }
         store.notify({
           kind: "success",
-          message: "Feedback pre-filled in the agent pane",
+          message: inChat
+            ? "Feedback pre-filled in the chat's message box"
+            : "Feedback pre-filled in the agent pane",
           detail: draftActive
-            ? "Review the message there, then press Enter to submit it."
-            : "Original draft retained because its workspace was left or unloaded, or its connection changed. Review the message in the agent pane, then press Enter.",
+            ? inChat
+              ? "Review the message there, then send it."
+              : "Review the message there, then press Enter to submit it."
+            : inChat
+              ? "Original draft retained because its workspace was left or unloaded, or its connection changed. Review the message in the chat's message box, then send it."
+              : "Original draft retained because its workspace was left or unloaded, or its connection changed. Review the message in the agent pane, then press Enter.",
           autoDismissMs: 6000,
         });
       } catch (error) {
@@ -3242,7 +3302,7 @@ export default function App() {
       }
       const paneJumpShortcut = shortcutMatches(e, "panes.recent");
       if (paneJumpShortcut) {
-        if (isEditableElement(e.target)) return;
+        if (blocksNavigationShortcuts(e.target)) return;
         if (paneJumpOptions.length === 0) return;
         e.preventDefault();
         e.stopPropagation();
@@ -3262,7 +3322,7 @@ export default function App() {
         return;
       }
       if (shortcutMatches(e, "panes.search")) {
-        if (isEditableElement(e.target)) return;
+        if (blocksNavigationShortcuts(e.target)) return;
         e.preventDefault();
         e.stopPropagation();
         openPaneJumpSearch();
@@ -3308,7 +3368,7 @@ export default function App() {
         e.preventDefault();
         e.stopPropagation();
         if (
-          isEditableElement(e.target) ||
+          blocksNavigationShortcuts(e.target) ||
           document.querySelector(".modal-backdrop")
         ) {
           return;
@@ -3364,9 +3424,10 @@ export default function App() {
         e.preventDefault();
         e.stopPropagation();
         // Typing into the popup's own terminal never reaches here, since
-        // isEditableElement stops at the xterm textarea.
+        // isEditableElement stops at the xterm textarea. An agent chat's
+        // message box lets it through.
         if (
-          isEditableElement(e.target) ||
+          blocksNavigationShortcuts(e.target) ||
           document.querySelector(".modal-backdrop")
         ) {
           return;
@@ -3394,7 +3455,7 @@ export default function App() {
         e.preventDefault();
         e.stopPropagation();
         if (
-          isEditableElement(e.target) ||
+          blocksNavigationShortcuts(e.target) ||
           document.querySelector(".modal-backdrop")
         ) {
           return;
@@ -3433,7 +3494,7 @@ export default function App() {
       }
       const tabIndex = tabShortcutIndex(e);
       if (tabIndex !== null) {
-        if (isEditableElement(e.target)) return;
+        if (blocksNavigationShortcuts(e.target)) return;
         const current = store.get();
         const focusedWorkspace = current.workspaces.find((w) => w.focused);
         // Number shortcuts address tab-strip positions, pinned tabs first.
@@ -3491,7 +3552,7 @@ export default function App() {
       }
       const workspacesShortcut = shortcutMatches(e, "workspaces.open");
       if (workspacesShortcut) {
-        if (isEditableElement(e.target)) return;
+        if (blocksNavigationShortcuts(e.target)) return;
         e.preventDefault();
         e.stopPropagation();
         openWorkspaces();
@@ -3512,7 +3573,10 @@ export default function App() {
         toggleZenMode();
         return;
       }
-      if (!shortcutMatches(e, "sidebar.toggle") || isEditableElement(e.target))
+      if (
+        !shortcutMatches(e, "sidebar.toggle") ||
+        blocksNavigationShortcuts(e.target)
+      )
         return;
       e.preventDefault();
       toggleSidebar();
@@ -4155,6 +4219,36 @@ export default function App() {
               {annotations.length > 0 ? ` ${annotations.length}` : ""}
             </span>
           </button>
+          {activePaneHasAgent && activePane ? (
+            <button
+              type="button"
+              className={activePaneChat ? "active" : ""}
+              title={shortcutTitle(
+                activePaneChat ? "Show the terminal" : "Show as a chat",
+                "pane.chat",
+              )}
+              aria-label={
+                activePaneChat
+                  ? "Show the agent's terminal"
+                  : "Show the agent as a chat"
+              }
+              aria-pressed={activePaneChat}
+              onClick={() => {
+                togglePaneView(s.activeConnectionId, activePane.pane_id);
+                setMobileMoreOpen(false);
+                activateTerminalSurface();
+              }}
+            >
+              {activePaneChat ? (
+                <SquareTerminal size={16} />
+              ) : (
+                <MessagesSquare size={16} />
+              )}
+              <span className="mobile-nav-label">
+                {activePaneChat ? "Terminal in pane" : "Chat in pane"}
+              </span>
+            </button>
+          ) : null}
         </nav>
         <nav
           className="mobile-nav mobile-workspace-tools"

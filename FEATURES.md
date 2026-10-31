@@ -176,6 +176,19 @@ Inspector state is scoped to each checkout; see
   online services and may send message text to their provider. No microphone or
   server-side speech software is required. Browser support and voices vary;
   background and locked-screen playback are not guaranteed, including on iOS.
+- An agent pane can show its conversation **as a chat** instead of its
+  terminal, which keeps running underneath and does not take the keyboard:
+  the chat button in the pane's toolbar, Ctrl+Cmd+M (Ctrl+Alt+M elsewhere), or
+  on a phone **Chat in pane** in More options (the bottom bar's **Chat** opens
+  Agent History instead). The chat takes the whole pane, with one slim row for
+  the agent's status, search, **Stop** (Esc in the terminal) and the way back
+  to the terminal; on a phone that row stands for the top bar, which hides,
+  and the message box sits in the bottom bar, taking the whole width while
+  you write. Below the conversation, a working agent shows **Working...** and
+  a blocked one says it waits, with a button to its terminal. Each pane
+  remembers its view; **Open agents as a chat** in Configuration > Behavior
+  (off by default) opens agent panes as a chat until switched. Review
+  feedback sent to a pane shown as a chat is pre-filled in its message box.
 - **Menu > Configuration > Integrations** installs, updates, or removes Herdr's
   bundled agent integrations (not the agents themselves). See
   [version lookup](docs/ARCHITECTURE.md#agent-integrations).

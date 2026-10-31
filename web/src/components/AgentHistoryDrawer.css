@@ -645,3 +645,183 @@
     font-size: 16px;
   }
 }
+
+/* In a pane shown as a chat: the blocked agent waits for an answer. */
+.agent-chat-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 10px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 13px;
+}
+
+/* In a pane, the conversation gets the room: one slim header row. */
+.agent-history-drawer.is-pane-chat .agent-history-drawer-head {
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+.agent-history-drawer.is-pane-chat .agent-history-actions {
+  margin-left: auto;
+}
+
+/* Clear of the pane's own buttons, which sit at the end of this row
+   (TerminalView.css). */
+.agent-history-drawer.is-pane-chat .agent-history-drawer-head {
+  padding-right: calc(var(--pane-toolbar-width, 0px) + 12px);
+}
+
+/* Beside the conversation's centred column, not across the whole pane: the
+   message box, the prompt and the activity line line up with the messages,
+   which keep clear of the minimap rail on the right. Margins and padding in
+   % are of the pane's width. */
+.agent-history-drawer.is-pane-chat {
+  --chat-rail: 0px;
+  --chat-column-gutter: max(0px, (100% - var(--chat-rail) - 820px) / 2);
+}
+
+.agent-history-drawer.is-pane-chat:has(
+  .conversation-minimap:not(.is-horizontal)
+) {
+  --chat-rail: 44px;
+}
+
+.agent-history-drawer.is-pane-chat .agent-history-composer {
+  padding-inline: calc(var(--chat-column-gutter) + 12px)
+    calc(var(--chat-column-gutter) + var(--chat-rail) + 12px);
+}
+
+.agent-history-drawer.is-pane-chat .agent-chat-prompt,
+.agent-history-drawer.is-pane-chat .agent-chat-activity {
+  margin-inline: calc(var(--chat-column-gutter) + 12px)
+    calc(var(--chat-column-gutter) + var(--chat-rail) + 12px);
+}
+
+/* On a phone, every line counts: no minimap rail, tighter bubbles. */
+@media (hover: none) and (pointer: coarse) {
+  .agent-history-drawer.is-pane-chat .conversation-minimap {
+    display: none;
+  }
+
+  .agent-history-drawer.is-pane-chat:has(
+    .conversation-minimap:not(.is-horizontal)
+  ) {
+    --chat-rail: 0px;
+  }
+
+  .agent-history-drawer.is-pane-chat
+    .agent-history-chat-frame
+    > .agent-history-chat {
+    padding-right: 0;
+  }
+
+  .agent-history-drawer.is-pane-chat .agent-history-chat-content {
+    gap: 6px;
+    padding: 6px 6px 10px;
+  }
+
+  .agent-history-drawer.is-pane-chat .agent-history-chat-message,
+  .agent-history-drawer.is-pane-chat .agent-history-chat-tools {
+    max-width: 94%;
+  }
+
+  .agent-history-drawer.is-pane-chat .agent-history-chat-bubble {
+    padding: 6px 9px;
+    font-size: 13px;
+  }
+
+  .agent-history-drawer.is-pane-chat .agent-chat-prompt {
+    margin: 0 6px 6px;
+  }
+}
+
+/* Scrolling the conversation to its end must not go on to scroll the page:
+   on a phone with the keyboard up, that slides the message box under it. */
+.agent-history-drawer.is-pane-chat .agent-history-chat {
+  overscroll-behavior: contain;
+}
+
+/* The working agent's own word for it ("Sublimating..."), as in its terminal. */
+.agent-chat-activity {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin: 0 10px 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.agent-chat-activity strong {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.agent-chat-activity > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-chat-activity-mark {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: agent-chat-activity-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes agent-chat-activity-pulse {
+  50% {
+    opacity: 0.25;
+    transform: scale(0.7);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-chat-activity-mark {
+    animation: none;
+  }
+}
+
+/* A pane's chat waiting for its transcript: one quiet line, centered. */
+.agent-chat-waiting {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 0;
+  padding: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.agent-chat-waiting small {
+  max-width: 40ch;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+/* The menu's keys, in one row under its choices. */
+.agent-chat-prompt-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-chat-prompt-keys .secondary-btn {
+  min-width: 40px;
+  justify-content: center;
+}

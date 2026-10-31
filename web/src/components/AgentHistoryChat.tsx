@@ -49,19 +49,43 @@ const FOLLOW_THRESHOLD_PX = 48;
 const EMPTY_LOADING: ReadonlySet<string> = new Set();
 const noop = () => {};
 
+type BubbleProps = {
+  entry: HistoryEntry;
+  sequence: number;
+  highlighted: boolean;
+  speech: ReturnType<typeof useChatSpeech>;
+  onOpen: (entry: HistoryEntry) => void;
+};
+// A history refresh hands over new entry objects even for messages that did
+// not change: a bubble re-renders only when what it shows changed.
+function sameBubble(a: BubbleProps, b: BubbleProps): boolean {
+  const x = a.entry;
+  const y = b.entry;
+  return (
+    a.sequence === b.sequence &&
+    a.highlighted === b.highlighted &&
+    a.speech === b.speech &&
+    a.onOpen === b.onOpen &&
+    (x === y ||
+      (x.id === y.id &&
+        x.text === y.text &&
+        x.role === y.role &&
+        x.kind === y.kind &&
+        x.sent_at === y.sent_at &&
+        x.queued === y.queued &&
+        x.compact_summary === y.compact_summary &&
+        x.text_bytes === y.text_bytes &&
+        x.text_hash === y.text_hash))
+  );
+}
+
 const ChatBubble = memo(function ChatBubble({
   entry,
   sequence,
   highlighted,
   speech,
   onOpen,
-}: {
-  entry: HistoryEntry;
-  sequence: number;
-  highlighted: boolean;
-  speech: ReturnType<typeof useChatSpeech>;
-  onOpen: (entry: HistoryEntry) => void;
-}) {
+}: BubbleProps) {
   // A compaction summary is long and written by Claude Code, not the user:
   // one line, with the summary a tap away.
   if (entry.compact_summary)
@@ -164,7 +188,7 @@ const ChatBubble = memo(function ChatBubble({
       </div>
     </article>
   );
-});
+}, sameBubble);
 
 // Opening a block fetches small arguments so each row can show a headline;
 // larger payloads (e.g. whole-file writes) wait until their step is opened.
@@ -462,7 +486,11 @@ function ToolBlock({
 
 // The drawer owns the scroll and content refs so its minimap can track and
 // jump to bubbles through their data-sequence, as it does for timeline cards.
-export function AgentHistoryChat({
+// Memoized: the pane around it re-renders on every pane update (status,
+// activity), several times a second while the agent works, and a long
+// conversation is too costly to render each time; its props only change
+// with the history.
+export const AgentHistoryChat = memo(function AgentHistoryChat({
   items,
   listRef,
   contentRef,
@@ -590,4 +618,4 @@ export function AgentHistoryChat({
       </div>
     </div>
   );
-}
+});

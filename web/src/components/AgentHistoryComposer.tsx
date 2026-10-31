@@ -1,3 +1,4 @@
+import { scrollChatPage } from "./chatPaging";
 import {
   useCallback,
   useEffect,
@@ -342,6 +343,16 @@ export function AgentHistoryComposer({
               event.keyCode === 229
             )
               return;
+            if (
+              (event.key === "PageUp" || event.key === "PageDown") &&
+              scrollChatPage(
+                event.currentTarget,
+                event.key === "PageUp" ? -1 : 1,
+              )
+            ) {
+              event.preventDefault();
+              return;
+            }
             if (event.key === "Escape" && confirming) {
               event.preventDefault();
               event.stopPropagation();

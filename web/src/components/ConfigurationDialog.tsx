@@ -7,6 +7,7 @@ import {
   GitBranch,
   Keyboard,
   LayoutDashboard,
+  MessageSquare,
   Minus,
   Moon,
   Option,
@@ -27,6 +28,7 @@ import {
   UI_SCALE_STEP,
 } from "../appearance";
 import { lazyWithReload } from "../lazyWithReload";
+import { setDefaultPaneView, useDefaultPaneView } from "../paneView";
 import {
   mobileTerminalShortcutCount,
   type MobileTerminalShortcutRows,
@@ -143,6 +145,7 @@ export function ConfigurationDialog({
   const applePlatform = detectShortcutPlatform() === "mac";
   const connectionClient = useConnectionClient();
   const [tab, setTab] = useState<ConfigurationTab>(initialTab);
+  const defaultPaneView = useDefaultPaneView();
   const [detail, setDetail] = useState<Detail | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
@@ -499,6 +502,36 @@ export function ConfigurationDialog({
                   onClick={() =>
                     store.setAutomaticUpdateChecksEnabled(
                       !s.automaticUpdateChecksEnabled,
+                    )
+                  }
+                >
+                  <span />
+                </button>
+              </div>
+              <div className="config-preference-row">
+                <span className="config-item-icon">
+                  <MessageSquare size={15} />
+                </span>
+                <div className="config-item-copy">
+                  <strong>Open agents as a chat</strong>
+                  <span>
+                    {defaultPaneView === "chat"
+                      ? "An agent pane shows its chat once the agent starts"
+                      : "An agent pane shows its terminal"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label="Open agents as a chat"
+                  aria-checked={defaultPaneView === "chat"}
+                  className={
+                    "settings-switch" +
+                    (defaultPaneView === "chat" ? " is-on" : "")
+                  }
+                  onClick={() =>
+                    setDefaultPaneView(
+                      defaultPaneView === "chat" ? "terminal" : "chat",
                     )
                   }
                 >
