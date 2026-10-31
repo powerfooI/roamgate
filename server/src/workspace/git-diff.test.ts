@@ -696,7 +696,7 @@ describe("git diff summary parsing", () => {
     ).toBe(true);
   });
 
-  test("stops counting untracked files once a newer refresh supersedes it", async () => {
+  test("overlapping refreshes each return complete untracked counts", async () => {
     const paths = Array.from(
       { length: GIT_UNTRACKED_NUMSTAT_MAX_FILES },
       (_, index) => `pending/file-${index}.txt`,
@@ -721,8 +721,7 @@ describe("git diff summary parsing", () => {
         }
         if (command.includes("--no-index")) {
           numstatCommands += 1;
-          // A second refresh of the same view lands while this pass is still
-          // counting, and owns the answer from here on.
+          // Another browser still needs its own complete response.
           newerRefresh ??= readDiffSummary({
             ...view,
             runProcessWithCodeTimeout: async () => ({
@@ -732,7 +731,11 @@ describe("git diff summary parsing", () => {
             }),
           });
           await newerRefresh;
-          return { code: 1, stdout: "", stderr: "" };
+          return {
+            code: 0,
+            stdout: paths.map((path) => `1\t0\t${path}\n`).join(""),
+            stderr: "",
+          };
         }
         return { code: 0, stdout: "", stderr: "" };
       },
@@ -740,11 +743,9 @@ describe("git diff summary parsing", () => {
 
     const batches = Math.ceil(paths.length / GIT_UNTRACKED_NUMSTAT_BATCH_SIZE);
     expect(batches).toBeGreaterThan(GIT_UNTRACKED_NUMSTAT_CONCURRENCY);
-    // How many batches are already in flight when the newer refresh lands is
-    // a scheduling detail; that the rest are abandoned is the contract.
-    expect(numstatCommands).toBeGreaterThan(0);
-    expect(numstatCommands).toBeLessThan(batches);
+    expect(numstatCommands).toBe(batches);
     expect(summary.entries).toHaveLength(paths.length);
+    expect(summary.entries.every((entry) => entry.additions === 1)).toBe(true);
   });
 });
 

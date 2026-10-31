@@ -22,20 +22,6 @@ import type {
 } from "./file-types";
 
 const GIT_ATTRIBUTE_BATCH_SIZE = 100;
-/**
- * Refreshes for one workspace view supersede each other: a second browser, a
- * trailing poll, or a tree that changed mid-pass all leave an older pass
- * counting files nobody is waiting for. Claiming a generation lets the newer
- * pass retire it instead.
- */
-const diffSummaryGenerations = new Map<string, number>();
-
-function claimDiffSummaryGeneration(key: string) {
-  const generation = (diffSummaryGenerations.get(key) ?? 0) + 1;
-  diffSummaryGenerations.set(key, generation);
-  return () => diffSummaryGenerations.get(key) === generation;
-}
-
 const LAST_STEP_SNAPSHOT_LIMIT = 64;
 const LAST_STEP_STORE_DISPOSED = "LAST_STEP_STORE_DISPOSED";
 
@@ -793,7 +779,6 @@ async function collectStats({
   host,
   shQuote,
   runProcessWithCodeTimeout,
-  isCurrent,
 }: {
   root: string;
   mode: GitDiffMode;
@@ -803,7 +788,6 @@ async function collectStats({
   host?: string;
   shQuote: (value: string) => string;
   runProcessWithCodeTimeout: RunProcessWithCodeTimeout;
-  isCurrent?: () => boolean;
 }) {
   const stats = new Map<string, { additions: number; deletions: number }>();
   const mergeStats = (
@@ -883,9 +867,6 @@ async function collectStats({
       const batch = batches[cursor];
       cursor += 1;
       if (!batch) continue;
-      // A newer refresh owns the answer: the rest of this pass would be spent
-      // counting a tree that has already moved on, often path by vanished path.
-      if (isCurrent?.() === false) return;
       const command = `
 set -- ${batch.map((entry) => shQuote(entry.path)).join(" ")}
 for p in "$@"; do
@@ -1023,9 +1004,6 @@ export async function readDiffSummary({
   lastStepBaselines?: LastStepBaselineStore;
 }) {
   const mode = diffMode(params);
-  const isCurrent = claimDiffSummaryGeneration(
-    [workspaceId, root, mode].join(" "),
-  );
   const comparison =
     mode === "branch-main"
       ? await resolveComparisonBase({
@@ -1128,7 +1106,6 @@ export async function readDiffSummary({
       host,
       shQuote,
       runProcessWithCodeTimeout,
-      isCurrent,
     });
   }
   const fingerprintTask =
