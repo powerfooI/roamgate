@@ -234,7 +234,8 @@ conflicts are aborted, and nothing is ever pushed.
 - **Browse filesystem** opens read-only browsing outside the checkout.
 - Preview text with highlighting and search, Markdown (with Mermaid diagrams),
   static HTML (workspace CSS/images/fonts; scripts blocked; 512 KiB limit),
-  images, PDFs, and audio up to 25 MiB.
+  images, PDFs, and audio up to 25 MiB. Browsers without a native PDF viewer
+  use a responsive three-page window with previous/next navigation.
 - Upload by drag and drop, download files or folders (`.tar.gz`), copy paths,
   create folders, move files by dragging, and delete with confirmation. All of
   this works over SSH (moves need `python3` on the remote host).
