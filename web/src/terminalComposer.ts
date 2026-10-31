@@ -637,16 +637,43 @@ export function terminalComposerRequest(
   };
 }
 
-// An image path the server's upload put in the text.
-const UPLOADED_PATH = /[\\/]roamgate-uploads-[^\\/\s]+[\\/]/;
+// An image path the server's upload put in the text, quoted when it needs to
+// be (see terminal-path-text). Punctuation right after an unquoted path ends
+// the sentence, not the path.
+const UPLOADED_PATH =
+  /'[^']*[\\/]roamgate-uploads-[^']*'|[^\s'"]*[\\/]roamgate-uploads-[^\s'"]*[^\s'".,;:!?)\]]/g;
 /**
- * How long an agent gets to take a pasted image in before Enter. Claude Code
- * reads a pasted image path into an attachment and drops an Enter that
- * arrives meanwhile, leaving the message unsent.
+ * How long an agent gets to take a pasted image in before what follows it.
+ * Claude Code reads a pasted image path into an attachment and drops an
+ * Enter that arrives meanwhile, leaving the message unsent.
  */
 export const IMAGE_SETTLE_MS = 400;
 
-/** Types composer text into a pane, optionally followed by Enter. */
+/** The text cut around the uploaded image paths in it. */
+export function uploadedPathPieces(
+  text: string,
+): Array<{ text: string; path: boolean }> {
+  const pieces: Array<{ text: string; path: boolean }> = [];
+  let last = 0;
+  for (const match of text.matchAll(UPLOADED_PATH)) {
+    if (match.index > last)
+      pieces.push({ text: text.slice(last, match.index), path: false });
+    pieces.push({ text: match[0], path: true });
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) pieces.push({ text: text.slice(last), path: false });
+  return pieces;
+}
+
+/**
+ * Types composer text into a pane, optionally followed by Enter.
+ *
+ * Claude Code only turns a paste into an image attachment when the paste is
+ * the image path alone; within a sentence the path stays text. So when the
+ * text holds an uploaded path and anything else, each path goes in as its
+ * own paste, followed by a pause for the attachment, and the words around
+ * it as theirs.
+ */
 export async function sendTerminalComposerText(
   client: Pick<ConnectionClient, "call">,
   paneId: string,
@@ -655,16 +682,28 @@ export async function sendTerminalComposerText(
   wait: (ms: number) => Promise<void> = (ms) =>
     new Promise((resolve) => setTimeout(resolve, ms)),
 ): Promise<void> {
-  if (submit && UPLOADED_PATH.test(text)) {
-    const typed = terminalComposerRequest(paneId, text, false);
-    await client.call(typed.method, typed.params);
-    await wait(IMAGE_SETTLE_MS);
-    const enter = terminalComposerRequest(paneId, "", true);
-    await client.call(enter.method, enter.params);
+  const pieces = uploadedPathPieces(text);
+  const imageOnly = pieces.every((piece) => piece.path || !piece.text.trim());
+  if (!pieces.some((piece) => piece.path) || (!submit && imageOnly)) {
+    const request = terminalComposerRequest(paneId, text, submit);
+    await client.call(request.method, request.params);
     return;
   }
-  const request = terminalComposerRequest(paneId, text, submit);
-  await client.call(request.method, request.params);
+  for (const [index, piece] of pieces.entries()) {
+    const last = index === pieces.length - 1;
+    if (!piece.path) {
+      const typed = terminalComposerRequest(paneId, piece.text, last && submit);
+      await client.call(typed.method, typed.params);
+      continue;
+    }
+    const typed = terminalComposerRequest(paneId, piece.text, false);
+    await client.call(typed.method, typed.params);
+    await wait(IMAGE_SETTLE_MS);
+    if (last && submit) {
+      const enter = terminalComposerRequest(paneId, "", true);
+      await client.call(enter.method, enter.params);
+    }
+  }
 }
 
 /**
