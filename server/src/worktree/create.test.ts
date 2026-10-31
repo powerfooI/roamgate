@@ -6,6 +6,36 @@ import { createWorkspaceWorktree, syncWorktreeBase } from "./create";
 const commit = "a".repeat(40);
 const remoteHead = `ref: refs/heads/master\tHEAD\n${commit}\tHEAD\n`;
 
+test("a worktree base without origin is the checked out commit, in any language", async () => {
+  const oid = "a".repeat(40);
+  const result = await syncWorktreeBase({
+    workspaceId: "w1",
+    resolveGitRoot: async () => ({ root: "/repo" }),
+    shQuote,
+    runProcessWithCodeTimeout: async (argv) => {
+      const command = argv.at(-1) ?? "";
+      if (command.includes("remote get-url origin"))
+        return {
+          code: 2,
+          stdout: "",
+          stderr: "error: No such remote 'origin'\n",
+        };
+      if (command.includes("rev-parse --verify 'HEAD^{commit}'"))
+        return { code: 0, stdout: `${oid}\n`, stderr: "" };
+      if (command.includes("for-each-ref"))
+        return { code: 0, stdout: "", stderr: "" };
+      // Git in French, as the user's machine may speak it.
+      return {
+        code: 128,
+        stdout: "",
+        stderr:
+          "fatal : 'origin' ne semble pas être un dépôt git\nfatal : Impossible de lire le dépôt distant.\n",
+      };
+    },
+  });
+  expect(result).toMatchObject({ base: "HEAD", commit: oid });
+});
+
 describe("worktree creation preparation", () => {
   test.each([
     { name: "local SHA-1", host: undefined, oid: commit },

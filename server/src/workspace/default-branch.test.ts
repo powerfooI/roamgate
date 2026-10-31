@@ -488,3 +488,22 @@ describe("origin default branch with real Git", () => {
     }
   }, 15_000);
 });
+
+describe("worktree base without an origin", () => {
+  test("starts from the checked out commit", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "roamgate-no-origin-"));
+    try {
+      await git("init", "-q", directory);
+      const head = await commit(directory, "first");
+      const result = await syncWorktreeBase({
+        workspaceId: "w1",
+        resolveGitRoot: async () => ({ root: directory }),
+        shQuote,
+        runProcessWithCodeTimeout,
+      });
+      expect(result).toMatchObject({ base: "HEAD", commit: head });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
