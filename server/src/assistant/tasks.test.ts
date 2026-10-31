@@ -670,6 +670,7 @@ function fixture(
     prepared: PreparedTask,
   ) => Promise<void>,
   notify?: (notification: AssistantTaskNotification) => void,
+  rescope?: (prepared: PreparedTask) => Promise<PreparedTask>,
 ) {
   const directory = existing ?? mkdtempSync(join(tmpdir(), "roamgate-tasks-"));
   if (!existing) directories.push(directory);
@@ -700,6 +701,7 @@ function fixture(
       if (deny) throw new Error("Original identity replaced");
       await validation?.(signal, _prepared);
     },
+    ...(rescope ? { rescope } : {}),
     child: (run, path, publish) => {
       const snapshot: AssistantSnapshot = {
         instance_id: "child",
@@ -2692,4 +2694,189 @@ test("retrying failed cancellation disposal releases the model slot without repl
     await confirming;
     await retrying;
   }
+});
+
+test("a task over all workspaces takes those of the time each run starts", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-28T00:00:00Z") });
+  expect(
+    validateTaskInput({ ...prepared().input, all_workspaces: true })
+      .all_workspaces,
+  ).toBe(true);
+  for (const bad of [false, "yes"])
+    expect(() =>
+      validateTaskInput({ ...prepared().input, all_workspaces: bad }),
+    ).toThrow("Invalid task input");
+  // A workspace created after the task.
+  const later = (base: PreparedTask): PreparedTask => ({
+    ...base,
+    input: {
+      ...base.input,
+      scope: [
+        ...base.input.scope,
+        { connection_id: "local", workspace_id: "later" },
+      ],
+    },
+    config: {
+      ...base.config,
+      allowed_workspaces: [
+        ...base.config.allowed_workspaces,
+        { connection_id: "local", workspace_id: "later" },
+      ],
+    },
+    workspaces: [
+      ...base.workspaces,
+      { ...base.workspaces[0]!, workspace_id: "later", label: "Later" },
+    ],
+    targets: [...base.targets, { ...base.targets[0]!, workspace_id: "later" }],
+  });
+  let rescoped = 0;
+  const f = fixture(undefined, undefined, undefined, async (current) => {
+    rescoped++;
+    return later({
+      ...current,
+      input: {
+        ...current.input,
+        scope: current.input.scope.slice(0, 1),
+      },
+      config: {
+        ...current.config,
+        allowed_workspaces: current.config.allowed_workspaces.slice(0, 1),
+      },
+      workspaces: current.workspaces.slice(0, 1),
+      targets: current.targets.slice(0, 1),
+    });
+  });
+  const all = prepared();
+  all.input.all_workspaces = true;
+  const task = await f.manager.create(all, randomUUID());
+  await f.manager.resume();
+  const first = await startRun(f, task.id);
+  expect(rescoped).toBe(1);
+  expect(first.run.targets.map((target) => target.workspace_id)).toEqual([
+    "workspace",
+    "later",
+  ]);
+  expect(
+    f.manager.detail(task.id).task.workspaces.map((ref) => ref.workspace_id),
+  ).toEqual(["workspace", "later"]);
+  // The same event is not notified again by a run over other workspaces.
+  expect(
+    JSON.parse(
+      (await f.manager.notifyRun(task.id, first.run.id, customNotification()))
+        .text,
+    ).accepted,
+  ).toBe(true);
+  first.complete();
+  await flush();
+  const second = await startRun(f, task.id);
+  expect(rescoped).toBe(2);
+  expect(
+    JSON.parse(
+      (await f.manager.notifyRun(task.id, second.run.id, customNotification()))
+        .text,
+    ),
+  ).toEqual({ accepted: false, reason: "already_notified" });
+  second.complete();
+  await flush();
+
+  // A task over chosen workspaces keeps them.
+  const fixed = await f.manager.create(prepared(), randomUUID());
+  const run = await startRun(f, fixed.id);
+  expect(rescoped).toBe(2);
+  expect(run.run.targets.map((target) => target.workspace_id)).toEqual([
+    "workspace",
+  ]);
+});
+
+test("a run that cannot start says why when it safely can", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  let failure: Error = new AssistantUserError(
+    "No workspace Ranger may use is available for this task.",
+  );
+  const f = fixture(undefined, undefined, undefined, async () => {
+    throw failure;
+  });
+  const all = prepared();
+  all.input.all_workspaces = true;
+  const task = await f.manager.create(all, randomUUID());
+  await f.manager.resume();
+  await f.manager.control("run_now", task.id);
+  jest.advanceTimersByTime(0);
+  await flush();
+  expect(f.manager.detail(task.id).runs[0]!).toMatchObject({
+    status: "failed",
+    error:
+      "The task could not safely start or resume: No workspace Ranger may use is available for this task.",
+  });
+
+  // Other failures can carry transport details: they stay masked.
+  failure = new Error("connect ENOENT /run/user/1000/herdr.sock");
+  await f.manager.control("run_now", task.id);
+  jest.advanceTimersByTime(0);
+  await flush();
+  expect(f.manager.detail(task.id).runs[0]!).toMatchObject({
+    status: "failed",
+    error:
+      "The task could not safely start or resume. Check its original workspace permissions, identity and model.",
+  });
+});
+
+test("a task over all workspaces keeps references to a workspace missing from one run", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-28T00:00:00Z") });
+  const other = { connection_id: "local", workspace_id: "other" };
+  const both = prepared();
+  both.input.all_workspaces = true;
+  both.input.scope.push(other);
+  both.config.allowed_workspaces.push(other);
+  both.workspaces.push({ ...both.workspaces[0]!, ...other, label: "Other" });
+  both.targets.push({ ...both.targets[0]!, ...other });
+  const mention = { ...agentMention(), ...other, workspace_label: "Other" };
+  both.input.mentions = [mention];
+  // What Ranger may use when each run starts, as the service rescopes.
+  let available = ["workspace"];
+  const f = fixture(undefined, undefined, undefined, async (current) => {
+    const keep = <T extends { workspace_id: string }>(refs: T[]) =>
+      refs.filter((ref) => available.includes(ref.workspace_id));
+    const { mentions, ...input } = current.input;
+    const kept = keep(mentions ?? []);
+    return {
+      input: {
+        ...input,
+        scope: keep(input.scope),
+        ...(kept.length ? { mentions: kept } : {}),
+      },
+      config: {
+        ...current.config,
+        allowed_workspaces: keep(current.config.allowed_workspaces),
+      },
+      workspaces: keep(current.workspaces),
+      targets: keep(current.targets),
+    };
+  });
+  const task = await f.manager.create(both, randomUUID());
+  await f.manager.resume();
+  const first = await startRun(f, task.id);
+  expect(first.run.input.mentions).toBeUndefined();
+  expect(first.run.targets.map((target) => target.workspace_id)).toEqual([
+    "workspace",
+  ]);
+  // The task still has the reference, and the workspace it is in.
+  const detail = f.manager.detail(task.id).task;
+  expect(detail.mentions).toEqual([mention]);
+  expect(detail.scope.map((ref) => ref.workspace_id)).toEqual([
+    "workspace",
+    "other",
+  ]);
+  first.complete();
+  await flush();
+
+  available = ["workspace", "other"];
+  const second = await startRun(f, task.id);
+  expect(second.run.input.mentions).toEqual([mention]);
+  expect(second.run.targets.map((target) => target.workspace_id)).toEqual([
+    "workspace",
+    "other",
+  ]);
+  second.complete();
+  await flush();
 });
