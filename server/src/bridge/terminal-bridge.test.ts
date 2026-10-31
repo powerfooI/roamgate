@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, test } from "bun:test";
 import type { ServerWebSocket } from "bun";
 import * as net from "node:net";
 import { EventEmitter, once } from "node:events";
@@ -328,6 +328,61 @@ describe("terminal bridge sharing", () => {
       }
     });
   }
+
+  test("first protocol 22 attach skips the relay without another protocol ping", async () => {
+    const socketPath = await startThinServer({ protocol: 22 });
+    const browser = {} as ServerWebSocket<unknown>;
+    const messages: string[] = [];
+    let probes = 0;
+    let resolveRepeatedProbe!: () => void;
+    const repeatedProbe = new Promise<void>((resolve) => {
+      resolveRepeatedProbe = resolve;
+    });
+    jest.useFakeTimers();
+    const bridge = createTerminalBridge({
+      clientSocketPath: socketPath,
+      // A remote ping costs a control round trip, longer than the relay
+      // wait. Only the first one answers; any later one never does.
+      herdrProtocol: () => {
+        probes += 1;
+        if (probes === 1) return Promise.resolve(22);
+        resolveRepeatedProbe();
+        return new Promise<number>(() => {});
+      },
+      safeSend: (_ws, payload) => {
+        messages.push(payload);
+        return true;
+      },
+      clientLabel: () => "browser",
+      markRpcError: () => undefined,
+    });
+    try {
+      const attached = bridge
+        .handleTerminalRpc(browser, "attach", "terminal.attach", {
+          terminal_id: "term_1",
+          cols: 100,
+          rows: 30,
+        })
+        .then(() => "attached");
+      // Timers stay frozen, so the attach can only finish if it never
+      // falls back to the relay wait.
+      expect(
+        await Promise.race([
+          attached,
+          repeatedProbe.then(() => "pinged again"),
+        ]),
+      ).toBe("attached");
+      expect(probes).toBe(1);
+      expect(
+        messages
+          .map((message) => JSON.parse(message))
+          .find((message) => message.id === "attach")?.result,
+      ).toEqual({ ok: true });
+    } finally {
+      jest.useRealTimers();
+      bridge.dispose();
+    }
+  });
 
   test("refreshes a reused terminal for a newly attached browser", async () => {
     const socketPath = await startThinServer();
