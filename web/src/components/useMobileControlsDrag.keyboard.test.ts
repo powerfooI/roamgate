@@ -1,4 +1,4 @@
-import { afterAll, afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, jest, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { Root } from "react-dom/client";
 import type { MobileControlsPlacement } from "../mobileControlsPlacement";
@@ -698,14 +698,26 @@ async function registerDomTests() {
       '[aria-label="Send draft to the terminal"]',
     )!;
     expect(send.disabled).toBe(true);
-    await act(async () => {
-      input.focus();
-      input.dispatchEvent(
-        new browser.CompositionEvent("compositionend", {
-          bubbles: true,
-        }) as unknown as CompositionEvent,
-      );
-    });
+    // TerminalComposer releases the IME lock one timer tick after
+    // compositionend. Fake timers fire that tick explicitly, so the result does
+    // not depend on whether it beats act()'s setImmediate flush.
+    jest.useFakeTimers();
+    try {
+      await act(async () => {
+        input.focus();
+        input.dispatchEvent(
+          new browser.CompositionEvent("compositionend", {
+            bubbles: true,
+          }) as unknown as CompositionEvent,
+        );
+      });
+      expect(send.disabled).toBe(true);
+      await act(async () => {
+        jest.advanceTimersByTime(0);
+      });
+    } finally {
+      jest.useRealTimers();
+    }
     expect(send.disabled).toBe(false);
     document.documentElement.classList.remove("keyboard-open");
     await act(async () =>
