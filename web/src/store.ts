@@ -787,6 +787,7 @@ let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 const refreshingConnectionKeys = new Set<string>();
 const queuedConnectionKeys = new Set<string>();
 let initialized = false;
+let initialConnectionSelectionPending = true;
 let catalogRequestSeq = 0;
 let appliedCatalogRequestSeq = 0;
 let catalogReadyForConnection = false;
@@ -1691,6 +1692,27 @@ function startPolling() {
   startUpdatePolling();
 }
 
+/** The connection this browser was last on, opened again on load. */
+const LAST_CONNECTION_KEY = "lastConnection";
+
+/**
+ * The connection to open when none is active: the one this browser was last
+ * on while the catalog still has it, else the server's default.
+ */
+function preferredConnectionId(defaultConnectionId: string): string {
+  let last: string | null;
+  try {
+    last = roamgateLocalStorage.getItem(LAST_CONNECTION_KEY);
+  } catch {
+    last = null;
+  }
+  return last &&
+    (state.connections.length === 0 ||
+      state.connections.some((connection) => connection.id === last))
+    ? last
+    : defaultConnectionId;
+}
+
 function selectConnectionNow(connectionId: string, refresh = true): boolean {
   if (!connectionId || connectionId === state.activeConnectionId) return false;
   if (
@@ -1704,6 +1726,11 @@ function selectConnectionNow(connectionId: string, refresh = true): boolean {
     typeof localStorage !== "undefined"
   ) {
     migrateLegacyConnectionStorage(roamgateLocalStorage, connectionId);
+  }
+  try {
+    roamgateLocalStorage.setItem(LAST_CONNECTION_KEY, connectionId);
+  } catch {
+    // Storage may be unavailable; a reload then opens the default.
   }
   stopPolling();
   disposeTerminalConnection(
@@ -1892,7 +1919,8 @@ function applyConnectionCatalog(result: unknown, requestSeq: number) {
     !sessionsChanged &&
     defaultConnectionId === state.defaultConnectionId
   ) {
-    if (!nextActive) selectConnectionNow(defaultConnectionId);
+    if (!nextActive)
+      selectConnectionNow(preferredConnectionId(defaultConnectionId));
     return;
   }
 
@@ -1904,7 +1932,8 @@ function applyConnectionCatalog(result: unknown, requestSeq: number) {
     sessionsByConnectionId: stableSessions,
   };
   emit();
-  if (!nextActive) selectConnectionNow(defaultConnectionId);
+  if (!nextActive)
+    selectConnectionNow(preferredConnectionId(defaultConnectionId));
 }
 
 async function refreshConnectionCatalog(): Promise<boolean> {
@@ -2133,6 +2162,19 @@ export function worktreeRemovalCompletionNotice(
       : "Worktree removed",
     detail: recoveryDetails.join("\n"),
   };
+}
+
+function handleBridgeHello(hello: { default_connection_id: string }) {
+  const defaultConnectionId = hello.default_connection_id;
+  set({ defaultConnectionId });
+  if (initialConnectionSelectionPending) {
+    initialConnectionSelectionPending = false;
+    if (state.activeConnectionId === LEGACY_DEFAULT_CONNECTION_ID)
+      selectConnectionNow(preferredConnectionId(defaultConnectionId), false);
+  }
+  if (state.status === "connected" && !state.connectionPaused) {
+    void refreshConnectionCatalog();
+  }
 }
 
 function handleBridgeStatus(s: ConnectionStatus) {
@@ -2496,19 +2538,7 @@ export const store = {
     initialized = true;
     void store.restoreTaskNotifications();
     subscribeLocalStorage(handlePreferenceStorageChange);
-    bridge.onHello((hello) => {
-      const defaultConnectionId = hello.default_connection_id;
-      set({ defaultConnectionId });
-      if (
-        state.activeConnectionId === LEGACY_DEFAULT_CONNECTION_ID &&
-        defaultConnectionId !== state.activeConnectionId
-      ) {
-        selectConnectionNow(defaultConnectionId, false);
-      }
-      if (state.status === "connected" && !state.connectionPaused) {
-        void refreshConnectionCatalog();
-      }
-    });
+    bridge.onHello(handleBridgeHello);
     bridge.onStatus(handleBridgeStatus);
     bridge.onEvent(handleHerdrEvent);
     bridge.onAssistantNotification(notifyRangerTask);
@@ -4110,6 +4140,7 @@ export const store = {
 export const __storeTesting = {
   reloadWhenUpdatedServerIsReady,
   notifyRangerTask,
+  handleBridgeHello,
   handleBridgeStatus,
   handleHerdrEvent,
   startUpdatePolling,
@@ -4124,6 +4155,7 @@ export const __storeTesting = {
   rearmTerminalAttachmentsAfterCatalog,
   replaceState(snapshot: State) {
     stopPolling();
+    initialConnectionSelectionPending = true;
     refreshingConnectionKeys.clear();
     queuedConnectionKeys.clear();
     focusActionChain = Promise.resolve();

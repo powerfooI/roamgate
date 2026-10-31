@@ -325,7 +325,8 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
 
 ## Remote, Multi-Client, and Operations
 
-- Save local and SSH connection profiles; each browser selects independently.
+- Save local and SSH connection profiles; each browser selects independently
+  and reopens the connection it was last on, or the default if it is gone.
   Linux/macOS bridges can reach Unix or Windows SSH hosts. See
   [connection setup](docs/DEPLOYMENT.md#multiple-and-remote-herdr-connections).
 - Task notifications for input-required and completed agents, delivered by
