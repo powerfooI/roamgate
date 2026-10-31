@@ -127,6 +127,17 @@ textarea:focus {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* Search fields (typed so password managers leave them alone) look like the
+   other inputs, without the browser's clear button. */
+input[type="search"] {
+  appearance: none;
+}
+
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  appearance: none;
+}
+
 .muted {
   color: var(--muted);
 }
