@@ -5,7 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 const AUTO_RENAME_DESCRIPTION =
   "Automatically updates the tab title with the session name when an agent " +
-  "(such as Claude Code or Hermes) is active. Preserves custom names set manually " +
+  "(such as Claude Code, Hermes, or Antigravity) is active. Preserves custom names set manually " +
   "and keeps the session name after the agent finishes.";
 
 export function AgentAutoRenameSettings() {
@@ -74,45 +74,71 @@ export function AgentAutoRenameSettings() {
   };
 
   return (
-    <div className="terminal-transport-settings">
-      <div className="terminal-transport-header">
-        <label
-          htmlFor="agent-auto-rename-toggle"
-          className="terminal-transport-label"
-        >
-          <Sparkles size={16} />
-          <span>Automatic tab renaming</span>
-        </label>
-        <Popover>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className="inline-help-icon"
-              aria-label="About automatic tab renaming"
-            >
-              <Info size={14} />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent className="inline-help-popover" align="start">
-            <p>{AUTO_RENAME_DESCRIPTION}</p>
-          </PopoverContent>
-        </Popover>
-      </div>
-
-      <div className="config-menu-item config-menu-item-toggle">
-        <span>Update tab names from active agent sessions</span>
-        <input
-          id="agent-auto-rename-toggle"
-          type="checkbox"
+    <>
+      <div className="config-preference-row">
+        <span className="config-item-icon">
+          <Sparkles size={15} />
+        </span>
+        <div className="config-item-copy">
+          <div className="configuration-setting-label">
+            <strong id="agent-auto-rename-label">Automatic tab renaming</strong>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="configuration-help"
+                  aria-label="About automatic tab renaming"
+                  title={AUTO_RENAME_DESCRIPTION}
+                >
+                  <Info size={14} aria-hidden="true" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                className="configuration-help-content"
+                aria-label="About automatic tab renaming"
+                aria-describedby="agent-auto-rename-description"
+                collisionPadding={12}
+              >
+                {AUTO_RENAME_DESCRIPTION}
+              </PopoverContent>
+            </Popover>
+          </div>
+          <span role="status">
+            {saving
+              ? "Saving..."
+              : enabled === null
+                ? error
+                  ? "Unavailable"
+                  : "Loading..."
+                : enabled
+                  ? "Update tab names from active agent sessions"
+                  : "Disabled"}
+          </span>
+        </div>
+        <button
+          type="button"
           role="switch"
-          aria-label="Automatic tab renaming"
-          disabled={saving || enabled === null}
-          checked={enabled ?? true}
-          onChange={(e) => void save(e.target.checked)}
-        />
+          id="agent-auto-rename-toggle"
+          aria-labelledby="agent-auto-rename-label"
+          aria-describedby="agent-auto-rename-description"
+          aria-checked={enabled === true}
+          aria-disabled={enabled === null || saving || !client.isCurrent()}
+          className={"settings-switch" + (enabled ? " is-on" : "")}
+          onClick={() => {
+            if (enabled !== null) void save(!enabled);
+          }}
+        >
+          <span />
+        </button>
       </div>
-
-      {error ? <div className="connection-error">{error}</div> : null}
-    </div>
+      <p id="agent-auto-rename-description" hidden>
+        {AUTO_RENAME_DESCRIPTION}
+      </p>
+      {error ? (
+        <div className="configuration-error" role="alert">
+          <span>{error}</span>
+        </div>
+      ) : null}
+    </>
   );
 }
