@@ -328,14 +328,104 @@ function projectCodexTrajectory(
   return createTrajectory("codex", file, records, steps);
 }
 
+type ClaudeQueued = { content: string };
+
+/**
+ * A queued message as Claude Code may write it again when it takes it out:
+ * another session's message loses attributes of its tag (hop-chain).
+ */
+function queuedKey(content: string) {
+  const tag = /^\s*<([a-z-]+)[\s>]/i.exec(content);
+  return tag
+    ? `${tag[1]}\u0000${content.slice(content.indexOf(">") + 1)}`
+    : content;
+}
+
+/** Takes the queued message written as `content` out; false if none is. */
+function takeQueued(queue: ClaudeQueued[], content: string): boolean {
+  let at = queue.findIndex((queued) => queued.content === content);
+  if (at < 0) {
+    const key = queuedKey(content);
+    at = queue.findIndex((queued) => queuedKey(queued.content) === key);
+  }
+  if (at < 0) return false;
+  queue.splice(at, 1);
+  return true;
+}
+
+/**
+ * A user record ends the wait of the queued message it shows, with or
+ * without a dequeue before it, so a message is never both the user's and
+ * queued. The dequeues before it take what it shows (several messages may
+ * go as one turn), else the oldest, as a guess.
+ */
+function dequeueQueued(queue: ClaudeQueued[], dequeued: number, text: string) {
+  let left = takeQueued(queue, text) ? dequeued - 1 : dequeued;
+  const words = text.replace(/\s+/g, " ").trim();
+  for (; left > 0; left--) {
+    const at = queue.findIndex((queued) => {
+      const content = queued.content.replace(/\s+/g, " ").trim();
+      return !!content && words.includes(content);
+    });
+    queue.splice(Math.max(at, 0), 1);
+  }
+}
+
 function projectClaudeTrajectory(
   file: SessionFile,
   records: Record<string, unknown>[],
 ) {
   const steps: Omit<AtifStep, "step_id">[] = [];
+  // Claude's queue of messages sent while it works: enqueue adds, remove
+  // takes one it absorbed mid-turn (shown below as a queued command),
+  // dequeue takes one for a new turn (a user record), popAll (one record
+  // per message) gives them back to the prompt, on Up. What is left still
+  // waits. Task notifications and other sessions' messages queue too: kept,
+  // not shown. A dequeue does not say which it takes, nor always the
+  // oldest: the turn's user record that follows does (dequeueQueued).
+  const queue: { content: string; timestamp: string; shown: boolean }[] = [];
+  let dequeued = 0;
   records.forEach((record, index) => {
     const timestamp = messageTime(record, file.mtimeMs, index);
     const type = stringValue(record.type);
+    if (type === "queue-operation") {
+      const content = stringValue(record.content);
+      switch (stringValue(record.operation)) {
+        case "enqueue":
+          queue.push({
+            content,
+            timestamp,
+            shown: !!content.trim() && !/^\s*<[a-z-]+[\s>]/i.test(content),
+          });
+          break;
+        case "remove":
+        case "popAll":
+          takeQueued(queue, content);
+          break;
+        case "dequeue":
+          dequeued += 1;
+          break;
+      }
+      return;
+    }
+    // What the user sends while the agent works reaches it as a queued
+    // command, not a user record. Task notifications and other sessions'
+    // messages come the same way; only the user's own are shown.
+    if (type === "attachment") {
+      const attachment = isRecord(record.attachment) ? record.attachment : {};
+      const origin = isRecord(attachment.origin) ? attachment.origin : {};
+      if (attachment.type !== "queued_command" || origin.kind !== "human")
+        return;
+      const text = cleanMessageText(textFromContent(attachment.prompt));
+      if (text)
+        steps.push({
+          timestamp,
+          source: "user",
+          message: text,
+          extra: { record_type: "queued_command" },
+        });
+      return;
+    }
     if (type !== "user" && type !== "assistant" && type !== "system") return;
     const message = isRecord(record.message) ? record.message : record;
     const role = stringValue(message.role) || type;
@@ -346,6 +436,29 @@ function projectClaudeTrajectory(
     const parts = Array.isArray(message.content)
       ? message.content.filter(isRecord)
       : [];
+    if (
+      type === "user" &&
+      record.isMeta !== true &&
+      !parts.some(
+        (part) => part.type === "tool_use" || part.type === "tool_result",
+      )
+    ) {
+      dequeueQueued(
+        queue,
+        dequeued,
+        textFromContent(message.content ?? record.content),
+      );
+      dequeued = 0;
+    }
+    // Turns Claude Code writes itself (notes on an image a tool read, and the
+    // like) are flagged meta: not the user's words.
+    if (
+      record.isMeta === true &&
+      !parts.some(
+        (part) => part.type === "tool_use" || part.type === "tool_result",
+      )
+    )
+      return;
     if (
       parts.some(
         (part) => part.type === "tool_use" || part.type === "tool_result",
@@ -385,11 +498,16 @@ function projectClaudeTrajectory(
               ],
             },
           });
-        } else if (part.type === "text" && stringValue(part.text).trim()) {
+        } else if (
+          part.type === "text" &&
+          cleanMessageText(stringValue(part.text)) &&
+          // Claude Code's note on an image a tool read, not the user's words.
+          !/^\[Image: original \d+x\d+/.test(stringValue(part.text))
+        ) {
           steps.push({
             timestamp,
             source: role === "user" ? "user" : "agent",
-            message: stringValue(part.text),
+            message: cleanMessageText(stringValue(part.text)),
           });
         } else if (
           part.type === "thinking" &&
@@ -424,9 +542,23 @@ function projectClaudeTrajectory(
       extra: {
         record_type: type,
         model: modelNameFromRecord(record) || undefined,
+        // The summary Claude Code writes when it compacts the conversation.
+        compact_summary: record.isCompactSummary === true || undefined,
       },
     });
   });
+  // Taken for a turn not written yet: the oldest, as a guess, until it is.
+  queue.splice(0, dequeued);
+  for (const { content, timestamp, shown } of queue) {
+    const text = shown ? cleanMessageText(content) : "";
+    if (text)
+      steps.push({
+        timestamp,
+        source: "user",
+        message: text,
+        extra: { record_type: "queue-operation", queued: true },
+      });
+  }
   return createTrajectory("claude", file, records, steps);
 }
 

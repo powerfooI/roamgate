@@ -1340,6 +1340,64 @@ describe("workspace source navigation", () => {
     },
   );
 
+  test("a pane known from the connection's last list is shown before the host answers", async () => {
+    const f = sourceFixture("browser-local");
+    const gate = Promise.withResolvers<unknown>();
+    f.setList(() => gate.promise);
+    try {
+      const cached = session("beta", 1, {
+        navigationMode: "browser-local",
+        workspaces: [
+          ...session("beta").workspaces,
+          { ...f.workspace, focused: false, active_tab_id: "beta-tab" },
+        ],
+        tabs: [
+          ...session("beta").tabs,
+          {
+            ...session("beta").tabs[0]!,
+            tab_id: "beta-tab",
+            workspace_id: f.workspace.workspace_id,
+            focused: false,
+          },
+        ],
+        panes: [
+          ...session("beta").panes,
+          {
+            ...session("beta").panes[0]!,
+            pane_id: "beta-pane",
+            tab_id: "beta-tab",
+            workspace_id: f.workspace.workspace_id,
+            focused: false,
+          },
+        ],
+      });
+      const current = store.get();
+      __storeTesting.replaceState({
+        ...current,
+        sessionsByConnectionId: {
+          ...current.sessionsByConnectionId,
+          beta: cached,
+        },
+      });
+      // Every host call hangs: the switch must not wait for one.
+      expect(
+        await store.focusWorkspaceSource(
+          { ...f.target, paneId: "beta-pane" },
+          { fromKnownList: true },
+        ),
+      ).toBe(true);
+      expect(store.get().activeConnectionId).toBe("beta");
+      expect(store.get().browserNavigation.workspaceId).toBe(
+        f.workspace.workspace_id,
+      );
+      expect(store.get().selectedPaneId).toBe("beta-pane");
+      expect(f.calls.some((call) => call.method === "pane.get")).toBe(false);
+    } finally {
+      gate.resolve({ workspaces: [] });
+      f.restore();
+    }
+  });
+
   test("source validation does not await a coalesced refresh that is already in flight", async () => {
     const f = sourceFixture();
     const gate = Promise.withResolvers<unknown>();

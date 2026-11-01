@@ -23,7 +23,7 @@ describe("agent session file access", () => {
       async runBinaryProcessWithTimeout(argv) {
         commands.push(argv);
         const command = argv.at(-1) ?? "";
-        if (command.includes("head -c")) {
+        if (command.includes("head -c") && !command.includes("known=")) {
           return {
             code: 0,
             stdout: Buffer.from('{"type":"session"}\n'),
@@ -146,6 +146,11 @@ describe("agent session file access", () => {
       const rewritten = first.replaceAll("\u00e9", "e");
       writeFileSync(path, rewritten);
       expect(await files.readText(path)).toBe(rewritten);
+      // A rewrite outside the overlap followed by an append still invalidates
+      // the prefix; matching the last 4 KB alone cannot detect this.
+      const corrected = "X" + rewritten.slice(1) + '{"text":"after edit"}\n';
+      writeFileSync(path, corrected);
+      expect(await files.readText(path)).toBe(corrected);
       // Cut shorter: read whole too.
       writeFileSync(path, '{"text":"short"}\n');
       expect(await files.readText(path)).toBe('{"text":"short"}\n');

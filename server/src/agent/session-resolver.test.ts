@@ -367,6 +367,29 @@ describe("Claude transcripts", () => {
     ).toBeNull();
   });
 
+  test("mentioning another session in user text does not make a successor", async () => {
+    const root = await mkdtemp(join(tmpdir(), "roamgate-claude-unrelated-"));
+    tempDirectories.push(root);
+    const reported = join(root, `${id}.jsonl`);
+    const other = join(root, "b6a8466c-831a-4cf8-9659-d65d02fa7db3.jsonl");
+    await writeFile(reported, JSON.stringify({ sessionId: id }) + "\n");
+    await writeFile(
+      other,
+      JSON.stringify({
+        sessionId: "b6a8466c-831a-4cf8-9659-d65d02fa7db3",
+        message: {
+          role: "user",
+          content: `Check ${id} and {"sessionId":"${id}"}`,
+        },
+      }) + "\n",
+    );
+    const old = new Date(Date.now() - 60_000);
+    await utimes(reported, old, old);
+    expect(
+      await localAgentSessionFiles.findClaudeSuccessor(reported, id),
+    ).toBeNull();
+  });
+
   test("a successor is found in a folder with spaces, and not on Windows", async () => {
     const parent = await mkdtemp(join(tmpdir(), "roamgate-claude-successor-"));
     tempDirectories.push(parent);

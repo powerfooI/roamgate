@@ -62,6 +62,17 @@ const ChatBubble = memo(function ChatBubble({
   speech: ReturnType<typeof useChatSpeech>;
   onOpen: (entry: HistoryEntry) => void;
 }) {
+  // A compaction summary is long and written by Claude Code, not the user:
+  // one line, with the summary a tap away.
+  if (entry.compact_summary)
+    return (
+      <div className="agent-history-chat-compacted" data-sequence={sequence}>
+        <span>Conversation compacted</span>
+        <button type="button" onClick={() => onOpen(entry)}>
+          Show the summary
+        </button>
+      </div>
+    );
   const preview = entry.text.slice(0, HISTORY_PREVIEW_CHARS);
   const truncated = preview.length < entry.text.length;
   const label = historyEntryLabel(entry);
@@ -80,7 +91,7 @@ const ChatBubble = memo(function ChatBubble({
             : "";
   return (
     <article
-      className={`agent-history-chat-message ${tone} ${highlighted ? "is-minimap-target" : ""}`}
+      className={`agent-history-chat-message ${tone} ${highlighted ? "is-minimap-target" : ""}${entry.queued ? " is-queued" : ""}`}
       data-sequence={sequence}
     >
       <div className="agent-history-chat-bubble">
@@ -104,6 +115,14 @@ const ChatBubble = memo(function ChatBubble({
         ) : null}
       </div>
       <div className="agent-history-chat-meta">
+        {entry.queued ? (
+          <span
+            className="agent-history-chat-queued"
+            title="Waiting in the agent's queue: it reads it when it can"
+          >
+            Queued
+          </span>
+        ) : null}
         <time dateTime={entry.sent_at} title={entry.sent_at}>
           {formatUiDateTime(entry.sent_at)}
         </time>

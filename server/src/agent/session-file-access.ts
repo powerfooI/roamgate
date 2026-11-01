@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -35,7 +36,7 @@ export type AgentSessionFileAccess = {
   findClaudeSessionById(id: string): Promise<SessionFile | null>;
   /**
    * The transcript a Claude session went on in: the newest one beside it,
-   * written since, that names its session (a resume or /clear starts a new
+   * written since, whose records name its session (a resume or /clear starts a new
    * file Herdr does not learn about). Null when it is still the latest.
    */
   findClaudeSuccessor(path: string, id: string): Promise<string | null>;
@@ -97,11 +98,11 @@ async function localSessionFile(path: string): Promise<SessionFile | null> {
 }
 
 /**
- * The newest .jsonl beside $f, newer than it, that names $id. Paths are read
+ * The newest .jsonl beside $f, newer than it, whose sessionId metadata names $id. Paths are read
  * one per line, so a folder with spaces in its name works too.
  */
 const CLAUDE_SUCCESSOR_SCRIPT = `
-find "$(dirname "$f")" -maxdepth 1 -name '*.jsonl' -newer "$f" -exec grep -l -F -- "$id" {} + 2>/dev/null | {
+find "$(dirname "$f")" -maxdepth 1 -name '*.jsonl' -newer "$f" -exec grep -l -E -- '"sessionId"[[:space:]]*:[[:space:]]*"'"$id"'"' {} + 2>/dev/null | {
   best=""
   best_mtime=0
   while IFS= read -r g; do
@@ -332,7 +333,8 @@ printf '%s\\t%s\\t%s\\n' "$size" "$latest_mtime" "$path64"
 
   // Transcripts only grow: keep each one read, most recent last, and fetch
   // only its new end next time, from a little before so a file rewritten
-  // in place shows up as a mismatch and is read whole.
+  // in place shows up as a mismatch and is read whole. The prefix is hashed
+  // on the host too: an edit before the overlap must not be silently lost.
   const kept = new Map<string, { identity: string; bytes: Buffer }>();
   let keptBytes = 0;
   function forget(path: string) {
@@ -355,7 +357,17 @@ printf '%s\\t%s\\t%s\\n' "$size" "$latest_mtime" "$path64"
 path=${args.shQuote(path)}
 known=${args.shQuote(old && overlap ? old.identity : "")}
 identity="$(stat -c '%d:%i' "$path" 2>/dev/null || stat -f '%d:%i' "$path")"
+matches=false
 if [ -n "$known" ] && [ "$identity" = "$known" ]; then
+  sum=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    sum="$(head -c ${old?.bytes.length ?? 0} "$path" | sha256sum)"
+  elif command -v shasum >/dev/null 2>&1; then
+    sum="$(head -c ${old?.bytes.length ?? 0} "$path" | shasum -a 256)"
+  fi
+  if [ "${"${sum%% *}"}" = ${args.shQuote(old ? createHash("sha256").update(old.bytes).digest("hex") : "")} ]; then matches=true; fi
+fi
+if [ "$matches" = true ]; then
   printf '%s\ttail\n' "$identity"
   tail -c +${(old?.bytes.length ?? 0) - overlap + 1} "$path"
 else

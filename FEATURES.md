@@ -157,6 +157,12 @@ Inspector state is scoped to each checkout; see
   anyway**. The timeline view adds User/Agent/Tool filters. Exports are always
   complete. **Session Inspector** adds metadata, a timeline, raw/ATIF
   transcripts, and export.
+  In a Claude session, messages sent while Claude works show where it took
+  them, and those still waiting in its queue show at the end marked
+  **Queued**. What Claude Code writes into the user's turn itself (system
+  reminders, task notifications, notes on images a tool read) is not shown as
+  the user's, and a compaction summary shows as one **Conversation
+  compacted** line that opens the summary.
   **Speak** beside an assistant message reads its full text using browser speech
   synthesis; **Stop**, another message, or closing/switching the chat cancels it.
   On desktop, Speak appears on hover or keyboard focus, like Copy; Stop remains
@@ -186,7 +192,9 @@ Inspector state is scoped to each checkout; see
   reports under the old ID) is followed there. Session folders that are
   symbolic links are followed. A Pi pane whose session Herdr does not report
   (no Pi integration) shows the newest session Pi keeps for the pane's
-  directory, on this machine or the SSH host. Muse needs session logging
+  directory, on this machine or the SSH host. This fallback cannot distinguish
+  two Pi panes in the same directory; install Herdr's Pi integration to bind
+  each pane to its own session. Muse needs session logging
   enabled (no `--no-session-log`). See
   [History synchronization](docs/HISTORY.md).
 
