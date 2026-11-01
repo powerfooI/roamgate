@@ -1627,7 +1627,10 @@ export function createAssistantTasks(options: {
       if (method === "resume" || method === "run_now") {
         const version = revision(entry.task.id);
         const sealed = seal(entry);
-        await check(entry.task.id, sealed);
+        // Dynamic tasks validate their fresh scope in launch, including model
+        // and permission checks. Their saved workspace identities may be gone.
+        if (!sealed.input.all_workspaces || !options.rescope)
+          await check(entry.task.id, sealed);
         entry = find(id);
         if (entry.task.status === "cancelled")
           throw new Error("This task was cancelled.");

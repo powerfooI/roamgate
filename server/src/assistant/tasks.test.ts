@@ -2880,3 +2880,47 @@ test("a task over all workspaces keeps references to a workspace missing from on
   second.complete();
   await flush();
 });
+
+test.each(["run_now", "resume"] as const)(
+  "%s of an all-workspaces task does not validate obsolete workspace identities",
+  async (method) => {
+    jest.useFakeTimers({ now: Date.parse("2026-10-28T00:00:00Z") });
+    let oldWorkspaceGone = false;
+    const f = fixture(
+      undefined,
+      async (_signal, value) => {
+        if (
+          oldWorkspaceGone &&
+          value.targets.some((ref) => ref.workspace_id === "workspace")
+        )
+          throw new Error("Old workspace is gone");
+      },
+      undefined,
+      async (value) => ({
+        ...value,
+        input: {
+          ...value.input,
+          scope: [{ connection_id: "local", workspace_id: "new" }],
+        },
+        config: {
+          ...value.config,
+          allowed_workspaces: [{ connection_id: "local", workspace_id: "new" }],
+        },
+        targets: value.targets.map((ref) => ({ ...ref, workspace_id: "new" })),
+        workspaces: value.workspaces.map((ref) => ({
+          ...ref,
+          workspace_id: "new",
+        })),
+      }),
+    );
+    const all = prepared();
+    all.input.all_workspaces = true;
+    const task = await f.manager.create(all, randomUUID());
+    await f.manager.resume();
+    await f.manager.control("pause", task.id);
+    oldWorkspaceGone = true;
+    await f.manager.control(method, task.id);
+    const run = await startRun(f, task.id);
+    expect(run.run.targets.map((ref) => ref.workspace_id)).toEqual(["new"]);
+  },
+);
