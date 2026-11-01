@@ -145,7 +145,12 @@ import {
 } from "./TerminalFileLinkMenu";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
 import { directoryPreviewName } from "../filesystemPaths";
-import { sanitizeTerminalHttpUrl, terminalFileUriPath } from "../terminalLinks";
+import { canForwardPorts, localForwardFor } from "../portForwarding";
+import {
+  sanitizeTerminalHttpUrl,
+  terminalFileUriPath,
+  terminalForwardCandidate,
+} from "../terminalLinks";
 import {
   createTerminalPasteRunner,
   type TerminalPasteTextareaSnapshot,
@@ -177,6 +182,11 @@ import {
   terminalWheelScroll,
 } from "../terminalScroll";
 import { TerminalSelectionDragGuard } from "../terminalSelectionGuard";
+import {
+  createEchoProbe,
+  latencyDebugEnabled,
+  logLatency,
+} from "../latencyDebug";
 import { applyTerminalTheme } from "../terminalThemes";
 import { useTerminalOptionAsMeta } from "../terminalOptionKey";
 import {
@@ -368,6 +378,7 @@ export function TerminalView({
       connectionGeneration: state.connectionGeneration,
       connectionPaused: state.connectionPaused,
       connections: state.connections,
+      forwards: state.forwards,
       layout: state.layout,
       panes: state.panes,
       selectedPaneId: state.selectedPaneId,
@@ -470,6 +481,14 @@ export function TerminalView({
   );
   const [localComposerOpen, setLocalComposerOpen] = useState(false);
   const [closePaneRequested, setClosePaneRequested] = useState(false);
+  // A loopback URL printed on an SSH connection belongs to the remote host, so
+  // opening it here reaches the wrong machine. Offer the forward instead.
+  const [forwardRequest, setForwardRequest] = useState<{
+    url: string;
+    port: number;
+    rewrite: (localPort: number) => string;
+    target: { connectionId: string; generation: number };
+  } | null>(null);
   const [localAgentHistoryOpen, setLocalAgentHistoryOpen] = useState(false);
   const containerRef = useCallback(
     (el: HTMLDivElement | null) => setContainer(el),
@@ -542,6 +561,65 @@ export function TerminalView({
     selectedPaneInLayout ?? s.layout?.focused_pane_id ?? null;
   const isActivePane = !!pane && (!paneId || pane.pane_id === activePaneId);
   const canShowAgentHistory = isActivePane && paneHasAgentHistory(pane);
+  /**
+   * Takes a loopback link so the user can forward it instead of opening an
+   * address that belongs to the remote host. Returns false for anything it
+   * does not take, including its own failures, so the caller opens the link
+   * as it always did.
+   */
+  const proposeForward = (url: string): boolean => {
+    try {
+      if (!forwardableRef.current) return false;
+      const candidate = terminalForwardCandidate(url);
+      if (!candidate) return false;
+      // Already forwarded: open it rather than asking again. The proposal is
+      // for ports that have no tunnel, not a toll on every click.
+      const existing = localForwardFor(
+        forwardsRef.current,
+        s.activeConnectionId,
+        candidate.port,
+      );
+      if (existing) {
+        window.open(
+          candidate.rewrite(existing.local_port),
+          "_blank",
+          "noopener,noreferrer",
+        );
+        return true;
+      }
+      setForwardRequest({
+        url,
+        port: candidate.port,
+        rewrite: candidate.rewrite,
+        target: {
+          connectionId: s.activeConnectionId,
+          generation: s.connectionGeneration,
+        },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  // Stable identity for the link provider: the terminal is built once, and a
+  // handler rebuilt each render would rebuild it with them.
+  const proposeForwardRef = useRef<(url: string) => boolean>(() => false);
+  proposeForwardRef.current = proposeForward;
+  const takeHttpLink = useCallback(
+    (url: string) => proposeForwardRef.current(url),
+    [],
+  );
+  const forwardConnection = s.connections.find(
+    (connection) => connection.id === s.activeConnectionId,
+  );
+  // Needs an SSH transport to forward over, and Roamgate on the machine the
+  // browser runs on: a forward binds wherever ssh runs.
+  // Read at click time from a ref: the provider's handler is installed once,
+  // when the terminal is created.
+  const forwardsRef = useRef(s.forwards);
+  forwardsRef.current = s.forwards;
+  const forwardableRef = useRef(false);
+  forwardableRef.current = canForwardPorts(forwardConnection?.type);
   const canClosePane = !!pane && paneCanClose(s.panes, pane.pane_id);
   const paneZoomed =
     s.layout?.zoomed === true && s.layout.focused_pane_id === pane?.pane_id;
@@ -1121,8 +1199,9 @@ export function TerminalView({
             return;
           }
           const url = sanitizeTerminalHttpUrl(text);
-          if (url) {
-            term.clearSelection();
+          if (!url) return;
+          term.clearSelection();
+          if (!takeHttpLink(url)) {
             window.open(url, "_blank", "noopener,noreferrer");
           }
         },
@@ -1222,6 +1301,9 @@ export function TerminalView({
           }) as Promise<TerminalResolvedLink>;
         },
       },
+      // Plain-text URLs are opened by the provider, not by the OSC hyperlink
+      // handler, so the forward proposal has to be offered from here too.
+      takeHttpLink,
     );
 
     const imeFallback = new TerminalImeFallbackTracker();
@@ -1261,6 +1343,7 @@ export function TerminalView({
       acceptsEndpointInput() &&
       isActivePaneRef.current &&
       (!shouldAvoidVirtualKeyboard() || inputActiveRef.current);
+    const echoProbe = latencyDebugEnabled ? createEchoProbe() : null;
 
     term.onData((data) => {
       invalidateLinks();
@@ -1291,6 +1374,7 @@ export function TerminalView({
       if (!terminalId) return;
       imeKeyEvent.recordXtermData(unsuppressedData);
       const bytes = new TextEncoder().encode(unsuppressedData);
+      echoProbe?.sent(unsuppressedData);
       sendBytes(connectionClient, bytes, terminalId).catch(() => {});
     });
 
@@ -1299,6 +1383,13 @@ export function TerminalView({
         () => term.hasSelection() || historySelection.active,
         (text, parsed, linksChanged) =>
           term.write(text, () => {
+            const echoMs = echoProbe?.presented() ?? null;
+            if (echoMs !== null) {
+              logLatency("terminal echo", {
+                terminal: desiredTerminalRef.current ?? undefined,
+                input_to_frame_ms: echoMs,
+              });
+            }
             parsed();
             if (!terminalEffectDisposed && linksChanged)
               term.refresh(0, term.rows - 1);
@@ -3019,6 +3110,7 @@ export function TerminalView({
     relayViewportFor,
     resolveTerminalFilePaths,
     scrollPage,
+    takeHttpLink,
     terminalIdentity,
   ]);
 
@@ -3168,6 +3260,11 @@ export function TerminalView({
                 return;
               }
               attachTimeoutCountRef.current += 1;
+              logLatency("attach watchdog fired", {
+                terminal: terminalId,
+                watchdog_ms: watchdogMs,
+                consecutive: attachTimeoutCountRef.current,
+              });
               attachedRef.current = null;
               attachingRef.current = null;
               void connectionClient
@@ -4005,6 +4102,41 @@ export function TerminalView({
           </div>
         ) : null}
       </div>
+      <ConfirmDialog
+        open={!!forwardRequest}
+        title="Forward port"
+        message={
+          forwardRequest
+            ? `This address is on ${forwardConnection?.label ?? "the remote host"}, not this machine. Forward port ${forwardRequest.port} over SSH and open it here?`
+            : ""
+        }
+        confirmLabel="Forward"
+        onClose={() => setForwardRequest(null)}
+        onConfirm={() => {
+          const request = forwardRequest;
+          setForwardRequest(null);
+          if (!request) return;
+          void store
+            .openForward(request.port, { target: request.target })
+            .then((forward) => {
+              // Open what was actually bound: the local port differs from the
+              // remote's when that number is already taken here.
+              if (!forward) return;
+              window.open(
+                request.rewrite(forward.local_port),
+                "_blank",
+                "noopener,noreferrer",
+              );
+            })
+            .catch((error: unknown) => {
+              store.notify({
+                kind: "error",
+                message: "Port forwarding failed",
+                detail: error instanceof Error ? error.message : String(error),
+              });
+            });
+        }}
+      />
       <ConfirmDialog
         open={closePaneRequested}
         title="Close Pane"

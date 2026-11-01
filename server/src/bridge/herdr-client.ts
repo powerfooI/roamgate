@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import * as net from "node:net";
+import { type Logger, serverLogger } from "../utils/logger";
 
 const MAX_NDJSON_LINE_BYTES = 1024 * 1024;
 const SUBSCRIPTION_ACK_TIMEOUT_MS = 8000;
@@ -63,6 +64,13 @@ function connectOneShot(
   }).catch((error: Error) => handlers.error(error));
 }
 
+/**
+ * The longest request line Herdr reads, not counting its newline (1 MiB,
+ * found by trying against Herdr 0.9.0: a 1 MiB line is answered, one byte
+ * more is dropped without an answer).
+ */
+export const HERDR_MAX_REQUEST_BYTES = 1024 * 1024;
+
 /** Subscription selector: a bare event type or a parameterized subscription. */
 export type HerdrSubscription =
   | string
@@ -81,12 +89,23 @@ export type HerdrSubscription =
  *     of the shape `{ event: "<name>", data: { ... } }`.
  */
 export class HerdrClient extends EventEmitter {
+  private logger: Logger;
+  private connectionId: string | undefined;
+  /** Bun.connect for one-shot calls; false keeps node:net, as on Windows. */
+  private useBunSocket: boolean;
+
   constructor(
     private socketPath: string,
-    /** Bun.connect for one-shot calls; false keeps node:net, as on Windows. */
-    private useBunSocket = process.platform !== "win32",
+    options: {
+      logger?: Logger;
+      connectionId?: string;
+      useBunSocket?: boolean;
+    } = {},
   ) {
     super();
+    this.logger = options.logger ?? serverLogger.child("herdr");
+    this.connectionId = options.connectionId;
+    this.useBunSocket = options.useBunSocket ?? process.platform !== "win32";
   }
 
   /** One-shot RPC: open -> send one request -> read one response -> close. */
@@ -99,11 +118,35 @@ export class HerdrClient extends EventEmitter {
     const requestId = `r_${Date.now().toString(36)}_${Math.random()
       .toString(36)
       .slice(2, 6)}`;
+    // What the socket has not taken yet. A Bun socket write takes only
+    // what fits in the socket buffer, and a long request (a long message
+    // sent with pane.send_input) does not fit in one; Herdr waits for the
+    // whole line.
+    const request = JSON.stringify({ id: requestId, method, params }) + "\n";
+    let unsent = Buffer.from(request);
+    // Herdr drops a request line over 1 MiB without answering, so refuse it
+    // before connecting or arming the timeout.
+    const lineBytes = unsent.length - 1;
+    if (lineBytes > HERDR_MAX_REQUEST_BYTES) {
+      return Promise.reject(
+        new Error(
+          `${method}: too large for Herdr (${Math.ceil(lineBytes / 1024)} KiB, at most 1024)`,
+        ),
+      );
+    }
     return new Promise((resolve, reject) => {
       let s: OneShotSocket | null = null;
       let buf = "";
       let done = false;
       const decoder = new TextDecoder();
+      // Debug timing: total call time, plus write -> first response byte,
+      // which isolates the round trip and Herdr's own wait from the connect.
+      const logger = this.logger;
+      const connectionId = this.connectionId;
+      const startedAt = performance.now();
+      let writtenAt: number | null = null;
+      let firstByteAt: number | null = null;
+      let responseBytes = 0;
 
       const timer = setTimeout(
         () => finish(new Error(`timeout: ${method}`)),
@@ -122,11 +165,33 @@ export class HerdrClient extends EventEmitter {
         } catch {
           /* already closed */
         }
+        if (logger.enabled("debug")) {
+          const finishedAt = performance.now();
+          logger.debug("herdr call", {
+            connection: connectionId,
+            method,
+            status: err ? "error" : "ok",
+            req_bytes: Buffer.byteLength(request),
+            resp_bytes: responseBytes,
+            total_ms: Math.round(finishedAt - startedAt),
+            connect_ms:
+              writtenAt === null
+                ? undefined
+                : Math.round(writtenAt - startedAt),
+            first_byte_ms:
+              writtenAt === null || firstByteAt === null
+                ? undefined
+                : Math.round(firstByteAt - writtenAt),
+            error: err?.message,
+          });
+        }
         if (err) reject(err);
         else resolve(val);
       }
 
       const onData = (chunk: Uint8Array) => {
+        firstByteAt ??= performance.now();
+        responseBytes += chunk.byteLength;
         buf += decoder.decode(chunk, { stream: true });
         const i = buf.indexOf("\n");
         if (i === -1) {
@@ -173,13 +238,6 @@ export class HerdrClient extends EventEmitter {
           finish(undefined, envelope.result);
         }
       };
-      // What the socket has not taken yet. A Bun socket write takes only
-      // what fits in the socket buffer, and a long request (a long message
-      // sent with pane.send_input) does not fit in one; Herdr waits for the
-      // whole line.
-      let unsent = Buffer.from(
-        JSON.stringify({ id: requestId, method, params }) + "\n",
-      );
       const sendRest = (socket: OneShotSocket) => {
         while (unsent.length) {
           const written = socket.write(unsent);
@@ -187,6 +245,7 @@ export class HerdrClient extends EventEmitter {
           if (written <= 0) return;
           unsent = unsent.subarray(written);
         }
+        writtenAt = performance.now();
       };
       const fail = (error: unknown, fallback: string) =>
         finish(error instanceof Error ? error : new Error(fallback));

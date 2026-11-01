@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { WorkspacePathInfo } from "../../../shared/workspacePath";
-import { sshCommandArgv } from "../bridge/ssh-command";
+import { sshReadCommandArgv } from "../bridge/ssh-command";
 import { powershellCommand } from "../bridge/ssh-windows";
 import type { RemotePlatform } from "../connections/unix-only";
 import { runProcessWithCodeTimeout, shQuote } from "../utils/process-utils";
@@ -95,7 +95,7 @@ if [ ${suggestions ? "1" : "0"} = 1 ]; then
 fi
 `)}`;
     const result = await runProcessWithCodeTimeout(
-      sshCommandArgv(connection.host, command),
+      sshReadCommandArgv(connection.host, command, [], "workspace.path"),
       8000,
     );
     if (result.code !== 0)

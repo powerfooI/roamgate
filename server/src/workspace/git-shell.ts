@@ -81,7 +81,7 @@ export function gitShellCommandArgv(
   options: ShellOptions = {},
 ): string[] {
   // SSH scripts execute on the remote host; never resolve a local Git shell.
-  if (host) return sshCommandArgv(host, command);
+  if (host) return sshCommandArgv(host, command, [], "git.shell");
   const shell =
     (options.platform ?? process.platform) === "win32"
       ? windowsGitShell(options)

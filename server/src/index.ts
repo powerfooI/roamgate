@@ -1,6 +1,11 @@
 import { createUiSettingsRpcHandler } from "./bridge/settings-rpc";
 import { loadOrCreateSessionSecret } from "./config/session-secret";
 import {
+  createAgentSeenStore,
+  createHerdrBootCache,
+  markAgentSeen,
+} from "./agent/agent-seen";
+import {
   authTokenPrintCommand,
   isShortAuthPassword,
   RECOMMENDED_PASSWORD_LENGTH,
@@ -62,6 +67,7 @@ import {
   connectionRecoveryFingerprint,
 } from "./connections/profiles";
 import { createSshProfileRuntimeConfig } from "./connections/ssh-profile-runtime";
+import { sweepOrphanedSshMasters } from "./bridge/ssh-master";
 import {
   CONNECTION_CHANGED_DURING_REQUEST,
   ConnectionRoutingError,
@@ -87,6 +93,11 @@ import { readConnectionAgentSessions } from "./connections/agent-sessions";
 import { bindListenerBeforeConnectionStart } from "./connections/startup";
 import { LEGACY_DEFAULT_CONNECTION_ID } from "./connections/types";
 import { unixOnlyMessage } from "./connections/unix-only";
+import {
+  createSshForwards,
+  forwardToWire,
+  roamgateOwnPorts,
+} from "./bridge/ssh-forward";
 import { createAuthHandlers, unauthenticatedLoginRedirect } from "./http/auth";
 import { serveStatic } from "./http/static-files";
 import { handleInstanceSettings } from "./http/instance-settings";
@@ -148,6 +159,10 @@ if (config.authRequired) {
 }
 configureServerLogger(config.logLevel);
 const logger = serverLogger;
+// Command masters of a Roamgate that crashed outlive it; end them.
+void sweepOrphanedSshMasters({ logger: logger.child("ssh") }).catch(
+  () => undefined,
+);
 if (
   config.authRequired &&
   !config.generatedAuthToken &&
@@ -169,6 +184,10 @@ const cpuProfile = config.profile
       logger,
     )
   : undefined;
+// Which agents' finished turns the user saw in Roamgate (agent-seen.ts).
+const agentSeen = createAgentSeenStore();
+// Seen marks hold for one Herdr server process: its boot id, per connection.
+const herdrBoots = createHerdrBootCache();
 const webPush = createWebPushService({
   warn: (message) => logger.warn(message),
 });
@@ -363,6 +382,29 @@ function summarizeHerdrEvent(event: any): string {
   return [`type=${type}`, ...ids].join(" ");
 }
 
+/**
+ * One registry for the whole server: local ports are a single machine-wide
+ * space, so two connections cannot each decide they own 5173.
+ */
+// Updated once the listener is bound (a configured port 0 resolves then).
+let forwardReservedListeningPort = config.port;
+// Read at runtime, as server-config does, so Bun does not inline it.
+const { NODE_ENV: forwardNodeEnvironment } = process.env;
+const sshForwards = createSshForwards({
+  logger: logger.child("forward"),
+  reservedPorts: () =>
+    roamgateOwnPorts(
+      forwardReservedListeningPort,
+      forwardNodeEnvironment === "development",
+    ),
+});
+// Forwards belong to the machine, not to a browser tab: every open tab shows
+// the same list, so a port one of them opened can be found and closed from
+// another. Carries no connection envelope for the same reason.
+sshForwards.onChange((forwards) => {
+  const line = JSON.stringify({ forwards: forwards.map(forwardToWire) });
+  for (const ws of clients) safeSend(ws, line, "forwards");
+});
 const connectionProfileStore = new ConnectionProfileStore();
 const syntheticLegacyProfile: SyntheticLocalProfile = {
   id: LEGACY_DEFAULT_CONNECTION_ID,
@@ -598,6 +640,7 @@ function runtimeFactoryForProfile(
             });
           }
         },
+        forwards: sshForwards,
         onTransportExit: profileConfig.sshHost
           ? (error) => {
               if (!context.isCurrent()) return;
@@ -987,6 +1030,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     herdr,
     worktreeParents,
     handleSettingsRpc,
+    handleForwardRpc,
     worktreeRemovalCoordinator,
     worktreeRemovalRuntime,
     terminalBridge,
@@ -1082,18 +1126,41 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     return;
   }
 
+  const herdrBoot = () =>
+    herdrBoots.get(connection.identity.id, () =>
+      connection.recoveryIdentity(AbortSignal.timeout(3_000)),
+    );
   if (method === "agent.list") {
     try {
-      const result =
+      const [list, boot] = await Promise.all([
         connection.remotePlatform === "windows"
-          ? await herdr.call("agent.list", params ?? {})
-          : await connection.agentSessions.listWithActivity(params ?? {});
+          ? herdr.call("agent.list", params ?? {})
+          : connection.agentSessions.listWithActivity(params ?? {}),
+        herdrBoot(),
+      ]);
+      const result = agentSeen.annotate(connection.identity.id, list, boot);
       sendReply({ id, result }, "agent-list");
     } catch (e) {
       sendError("agent-list-error", e);
     }
     return;
   }
+  if (method === "agent_seen.mark") {
+    try {
+      const result = await markAgentSeen(
+        agentSeen,
+        herdrBoots,
+        connection.identity.id,
+        params,
+        () => connection.recoveryIdentity(AbortSignal.timeout(3_000)),
+      );
+      sendReply({ id, result }, method);
+    } catch (e) {
+      sendError("agent-seen-error", e);
+    }
+    return;
+  }
+
   if (method === "agent_history.get") {
     try {
       const result = await readAgentMessageHistory(params ?? {});
@@ -1270,6 +1337,13 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
   }
   if (method.startsWith("settings.")) {
     return handleSettingsRpc(ws, id, method, params ?? {}, requestIsCurrent);
+  }
+  if (method.startsWith("forward.")) {
+    if (!handleForwardRpc) {
+      markRpcError(ws, id, "port forwarding is unavailable");
+      return;
+    }
+    return handleForwardRpc(ws, id, method, params ?? {}, requestIsCurrent);
   }
   if (method === "worktree.create") {
     try {
@@ -1741,6 +1815,15 @@ function main() {
               }),
               "hello",
             );
+            // The registry is global and must arrive before any Herdr catalog
+            // or runtime lease is available, including with an offline default.
+            safeSend(
+              ws,
+              JSON.stringify({
+                forwards: sshForwards.list().map(forwardToWire),
+              }),
+              "forwards",
+            );
           },
           drain(ws) {
             // The viewer caught up: send the newest repaint we held back.
@@ -1859,6 +1942,7 @@ function main() {
     },
   });
   const listeningPort = server.port ?? config.port;
+  forwardReservedListeningPort = listeningPort;
   const publicBrowserUrl = browserUrlFor(
     config.host,
     listeningPort,
@@ -1905,6 +1989,8 @@ function main() {
 
 let managerStopTask: Promise<void> | null = null;
 function stopManagerOnce(): Promise<void> {
+  // Seen marks are written in batches: keep the last ones.
+  agentSeen.flush();
   webPush.stop();
   connectionProfiles.stopSupervision();
   managerStopTask ??= (async () => {

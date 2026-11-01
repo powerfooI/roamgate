@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { Readable } from "node:stream";
-import { sshCommandArgv } from "./ssh-command";
+import { sshBridgeCommandArgv, sshCommandArgv } from "./ssh-command";
 import {
   classifySshTunnelFailure,
   readBoundedStderr,
@@ -169,7 +169,7 @@ export function createWindowsSshTunnel(args: {
       }
       sockets.add(socket);
       socket.on("error", () => socket.destroy());
-      const [program, ...argv] = sshCommandArgv(config.sshHost!, command);
+      const [program, ...argv] = sshBridgeCommandArgv(config.sshHost!, command);
       const child = args.spawnBridge
         ? args.spawnBridge([program, ...argv])
         : spawn(program, argv, {
