@@ -225,6 +225,9 @@ has the same [full authority](SECURITY.md#trust-model) as any Roamgate user.
 Open **Worktree Lifecycle** from a workspace menu or the command menu to:
 - Create a worktree from `origin`'s freshly fetched default branch without
   touching the current checkout. Creation stops if the remote is unavailable.
+  An optional [worktree command](docs/DEPLOYMENT.md#worktree-command), such
+  as `git recworktree add`, can create it instead of Herdr, and a remove
+  command, such as `git recworktree remove`, remove it.
 - See each worktree's path, branch status, uncommitted changes, and PR/MR badge.
 - Focus, pull, configure branch updates, or remove worktrees (with confirmation
   and hooks).

@@ -12,6 +12,10 @@ export type GuiRepoSettings = {
   worktree_hooks_enabled?: boolean;
   /** Absolute directory that new worktrees of this repository are created in. */
   worktree_directory?: string;
+  /** Shell command that creates new worktrees; overrides the global default. */
+  worktree_command?: string;
+  /** Shell command that removes worktrees; overrides the global default. */
+  worktree_remove_command?: string;
   custom?: Record<string, unknown>;
 };
 
@@ -35,6 +39,10 @@ export type GuiWorkspaceAutoSyncSettings = {
 export type GuiSettings = {
   version: 1;
   title_suffix?: string;
+  /** Default worktree command for repositories without their own. */
+  worktree_command?: string;
+  /** Default worktree removal command for repositories without their own. */
+  worktree_remove_command?: string;
   repositories: Record<string, GuiRepoSettings>;
   workspace_auto_sync: Record<string, GuiWorkspaceAutoSyncSettings>;
   terminal_transport?: Record<string, { surface_codecs: boolean }>;
@@ -112,6 +120,42 @@ export function normalizeWorktreeDirectory(value: unknown): string | undefined {
   return trimmed.startsWith("/") ? trimmed : undefined;
 }
 
+export const WORKTREE_COMMAND_MAX_LENGTH = 4096;
+
+/** Returns a trimmed command template, or undefined when unset or invalid. */
+export function normalizeWorktreeCommand(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed &&
+    trimmed.length <= WORKTREE_COMMAND_MAX_LENGTH &&
+    !trimmed.includes("\0")
+    ? trimmed
+    : undefined;
+}
+
+/** The repository's worktree command, else the global default. */
+export function worktreeCommandFor(
+  settings: GuiSettings,
+  repoKey?: string | null,
+): string | undefined {
+  return (
+    (repoKey ? settings.repositories[repoKey]?.worktree_command : undefined) ??
+    settings.worktree_command
+  );
+}
+
+/** The repository's worktree removal command, else the global default. */
+export function worktreeRemoveCommandFor(
+  settings: GuiSettings,
+  repoKey?: string | null,
+): string | undefined {
+  return (
+    (repoKey
+      ? settings.repositories[repoKey]?.worktree_remove_command
+      : undefined) ?? settings.worktree_remove_command
+  );
+}
+
 function normalizeGuiSettings(raw: unknown): GuiSettings {
   const obj = raw && typeof raw === "object" ? (raw as any) : {};
   const repositories =
@@ -128,6 +172,10 @@ function normalizeGuiSettings(raw: unknown): GuiSettings {
           ? repo.worktree_hooks_enabled
           : undefined,
       worktree_directory: normalizeWorktreeDirectory(repo.worktree_directory),
+      worktree_command: normalizeWorktreeCommand(repo.worktree_command),
+      worktree_remove_command: normalizeWorktreeCommand(
+        repo.worktree_remove_command,
+      ),
       custom:
         repo.custom && typeof repo.custom === "object"
           ? (repo.custom as Record<string, unknown>)
@@ -175,6 +223,10 @@ function normalizeGuiSettings(raw: unknown): GuiSettings {
   return {
     version: 1,
     title_suffix: storedTitleSuffix(obj.title_suffix),
+    worktree_command: normalizeWorktreeCommand(obj.worktree_command),
+    worktree_remove_command: normalizeWorktreeCommand(
+      obj.worktree_remove_command,
+    ),
     repositories: normalizedRepos,
     workspace_auto_sync: normalizedWorkspaceAutoSync,
     terminal_transport: Object.fromEntries(

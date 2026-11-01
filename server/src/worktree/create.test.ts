@@ -8,14 +8,24 @@ import {
 } from "../config/gui-settings";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
 import { shQuote } from "../utils/process-utils";
+import type { GuiSettings } from "../config/gui-settings";
 import {
   createWorkspaceWorktree,
+  herdrDefaultCheckoutPath,
   syncWorktreeBase,
+  WORKTREE_COMMAND_TIMEOUT_MS,
   worktreeCheckoutPath,
 } from "./create";
 
 const commit = "a".repeat(40);
 const remoteHead = `ref: refs/heads/master\tHEAD\n${commit}\tHEAD\n`;
+
+/** The script inside the `sh -c '<script>'` sent over ssh, unquoted by sh. */
+function remoteScript(command: string) {
+  expect(command).toStartWith("sh -c ");
+  const run = Bun.spawnSync(["sh", "-c", `printf %s ${command.slice(6)}`]);
+  return run.stdout.toString();
+}
 
 test("a worktree base without origin is the checked out commit, in any language", async () => {
   const oid = "a".repeat(40);
@@ -243,8 +253,10 @@ function creationFixture(
   retireAfter?: string,
   failParent = false,
   roots = ["/source/root"],
+  settings: Partial<GuiSettings> = {},
 ) {
   const calls: string[] = [];
+  const methods: string[] = [];
   const rpcParams: Record<string, unknown>[] = [];
   const hookArgs: unknown[][] = [];
   const remainingRoots = [...roots];
@@ -271,10 +283,12 @@ function creationFixture(
     },
     herdr: {
       call: async (method: string, params: Record<string, unknown>) => {
-        expect(method).toBe("worktree.create");
+        methods.push(method);
         rpcParams.push(params);
         record("create");
-        return { workspace };
+        return method === "worktree.open"
+          ? { workspace, already_open: false }
+          : { workspace };
       },
     },
     worktreeParents: {
@@ -300,7 +314,7 @@ function creationFixture(
         record("source");
         return {
           cwd: "/source",
-          worktree: { checkout_path: "/source/checkout" },
+          worktree: { checkout_path: "/source/checkout", repo_name: "Source" },
         };
       },
       runWorktreeSetupHook: async (...args: unknown[]) => {
@@ -325,11 +339,21 @@ function creationFixture(
       stderr: "",
     };
   };
+  const readSettings = async (): Promise<GuiSettings> => ({
+    version: 1,
+    repositories: {},
+    workspace_auto_sync: {},
+    custom: {},
+    ui: {},
+    ...settings,
+  });
   return {
     runtime,
     syncBase,
+    readSettings,
     isCurrent,
     calls,
+    methods,
     rpcParams,
     hookArgs,
     setupHook,
@@ -352,6 +376,8 @@ describe("shared worktree creation pipeline", () => {
       fixture.isCurrent,
       undefined,
       fixture.syncBase,
+      undefined,
+      { readSettings: fixture.readSettings },
     );
     expect(fixture.calls).toEqual([
       "source",
@@ -369,7 +395,7 @@ describe("shared worktree creation pipeline", () => {
       { workspace: result.workspace },
       {
         cwd: "/source/checkout",
-        worktree: { checkout_path: "/source/checkout" },
+        worktree: { checkout_path: "/source/checkout", repo_name: "Source" },
       },
       { command: "printf approved", enabled: true },
       fixture.isCurrent,
@@ -388,12 +414,15 @@ describe("shared worktree creation pipeline", () => {
       fixture.isCurrent,
       (error) => warnings.push(error),
       fixture.syncBase,
+      undefined,
+      { readSettings: fixture.readSettings },
     );
     expect(fixture.calls.at(-1)).toBe("setup");
     expect(fixture.hookArgs[0]?.[2]).toBeUndefined();
     expect(warnings).toHaveLength(1);
     expect(result.parent_tracking_failed).toBe(true);
     expect(JSON.stringify(result)).not.toContain("parent storage unavailable");
+    expect(fixture.methods).toEqual(["worktree.create"]);
     expect(fixture.rpcParams).toEqual([
       { workspace_id: "source", branch: "feature", base: commit },
     ]);
@@ -415,6 +444,8 @@ describe("shared worktree creation pipeline", () => {
         fixture.isCurrent,
         undefined,
         fixture.syncBase,
+        undefined,
+        { readSettings: fixture.readSettings },
       ),
     ).rejects.toThrow("The worktree source repository changed.");
     expect(fixture.calls).toEqual(["source", "sync", "resolve", "resolve"]);
@@ -442,6 +473,8 @@ describe("shared worktree creation pipeline", () => {
           fixture.isCurrent,
           undefined,
           syncBase,
+          undefined,
+          { readSettings: fixture.readSettings },
         ),
       ).rejects.toThrow("The worktree source repository changed.");
       expect(fixture.rpcParams).toEqual([]);
@@ -460,6 +493,8 @@ describe("shared worktree creation pipeline", () => {
           fixture.isCurrent,
           undefined,
           fixture.syncBase,
+          undefined,
+          { readSettings: fixture.readSettings },
         ),
       ).rejects.toThrow("Confirmed source repository is invalid.");
       expect(fixture.calls).toEqual([]);
@@ -484,6 +519,8 @@ describe("shared worktree creation pipeline", () => {
           fixture.isCurrent,
           undefined,
           fixture.syncBase,
+          undefined,
+          { readSettings: fixture.readSettings },
         ),
       ).rejects.toThrow("The worktree target changed.");
       expect(fixture.calls).toEqual([...calls]);
@@ -507,11 +544,245 @@ describe("shared worktree creation pipeline", () => {
           fixture.isCurrent,
           undefined,
           fixture.syncBase,
+          undefined,
+          { readSettings: fixture.readSettings },
         ),
       ).rejects.toThrow("Confirmed setup hook configuration is invalid.");
       expect(fixture.calls).toEqual([]);
     },
   );
+});
+
+describe("configured worktree command", () => {
+  const repoKey = "ssh:host:/source/checkout";
+  const template = "git recworktree add {path} --branch {branch} --base {base}";
+
+  function commandFixture(
+    settings: Partial<GuiSettings>,
+    result = { code: 0, stdout: "made it\n\n/created/checkout\n", stderr: "" },
+    probeCode = 0,
+  ) {
+    const fixture = creationFixture(undefined, false, undefined, settings);
+    const processes: { argv: string[]; timeout: number }[] = [];
+    const probes: string[][] = [];
+    const self = {
+      ...fixture,
+      processes,
+      probes,
+      create: (params: Record<string, unknown> = {}) =>
+        createWorkspaceWorktree(
+          fixture.runtime,
+          {
+            workspace_id: "source",
+            branch: "feature/x",
+            focus: true,
+            ...params,
+          },
+          fixture.isCurrent,
+          undefined,
+          self.syncBase,
+          undefined,
+          {
+            readSettings: fixture.readSettings,
+            runProcess: async (argv, timeout) => {
+              if (argv.at(-1)!.includes("command -v")) {
+                probes.push(argv);
+                fixture.calls.push("probe");
+                return { code: probeCode, stdout: "", stderr: "" };
+              }
+              processes.push({ argv, timeout });
+              fixture.calls.push("command");
+              return result;
+            },
+          },
+        ),
+    };
+    return self;
+  }
+
+  test("defaults to Herdr's own checkout path", () => {
+    expect(herdrDefaultCheckoutPath("herdr", "worktree/brave-river")).toBe(
+      "~/.herdr/worktrees/herdr/worktree-brave-river",
+    );
+    expect(herdrDefaultCheckoutPath("r", "Issue/137 Spaces")).toBe(
+      "~/.herdr/worktrees/r/issue-137-spaces",
+    );
+    expect(herdrDefaultCheckoutPath("r", "///")).toBe(
+      "~/.herdr/worktrees/r/worktree",
+    );
+  });
+
+  test("runs over SSH from the source root, then opens the path in Herdr", async () => {
+    const fixture = commandFixture({
+      repositories: {
+        [repoKey]: { worktree_command: template, worktree_directory: "/wt" },
+      },
+    });
+    const result = await fixture.create({ label: "X" });
+    expect(fixture.calls).toEqual([
+      "source",
+      "sync",
+      "resolve",
+      "probe",
+      "command",
+      "create",
+      "parent",
+      "setup",
+    ]);
+    expect(remoteScript(fixture.probes[0]!.at(-1)!)).toBe(
+      "command -v -- 'git' >/dev/null 2>&1 || exit 127; git --list-cmds=main,others,alias 2>/dev/null | grep -qxF -- 'recworktree' || exit 127",
+    );
+    const [{ argv, timeout }] = fixture.processes;
+    expect(timeout).toBe(WORKTREE_COMMAND_TIMEOUT_MS);
+    expect(argv[0]).toBe("ssh");
+    expect(argv.slice(-3, -1)).toEqual(["--", "host"]);
+    expect(remoteScript(argv.at(-1)!)).toBe(
+      `export ROAMGATE_WORKTREE_PATH='/wt/feature-x'; export ROAMGATE_WORKTREE_BRANCH='feature/x'; export ROAMGATE_WORKTREE_BASE='${commit}'; export ROAMGATE_WORKTREE_REPO='/source/root'; cd "$ROAMGATE_WORKTREE_REPO" && git recworktree add "$ROAMGATE_WORKTREE_PATH" --branch "$ROAMGATE_WORKTREE_BRANCH" --base "$ROAMGATE_WORKTREE_BASE" && cd "$ROAMGATE_WORKTREE_PATH" && printf '\\n%s\\n' "$PWD"`,
+    );
+    expect(fixture.methods).toEqual(["worktree.open"]);
+    expect(fixture.rpcParams).toEqual([
+      {
+        path: "/created/checkout",
+        workspace_id: "source",
+        focus: true,
+        label: "X",
+      },
+    ]);
+    expect(result).not.toHaveProperty("already_open");
+    expect(result.workspace).toEqual({
+      workspace_id: "created",
+      cwd: "/created",
+    });
+  });
+
+  test("uses the global default locally, at Herdr's default path", async () => {
+    const fixture = commandFixture({ worktree_command: "mk {path} {repo}" });
+    fixture.runtime.sshHost = () => undefined;
+    const syncBase = fixture.syncBase;
+    fixture.syncBase = (args) => syncBase({ ...args, host: "host" });
+    await fixture.create();
+    expect(fixture.processes[0]?.argv).toEqual([
+      "sh",
+      "-lc",
+      `export ROAMGATE_WORKTREE_PATH="$HOME"/'.herdr/worktrees/Source/feature-x'; export ROAMGATE_WORKTREE_BRANCH='feature/x'; export ROAMGATE_WORKTREE_BASE='${commit}'; export ROAMGATE_WORKTREE_REPO='/source/root'; cd "$ROAMGATE_WORKTREE_REPO" && mk "$ROAMGATE_WORKTREE_PATH" "$ROAMGATE_WORKTREE_REPO" && cd "$ROAMGATE_WORKTREE_PATH" && printf '\\n%s\\n' "$PWD"`,
+    ]);
+    expect(fixture.rpcParams).toEqual([
+      {
+        path: "/created/checkout",
+        workspace_id: "source",
+        focus: true,
+      },
+    ]);
+  });
+
+  test("a repository command overrides the global default", async () => {
+    const fixture = commandFixture({
+      worktree_command: "global {path}",
+      repositories: { [repoKey]: { worktree_command: "repo {branch}" } },
+    });
+    await fixture.create();
+    expect(remoteScript(fixture.processes[0]!.argv.at(-1)!)).toContain(
+      `cd "$ROAMGATE_WORKTREE_REPO" && repo "$ROAMGATE_WORKTREE_BRANCH" && `,
+    );
+  });
+
+  test("a failing command surfaces its output and opens nothing", async () => {
+    const fixture = commandFixture(
+      { worktree_command: template },
+      { code: 2, stdout: "progress\n", stderr: "\nfatal: branch exists\n\n" },
+    );
+    await expect(fixture.create()).rejects.toThrow(
+      "Worktree command failed (exit 2): fatal: branch exists",
+    );
+    expect(fixture.methods).toEqual([]);
+    expect(fixture.hookArgs).toEqual([]);
+  });
+
+  test("a command not installed on the host falls back to Herdr's worktree, and says so", async () => {
+    const fixture = commandFixture(
+      { worktree_command: template },
+      undefined,
+      127,
+    );
+    const result = await fixture.create();
+    expect(fixture.processes).toEqual([]);
+    expect(fixture.methods).toEqual(["worktree.create"]);
+    expect(result.command_fallback).toBe(
+      "git recworktree is not installed on host. Herdr created the worktree.",
+    );
+  });
+
+  test("an exit 127 from inside an installed command is a failure, not a fallback", async () => {
+    const fixture = commandFixture(
+      { worktree_command: template },
+      { code: 127, stdout: "", stderr: "post-checkout: mk: not found\n" },
+    );
+    await expect(fixture.create()).rejects.toThrow(
+      "Worktree command failed (exit 127): post-checkout: mk: not found",
+    );
+    expect(fixture.methods).toEqual([]);
+  });
+
+  test("a checkout already open in Herdr does not rerun its setup hook", async () => {
+    const fixture = commandFixture({ worktree_command: template });
+    fixture.runtime.herdr.call = async (method: string) => {
+      fixture.methods.push(method);
+      return { workspace: { workspace_id: "old" }, already_open: true };
+    };
+    await expect(fixture.create()).rejects.toThrow(
+      "The worktree command left /created/checkout, which was already open in Herdr; the setup hook was not run again.",
+    );
+    expect(fixture.methods).toEqual(["worktree.open"]);
+    expect(fixture.hookArgs).toEqual([]);
+  });
+
+  test("a command changed since Ranger's confirmation runs nothing", async () => {
+    const fixture = commandFixture({ worktree_command: template });
+    await expect(
+      fixture.create({ expected_worktree_command: "other {path}" }),
+    ).rejects.toThrow("The worktree command changed.");
+    await expect(
+      fixture.create({ expected_worktree_command: null }),
+    ).rejects.toThrow("The worktree command changed.");
+    expect(fixture.processes).toEqual([]);
+    expect(fixture.methods).toEqual([]);
+    await fixture.create({ expected_worktree_command: template });
+    expect(fixture.methods).toEqual(["worktree.open"]);
+  });
+
+  test("refuses a branch name with shell syntax before anything runs", async () => {
+    const fixture = commandFixture({ worktree_command: template });
+    for (const branch of ["a$(touch${IFS}/tmp/x)", "a`id`", "-b", "a..b"])
+      await expect(fixture.create({ branch })).rejects.toThrow(
+        "Invalid branch name",
+      );
+    expect(fixture.calls).toEqual([]);
+    expect(fixture.processes).toEqual([]);
+  });
+
+  test("a target retired while the command runs is not opened", async () => {
+    const fixture = commandFixture({ worktree_command: template });
+    const runtime = fixture.runtime;
+    let current = true;
+    await expect(
+      createWorkspaceWorktree(
+        runtime,
+        { workspace_id: "source", branch: "feature" },
+        () => current,
+        undefined,
+        fixture.syncBase,
+        undefined,
+        {
+          readSettings: fixture.readSettings,
+          runProcess: async () => {
+            current = false;
+            return { code: 0, stdout: "", stderr: "" };
+          },
+        },
+      ),
+    ).rejects.toThrow("The worktree target changed.");
+    expect(fixture.methods).toEqual([]);
+  });
 });
 
 test("Windows runtimes refuse worktree creation before any helper runs", async () => {
@@ -524,6 +795,8 @@ test("Windows runtimes refuse worktree creation before any helper runs", async (
       fixture.isCurrent,
       undefined,
       fixture.syncBase,
+      undefined,
+      { readSettings: fixture.readSettings },
     ),
   ).rejects.toThrow("unavailable on Windows");
   expect(fixture.calls).toEqual([]);
@@ -586,4 +859,38 @@ describe("repository worktree directory", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+test("a command changed while its install probe runs is not dispatched", async () => {
+  const template = "git recworktree add {path} --branch {branch}";
+  const settings: Partial<GuiSettings> = { worktree_command: template };
+  const f = creationFixture(undefined, false, undefined, settings);
+  let executed = false;
+  await expect(
+    createWorkspaceWorktree(
+      f.runtime,
+      {
+        workspace_id: "source",
+        branch: "feature",
+        expected_worktree_command: template,
+      },
+      f.isCurrent,
+      undefined,
+      f.syncBase,
+      undefined,
+      {
+        readSettings: f.readSettings,
+        runProcess: async (argv) => {
+          if (argv.at(-1)!.includes("command -v")) {
+            settings.worktree_command = "different-command {path}";
+            return { code: 0, stdout: "", stderr: "" };
+          }
+          executed = true;
+          return { code: 0, stdout: "/created/checkout\n", stderr: "" };
+        },
+      },
+    ),
+  ).rejects.toThrow("The worktree command changed");
+  expect(executed).toBe(false);
+  expect(f.methods).toEqual([]);
 });

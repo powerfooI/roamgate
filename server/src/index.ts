@@ -101,7 +101,10 @@ import {
 import { createAuthHandlers, unauthenticatedLoginRedirect } from "./http/auth";
 import { serveStatic } from "./http/static-files";
 import { handleInstanceSettings } from "./http/instance-settings";
-import { readGuiSettings } from "./config/gui-settings";
+import {
+  readGuiSettings,
+  worktreeRemoveCommandFor,
+} from "./config/gui-settings";
 import {
   TERMINAL_UPLOAD_TIMEOUT_MS,
   terminalUploadRequestBodyLimit,
@@ -122,6 +125,7 @@ import { createWorkspaceWorktree } from "./worktree/create";
 import { inspectWorkspacePath } from "./workspace/path";
 import {
   removeWorktreeWithRecovery,
+  runWorktreeRemoveCommand,
   WORKTREE_REMOVE_TIMEOUT_MS,
 } from "./worktree/remove";
 
@@ -1439,12 +1443,50 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
             };
           }
 
+          const removeCommand = removeHookContext
+            ? worktreeRemoveCommandFor(
+                await readGuiSettings(),
+                removeHookContext.repoSettingsKey,
+              )
+            : undefined;
           const removal = await removeWorktreeWithRecovery({
             call: (name, callParams) =>
               herdr.call(name, callParams, WORKTREE_REMOVE_TIMEOUT_MS),
             params: params ?? {},
             checkoutPath: removeHookContext?.checkoutPath,
             runtime: worktreeRemovalRuntime,
+            // The command removes the checkout (git recworktree also its
+            // nested ones); Herdr then only closes the workspace, as its own
+            // removal would. Not installed on this host: Herdr removes it.
+            removeWithCommand:
+              removeCommand && removeHookContext
+                ? async () => {
+                    const force = params?.force === true;
+                    const fallback = await runWorktreeRemoveCommand({
+                      template: removeCommand,
+                      checkoutPath: removeHookContext.checkoutPath,
+                      sourceCheckoutPath: removeHookContext.sourceCheckoutPath,
+                      force,
+                      host: sshHost(),
+                      runProcess: runProcessWithCodeTimeout,
+                    });
+                    if (fallback)
+                      return {
+                        fallback: `${fallback} Herdr removed the worktree.`,
+                      };
+                    await herdr.call("workspace.close", {
+                      workspace_id: workspaceId,
+                    });
+                    return {
+                      result: {
+                        forced: force,
+                        path: removeHookContext.checkoutPath,
+                        type: "worktree_removed",
+                        workspace_id: workspaceId,
+                      },
+                    };
+                  }
+                : undefined,
           });
           if (removal.cleanup?.preserved_path) {
             logger.warn("preserved stale worktree files", {
@@ -1467,6 +1509,9 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
           return {
             ...removal.result,
             ...(removal.cleanup ? { cleanup: removal.cleanup } : {}),
+            ...(removal.commandFallback
+              ? { command_fallback: removal.commandFallback }
+              : {}),
             before_remove_hook: beforeRemoveHook,
             removed_hook: removedHook,
           };

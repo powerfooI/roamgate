@@ -53,6 +53,7 @@ import { TerminalTransportSettings } from "./TerminalTransportSettings";
 import { ConfigurationLoadingDialog } from "./ConfigurationLoadingDialog";
 import { InstanceNameSettings } from "./InstanceNameSettings";
 import { SpeechSettings } from "./SpeechSettings";
+import { WorktreeCommandSettings } from "./WorktreeCommandSettings";
 import { MobileSheetHandle } from "./MobileSheetHandle";
 import "./ConfigMenu.css";
 import "./ConfigurationDialog.css";
@@ -634,7 +635,12 @@ export function ConfigurationDialog({
               aria-labelledby="configuration-tab-Instance"
               hidden={tab !== "Instance"}
             >
-              {tab === "Instance" ? <InstanceNameSettings /> : null}
+              {tab === "Instance" ? (
+                <>
+                  <InstanceNameSettings />
+                  <WorktreeCommandSettings />
+                </>
+              ) : null}
             </section>
             <section
               role="tabpanel"
@@ -693,7 +699,7 @@ export function ConfigurationDialog({
               {tab === "Integrations"
                 ? "Changes require confirmation."
                 : tab === "Instance"
-                  ? "Use Save or Reset to default to apply the instance name."
+                  ? "Use Save to apply instance settings."
                   : "Changes are saved automatically."}
             </span>
             <button type="button" onClick={onClose}>
