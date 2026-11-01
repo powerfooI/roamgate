@@ -13,6 +13,8 @@ import {
   Check,
   ChevronRight,
   Copy,
+  ExternalLink,
+  RotateCw,
   Square,
   Volume2,
   Wrench,
@@ -22,6 +24,7 @@ import { useChatSpeech } from "../useChatSpeech";
 import { copyTextWithFeedback } from "../copyText";
 import { formatUiDateTime } from "../uiLocale";
 import { HISTORY_PREVIEW_CHARS } from "./AgentHistoryCard";
+import type { OutboxMessage } from "./chatOutbox";
 import {
   historyEntryLabel,
   isToolContentPending,
@@ -40,6 +43,8 @@ import {
 } from "./agentHistoryView";
 import { formatBytes } from "./agentSession";
 import { MarkdownPreview } from "./markdown";
+import { messageImagePieces } from "../chatImages";
+import { ImageLightbox } from "./ImageLightbox";
 import "./AgentHistoryChat.css";
 
 // Treat the list as pinned while the reader is within this distance of the
@@ -48,6 +53,39 @@ const FOLLOW_THRESHOLD_PX = 48;
 
 const EMPTY_LOADING: ReadonlySet<string> = new Set();
 const noop = () => {};
+const NO_OUTBOX: readonly OutboxMessage[] = [];
+
+type BubbleProps = {
+  entry: HistoryEntry;
+  sequence: number;
+  highlighted: boolean;
+  speech: ReturnType<typeof useChatSpeech>;
+  onOpen: (entry: HistoryEntry) => void;
+  imageUrl?: (path: string) => string;
+};
+// A history refresh hands over new entry objects even for messages that did
+// not change: a bubble re-renders only when what it shows changed.
+function sameBubble(a: BubbleProps, b: BubbleProps): boolean {
+  const x = a.entry;
+  const y = b.entry;
+  return (
+    a.sequence === b.sequence &&
+    a.highlighted === b.highlighted &&
+    a.speech === b.speech &&
+    a.onOpen === b.onOpen &&
+    a.imageUrl === b.imageUrl &&
+    (x === y ||
+      (x.id === y.id &&
+        x.text === y.text &&
+        x.role === y.role &&
+        x.kind === y.kind &&
+        x.sent_at === y.sent_at &&
+        x.queued === y.queued &&
+        x.compact_summary === y.compact_summary &&
+        x.text_bytes === y.text_bytes &&
+        x.text_hash === y.text_hash))
+  );
+}
 
 const ChatBubble = memo(function ChatBubble({
   entry,
@@ -55,13 +93,8 @@ const ChatBubble = memo(function ChatBubble({
   highlighted,
   speech,
   onOpen,
-}: {
-  entry: HistoryEntry;
-  sequence: number;
-  highlighted: boolean;
-  speech: ReturnType<typeof useChatSpeech>;
-  onOpen: (entry: HistoryEntry) => void;
-}) {
+  imageUrl,
+}: BubbleProps) {
   // A compaction summary is long and written by Claude Code, not the user:
   // one line, with the summary a tap away.
   if (entry.compact_summary)
@@ -96,7 +129,11 @@ const ChatBubble = memo(function ChatBubble({
     >
       <div className="agent-history-chat-bubble">
         {entry.role === "user" ? (
-          <p>{preview}</p>
+          imageUrl ? (
+            <UserText text={preview} imageUrl={imageUrl} />
+          ) : (
+            <p>{preview}</p>
+          )
         ) : (
           <MarkdownPreview
             text={preview}
@@ -164,7 +201,152 @@ const ChatBubble = memo(function ChatBubble({
       </div>
     </article>
   );
-});
+}, sameBubble);
+
+/** A message of the user's, with the images it sent shown, not their paths. */
+function UserText({
+  text,
+  imageUrl,
+}: {
+  text: string;
+  imageUrl: (path: string) => string;
+}) {
+  const [shown, setShown] = useState<string | null>(null);
+  const pieces = messageImagePieces(text);
+  if (!pieces.some((piece) => "image" in piece)) return <p>{text}</p>;
+  const nameOf = (path: string) => path.split(/[\\/]/).pop() ?? path;
+  return (
+    <>
+      {pieces.map((piece, index) =>
+        "image" in piece ? (
+          <a
+            // The pieces of a message never move.
+            key={index}
+            className="agent-history-chat-image"
+            href={imageUrl(piece.image)}
+            target="_blank"
+            rel="noreferrer"
+            title={piece.image}
+            onClick={(event) => {
+              // Cmd / Ctrl / Shift / middle click still open a tab.
+              if (
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey
+              )
+                return;
+              event.preventDefault();
+              setShown(piece.image);
+            }}
+          >
+            <img
+              src={imageUrl(piece.image)}
+              alt={nameOf(piece.image)}
+              loading="lazy"
+            />
+          </a>
+        ) : (
+          <p key={index}>{piece.text}</p>
+        ),
+      )}
+      {shown ? (
+        <ImageLightbox
+          src={imageUrl(shown)}
+          name={nameOf(shown)}
+          onClose={() => setShown(null)}
+          // Focus left in the list would stop the chat following new messages.
+          returnFocus={false}
+        />
+      ) : null}
+    </>
+  );
+}
+
+// A message sent from the chat that the transcript does not show yet: on its
+// way (dashed and dimmed, like a queued one) until its entry replaces it, or
+// not delivered, with the ways out.
+function OutboxBubble({
+  message,
+  onRetry,
+  onDiscard,
+}: {
+  message: OutboxMessage;
+  onRetry?: (message: OutboxMessage) => void;
+  onDiscard?: (message: OutboxMessage) => void;
+}) {
+  const failed = message.state === "failed";
+  return (
+    <article
+      className={`agent-history-chat-message is-user is-outbox is-${message.state}`}
+      data-outbox-id={message.id}
+    >
+      <div className="agent-history-chat-bubble">
+        <p>{message.text.slice(0, HISTORY_PREVIEW_CHARS)}</p>
+      </div>
+      <div className="agent-history-chat-meta">
+        {failed ? (
+          <>
+            <span
+              className="agent-history-chat-undelivered"
+              title={message.reason}
+            >
+              Not delivered
+            </span>
+            {onRetry ? (
+              <button
+                type="button"
+                className="agent-history-copy"
+                onClick={() => onRetry(message)}
+                aria-label="Send this message again"
+                title="Send again"
+              >
+                <RotateCw size={12} />
+              </button>
+            ) : null}
+            {onDiscard ? (
+              <button
+                type="button"
+                className="agent-history-copy"
+                onClick={() => onDiscard(message)}
+                aria-label="Discard this message"
+                title="Discard"
+              >
+                <X size={12} />
+              </button>
+            ) : null}
+          </>
+        ) : (
+          <span
+            className="agent-history-chat-sending"
+            role="status"
+            title={
+              message.state === "sending"
+                ? "Sending it to the agent"
+                : "Sent: waiting for the agent's session to show it"
+            }
+          >
+            <span
+              className="agent-history-chat-sending-mark"
+              aria-hidden="true"
+            />
+            {message.state === "sending" ? "Sending…" : "On its way"}
+          </span>
+        )}
+        <button
+          type="button"
+          className="agent-history-copy"
+          onClick={() => void copyTextWithFeedback(message.text)}
+          aria-label="Copy the message"
+          title="Copy"
+        >
+          <Copy size={12} />
+        </button>
+      </div>
+    </article>
+  );
+}
 
 // Opening a block fetches small arguments so each row can show a headline;
 // larger payloads (e.g. whole-file writes) wait until their step is opened.
@@ -362,6 +544,14 @@ function ToolBlock({
   onToggle: () => void;
   onOpen: (entry: HistoryEntry) => void;
 }) {
+  // The pages these calls published, the latest version of each.
+  const artifacts = [
+    ...new Map(
+      entries.flatMap((entry) =>
+        entry.artifact ? [[entry.artifact.url, entry.artifact] as const] : [],
+      ),
+    ).values(),
+  ];
   const [open, setOpen] = useState(false);
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
   const listId = useId();
@@ -437,6 +627,26 @@ function ToolBlock({
           ) : null}
         </span>
       </button>
+      {artifacts.length ? (
+        <div className="agent-history-chat-artifacts">
+          {artifacts.map((artifact) => (
+            <a
+              key={artifact.url}
+              className="agent-history-chat-artifact"
+              href={artifact.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={artifact.url}
+            >
+              <ExternalLink size={12} aria-hidden="true" />
+              <span>{artifact.title}</span>
+              <span className="agent-history-chat-artifact-version">
+                {artifact.version ? `v${artifact.version}` : "New"}
+              </span>
+            </a>
+          ))}
+        </div>
+      ) : null}
       {open ? (
         <ul id={listId} className="agent-history-chat-tools-list">
           {steps.map((step) => (
@@ -462,7 +672,11 @@ function ToolBlock({
 
 // The drawer owns the scroll and content refs so its minimap can track and
 // jump to bubbles through their data-sequence, as it does for timeline cards.
-export function AgentHistoryChat({
+// Memoized: the pane around it re-renders on every pane update (status,
+// activity), several times a second while the agent works, and a long
+// conversation is too costly to render each time; its props only change
+// with the history.
+export const AgentHistoryChat = memo(function AgentHistoryChat({
   items,
   listRef,
   contentRef,
@@ -473,6 +687,10 @@ export function AgentHistoryChat({
   speechActive = true,
   speechScopeKey = "",
   onOpen,
+  outbox = NO_OUTBOX,
+  onRetrySend,
+  onDiscardSend,
+  imageUrl,
 }: {
   items: HistoryChatItem[];
   listRef: RefObject<HTMLDivElement | null>;
@@ -486,6 +704,12 @@ export function AgentHistoryChat({
   speechActive?: boolean;
   speechScopeKey?: string;
   onOpen: (entry: HistoryEntry) => void;
+  /** Messages sent that the transcript does not show yet, oldest first. */
+  outbox?: readonly OutboxMessage[];
+  onRetrySend?: (message: OutboxMessage) => void;
+  onDiscardSend?: (message: OutboxMessage) => void;
+  /** Where an image the user uploaded loads from; none shows the path. */
+  imageUrl?: (path: string) => string;
 }) {
   const speech = useChatSpeech(speechActive, speechScopeKey);
   const followRef = useRef(true);
@@ -536,6 +760,15 @@ export function AgentHistoryChat({
     if (list && followRef.current) list.scrollTop = list.scrollHeight;
   }, [items, listRef]);
 
+  // A message just sent is shown where the conversation goes on.
+  const lastOutboxId = outbox[outbox.length - 1]?.id;
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list || !lastOutboxId) return;
+    followRef.current = true;
+    list.scrollTop = list.scrollHeight;
+  }, [lastOutboxId, listRef]);
+
   // Re-pin after layout changes the list did not cause itself: the inspector
   // revealing a hidden view, a resized pane, or lazy markdown (diagrams,
   // images) growing a bubble after its first paint.
@@ -576,6 +809,7 @@ export function AgentHistoryChat({
               highlighted={highlightedSequence === item.sequence}
               speech={speech}
               onOpen={onOpen}
+              imageUrl={imageUrl}
             />
           ) : (
             <ToolBlock
@@ -587,7 +821,15 @@ export function AgentHistoryChat({
             />
           ),
         )}
+        {outbox.map((message) => (
+          <OutboxBubble
+            key={message.id}
+            message={message}
+            onRetry={onRetrySend}
+            onDiscard={onDiscardSend}
+          />
+        ))}
       </div>
     </div>
   );
-}
+});

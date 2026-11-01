@@ -104,6 +104,29 @@ export function createAgentSessionHandlers(args: {
         text_hash: historyTextHash(entry.text),
       };
     },
+    /** The skills and custom commands a Claude session offers as /name. */
+    readCommands: async (params: Record<string, unknown>) => {
+      const resolved = await resolveAgentSession(
+        params,
+        args.herdrCall,
+        args.files,
+        resolverContext,
+      );
+      if (!resolved.file) return { commands: [] };
+      const projection = await cache.get(resolved);
+      return { commands: projection.commands };
+    },
+    readArtifacts: async (params: Record<string, unknown>) => {
+      const resolved = await resolveAgentSession(
+        params,
+        args.herdrCall,
+        args.files,
+        resolverContext,
+      );
+      if (!resolved.file) return { artifacts: [] };
+      const projection = await cache.get(resolved);
+      return { artifacts: projection.artifacts };
+    },
     readSummary: (params: Record<string, unknown>) =>
       readAgentSessionSummary(
         params,
@@ -180,6 +203,7 @@ export async function readAgentSessionSummary(
     return {
       ...resolved,
       stats: { turns: 0, records: 0, token_usage: null },
+      title: null,
       text: null,
       truncated: false,
       trajectory: null,
@@ -227,6 +251,7 @@ export async function readAgentSessionSummary(
     file: projected.file,
     updated_at: new Date(projected.file.mtimeMs).toISOString(),
     stats,
+    title: projected.title,
     text,
     truncated,
     trajectory,

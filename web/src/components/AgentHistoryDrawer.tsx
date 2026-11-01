@@ -5,19 +5,26 @@ import {
   useId,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
+import { workspaceFileUrl } from "../workspaceFileUrl";
 import {
+  Check,
   Copy,
   ChevronDown,
-  Search,
   Download,
   Eye,
   Info,
   MessagesSquare,
   RefreshCw,
+  Search,
+  Square,
+  SquareCheck,
+  SquareTerminal,
   X,
 } from "lucide-react";
 import { useLayoutPreferences } from "../layoutPreferences";
@@ -25,10 +32,15 @@ import { store, useStoreSelector } from "../store";
 import { copyTextWithFeedback } from "../copyText";
 import { useConnectionClient } from "../useConnectionClient";
 import {
+  readTerminalComposerDraft,
   sendTerminalComposerText,
   terminalComposerDraftKey,
 } from "../terminalComposer";
 import { uploadTerminalImage } from "../terminalImageUpload";
+import type { AgentActivity, AgentPrompt } from "../agentPrompt";
+import { AgentArtifactsMenu } from "./AgentArtifactsMenu";
+import { useAgentArtifacts } from "../agentArtifacts";
+import { useAgentCommands } from "../claudeCommands";
 import type { Pane } from "../types";
 import {
   DEFAULT_INSPECTOR_NAVIGATION_RATIO,
@@ -72,8 +84,20 @@ import {
   formatCount,
   formatOptionalCompact,
   formatTokenTotal,
+  agentPromptWarning,
   tokenUsage,
 } from "./agentSession";
+import {
+  newOutboxMessage,
+  nextOutboxDeadline,
+  type OutboxMessage,
+  readOutbox,
+  settleOutbox,
+  subscribeOutbox,
+  updateOutbox,
+} from "./chatOutbox";
+import { promptKeyInput } from "./promptKeys";
+import { ConfirmDialog } from "./ModalDialogs";
 import "./AgentHistoryDrawer.css";
 
 function formatRelativeTime(timestamp: string) {
@@ -89,17 +113,52 @@ function formatRelativeTime(timestamp: string) {
   return formatUiRelativeTime(Math.round(seconds / 86400), "day");
 }
 
+/** Keys a menu in the agent's terminal answers to: label, input, name. */
+const PROMPT_KEYS: [string, string, string][] = [
+  ["\u2190", "\x1b[D", "Left: previous question"],
+  ["\u2191", "\x1b[A", "Up"],
+  ["\u2193", "\x1b[B", "Down"],
+  ["\u2192", "\x1b[C", "Right: next question"],
+  ["Tab", "\t", "Tab"],
+  ["Enter", "\r", "Enter: confirm"],
+  ["Esc", "\x1b", "Escape: cancel"],
+];
+
+/** How long a pane's chat waits for its transcript before saying why. */
+const UNAVAILABLE_QUIET_MS = 20_000;
+
 export function AgentHistoryDrawer({
   pane,
   open,
   embedded = false,
   wide = false,
+  paneChat,
   onOpenChange,
 }: {
   pane: Pane;
   open: boolean;
   embedded?: boolean;
   wide?: boolean;
+  /**
+   * Shown in the pane, in place of its terminal: the chat only, with what
+   * the terminal asks while the agent is blocked.
+   */
+  paneChat?: {
+    /** The blocked agent's prompt, read from its screen. */
+    prompt?: AgentPrompt | null;
+    /** What the working agent says it is doing, from its screen. */
+    activity?: AgentActivity | null;
+    onShowTerminal: () => void;
+    /**
+     * The pane is the active one: only its question takes keys typed with
+     * nothing focused, or moves the focus.
+     */
+    active?: boolean;
+    /** Types into the terminal: an answer's key, or Esc to stop. */
+    onKeys: (text: string) => void;
+    /** Where the message box goes: the phone's bottom bar. */
+    composerTarget?: HTMLElement | null;
+  };
   onOpenChange: (open: boolean) => void;
 }) {
   const { mobile } = useLayoutPreferences();
@@ -120,6 +179,14 @@ export function AgentHistoryDrawer({
     (state) => state.connectionGeneration,
   );
   const connectionClient = useConnectionClient();
+  // Images the user uploaded load from the pane's host.
+  const imageUrl = useCallback(
+    (path: string) =>
+      workspaceFileUrl(connectionClient, pane.workspace_id, path, {
+        inline: true,
+      }),
+    [connectionClient, pane.workspace_id],
+  );
   const workspaceLabel =
     workspaces.find((workspace) => workspace.workspace_id === pane.workspace_id)
       ?.label ?? pane.workspace_id;
@@ -139,7 +206,9 @@ export function AgentHistoryDrawer({
   const [session, setSession] = useState<AgentSessionSummary | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [view, setView] = useState<AgentHistoryView>(readAgentHistoryView);
-  const chatView = view === "chat";
+  const chatView = !!paneChat || view === "chat";
+  const agentCommands = useAgentCommands(pane, open);
+  const artifacts = useAgentArtifacts(pane, !!paneChat && open);
   const [previewPane, setPreviewPane] = useState<Pane | null>(null);
   const [previewSummary, setPreviewSummary] =
     useState<AgentSessionSummary | null>(null);
@@ -158,6 +227,7 @@ export function AgentHistoryDrawer({
     DEFAULT_INSPECTOR_NAVIGATION_RATIO,
   );
   const [wideSelectedId, setWideSelectedId] = useState<string | null>(null);
+  const drawerRef = useRef<HTMLElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const wideSplitRef = useRef<HTMLDivElement>(null);
@@ -659,6 +729,27 @@ export function AgentHistoryDrawer({
     error ||
     "No readable session transcript was reported for this agent.";
   const unavailableCommand = session?.command || history?.command;
+  const sessionTitle = session?.title || null;
+  // A pane's chat waits quietly while the transcript cannot be read (a
+  // server restart, an agent not yet started): the poll keeps trying, and
+  // the reason shows only once it has lasted.
+  const [unavailableSince, setUnavailableSince] = useState<number | null>(null);
+  const [, setUnavailableTick] = useState(0);
+  useEffect(() => {
+    if (!unavailable) {
+      setUnavailableSince(null);
+      return;
+    }
+    setUnavailableSince((since) => since ?? Date.now());
+    const timer = window.setTimeout(
+      () => setUnavailableTick((tick) => tick + 1),
+      UNAVAILABLE_QUIET_MS + 100,
+    );
+    return () => window.clearTimeout(timer);
+  }, [unavailable]);
+  const unavailableLasted =
+    unavailableSince !== null &&
+    Date.now() - unavailableSince >= UNAVAILABLE_QUIET_MS;
   const updatedAt = sessionReady
     ? session.updated_at
     : historyReady
@@ -820,11 +911,16 @@ export function AgentHistoryDrawer({
   const sendMessage = useCallback(
     async (text: string) => {
       const scope = pollScopeRef.current;
+      // Writing a question's own answer ("Type something.") where Enter would
+      // tick the box off again: the text alone.
+      const answering = paneChat?.prompt?.options.find(
+        (option) => option.cursor && option.freeText,
+      );
       await sendTerminalComposerText(
         connectionClient,
         pane.pane_id,
         text,
-        true,
+        answering?.checked === undefined,
       );
       if (!connectionClient.isCurrent() || pollScopeRef.current !== scope)
         return;
@@ -842,7 +938,115 @@ export function AgentHistoryDrawer({
       };
       refresh(1000);
     },
-    [connectionClient, loadHistory, pane.pane_id],
+    [connectionClient, loadHistory, pane.pane_id, paneChat?.prompt],
+  );
+  // Messages sent from the box that the transcript does not show yet
+  // (chatOutbox): shown on their way, then replaced by their entries. Kept
+  // per pane outside this chat, which a switch to the terminal unmounts.
+  const outboxKey = terminalComposerDraftKey(
+    activeConnectionId,
+    connectionGeneration,
+    pane.pane_id,
+    pane.terminal_id,
+  );
+  const paneOutbox = useSyncExternalStore(subscribeOutbox, () =>
+    readOutbox(outboxKey),
+  );
+  const historyMessagesRef = useRef(history?.messages ?? []);
+  historyMessagesRef.current = history?.messages ?? [];
+  const settlePaneOutbox = useCallback(
+    (entries: readonly AgentHistoryEntry[]) =>
+      updateOutbox(outboxKey, (current) =>
+        settleOutbox(current, entries, Date.now()),
+      ),
+    [outboxKey],
+  );
+  useEffect(() => {
+    // Not before the history is read: a message would time out against an
+    // empty one.
+    if (history) settlePaneOutbox(history.messages);
+  }, [history, settlePaneOutbox]);
+  useEffect(() => {
+    const deadline = nextOutboxDeadline(paneOutbox);
+    if (deadline === null) return;
+    const timer = window.setTimeout(
+      () => settlePaneOutbox(historyMessagesRef.current),
+      Math.max(0, deadline - Date.now()) + 50,
+    );
+    return () => window.clearTimeout(timer);
+  }, [paneOutbox, settlePaneOutbox]);
+  const sendFromBox = useCallback(
+    async (text: string, replacing?: string) => {
+      // An answer typed into a question, a /command or a ! shell line is
+      // not recorded as the user's message: those are sent as before.
+      const answering = paneChat?.prompt?.options.some(
+        (option) => option.cursor && option.freeText,
+      );
+      if (answering || /^\s*[/!]/.test(text)) {
+        await sendMessage(text);
+        return;
+      }
+      // The pane's outbox at the time of sending, whatever this chat shows
+      // by the time the send settles.
+      const key = outboxKey;
+      const message = newOutboxMessage(
+        pane.pane_id,
+        text,
+        historyMessagesRef.current,
+        Date.now(),
+      );
+      const update = (patch: Partial<OutboxMessage>) =>
+        updateOutbox(key, (current) =>
+          current.map((each) =>
+            each.id === message.id ? { ...each, ...patch } : each,
+          ),
+        );
+      updateOutbox(key, (current) => [
+        ...current.filter((each) => each.id !== replacing),
+        message,
+      ]);
+      try {
+        await sendMessage(text);
+        update({ state: "sent", sentAtMs: Date.now() });
+      } catch (error) {
+        // Kept in the chat, marked, rather than put back in the box.
+        update({
+          state: "failed",
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    [outboxKey, pane.pane_id, paneChat?.prompt, sendMessage],
+  );
+  const retryContext = JSON.stringify([
+    outboxKey,
+    pane.agent,
+    pane.agent_status,
+    pane.state_change_seq,
+    open,
+  ]);
+  const [retryConfirmation, setRetryConfirmation] = useState<{
+    message: OutboxMessage;
+    context: string;
+  } | null>(null);
+  useEffect(() => {
+    if (retryConfirmation?.context !== retryContext) setRetryConfirmation(null);
+  }, [retryConfirmation, retryContext]);
+  const retryWarning = agentPromptWarning(pane.agent, pane.agent_status);
+  const retrySend = useCallback(
+    (message: OutboxMessage) => {
+      if (retryWarning)
+        setRetryConfirmation({ message, context: retryContext });
+      else void sendFromBox(message.text, message.id);
+    },
+    [retryWarning, retryContext, sendFromBox],
+  );
+  const discardSend = useCallback(
+    (message: OutboxMessage) =>
+      updateOutbox(outboxKey, (current) =>
+        current.filter((each) => each.id !== message.id),
+      ),
+    [outboxKey],
   );
   const notifyComposerError = useCallback((detail: string) => {
     store.notify({ kind: "error", message: "Message input failed", detail });
@@ -853,14 +1057,303 @@ export function AgentHistoryDrawer({
     pane.pane_id,
     pane.terminal_id,
   );
+  const historyComposer = (
+    <AgentHistoryComposer
+      // A pane or connection switch must never render, or send, the
+      // previous draft before the new one loads.
+      key={composerDraftKey}
+      draftKey={composerDraftKey}
+      agent={pane.agent}
+      status={pane.agent_status}
+      stateSeq={pane.state_change_seq}
+      onSend={sendFromBox}
+      onUploadImage={(file) => uploadTerminalImage(connectionClient, file)}
+      commands={agentCommands}
+      onError={notifyComposerError}
+    />
+  );
+  // An agent's question takes the keys in its card, as in the terminal.
+  const paneActive = paneChat?.active !== false;
+  const promptRef = useRef<HTMLDivElement | null>(null);
+  // Blocked, or a menu on its screen though it still counts as working.
+  const promptShown =
+    !!paneChat &&
+    (pane.agent_status.toLowerCase() === "blocked" ||
+      !!paneChat.prompt?.confirm ||
+      !!paneChat.prompt?.tabs);
+  const promptTyping = !!paneChat?.prompt?.options.some(
+    (option) => option.cursor && option.freeText,
+  );
+  const focusChatBox = useCallback(() => {
+    (paneChat?.composerTarget ?? drawerRef.current)
+      ?.querySelector<HTMLElement>(
+        ".agent-history-composer :is(textarea, [contenteditable='true'])",
+      )
+      ?.focus({ preventScroll: true });
+  }, [paneChat?.composerTarget]);
+  const onPromptKey = (
+    event: Pick<
+      ReactKeyboardEvent<HTMLDivElement>,
+      | "key"
+      | "shiftKey"
+      | "ctrlKey"
+      | "metaKey"
+      | "altKey"
+      | "preventDefault"
+      | "stopPropagation"
+    > & { nativeEvent: KeyboardEvent },
+  ) => {
+    if (!paneChat || event.nativeEvent.isComposing) return;
+    const input = promptKeyInput(event, promptTyping);
+    if (input === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (input === "box") focusChatBox();
+    else paneChat.onKeys(input);
+  };
+  // The message box is hidden while a question only takes a choice; an
+  // answer of one's own ("Type something.") is written in it.
+  const boxHidden = promptShown && !promptTyping;
+  // A question takes the keys when it comes, unless the user is writing; the
+  // box gets them for an answer of one's own, and back when it goes.
+  const promptWas = useRef<"none" | "choice" | "typing">("none");
+  useEffect(() => {
+    const now = !promptShown ? "none" : promptTyping ? "typing" : "choice";
+    const was = promptWas.current;
+    promptWas.current = now;
+    if (now === was || !paneActive) return;
+    const active = document.activeElement;
+    const idle =
+      !active ||
+      active === document.body ||
+      !!active.closest(".agent-history-composer, .agent-chat-prompt");
+    if (now === "typing") {
+      if (idle) requestAnimationFrame(focusChatBox);
+    } else if (now === "choice") {
+      if (
+        idle &&
+        (was === "typing" ||
+          !readTerminalComposerDraft(composerDraftKey).trim())
+      )
+        requestAnimationFrame(() =>
+          promptRef.current?.focus({ preventScroll: true }),
+        );
+    } else if (!active || active === document.body)
+      requestAnimationFrame(focusChatBox);
+  }, [promptShown, promptTyping, composerDraftKey, focusChatBox, paneActive]);
+  // With nothing focused (the hidden box had the keys, say), they still go
+  // to the question.
+  const onPromptKeyRef = useRef(onPromptKey);
+  onPromptKeyRef.current = onPromptKey;
+  useEffect(() => {
+    if (!promptShown || !paneActive) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.target !== document.body) return;
+      promptRef.current?.focus({ preventScroll: true });
+      onPromptKeyRef.current({
+        key: event.key,
+        shiftKey: event.shiftKey,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        nativeEvent: event,
+        preventDefault: () => event.preventDefault(),
+        stopPropagation: () => event.stopPropagation(),
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [promptShown, paneActive]);
+  // Tab from an empty message box goes to the question. The box is a
+  // child of the bottom bar on a phone, so this is caught on the drawer
+  // (events come up through the portal), with no element around the box.
+  const onComposerKeyCapture = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (
+      event.key !== "Tab" ||
+      event.shiftKey ||
+      !promptShown ||
+      !(event.target as HTMLElement).closest?.(".agent-history-composer") ||
+      readTerminalComposerDraft(composerDraftKey).trim()
+    )
+      return;
+    event.preventDefault();
+    event.stopPropagation();
+    promptRef.current?.focus({ preventScroll: true });
+  };
+  // Hidden by not being drawn: its draft stays in the store.
+  const shownComposer = boxHidden ? null : historyComposer;
+  // The History view on a phone writes through the bottom bar's Message box.
+  const paneComposer = paneChat?.composerTarget
+    ? createPortal(shownComposer, paneChat.composerTarget)
+    : mobile && !paneChat
+      ? null
+      : shownComposer;
+  // What the agent is doing, or asking, under the conversation; also shown
+  // before it has one (a new session asking to trust its folder).
+  const chatStatus = (
+    <>
+      {paneChat &&
+      !promptShown &&
+      pane.agent_status.toLowerCase() === "working" ? (
+        <div className="agent-chat-activity" role="status">
+          <span className="agent-chat-activity-mark" aria-hidden="true" />
+          <strong>{paneChat.activity?.word ?? "Working..."}</strong>
+          {paneChat.activity?.detail ? (
+            <span>{paneChat.activity.detail}</span>
+          ) : null}
+        </div>
+      ) : null}
+      {promptShown ? (
+        <div
+          ref={promptRef}
+          className="agent-chat-prompt"
+          role="status"
+          tabIndex={-1}
+          onKeyDown={onPromptKey}
+        >
+          <strong>{pane.agent ?? "The agent"} is waiting for you</strong>
+          {paneChat.prompt?.tabs ? (
+            // AskUserQuestion's questions: the one shown, and the others.
+            <div className="agent-chat-prompt-tabs" role="tablist">
+              {paneChat.prompt.tabs.map((tab) => (
+                <button
+                  key={tab.label}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab.current}
+                  className={`${tab.current ? "is-current" : ""}${
+                    tab.done ? " is-done" : ""
+                  }`}
+                  onClick={() => {
+                    if (tab.input) paneChat.onKeys(tab.input);
+                  }}
+                >
+                  {tab.done ? <Check size={13} aria-hidden="true" /> : null}
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {paneChat.prompt?.lines.length ? (
+            <pre>
+              {paneChat.prompt.lines
+                .filter((line) =>
+                  paneChat.prompt?.options.every(
+                    (option) =>
+                      !line.includes(
+                        option.key
+                          ? `${option.key}. ${option.label}`
+                          : option.label,
+                      ),
+                  ),
+                )
+                .join("\n")}
+            </pre>
+          ) : null}
+          <div
+            className={`agent-chat-prompt-actions${
+              paneChat.prompt?.options.some((option) => option.detail)
+                ? " has-details"
+                : ""
+            }`}
+          >
+            {paneChat.prompt?.options.map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                className={`secondary-btn${option.cursor ? " is-cursor" : ""}`}
+                aria-current={option.cursor ? "true" : undefined}
+                onClick={() => paneChat.onKeys(option.input)}
+              >
+                {option.key ? <kbd>{option.key}</kbd> : null}{" "}
+                {option.checked === undefined ? null : option.checked ? (
+                  <SquareCheck size={15} aria-label="picked" />
+                ) : (
+                  <Square size={15} aria-label="not picked" />
+                )}{" "}
+                {option.label}
+                {option.detail ? <small>{option.detail}</small> : null}
+              </button>
+            ))}
+          </div>
+          {paneChat.prompt?.submit ? (
+            <button
+              type="button"
+              className="secondary-btn agent-chat-prompt-submit"
+              onClick={() => {
+                if (paneChat.prompt?.submit)
+                  paneChat.onKeys(paneChat.prompt.submit);
+              }}
+            >
+              Submit these answers
+            </button>
+          ) : null}
+          <small className="agent-chat-prompt-hint">
+            {promptTyping
+              ? "Write your answer in the message box · Enter sends it"
+              : "↑↓ or j k · 1–9 · Tab · Enter · Esc"}
+          </small>
+          {/* The menu's own keys: moving between questions and choices,
+              confirming, cancelling. */}
+          <div className="agent-chat-prompt-keys" aria-label="Keys">
+            {PROMPT_KEYS.filter(
+              // The tabs move between questions themselves.
+              ([, input]) =>
+                !paneChat.prompt?.tabs ||
+                (input !== "\x1b[D" && input !== "\x1b[C"),
+            ).map(([label, input, name]) => (
+              <button
+                key={name}
+                type="button"
+                className="secondary-btn"
+                aria-label={name}
+                title={name}
+                onClick={() => paneChat.onKeys(input)}
+              >
+                <kbd>{label}</kbd>
+              </button>
+            ))}
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={paneChat.onShowTerminal}
+            >
+              <SquareTerminal size={13} /> Terminal
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
   const historyChat = (
     <div
       className="agent-history-messages"
       role="region"
       aria-label="History messages"
+      onClick={(event) => {
+        // A click on the chat (not on a control, nor ending a selection)
+        // goes to its message box, on a desktop; on a phone it would bring
+        // the keyboard up with every tap.
+        const target = event.target as Element;
+        if (
+          !paneChat ||
+          !paneComposer ||
+          target.closest(
+            "button, a, input, textarea, select, summary, label, [role='button'], [contenteditable='true'], .agent-history-composer",
+          ) ||
+          window.getSelection()?.isCollapsed === false ||
+          window.matchMedia("(pointer: coarse)").matches
+        )
+          return;
+        event.currentTarget
+          .querySelector<HTMLElement>(
+            ".agent-history-composer :is(textarea, [contenteditable='true'])",
+          )
+          ?.focus({ preventScroll: true });
+      }}
     >
-      {historySearch}
-      {historyEmptyState ?? (
+      {!paneChat || searchOpen || query ? historySearch : null}
+      {(paneOutbox.length ? null : historyEmptyState) ?? (
         <div className="agent-history-chat-frame">
           <AgentHistoryChat
             items={chatItems}
@@ -877,24 +1370,16 @@ export function AgentHistoryDrawer({
             toolLoading={toolEntryLoading}
             onLoadTool={loadToolEntry}
             onOpen={setExpandedMessage}
+            imageUrl={imageUrl}
+            outbox={paneOutbox}
+            onRetrySend={retrySend}
+            onDiscardSend={discardSend}
           />
           {historyMinimap("auto")}
         </div>
       )}
-      {!mobile ? (
-        <AgentHistoryComposer
-          // A pane or connection switch must never render, or send, the
-          // previous draft before the new one loads.
-          key={composerDraftKey}
-          draftKey={composerDraftKey}
-          agent={pane.agent}
-          status={pane.agent_status}
-          stateSeq={pane.state_change_seq}
-          onSend={sendMessage}
-          onUploadImage={(file) => uploadTerminalImage(connectionClient, file)}
-          onError={notifyComposerError}
-        />
-      ) : null}
+      {chatStatus}
+      {paneComposer}
     </div>
   );
   const changeView = (next: AgentHistoryView) => {
@@ -990,15 +1475,17 @@ export function AgentHistoryDrawer({
   return (
     <>
       <aside
+        ref={drawerRef}
         className={`agent-history-drawer ${open ? "is-open" : ""} ${
           embedded ? "is-embedded" : ""
-        } ${wide ? "is-wide" : ""}`}
+        } ${wide ? "is-wide" : ""}${paneChat ? " is-pane-chat" : ""}`}
         data-view={detailsOpen ? "details" : view}
         aria-label="Agent session"
         aria-hidden={!open}
         inert={!open}
+        onKeyDownCapture={onComposerKeyCapture}
       >
-        {mobile ? (
+        {mobile && !paneChat ? (
           <div className="agent-history-mobile-head">
             <button
               type="button"
@@ -1052,50 +1539,102 @@ export function AgentHistoryDrawer({
         <div
           className="agent-history-drawer-head"
           id={headerId}
-          hidden={mobile && !headerExpanded}
+          hidden={mobile && !paneChat && !headerExpanded}
         >
-          <div className="agent-history-identity">
-            <AgentIcon agent={pane.agent} />
-            <div className="agent-history-title">
-              <strong>
-                Session
-                {messages.length > 0 ? (
-                  <span
-                    className="agent-history-count"
-                    aria-label={`${visibleMessages.length} of ${messages.length} history entries`}
-                    title="Most recent 200 messages with their tool entries"
-                  >
-                    {visibleMessages.length === messages.length
-                      ? messages.length
-                      : `${visibleMessages.length}/${messages.length}`}
-                  </span>
-                ) : null}
-              </strong>
-              <span title={workspaceLabel}>
-                {workspaceLabel} · {pane.agent ?? "Agent"} ·{" "}
-                {shortId(pane.pane_id)}
-              </span>
+          {paneChat ? (
+            <>
+              <AgentIcon agent={pane.agent} />
+              {sessionTitle ? (
+                <span className="agent-chat-title" title={sessionTitle}>
+                  {sessionTitle}
+                </span>
+              ) : null}
+            </>
+          ) : (
+            <div className="agent-history-identity">
+              <AgentIcon agent={pane.agent} />
+              <div className="agent-history-title">
+                <strong>
+                  {sessionTitle ?? "Session"}
+                  {messages.length > 0 ? (
+                    <span
+                      className="agent-history-count"
+                      aria-label={`${visibleMessages.length} of ${messages.length} history entries`}
+                      title="Most recent 200 messages with their tool entries"
+                    >
+                      {visibleMessages.length === messages.length
+                        ? messages.length
+                        : `${visibleMessages.length}/${messages.length}`}
+                    </span>
+                  ) : null}
+                </strong>
+                <span title={workspaceLabel}>
+                  {workspaceLabel} · {pane.agent ?? "Agent"} ·{" "}
+                  {shortId(pane.pane_id)}
+                </span>
+              </div>
             </div>
-          </div>
+          )}
           <span
             className={`agent-history-status is-${pane.agent_status.toLowerCase()}`}
           >
             {pane.agent_status}
           </span>
           <div className="agent-history-actions">
-            {!mobile ? chatViewToggle : null}
-            <button
-              type="button"
-              className="agent-history-icon"
-              aria-label="Session details"
-              aria-pressed={detailsOpen}
-              title={detailsOpen ? "Show history" : "Show session details"}
-              onClick={() => setDetailsOpen((current) => !current)}
-              disabled={!hasSessionData}
-            >
-              <Info size={14} />
-            </button>
-            {sessionActions}
+            {paneChat ? (
+              <>
+                <AgentArtifactsMenu artifacts={artifacts} />
+                <button
+                  type="button"
+                  className="agent-history-icon"
+                  aria-label="Search the conversation"
+                  aria-pressed={searchOpen}
+                  title="Search"
+                  onClick={() => {
+                    if (searchOpen) changeFilters(filters, "");
+                    setSearchOpen(!searchOpen);
+                  }}
+                >
+                  <Search size={14} />
+                </button>
+                {pane.agent_status.toLowerCase() === "working" ? (
+                  <button
+                    type="button"
+                    className="agent-history-icon"
+                    aria-label="Stop"
+                    title="Stop: Esc in the terminal"
+                    onClick={() => paneChat.onKeys("\x1b")}
+                  >
+                    <Square size={14} />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="agent-history-icon"
+                  aria-label="Show the terminal"
+                  title="Show the terminal"
+                  onClick={paneChat.onShowTerminal}
+                >
+                  <SquareTerminal size={14} />
+                </button>
+              </>
+            ) : (
+              <>
+                {!mobile ? chatViewToggle : null}
+                <button
+                  type="button"
+                  className="agent-history-icon"
+                  aria-label="Session details"
+                  aria-pressed={detailsOpen}
+                  title={detailsOpen ? "Show history" : "Show session details"}
+                  onClick={() => setDetailsOpen((current) => !current)}
+                  disabled={!hasSessionData}
+                >
+                  <Info size={14} />
+                </button>
+              </>
+            )}
+            {paneChat ? null : sessionActions}
             <button
               type="button"
               className={`agent-history-icon ${loading ? "is-loading" : ""}`}
@@ -1120,7 +1659,13 @@ export function AgentHistoryDrawer({
           </div>
         </div>
 
-        {unavailable ? (
+        {unavailable && paneChat ? (
+          <div className="agent-chat-waiting" role="status">
+            <span className="agent-chat-activity-mark" aria-hidden="true" />
+            <span>No conversation yet</span>
+            {unavailableLasted ? <small>{unavailableDetail}</small> : null}
+          </div>
+        ) : unavailable ? (
           <div className="agent-history-unavailable" role="status">
             <strong>Session unavailable</strong>
             <p>{unavailableDetail}</p>
@@ -1147,7 +1692,15 @@ export function AgentHistoryDrawer({
               Retry
             </button>
           </div>
-        ) : (
+        ) : null}
+        {unavailable && paneChat ? (
+          // A pane's chat still types into the agent, and answers its
+          // questions, without its transcript.
+          <>
+            {chatStatus}
+            {paneComposer}
+          </>
+        ) : unavailable ? null : (
           <>
             {error ? <div className="agent-history-error">{error}</div> : null}
             {!detailsOpen ? (
@@ -1240,6 +1793,23 @@ export function AgentHistoryDrawer({
           </>
         )}
       </aside>
+      <ConfirmDialog
+        open={open && retryConfirmation?.context === retryContext}
+        title="Send this message again?"
+        message={retryWarning ?? "Send the message to the agent's terminal."}
+        confirmLabel="Send anyway"
+        onClose={() => setRetryConfirmation(null)}
+        onConfirm={() => {
+          if (retryConfirmation?.context !== retryContext) return;
+          const message = readOutbox(outboxKey).find(
+            (each) =>
+              each.id === retryConfirmation.message.id &&
+              each.state === "failed",
+          );
+          if (message) void sendFromBox(message.text, message.id);
+          setRetryConfirmation(null);
+        }}
+      />
       <AgentMessageDialog
         message={
           !masterDetail && expandedMessage

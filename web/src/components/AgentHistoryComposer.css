@@ -27,7 +27,8 @@
 }
 
 .agent-history-composer-send,
-.agent-history-composer-attach {
+.agent-history-composer-attach,
+.agent-history-composer-escape {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -37,9 +38,16 @@
   font-size: 11px;
 }
 
-.agent-history-composer-attach {
+.agent-history-composer-attach,
+.agent-history-composer-escape {
   min-width: 36px;
   padding: 0;
+}
+
+.agent-history-composer-escape {
+  padding: 0 8px;
+  font-family: var(--mono-font);
+  font-weight: 600;
 }
 
 .agent-history-composer-warning {
@@ -75,4 +83,140 @@
   min-height: 28px;
   padding: 0 9px;
   font-size: 11px;
+}
+
+/* Attached images: a thumbnail each, as `[Image #N]` in the text. */
+.agent-history-composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-history-composer-attachments > span {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 2px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.agent-history-composer-attachments img {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.agent-history-composer-attachments button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+}
+
+/* A /command being typed: the matching commands above the box. */
+.agent-history-composer-commands {
+  display: flex;
+  flex-direction: column;
+  max-height: min(40vh, 280px);
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  list-style: none;
+  overscroll-behavior: contain;
+}
+
+.agent-history-composer-commands button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.agent-history-composer-commands button.is-selected,
+.agent-history-composer-commands button:hover {
+  background: var(--accent-soft);
+}
+
+.agent-history-composer-commands strong {
+  flex: none;
+  font-family: var(--mono-font);
+  font-size: 12px;
+}
+
+.agent-history-composer-commands span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .agent-history-composer-commands button {
+    min-height: 40px;
+  }
+}
+
+/* The box with Vim keys: CodeMirror, dressed as the plain box. */
+.agent-history-composer-editor {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.agent-history-composer-editor .cm-editor {
+  max-height: 160px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.agent-history-composer-editor .cm-editor.cm-focused {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.agent-history-composer-editor .cm-scroller {
+  overflow: auto;
+  font-family: inherit;
+}
+
+.agent-history-composer-editor .cm-content {
+  min-height: 34px;
+  padding: 7px 8px;
+  caret-color: var(--text);
+}
+
+.agent-history-composer-editor .cm-fat-cursor {
+  background: var(--accent) !important;
+  opacity: 0.6;
+}
+
+.agent-history-composer-editor .cm-placeholder {
+  color: var(--muted);
 }

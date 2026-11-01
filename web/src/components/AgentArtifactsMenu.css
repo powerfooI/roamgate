@@ -1,0 +1,99 @@
+.agent-artifacts {
+  position: relative;
+  display: inline-flex;
+}
+
+.agent-artifacts-button {
+  gap: 2px;
+  width: auto;
+  padding: 0 4px;
+  color: var(--accent);
+}
+
+.agent-artifacts-button span {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-artifacts-menu {
+  position: fixed;
+  z-index: 40;
+  max-width: calc(100vw - 32px);
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+}
+
+.agent-artifacts-menu h3 {
+  margin: 2px 6px 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.agent-artifacts-menu ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-artifacts-menu li {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.agent-artifacts-menu a {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 8px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.agent-artifacts-menu a svg {
+  grid-row: span 2;
+  color: var(--accent);
+}
+
+.agent-artifacts-title {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-artifacts-menu small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.agent-artifacts-menu a:hover,
+.agent-artifacts-menu a:focus-visible,
+.agent-artifacts-copy:hover {
+  background: var(--panel-2);
+}
+
+.agent-artifacts-copy {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}

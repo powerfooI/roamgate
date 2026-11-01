@@ -1,3 +1,6 @@
+import { parseSessionTitle } from "./session-title";
+import { parseSessionCommands } from "./session-commands";
+import { parseSessionArtifacts } from "./session-artifacts";
 import { randomUUID } from "node:crypto";
 import type { AgentSessionFileAccess } from "./session-file-access";
 import type { AgentSessionResolved, SessionFile } from "./session-types";
@@ -47,6 +50,12 @@ export async function readSessionProjection(
     trajectory,
     messages,
     entries: historyEntriesFromTrajectory(projectionFile, trajectory),
+    /** What a Claude session is about (session-title.ts). */
+    title: agent === "claude" ? parseSessionTitle(records) : null,
+    /** The pages a Claude session published with its Artifact tool. */
+    artifacts: agent === "claude" ? parseSessionArtifacts(records) : [],
+    /** The skills and custom commands a Claude session offers as /name. */
+    commands: agent === "claude" ? parseSessionCommands(records) : [],
     stats: {
       turns: messages.filter((message) => message.role === "user").length,
       records: records.length,

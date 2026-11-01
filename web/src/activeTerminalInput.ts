@@ -17,6 +17,10 @@ export function activeTerminalInput(root: ParentNode): HTMLElement | null {
     shell.querySelector<HTMLElement>(
       ".terminal-composer-input:not([hidden])",
     ) ??
+    // A pane shown as a chat takes keys in its message box.
+    shell.querySelector<HTMLElement>(
+      ".terminal-chat-layer .agent-history-composer :is(textarea, [contenteditable='true'])",
+    ) ??
     shell.querySelector<HTMLElement>(".terminal-view") ??
     null
   );

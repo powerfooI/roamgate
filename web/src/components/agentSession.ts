@@ -195,6 +195,8 @@ export type AgentSessionSummary = {
   pane_id: string;
   path: string;
   session?: { value?: string } | null;
+  /** What a Claude session is about: its /rename name, else Claude's title. */
+  title?: string | null;
   updated_at: string;
   file: { size?: number } | null;
   stats: {
