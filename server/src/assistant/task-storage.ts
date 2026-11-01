@@ -21,6 +21,15 @@ export type TaskStorage = {
 };
 
 export const MAX_TASK_STATE_BYTES = 32_000_000;
+/**
+ * Run notices live beside the runs rather than in them: an older Roamgate
+ * writes runs by position, so a new runs column would break its saves after
+ * a rollback. It does not know this table, leaves it alone, and its rows
+ * name runs by their unique id, so a stale one is dropped on the next save.
+ */
+const runNotices = `CREATE TABLE IF NOT EXISTS run_notices (
+    run_id TEXT PRIMARY KEY, notice TEXT NOT NULL
+  ) STRICT;`;
 const schema = `
   CREATE TABLE tasks (
     id TEXT PRIMARY KEY, position INTEGER NOT NULL,
@@ -30,7 +39,7 @@ const schema = `
     schedule TEXT NOT NULL, config TEXT NOT NULL,
     targets TEXT NOT NULL, workspaces TEXT NOT NULL,
     notification_mode TEXT, notifications TEXT NOT NULL DEFAULT '[]',
-    mentions TEXT
+    mentions TEXT, all_workspaces INTEGER
   ) STRICT;
   CREATE TABLE runs (
     id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
@@ -48,6 +57,7 @@ const schema = `
     id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id),
     position INTEGER NOT NULL
   ) STRICT;
+  ${runNotices}
 `;
 
 type TaskRow = {
@@ -68,6 +78,7 @@ type TaskRow = {
   notification_mode: string | null;
   notifications: string;
   mentions: string | null;
+  all_workspaces?: number | null;
 };
 type RunRow = {
   id: string;
@@ -160,14 +171,15 @@ export function openTaskStorage(
 
     function write(state: SavedTaskState) {
       db.exec(
-        "DELETE FROM requests; DELETE FROM runs; DELETE FROM tasks; DELETE FROM proposals",
+        "DELETE FROM requests; DELETE FROM runs; DELETE FROM tasks; DELETE FROM proposals; DELETE FROM run_notices",
       );
+      const noticeInsert = db.query("INSERT INTO run_notices VALUES (?, ?)");
       const taskInsert = db.query(
         `INSERT INTO tasks (
           id, position, status, created_at, updated_at, next_run_at, due_at,
           title, prompt, scope, schedule, config, targets, workspaces,
-          notification_mode, notifications, mentions
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          notification_mode, notifications, mentions, all_workspaces
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const runInsert = db.query(
         "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -192,6 +204,7 @@ export function openTaskStorage(
           input.notification_mode ?? null,
           JSON.stringify(entry.notifications ?? []),
           input.mentions === undefined ? null : JSON.stringify(input.mentions),
+          input.all_workspaces ? 1 : null,
         );
         for (const [position, run] of entry.runs.entries()) {
           const admission: PreparedTask | null = [
@@ -218,6 +231,7 @@ export function openTaskStorage(
             Number(run.manual),
             admission ? JSON.stringify(admission) : null,
           );
+          if (run.notice !== undefined) noticeInsert.run(run.id, run.notice);
         }
       }
       const proposalInsert = db.query(
@@ -289,6 +303,7 @@ export function openTaskStorage(
           ["id", "status", "created_at", "task_id", "input", "prepared"],
         ],
         ["requests", 1000, ["id", "task_id"]],
+        ["run_notices", 1000, ["run_id", "notice"]],
       ] as const) {
         const row = db
           .query<{ count: number; bytes: number }, []>(
@@ -302,6 +317,14 @@ export function openTaskStorage(
       const runs = db
         .query<RunRow, []>("SELECT * FROM runs ORDER BY position")
         .all();
+      const notices = new Map(
+        db
+          .query<{ run_id: string; notice: string }, []>(
+            "SELECT run_id, notice FROM run_notices",
+          )
+          .all()
+          .map((row) => [row.run_id, row.notice]),
+      );
       const tasks = db
         .query<TaskRow, []>("SELECT * FROM tasks ORDER BY position")
         .all()
@@ -327,6 +350,8 @@ export function openTaskStorage(
               ...(row.mentions === null
                 ? {}
                 : { mentions: JSON.parse(row.mentions) }),
+              // An older Roamgate saves no flag: the task keeps its scope.
+              ...(row.all_workspaces === 1 ? { all_workspaces: true } : {}),
             },
             config: JSON.parse(row.config),
             targets: JSON.parse(row.targets),
@@ -346,6 +371,7 @@ export function openTaskStorage(
                 finished_at: run.finished_at ?? undefined,
                 error: run.error,
                 manual: run.manual === 1,
+                ...(notices.has(run.id) ? { notice: notices.get(run.id) } : {}),
               })),
           };
         });
@@ -377,6 +403,38 @@ export function openTaskStorage(
         .all();
       return validate({ tasks, proposals, requests });
     });
+    /**
+     * Additions to version 3 that an older Roamgate reading version 3 still
+     * reads and writes (it names the task columns it saves and ignores the
+     * table), so they keep the version: a new one would make it refuse the
+     * database after a rollback.
+     */
+    const additions = () => {
+      const columns = db
+        .query<{ name: string }, []>(
+          "SELECT name FROM pragma_table_info('tasks')",
+        )
+        .all()
+        .map((column) => column.name);
+      if (columns.length && !columns.includes("all_workspaces"))
+        db.exec("ALTER TABLE tasks ADD COLUMN all_workspaces INTEGER");
+      db.exec(runNotices);
+    };
+    const current = () => {
+      const columns = db
+        .query<{ name: string }, []>(
+          "SELECT name FROM pragma_table_info('tasks')",
+        )
+        .all();
+      return (
+        columns.some((column) => column.name === "all_workspaces") &&
+        !!db
+          .query(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run_notices'",
+          )
+          .get()
+      );
+    };
     if (!existing)
       db.transaction(() => {
         db.exec(schema);
@@ -391,9 +449,15 @@ export function openTaskStorage(
             ALTER TABLE tasks ADD COLUMN notifications TEXT NOT NULL DEFAULT '[]';
           `);
         db.exec("ALTER TABLE tasks ADD COLUMN mentions TEXT");
+        additions();
         // Validate every table before committing the schema upgrade.
         load();
         db.exec("PRAGMA user_version = 3");
+      }).immediate();
+    else if (!current())
+      db.transaction(() => {
+        additions();
+        load();
       }).immediate();
     // Fail closed during construction, including a missing or damaged table.
     else load();

@@ -307,7 +307,10 @@ state; sends are never replayed.
   directory; one bridge process must own it. After a restart, a turn resumes
   only after its endpoints, Herdr boot IDs, and workspaces are re-verified;
   Claude Code turns instead stop without replay as described above.
-- **Tasks** live in `tasks.sqlite`; each state change commits before it is
+- **Tasks** live in `tasks.sqlite`, at `user_version` 3: later additions
+  (`tasks.all_workspaces`, the `run_notices` table) are made in place, so an
+  older bridge, which refuses other versions, still opens it after a rollback.
+  Each state change commits before it is
   published. One scheduled run executes at a time, overdue occurrences are
   combined, and runs re-verify identities and permissions. Run results emit an
   `assistant_notification` push; custom notices are deduplicated by event key.
