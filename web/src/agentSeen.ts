@@ -80,7 +80,8 @@ export function watchAgentsSeen({
       const done =
         (pane.agent_status === "idle" || pane.agent_status === "done") &&
         seq !== undefined;
-      if (done && (finished.get(key) ?? -1) < seq) {
+      // Herdr can restart while preserving terminal IDs and resetting seq.
+      if (done && finished.get(key) !== seq) {
         finished.set(key, seq);
         mark(key, paneId, pane.terminal_id, seq, pane.agent_status === "done");
       } else if (!shown.has(key)) mark(key, paneId, pane.terminal_id);

@@ -175,3 +175,20 @@ test("a phone sees only its pane, and a failed mark is sent again", async () => 
   expect(page.refreshes()).toBe(1);
   page.stop();
 });
+
+test("an agent retained across a Herdr restart is marked in its lower finished state", () => {
+  const page = harness();
+  page.calls.length = 0;
+  page.update((snapshot) => ({
+    ...snapshot,
+    panes: snapshot.panes.map((each) =>
+      each.pane_id === "b" ? { ...each, state_change_seq: 1 } : each,
+    ),
+  }));
+  expect(page.calls).toContainEqual({
+    pane_id: "b",
+    terminal_id: "t-b",
+    seq: 1,
+  });
+  page.stop();
+});
