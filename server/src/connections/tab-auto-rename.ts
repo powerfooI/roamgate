@@ -1,5 +1,29 @@
 import { isRecord, stringValue } from "../agent/session-utils";
 
+export function isGenericTerminalTitle(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) return true;
+  // Match shell prompt like user@host: path or user@host path
+  if (/^[\w.-]+@[\w.-]+:?\s*.*$/.test(trimmed)) return true;
+  // Match common shell binaries
+  if (/^(bash|zsh|sh|fish|csh|tcsh|dash|tmux|screen)$/i.test(trimmed))
+    return true;
+  // Match CLI invocations like "agy --...", "claude --...", "hermes ..."
+  if (/^(agy|claude|hermes|codex)\s+--?[a-zA-Z0-9_-]+/i.test(trimmed))
+    return true;
+  return false;
+}
+
+export interface HerdrPane {
+  pane_id: string;
+  tab_id: string;
+  focused?: boolean;
+  agent?: string;
+  cwd?: string;
+  terminal_title?: string;
+  terminal_title_stripped?: string;
+}
+
 export interface TabAutoRenamerOptions {
   herdr: {
     call(
@@ -8,9 +32,13 @@ export interface TabAutoRenamerOptions {
       timeoutMs?: number,
     ): Promise<any>;
   };
-  getAgentTitleForPane: (paneId: string) => Promise<string | null>;
+  getAgentTitleForPane: (
+    paneId: string,
+    candidatePane?: HerdrPane,
+  ) => Promise<string | null>;
   isEnabled?: () => Promise<boolean>;
   debounceMs?: number;
+  pollIntervalMs?: number;
   log?: (message: string) => void;
 }
 
@@ -29,13 +57,6 @@ interface HerdrTab {
   workspace_id?: string;
 }
 
-interface HerdrPane {
-  pane_id: string;
-  tab_id: string;
-  focused?: boolean;
-  agent?: string;
-}
-
 export function createTabAutoRenamer(
   options: TabAutoRenamerOptions,
 ): TabAutoRenamer {
@@ -43,6 +64,7 @@ export function createTabAutoRenamer(
   const lastAppliedTitles = new Map<string, string>();
   const debounceMs = options.debounceMs ?? 500;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
   let disposed = false;
 
   const isEnabled = options.isEnabled ?? (async () => true);
@@ -79,7 +101,7 @@ export function createTabAutoRenamer(
         if (!candidatePane) continue;
 
         const title = await options
-          .getAgentTitleForPane(candidatePane.pane_id)
+          .getAgentTitleForPane(candidatePane.pane_id, candidatePane)
           .catch(() => null);
 
         if (!title || typeof title !== "string") continue;
@@ -119,6 +141,15 @@ export function createTabAutoRenamer(
     }, debounceMs);
   }
 
+  if (options.pollIntervalMs && options.pollIntervalMs > 0) {
+    pollTimer = setInterval(() => {
+      scheduleEvaluation();
+    }, options.pollIntervalMs);
+  }
+
+  // Initial evaluation on startup
+  scheduleEvaluation();
+
   return {
     markManualRename(tabId: string) {
       if (tabId) manualRenames.add(tabId);
@@ -142,8 +173,13 @@ export function createTabAutoRenamer(
       } else if (
         eventType === "pane.agent_detected" ||
         eventType === "pane_agent_detected" ||
+        eventType === "pane.agent_status_changed" ||
+        eventType === "pane_agent_status_changed" ||
         eventType === "pane.focused" ||
-        eventType === "tab.focused"
+        eventType === "pane_focused" ||
+        eventType === "tab.focused" ||
+        eventType === "tab_focused" ||
+        eventType === "session.resync_required"
       ) {
         scheduleEvaluation();
       }
@@ -158,6 +194,10 @@ export function createTabAutoRenamer(
       if (debounceTimer) {
         clearTimeout(debounceTimer);
         debounceTimer = null;
+      }
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
       }
       manualRenames.clear();
       lastAppliedTitles.clear();

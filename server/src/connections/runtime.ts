@@ -66,7 +66,14 @@ import {
   createWorktreeRemovalRuntime,
 } from "../worktree/remove";
 import { createAgentStatusSubscriptionLoop } from "./agent-status-subscription";
-import { createTabAutoRenamer } from "./tab-auto-rename";
+import { existsSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+import { sshCommandArgv } from "../bridge/ssh-command";
+import {
+  createTabAutoRenamer,
+  isGenericTerminalTitle,
+} from "./tab-auto-rename";
 import { sanitizeConnectionError } from "./manager";
 import { createEventSubscriptionLoop } from "./subscription-loop";
 import { type ConnectionIdentity, LEGACY_DEFAULT_CONNECTION } from "./types";
@@ -530,24 +537,119 @@ export function createLegacyConnectionRuntime(args: {
     },
   });
 
+  async function readHermesSqliteTitle(
+    sshHost?: string,
+  ): Promise<string | null> {
+    const pythonScript =
+      "import sqlite3, os\n" +
+      'db = os.path.expanduser("~/.hermes/state.db")\n' +
+      "if os.path.exists(db):\n" +
+      "    try:\n" +
+      "        conn = sqlite3.connect(db)\n" +
+      "        row = conn.execute(\"SELECT title FROM sessions WHERE title IS NOT NULL AND title != '' ORDER BY started_at DESC LIMIT 1\").fetchone()\n" +
+      "        if row and row[0]:\n" +
+      "            print(row[0].strip())\n" +
+      "    except Exception:\n" +
+      "        pass\n";
+    if (sshHost) {
+      try {
+        const res = await runBinaryProcessWithTimeout(
+          sshCommandArgv(sshHost, `python3 -c ${shQuote(pythonScript)}`),
+          3000,
+        );
+        if (res.code === 0) {
+          const out = res.stdout.toString("utf8").trim();
+          return out.length > 0 ? out : null;
+        }
+      } catch {}
+    } else {
+      try {
+        const dbPath = join(homedir(), ".hermes", "state.db");
+        if (existsSync(dbPath)) {
+          const { Database } = await import("bun:sqlite");
+          const db = new Database(dbPath, { readonly: true });
+          const row = db
+            .query(
+              "SELECT title FROM sessions WHERE title IS NOT NULL AND title != '' ORDER BY started_at DESC LIMIT 1",
+            )
+            .get() as { title?: string } | null;
+          db.close();
+          if (row?.title && typeof row.title === "string") {
+            const trimmed = row.title.trim();
+            return trimmed.length > 0 ? trimmed : null;
+          }
+        }
+      } catch {}
+    }
+    return null;
+  }
+
   const tabAutoRenamer = createTabAutoRenamer({
     herdr,
-    getAgentTitleForPane: async (paneId) => {
+    getAgentTitleForPane: async (paneId, candidatePane) => {
+      // 1. Try reading summary title from agentSessions
       try {
         const summary = (await agentSessions.readSummary({
           pane_id: paneId,
         })) as {
           title?: string | null;
         };
-        return summary?.title ?? null;
-      } catch {
-        return null;
+        if (summary?.title && typeof summary.title === "string") {
+          const trimmed = summary.title.trim();
+          if (trimmed) return trimmed;
+        }
+      } catch {}
+
+      // 2. If Hermes, check SQLite state.db
+      if (candidatePane?.agent === "hermes") {
+        try {
+          const hermesTitle = await readHermesSqliteTitle(config.sshHost);
+          if (hermesTitle) return hermesTitle;
+        } catch {}
       }
+
+      // 3. Fallback to pane / agent terminal_title_stripped or terminal_title
+      try {
+        let stripped = candidatePane?.terminal_title_stripped;
+        let raw = candidatePane?.terminal_title;
+
+        if (!stripped && !raw) {
+          const agentInfo = (await herdr.call(
+            "agent.get",
+            { target: paneId },
+            5000,
+          )) as {
+            agent?: {
+              terminal_title_stripped?: string;
+              terminal_title?: string;
+            };
+          } | null;
+          stripped = agentInfo?.agent?.terminal_title_stripped;
+          raw = agentInfo?.agent?.terminal_title;
+        }
+
+        if (typeof stripped === "string") {
+          const trimmed = stripped.trim();
+          if (trimmed && !isGenericTerminalTitle(trimmed)) {
+            return trimmed;
+          }
+        }
+
+        if (typeof raw === "string") {
+          const cleaned = raw.replace(/^[\s✳*•]+/, "").trim();
+          if (cleaned && !isGenericTerminalTitle(cleaned)) {
+            return cleaned;
+          }
+        }
+      } catch {}
+
+      return null;
     },
     isEnabled: async () => {
       const settings = await readGuiSettings().catch(() => null);
       return settings?.auto_rename_agent_tabs !== false;
     },
+    pollIntervalMs: 3000,
     log: (message) => logger.debug(message, { connection: identity.id }),
   });
 

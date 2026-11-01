@@ -173,6 +173,59 @@ async function findHermesSession(
   });
 }
 
+async function findClaudeSessionForCwd(
+  cwd: string,
+): Promise<{ id: string; file: SessionFile } | null> {
+  if (!cwd) return null;
+  const slug = cwd.replace(/[^a-zA-Z0-9]/g, "-");
+  const projectDir = join(homedir(), ".claude", "projects", slug);
+  try {
+    const files = await walkFiles(projectDir, (path) =>
+      path.endsWith(".jsonl"),
+    );
+    const matchedPath = newestFile(files);
+    if (!matchedPath) return null;
+    const id = basename(matchedPath, ".jsonl");
+    return {
+      id,
+      file: { path: matchedPath, mtimeMs: statSync(matchedPath).mtimeMs },
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function findHermesSessionForCwd(
+  cwd: string,
+): Promise<{ id: string; file: SessionFile } | null> {
+  const roots: string[] = [];
+  if (cwd) {
+    roots.push(join(cwd, ".hermes"));
+  }
+  roots.push(join(homedir(), ".hermes", "sessions"));
+  roots.push(join(homedir(), ".hermes"));
+  roots.push(join(homedir(), ".local", "state", "hermes", "sessions"));
+
+  const files = (
+    await Promise.all(
+      roots.map((root) =>
+        walkFiles(
+          root,
+          (path) => path.endsWith(".jsonl") || path.endsWith(".json"),
+        ),
+      ),
+    )
+  ).flat();
+
+  const matchedPath = newestFile(files);
+  if (!matchedPath) return null;
+  const id = basename(matchedPath).replace(/\.(jsonl|json)$/, "");
+  return {
+    id,
+    file: { path: matchedPath, mtimeMs: statSync(matchedPath).mtimeMs },
+  };
+}
+
 async function findKimiSession(
   id: string,
   context: AgentSessionResolverContext,
@@ -429,6 +482,30 @@ export async function resolveAgentSessionInfo(
         agent: "muse",
         kind: "id",
         value: file.sessionId,
+      };
+    }
+  }
+  if (agent === "claude" && !resolvedSession && !files.remote) {
+    const descriptor = await findClaudeSessionForCwd(cwd);
+    if (descriptor) {
+      file = descriptor.file;
+      resolvedSession = {
+        source: "claude-local",
+        agent: "claude",
+        kind: "id",
+        value: descriptor.id,
+      };
+    }
+  }
+  if (agent === "hermes" && !resolvedSession && !files.remote) {
+    const descriptor = await findHermesSessionForCwd(cwd);
+    if (descriptor) {
+      file = descriptor.file;
+      resolvedSession = {
+        source: "hermes-local",
+        agent: "hermes",
+        kind: "id",
+        value: descriptor.id,
       };
     }
   }

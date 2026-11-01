@@ -1,5 +1,30 @@
 import { describe, expect, test } from "bun:test";
-import { createTabAutoRenamer } from "./tab-auto-rename";
+import {
+  createTabAutoRenamer,
+  isGenericTerminalTitle,
+} from "./tab-auto-rename";
+
+describe("isGenericTerminalTitle", () => {
+  test("identifies shell prompts and shell binaries as generic", () => {
+    expect(isGenericTerminalTitle("shayani@home1:~/workspace/snsa")).toBe(true);
+    expect(isGenericTerminalTitle("shayani@home2: ~")).toBe(true);
+    expect(isGenericTerminalTitle("bash")).toBe(true);
+    expect(isGenericTerminalTitle("zsh")).toBe(true);
+    expect(isGenericTerminalTitle("agy --dangerously-skip-permissions")).toBe(
+      true,
+    );
+    expect(isGenericTerminalTitle("")).toBe(true);
+    expect(isGenericTerminalTitle("   ")).toBe(true);
+  });
+
+  test("identifies agent generated titles as non-generic", () => {
+    expect(isGenericTerminalTitle("Previsão do tempo em João Pessoa")).toBe(
+      false,
+    );
+    expect(isGenericTerminalTitle("Design system para o SNSA")).toBe(false);
+    expect(isGenericTerminalTitle("PR 2814 e feature flag")).toBe(false);
+  });
+});
 
 describe("createTabAutoRenamer", () => {
   const setup = (
@@ -177,5 +202,51 @@ describe("createTabAutoRenamer", () => {
     const renameCalls = calls.filter((c) => c.method === "tab.rename");
     expect(renameCalls).toHaveLength(1);
     expect(tabs[0].label).toBe("Refactor Database");
+  });
+
+  test("triggers evaluation on pane.agent_status_changed event", async () => {
+    const { renamer, calls, tabs } = setup({ debounceMs: 10 });
+
+    renamer.handleHerdrEvent({
+      event: "pane.agent_status_changed",
+      data: { pane_id: "pane-1", agent_status: "idle" },
+    });
+
+    await new Promise((r) => setTimeout(r, 25));
+
+    const renameCalls = calls.filter((c) => c.method === "tab.rename");
+    expect(renameCalls).toHaveLength(1);
+    expect(tabs[0].label).toBe("Refactor Database");
+  });
+
+  test("passes candidatePane to getAgentTitleForPane", async () => {
+    const panes = [
+      {
+        pane_id: "p1",
+        tab_id: "t1",
+        agent: "claude",
+        terminal_title_stripped: "Stripped Title",
+      },
+    ];
+    let receivedPane: unknown = null;
+    const mockHerdr = {
+      async call(method: string) {
+        if (method === "tab.list")
+          return { tabs: [{ tab_id: "t1", label: "Old" }] };
+        if (method === "pane.list") return { panes };
+        return {};
+      },
+    };
+    const renamer = createTabAutoRenamer({
+      herdr: mockHerdr,
+      getAgentTitleForPane: async (_id, pane) => {
+        receivedPane = pane;
+        return (pane as any)?.terminal_title_stripped ?? null;
+      },
+      debounceMs: 0,
+    });
+
+    await renamer.triggerEvaluation();
+    expect(receivedPane).toEqual(panes[0]);
   });
 });
