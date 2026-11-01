@@ -66,6 +66,10 @@ import {
   createWorktreeRemovalRuntime,
 } from "../worktree/remove";
 import { createAgentStatusSubscriptionLoop } from "./agent-status-subscription";
+import {
+  antigravityHome,
+  findAntigravitySessionForCwd,
+} from "../agent/antigravity-session";
 import { existsSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
@@ -584,6 +588,59 @@ export function createLegacyConnectionRuntime(args: {
     return null;
   }
 
+  async function readAntigravityTitle(
+    cwd?: string,
+    sshHost?: string,
+  ): Promise<string | null> {
+    if (sshHost) {
+      const pythonScript =
+        "import os, glob, re\n" +
+        "home = os.path.expanduser('~/.gemini/antigravity-cli/annotations')\n" +
+        "files = glob.glob(os.path.join(home, '*.pbtxt'))\n" +
+        "if files:\n" +
+        "    files.sort(key=os.path.getmtime, reverse=True)\n" +
+        "    try:\n" +
+        "        with open(files[0], 'r', encoding='utf-8') as f:\n" +
+        '            m = re.search(r\'title:\\s*"([^"]+)"\', f.read())\n' +
+        "            if m:\n" +
+        "                print(m.group(1).strip())\n" +
+        "    except Exception:\n" +
+        "        pass\n";
+      try {
+        const res = await runBinaryProcessWithTimeout(
+          sshCommandArgv(sshHost, `python3 -c ${shQuote(pythonScript)}`),
+          3000,
+        );
+        if (res.code === 0) {
+          const out = res.stdout.toString("utf8").trim();
+          return out.length > 0 ? out : null;
+        }
+      } catch {}
+    } else {
+      try {
+        if (cwd) {
+          const desc = await findAntigravitySessionForCwd(cwd);
+          if (desc?.session.sessionId) {
+            const pbtxt = join(
+              antigravityHome(),
+              "annotations",
+              `${desc.session.sessionId}.pbtxt`,
+            );
+            if (existsSync(pbtxt)) {
+              const text = await Bun.file(pbtxt).text();
+              const match = text.match(/title:\s*"([^"]+)"/);
+              if (match?.[1]) {
+                const trimmed = match[1].trim();
+                if (trimmed) return trimmed;
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+    return null;
+  }
+
   const tabAutoRenamer = createTabAutoRenamer({
     herdr,
     getAgentTitleForPane: async (paneId, candidatePane) => {
@@ -608,7 +665,18 @@ export function createLegacyConnectionRuntime(args: {
         } catch {}
       }
 
-      // 3. Fallback to pane / agent terminal_title_stripped or terminal_title
+      // 3. If Antigravity (agy), check annotations
+      if (candidatePane?.agent === "agy") {
+        try {
+          const agyTitle = await readAntigravityTitle(
+            candidatePane.cwd,
+            config.sshHost,
+          );
+          if (agyTitle) return agyTitle;
+        } catch {}
+      }
+
+      // 4. Fallback to pane / agent terminal_title_stripped or terminal_title
       try {
         let stripped = candidatePane?.terminal_title_stripped;
         let raw = candidatePane?.terminal_title;

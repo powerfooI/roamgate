@@ -77,4 +77,34 @@ describe("extractAgentSessionTitle", () => {
       expect(extractAgentSessionTitle("hermes", dummyFile, records)).toBeNull();
     });
   });
+
+  describe("agy", () => {
+    test("extracts title from annotations pbtxt file", async () => {
+      const { mkdtemp, rm } = await import("node:fs/promises");
+      const { writeFileSync, mkdirSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+
+      const dir = await mkdtemp(join(tmpdir(), "agy-title-test-"));
+      try {
+        const convDir = join(dir, "conversations");
+        const annoDir = join(dir, "annotations");
+        mkdirSync(convDir, { recursive: true });
+        mkdirSync(annoDir, { recursive: true });
+
+        const sessionId = "session-123";
+        const dbPath = join(convDir, `${sessionId}.db`);
+        writeFileSync(dbPath, "");
+        const pbtxtPath = join(annoDir, `${sessionId}.pbtxt`);
+        writeFileSync(pbtxtPath, 'title: "Migrate Database Schema"\n');
+
+        const file: SessionFile = { path: dbPath, mtimeMs: 1000 };
+        expect(extractAgentSessionTitle("agy", file, [])).toBe(
+          "Migrate Database Schema",
+        );
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
 });

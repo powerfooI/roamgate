@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { antigravityHome } from "./antigravity-session";
 import type { SessionFile } from "./session-types";
 import { isRecord, stringValue } from "./session-utils";
 
@@ -9,9 +12,32 @@ function cleanTitle(val: unknown): string | null {
 
 export function extractAgentSessionTitle(
   agent: string,
-  _file: SessionFile,
+  file: SessionFile,
   records: Record<string, unknown>[],
 ): string | null {
+  if (agent === "agy") {
+    try {
+      const sessionId = basename(file.path, ".db");
+      const dir = dirname(file.path);
+      const pbtxtCandidate = join(
+        dirname(dir),
+        "annotations",
+        `${sessionId}.pbtxt`,
+      );
+      const pbtxt = existsSync(pbtxtCandidate)
+        ? pbtxtCandidate
+        : join(antigravityHome(), "annotations", `${sessionId}.pbtxt`);
+      if (existsSync(pbtxt)) {
+        const content = readFileSync(pbtxt, "utf8");
+        const match = content.match(/title:\s*"([^"]+)"/);
+        if (match?.[1]) {
+          const clean = cleanTitle(match[1]);
+          if (clean) return clean;
+        }
+      }
+    } catch {}
+  }
+
   if (!Array.isArray(records) || records.length === 0) return null;
 
   if (agent === "claude") {
