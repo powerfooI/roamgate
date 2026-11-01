@@ -2342,6 +2342,198 @@ export function createAssistantService(options: {
     })();
   }
 
+  /** A task's workspace as named when the task was saved. */
+  function savedName(prepared: PreparedTask, ref: AssistantWorkspaceRef) {
+    const saved = prepared.workspaces.find(
+      (item) => refKey(item) === refKey(ref),
+    );
+    return `${saved?.connection_label || ref.connection_id} / ${saved?.label || ref.workspace_id}`;
+  }
+  function namedList(names: string[]) {
+    const shown = names.slice(0, 20);
+    return names.length > shown.length
+      ? `${shown.join(", ")} and ${names.length - shown.length} more`
+      : shown.join(", ");
+  }
+  /** The task targets Ranger may not use now, named and with why. */
+  function refusedTargets(prepared: PreparedTask) {
+    const refused = prepared.targets.filter(
+      (target) => !workspaceAllowed(target),
+    );
+    return refused.length
+      ? namedList(
+          refused.map(
+            (target) =>
+              `${savedName(prepared, target)} (${workspaceRemoved(target) ? "closed" : "no longer allowed"})`,
+          ),
+        )
+      : undefined;
+  }
+  /**
+   * Why a task's workspace is gone: its connection was removed, or it was
+   * closed, perhaps then opened again (same name and checkout) under a new
+   * id. That one is not used in its place: the task was granted the old one.
+   */
+  async function goneReason(
+    prepared: PreparedTask,
+    target: RecoveryTarget,
+    signal?: AbortSignal,
+  ) {
+    if (
+      workspaceInventory?.connection_ids !== undefined &&
+      !workspaceInventory.connection_ids.includes(target.connection_id)
+    )
+      return "connection removed";
+    const label = prepared.workspaces.find(
+      (item) => refKey(item) === refKey(target),
+    )?.label;
+    const held = new Set(prepared.targets.map(refKey));
+    const candidates = (workspaceInventory?.workspaces ?? []).filter(
+      (item) =>
+        item.connection_id === target.connection_id &&
+        item.label === label &&
+        !held.has(refKey(item)) &&
+        workspaceAllowed(item),
+    );
+    for (const candidate of candidates.slice(0, 5)) {
+      try {
+        const captured = await context.captureScope([candidate], signal);
+        const [found] = (await context.recoveryScope?.(captured, signal)) ?? [];
+        if (found?.workspace_identity === target.workspace_identity)
+          return `recreated as ${candidate.workspace_id}`;
+      } catch {
+        signal?.throwIfAborted();
+      }
+    }
+    return "closed";
+  }
+  /**
+   * The task targets on connections whose Herdr restarted since the task was
+   * saved, checked again for a new run: each is found again by its id, with
+   * the current server identity, when that id still holds the same
+   * workspace (path and checkout). One whose id now holds another workspace
+   * is not used: Herdr offers no identity of its own that would find the
+   * granted one elsewhere (workspaces outside a checkout all look alike).
+   * A connection that cannot be read now is left as saved, for validation
+   * to refuse or wait on as before.
+   */
+  async function reidentify(targets: RecoveryTarget[], signal?: AbortSignal) {
+    const refreshed = new Map<
+      string,
+      { target: RecoveryTarget; workspace: AssistantWorkspace }
+    >();
+    const changed: RecoveryTarget[] = [];
+    const restarted: string[] = [];
+    if (!context.recoveryScope) return { refreshed, changed, restarted };
+    const byConnection = new Map<string, RecoveryTarget[]>();
+    for (const target of targets)
+      byConnection.set(target.connection_id, [
+        ...(byConnection.get(target.connection_id) ?? []),
+        target,
+      ]);
+    for (const [connectionId, saved] of byConnection) {
+      let fresh: RecoveryTarget[];
+      let captured: AssistantWorkspace[];
+      try {
+        // One workspace tells the server identity; most runs stop there.
+        const probe = await context.captureScope([saved[0]!], signal);
+        const [current] = await context.recoveryScope(probe, signal);
+        if (
+          !current ||
+          current.herdr_boot_id === saved[0]!.herdr_boot_id ||
+          current.endpoint_fingerprint !== saved[0]!.endpoint_fingerprint
+        )
+          continue;
+        captured = await context.captureScope(saved, signal);
+        fresh = await context.recoveryScope(captured, signal);
+      } catch {
+        signal?.throwIfAborted();
+        continue;
+      }
+      if (fresh.length !== saved.length) continue;
+      restarted.push(captured[0]?.connection_label || connectionId);
+      saved.forEach((target, index) => {
+        const found = fresh[index]!;
+        if (
+          refKey(found) !== refKey(target) ||
+          found.workspace_identity !== target.workspace_identity ||
+          found.endpoint_fingerprint !== target.endpoint_fingerprint
+        )
+          changed.push(target);
+        else
+          refreshed.set(refKey(target), {
+            target: found,
+            workspace: captured[index]!,
+          });
+      });
+    }
+    return { refreshed, changed, restarted };
+  }
+  /**
+   * A new run of a task over fixed workspaces runs over those still open and
+   * says which it skipped. A workspace still open that Ranger may no longer
+   * use is kept, so that validation refuses the run. After a connection's
+   * Herdr restarted, its workspaces are found again for the run (see
+   * reidentify) instead of failing it on the old server identity.
+   */
+  async function narrowTask(prepared: PreparedTask, signal?: AbortSignal) {
+    await workspaceCatalog();
+    signal?.throwIfAborted();
+    const gone = prepared.targets.filter((target) => workspaceRemoved(target));
+    const open = prepared.targets.filter((target) => !workspaceRemoved(target));
+    const { refreshed, changed, restarted } = await reidentify(open, signal);
+    signal?.throwIfAborted();
+    if (!gone.length && !changed.length && !refreshed.size) return undefined;
+    const skipped: string[] = [];
+    for (const target of gone)
+      skipped.push(
+        `${savedName(prepared, target)} (${await goneReason(prepared, target, signal)})`,
+      );
+    for (const target of changed)
+      skipped.push(
+        `${savedName(prepared, target)} (its id now holds another workspace)`,
+      );
+    signal?.throwIfAborted();
+    if (skipped.length === prepared.targets.length)
+      throw new AssistantUserError(
+        `None of the task's workspaces is open any more: ${namedList(skipped)}. Edit the task to choose its workspaces again.`,
+      );
+    const left = new Set([...gone, ...changed].map(refKey));
+    const keep = <T extends AssistantWorkspaceRef>(refs: T[]) =>
+      refs.filter((ref) => !left.has(refKey(ref)));
+    const { mentions, ...input } = prepared.input;
+    const kept = mentions && keep(mentions);
+    const notices = [
+      ...(restarted.length
+        ? [
+            `Herdr on ${namedList(restarted)} restarted since the task was saved: its workspaces were checked again.`,
+          ]
+        : []),
+      ...(skipped.length
+        ? [
+            `Skipped ${skipped.length === 1 ? "a workspace" : `${skipped.length} workspaces`} no longer open: ${namedList(skipped)}. Edit the task to update its workspaces.`,
+          ]
+        : []),
+    ];
+    return {
+      input: {
+        ...input,
+        scope: keep(input.scope),
+        ...(kept?.length ? { mentions: kept } : {}),
+      },
+      config: {
+        ...prepared.config,
+        allowed_workspaces: keep(prepared.config.allowed_workspaces),
+      },
+      targets: keep(prepared.targets).map(
+        (target) => refreshed.get(refKey(target))?.target ?? target,
+      ),
+      workspaces: keep(prepared.workspaces).map(
+        (workspace) => refreshed.get(refKey(workspace))?.workspace ?? workspace,
+      ),
+      notice: notices.join(" "),
+    };
+  }
   async function validatePreparedTask(
     prepared: PreparedTask,
     signal?: AbortSignal,
@@ -2353,13 +2545,12 @@ export function createAssistantService(options: {
       );
     await workspaceCatalog();
     signal?.throwIfAborted();
-    if (
-      !prepared.targets.length ||
-      !context.restoreScope ||
-      prepared.targets.some((target) => !workspaceAllowed(target))
-    )
+    const refused = refusedTargets(prepared);
+    if (!prepared.targets.length || !context.restoreScope || refused)
       throw new AssistantUserError(
-        "The original task permission is unavailable.",
+        refused
+          ? `The original task permission is unavailable for ${refused}.`
+          : "The original task permission is unavailable.",
       );
     const available = await driver.catalog(prepared.config.credential_source);
     const restored = await context.restoreScope(prepared.targets, signal);
@@ -2377,9 +2568,13 @@ export function createAssistantService(options: {
       throw new AssistantRecoveryNotReadyError(
         "The model connection is changing.",
       );
+    const revoked = refusedTargets(prepared);
+    if (revoked)
+      throw new AssistantUserError(
+        `The original task permission is unavailable for ${revoked}.`,
+      );
     if (
       disposed ||
-      prepared.targets.some((target) => !workspaceAllowed(target)) ||
       !available.providers.some(
         (provider) =>
           provider.id === prepared.config.provider && provider.configured,
@@ -2513,6 +2708,7 @@ export function createAssistantService(options: {
       notify: options.notify,
       validate: validatePreparedTask,
       rescope: rescopeTask,
+      narrow: narrowTask,
       validateCleanup: async (prepared, signal) => {
         await workspaceCatalog();
         signal?.throwIfAborted();

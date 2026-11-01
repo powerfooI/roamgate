@@ -311,6 +311,13 @@ state; sends are never replayed.
   published. One scheduled run executes at a time, overdue occurrences are
   combined, and runs re-verify identities and permissions. Run results emit an
   `assistant_notification` push; custom notices are deduplicated by event key.
+- **Task runs over fixed workspaces** leave out the workspaces closed since the
+  task was saved and name them in the run's notice (a workspace reopened under
+  a new id is named, not used); a run fails when none is left, or when one
+  still open is no longer allowed. After a connection's Herdr restarted (new
+  boot ID), an interrupted run does not resume; a new run reads its workspaces
+  again, keeps one whose ID still holds the same path and checkout under the
+  new boot ID, and skips and names one whose ID now holds another workspace.
 
 ## Task notifications
 

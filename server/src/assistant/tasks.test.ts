@@ -23,7 +23,10 @@ import type {
   AssistantSnapshot,
   AssistantTaskNotification,
 } from "../../../shared/assistant";
-import { AssistantRecoveryNotReadyError } from "./context";
+import {
+  AssistantRecoveryNotReadyError,
+  AssistantServerRestartedError,
+} from "./context";
 import { AssistantUserError } from "./errors";
 import { openTaskStorage } from "./task-storage";
 import {
@@ -2818,6 +2821,32 @@ test("a run that cannot start says why when it safely can", async () => {
     status: "failed",
     error:
       "The task could not safely start or resume. Check its original workspace permissions, identity and model.",
+  });
+});
+
+test("a run cannot resume after its Herdr restarted and says to start a fresh one", async () => {
+  jest.useFakeTimers({ now: Date.parse("2026-10-04T00:00:00Z") });
+  const f = fixture();
+  const task = await f.manager.create(
+    prepared({ type: "once", at: "2026-10-04T00:01:00.000Z" }),
+    randomUUID(),
+  );
+  await f.manager.resume();
+  jest.advanceTimersByTime(60_000);
+  await flush();
+  expect(f.runs).toHaveLength(1);
+  await f.manager.dispose();
+  // The bridge restarts after Herdr on Desktop did.
+  const restored = fixture(f.directory, async () => {
+    throw new AssistantServerRestartedError("Desktop");
+  });
+  await restored.manager.resume();
+  await flush();
+  expect(restored.runs).toHaveLength(0);
+  expect(restored.manager.detail(task.id).runs[0]!).toMatchObject({
+    status: "failed",
+    error:
+      "This run could not safely resume: Herdr on Desktop restarted since it started. Start a fresh run instead.",
   });
 });
 

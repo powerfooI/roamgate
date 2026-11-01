@@ -24,7 +24,11 @@ import {
   isAssistantThinkingLevel,
 } from "../../../shared/assistant";
 import { assertSafeDataPath } from "../config/data-paths";
-import { AssistantRecoveryNotReadyError, type RecoveryTarget } from "./context";
+import {
+  AssistantRecoveryNotReadyError,
+  AssistantServerRestartedError,
+  type RecoveryTarget,
+} from "./context";
 import { AssistantUserError } from "./errors";
 import { nextTaskTime, validateTaskSchedule } from "./task-schedule";
 import {
@@ -502,6 +506,14 @@ export function createAssistantTasks(options: {
     prepared: PreparedTask,
     signal?: AbortSignal,
   ): Promise<PreparedTask & { notice?: string }>;
+  /**
+   * A task over fixed workspaces without those closed since it was saved,
+   * with what it skipped to show on the run, or nothing when none closed.
+   */
+  narrow?(
+    prepared: PreparedTask,
+    signal?: AbortSignal,
+  ): Promise<(PreparedTask & { notice: string }) | undefined>;
   child(
     run: SavedTaskRun,
     directory: string,
@@ -1151,6 +1163,33 @@ export function createAssistantTasks(options: {
             bump(entry.task.id);
           }
         });
+      } else if (!recover && !run.input.all_workspaces && options.narrow) {
+        // A new run over fixed workspaces runs over those still open.
+        const narrowed = await options.narrow(seal(run), admission.signal);
+        if (disposed || !["running", "waiting"].includes(run.status)) {
+          if (busy === run.id) busy = undefined;
+          return;
+        }
+        if (narrowed)
+          change(() => {
+            Object.assign(run, seal(narrowed));
+            run.notice = narrowed.notice;
+            // A workspace found again after its Herdr restarted is the same
+            // one: the task keeps it under the new server identity, so later
+            // runs (and edits) do not check it again.
+            for (const target of entry.targets) {
+              const found = narrowed.targets.find(
+                (item) =>
+                  key(item) === key(target) &&
+                  item.endpoint_fingerprint === target.endpoint_fingerprint &&
+                  item.workspace_identity === target.workspace_identity,
+              );
+              if (found && found.herdr_boot_id !== target.herdr_boot_id) {
+                target.herdr_boot_id = found.herdr_boot_id;
+                bump(entry.task.id);
+              }
+            }
+          });
       }
       await validate(run, admission.signal);
       if (disposed || !["running", "waiting"].includes(run.status)) {
@@ -1195,9 +1234,11 @@ export function createAssistantTasks(options: {
           run.status = "failed";
           // Say why when it is safe to: a scope or model no longer allowed.
           run.error =
-            error instanceof AssistantUserError
-              ? `The task could not safely start or resume: ${error.message}`
-              : "The task could not safely start or resume. Check its original workspace permissions, identity and model.";
+            recover && error instanceof AssistantServerRestartedError
+              ? `This run could not safely resume: Herdr on ${error.connection} restarted since it started. Start a fresh run instead.`
+              : error instanceof AssistantUserError
+                ? `The task could not safely start or resume: ${error.message}`
+                : "The task could not safely start or resume. Check its original workspace permissions, identity and model.";
           run.finished_at = now();
           compact(run);
         });
@@ -1629,8 +1670,14 @@ export function createAssistantTasks(options: {
         const sealed = seal(entry);
         // Dynamic tasks validate their fresh scope in launch, including model
         // and permission checks. Their saved workspace identities may be gone.
+        // Fixed ones run over the workspaces still open (narrow in launch).
         if (!sealed.input.all_workspaces || !options.rescope)
-          await check(entry.task.id, sealed);
+          await check(
+            entry.task.id,
+            (!sealed.input.all_workspaces &&
+              (await options.narrow?.(sealed))) ||
+              sealed,
+          );
         entry = find(id);
         if (entry.task.status === "cancelled")
           throw new Error("This task was cancelled.");
