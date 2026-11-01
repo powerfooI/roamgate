@@ -2428,3 +2428,39 @@ describe("jumping to a workspace while the connection changes", () => {
     }
   });
 });
+
+test("a delayed Ranger pane lookup cannot override a newer show target", async () => {
+  const originalConnection = bridge.connection;
+  const originalPane = store.focusPane;
+  const originalWorkspace = store.focusWorkspace;
+  const pending = Promise.withResolvers<unknown>();
+  const focused: string[] = [];
+  bridge.connection = ((connectionId = "alpha") => ({
+    connectionId,
+    generation: 10,
+    isCurrent: () => true,
+    call: (async () => pending.promise) as ConnectionClient["call"],
+  })) as typeof bridge.connection;
+  store.focusPane = async (id) => {
+    focused.push(`pane:${id}`);
+  };
+  store.focusWorkspace = async (id) => {
+    focused.push(`workspace:${id}`);
+  };
+  try {
+    __storeTesting.replaceState(partitionState());
+    const first = store.jumpToConnectionWorkspace(
+      "alpha",
+      "same-workspace",
+      "same-pane",
+    );
+    await store.jumpToConnectionWorkspace("alpha", "newer-workspace");
+    pending.resolve({ pane: pane("alpha", "idle") });
+    await first;
+    expect(focused).toEqual(["workspace:newer-workspace"]);
+  } finally {
+    bridge.connection = originalConnection;
+    store.focusPane = originalPane;
+    store.focusWorkspace = originalWorkspace;
+  }
+});

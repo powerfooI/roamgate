@@ -800,6 +800,7 @@ let catalogReadyForConnection = false;
 let terminalReattachPending = false;
 let connectionRecoveryIntent: "resume" | "reconnect" | null = null;
 let focusActionChain: Promise<unknown> = Promise.resolve();
+let rangerJumpSeq = 0;
 type PaneStatusTracker = {
   ready: boolean;
   byId: Map<string, string>;
@@ -2961,18 +2962,23 @@ export const store = {
     workspaceId: string,
     paneId?: string,
   ) {
+    const jump = ++rangerJumpSeq;
     // Another connection chosen meanwhile decides what is shown: a target
     // checked on one connection must not be focused on another.
     if (state.activeConnectionId !== connectionId) {
       if (!selectConnectionNow(connectionId)) return;
       const switched = captureConnectionLease();
       await refreshNow(switched);
-      if (!isStoreConnectionLeaseCurrent(state, switched)) return;
+      if (
+        jump !== rangerJumpSeq ||
+        !isStoreConnectionLeaseCurrent(state, switched)
+      )
+        return;
     }
     if (paneId) {
       const lease = captureConnectionLease();
       const inWorkspace = await paneIsInWorkspace(lease, paneId, workspaceId);
-      if (!leaseIsCurrent(lease)) return;
+      if (jump !== rangerJumpSeq || !leaseIsCurrent(lease)) return;
       if (inWorkspace) {
         void store.focusPane(paneId);
         return;
