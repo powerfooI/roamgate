@@ -47,6 +47,7 @@ import {
 } from "./browserNavigation";
 import { useRef, useSyncExternalStore } from "react";
 import {
+  type ForwardRecord,
   bridge,
   type ConnectionClient,
   type ConnectionStatus,
@@ -61,6 +62,11 @@ import {
 } from "./connectionStorage";
 import { disposeTerminalConnection } from "./terminalConnection";
 import {
+  type GitStatusPush,
+  parseGitStatusPush,
+  withGitStatuses,
+} from "./gitStatusPush";
+import {
   adoptShortcutPreferences,
   connectShortcutPreferences,
   disconnectShortcutPreferences,
@@ -68,6 +74,7 @@ import {
 } from "./shortcutPreferences";
 import { isReconnectRetryableError } from "./reconnectRetry";
 import { publishLastStepCompletion } from "./lastStepCompletionStore";
+import { timeLatency } from "./latencyDebug";
 import {
   clearTerminalRelayViewports,
   forgetTerminalRelayViewportsExcept,
@@ -119,6 +126,12 @@ export type WorkspaceSourceTarget = Omit<TaskNotificationTarget, "paneId"> & {
   paneId?: string;
 };
 
+export interface ForwardListeners {
+  connectionId: string;
+  remote: { port: number; process?: string }[];
+  local: { port: number; process?: string }[];
+}
+
 export interface State extends ServerSessionState {
   status: ConnectionStatus;
   connectionPaused: boolean;
@@ -128,6 +141,21 @@ export interface State extends ServerSessionState {
   activeConnectionId: string;
   connectionGeneration: number;
   sessionsByConnectionId: Record<string, ServerSessionState>;
+  /**
+   * Machine-wide SSH port forwards, mirrored from the server's registry.
+   * Not per-connection session state: a forward binds a local port, and the
+   * machine has one of those whichever connection asked for it.
+   */
+  forwards: ForwardRecord[];
+  /**
+   * The last port scan, for the connection it was made on: `remote` is what
+   * the far host listens on (a local forward could bring it here), `local`
+   * what this machine does (a remote forward could put it there). Asked for
+   * rather than polled, so null until someone looks.
+   */
+  listeners: ForwardListeners | null;
+  /** A scan is in flight; a newer one supersedes it rather than waiting. */
+  listenersBusy: boolean;
   notice: Notice | null;
   taskNotificationsEnabled: boolean;
   taskNotificationPreferences: TaskNotificationPreferences;
@@ -349,6 +377,9 @@ const initial: State = {
     [LEGACY_DEFAULT_CONNECTION_ID]: initialSession,
   },
   ...initialSession,
+  forwards: [],
+  listeners: null,
+  listenersBusy: false,
   notice: null,
   taskNotificationsEnabled: storedTaskNotificationsEnabled(),
   taskNotificationPreferences: storedTaskNotificationPreferences(),
@@ -792,6 +823,9 @@ export function numberedCreatedTabRename(
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 const refreshingConnectionKeys = new Set<string>();
 const queuedConnectionKeys = new Set<string>();
+// Git status pushes received while a refresh is in flight. That refresh's
+// workspace.list reply predates them, so it must not publish older statuses.
+const gitStatusPushesDuringRefresh = new Map<string, GitStatusPush>();
 let initialized = false;
 let initialConnectionSelectionPending = true;
 let catalogRequestSeq = 0;
@@ -800,6 +834,7 @@ let catalogReadyForConnection = false;
 let terminalReattachPending = false;
 let connectionRecoveryIntent: "resume" | "reconnect" | null = null;
 let focusActionChain: Promise<unknown> = Promise.resolve();
+let rangerJumpSeq = 0;
 type PaneStatusTracker = {
   ready: boolean;
   byId: Map<string, string>;
@@ -1356,6 +1391,31 @@ async function hydrateUiSettings() {
   }
 }
 
+let listenersScan = 0;
+
+/**
+ * Whether a pane belongs to a workspace on the active connection. A target
+ * that names both (Ranger's show_in_roamgate) is only trusted for the
+ * workspace, which the server checked against the question's scope.
+ */
+async function paneIsInWorkspace(
+  lease: StoreConnectionLease,
+  paneId: string,
+  workspaceId: string,
+): Promise<boolean> {
+  try {
+    const result = await lease.client.call("pane.get", { pane_id: paneId });
+    const pane = result?.pane ?? result;
+    return (
+      leaseIsCurrent(lease) &&
+      pane?.pane_id === paneId &&
+      pane?.workspace_id === workspaceId
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function refreshNow(lease = captureConnectionLease()) {
   if (
     state.connectionPaused ||
@@ -1380,13 +1440,23 @@ async function refreshNow(lease = captureConnectionLease()) {
     settledAt: state.pendingFocusWorkspaceSettledAt,
   };
   try {
-    const [wsRes, tabRes, paneRes, agentRes] = await Promise.all([
-      lease.client.call("workspace.list"),
-      lease.client.call("tab.list"),
-      lease.client.call("pane.list"),
-      // Older servers may omit agent metadata; ordinary navigation still works.
-      lease.client.call("agent.list").catch(() => null),
-    ]);
+    const timedCall = (method: string) =>
+      timeLatency(
+        "refresh call",
+        { connection: lease.connectionId, method },
+        lease.client.call(method),
+      );
+    const [wsRes, tabRes, paneRes, agentRes] = await timeLatency(
+      "refresh",
+      { connection: lease.connectionId },
+      Promise.all([
+        timedCall("workspace.list"),
+        timedCall("tab.list"),
+        timedCall("pane.list"),
+        // Older servers may omit agent metadata; ordinary navigation still works.
+        timedCall("agent.list").catch(() => null),
+      ]),
+    );
     if (!leaseIsCurrent(lease)) return;
     const workspaces: Workspace[] = wsRes?.workspaces ?? [];
     const tabs: Tab[] = tabRes?.tabs ?? [];
@@ -1533,6 +1603,13 @@ async function refreshNow(lease = captureConnectionLease()) {
       delete next.endpointAvailability;
       queuedConnectionKeys.add(refreshKey);
     }
+    const overlappingGitStatuses = gitStatusPushesDuringRefresh.get(refreshKey);
+    if (overlappingGitStatuses && next.workspaces) {
+      next.workspaces = withGitStatuses(
+        next.workspaces,
+        overlappingGitStatuses,
+      );
+    }
     const patch = stabilizeRefreshPatch(state, next);
     if (patch) {
       if (!setForConnection(lease, patch)) return;
@@ -1544,6 +1621,7 @@ async function refreshNow(lease = captureConnectionLease()) {
     setForConnection(lease, { error: (error as Error).message });
   } finally {
     refreshingConnectionKeys.delete(refreshKey);
+    gitStatusPushesDuringRefresh.delete(refreshKey);
     if (queuedConnectionKeys.delete(refreshKey) && leaseIsCurrent(lease)) {
       void refreshNow(lease);
     }
@@ -2224,7 +2302,9 @@ function handleBridgeHello(hello: { default_connection_id: string }) {
 }
 
 function handleBridgeStatus(s: ConnectionStatus) {
-  if (s === "connected") void hydrateUiSettings();
+  if (s === "connected") {
+    void hydrateUiSettings();
+  }
   if (s === "disconnected") {
     set({ tabMoveSupported: false, endpointAvailability: {} });
     uiSettingsEpoch += 1;
@@ -2319,6 +2399,11 @@ function handleHerdrEvent(event: HerdrEventMsg) {
       if (notification) notifyHerdrTask(event.connection_id, notification);
       return;
     }
+    if (event.event === "workspace.git_status") {
+      const push = parseGitStatusPush(event.data);
+      if (push) applyGitStatusPush(push);
+      return;
+    }
     if (
       event.event === "workspace.last_step_completed" &&
       typeof event.data.workspace_id === "string"
@@ -2327,6 +2412,20 @@ function handleHerdrEvent(event: HerdrEventMsg) {
     }
     scheduleRefresh();
   }
+}
+
+// Background git status refreshes push only changed checkouts, so patch them
+// in place instead of re-reading the whole topology.
+function applyGitStatusPush(push: GitStatusPush) {
+  const lease = captureConnectionLease();
+  const refreshKey = `${lease.connectionId}:${lease.generation}`;
+  if (refreshingConnectionKeys.has(refreshKey)) {
+    const pending = gitStatusPushesDuringRefresh.get(refreshKey) ?? new Map();
+    for (const [path, status] of push) pending.set(path, status);
+    gitStatusPushesDuringRefresh.set(refreshKey, pending);
+  }
+  const workspaces = withGitStatuses(state.workspaces, push);
+  if (workspaces !== state.workspaces) setForConnection(lease, { workspaces });
 }
 
 function browserSelectionIsCurrent(navigation: BrowserNavigation) {
@@ -2589,6 +2688,7 @@ export const store = {
     void store.restoreTaskNotifications();
     subscribeLocalStorage(handlePreferenceStorageChange);
     bridge.onHello(handleBridgeHello);
+    bridge.onForwards((forwards) => set({ forwards }));
     bridge.onUiSetting((push) => {
       if (push.key === SHORTCUT_SETTING_KEY) {
         uiSettingsPushVersion += 1;
@@ -2925,6 +3025,145 @@ export const store = {
         retryOnReconnect: true,
       },
     );
+  },
+
+  /**
+   * Opens an on-demand SSH forward for the active connection and answers with
+   * the local port, which may not be the one that was asked for. Forwards are
+   * machine-wide, so the push updates every tab.
+   */
+  async openForward(
+    port: number,
+    options: {
+      direction?: "local" | "remote";
+      label?: string;
+      target?: { connectionId: string; generation: number };
+    } = {},
+  ) {
+    if (
+      options.target &&
+      (options.target.connectionId !== state.activeConnectionId ||
+        options.target.generation !== state.connectionGeneration)
+    ) {
+      store.notify({
+        kind: "error",
+        message: "Connection changed",
+        detail: "Open the port confirmation again on the intended connection.",
+      });
+      return null;
+    }
+    // Through a lease like every other RPC: the lease carries the runtime
+    // generation from the catalog, which bridge.connection() alone does not
+    // know and rejects the call without.
+    const result = await action(
+      (lease) =>
+        lease.client.call("forward.open", {
+          remote_port: port,
+          direction: options.direction ?? "local",
+          label: options.label,
+        }),
+      { refresh: "none" },
+    );
+    const forward = result?.forward as ForwardRecord | undefined;
+    if (forward) {
+      set({
+        forwards: [
+          ...state.forwards.filter((entry) => entry.id !== forward.id),
+          forward,
+        ],
+      });
+    }
+    return forward ?? null;
+  },
+
+  /**
+   * Asks the remote what it is listening on. Printed URLs only ever name one
+   * port, a dev server announces its page and says nothing about the
+   * websocket beside it, so the list has to come from the host itself.
+   */
+  async refreshListeners() {
+    // The scan answers for the connection it was asked on, and the latest
+    // request wins: reopening the list rescans instead of being ignored, and
+    // a slow scan of a connection left behind cannot overwrite a newer one.
+    const connectionId = state.activeConnectionId;
+    const scan = ++listenersScan;
+    set({ listenersBusy: true });
+    try {
+      // Settled separately: one side failing must not blank the other.
+      const [remote, local] = await Promise.allSettled([
+        action((lease) => lease.client.call("forward.candidates"), {
+          refresh: "none",
+        }),
+        action(
+          (lease) =>
+            lease.client.call("forward.candidates", { direction: "remote" }),
+          { refresh: "none" },
+        ),
+      ]);
+      const ports = (
+        result: PromiseSettledResult<{ candidates?: unknown } | undefined>,
+      ) =>
+        result.status === "fulfilled" && Array.isArray(result.value?.candidates)
+          ? (result.value.candidates as { port: number; process?: string }[])
+          : [];
+      if (scan === listenersScan)
+        set({
+          listeners: {
+            connectionId,
+            remote: ports(remote),
+            local: ports(local),
+          },
+        });
+    } finally {
+      if (scan === listenersScan) set({ listenersBusy: false });
+    }
+  },
+
+  async closeForward(id: string) {
+    const result = await action(
+      (lease) => lease.client.call("forward.close", { id }),
+      {
+        refresh: "none",
+      },
+    );
+    if (result)
+      set({ forwards: state.forwards.filter((entry) => entry.id !== id) });
+  },
+
+  /**
+   * Switches to another connection when needed, waits for its workspaces to
+   * load, then focuses a workspace there, or one of its panes. Ranger's
+   * show_in_roamgate targets can live on a connection other than the active
+   * one.
+   */
+  async jumpToConnectionWorkspace(
+    connectionId: string,
+    workspaceId: string,
+    paneId?: string,
+  ) {
+    const jump = ++rangerJumpSeq;
+    // Another connection chosen meanwhile decides what is shown: a target
+    // checked on one connection must not be focused on another.
+    if (state.activeConnectionId !== connectionId) {
+      if (!selectConnectionNow(connectionId)) return;
+      const switched = captureConnectionLease();
+      await refreshNow(switched);
+      if (
+        jump !== rangerJumpSeq ||
+        !isStoreConnectionLeaseCurrent(state, switched)
+      )
+        return;
+    }
+    if (paneId) {
+      const lease = captureConnectionLease();
+      const inWorkspace = await paneIsInWorkspace(lease, paneId, workspaceId);
+      if (jump !== rangerJumpSeq || !leaseIsCurrent(lease)) return;
+      if (inWorkspace) {
+        void store.focusPane(paneId);
+        return;
+      }
+    }
+    void store.focusWorkspace(workspaceId);
   },
 
   focusTaskNotificationTarget(target: TaskNotificationTarget) {
@@ -4274,6 +4513,7 @@ export const __storeTesting = {
     initialConnectionSelectionPending = true;
     refreshingConnectionKeys.clear();
     queuedConnectionKeys.clear();
+    gitStatusPushesDuringRefresh.clear();
     focusActionChain = Promise.resolve();
     taskCompletionTracker.clear();
     state = snapshot;

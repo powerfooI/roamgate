@@ -394,9 +394,16 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
       await ui.input("Task prompt", "  Summarize progress  ");
       await ui.input("Run at", "2030-05-01T08:30");
       expect(ui.button("Save and enable").disabled).toBe(true);
+      // Every workspace, new ones too, and a quick way to tick them all.
+      expect(
+        ui.container.querySelector(".assistant-workspace-all input"),
+      ).not.toBeNull();
+      expect(ui.button("Select all")).toBeTruthy();
       await React.act(async () =>
         ui.container
-          .querySelector<HTMLInputElement>('[type="checkbox"]')!
+          .querySelector<HTMLInputElement>(
+            '.assistant-workspace-choice [type="checkbox"]',
+          )!
           .click(),
       );
       expect(ui.button("Save and enable").disabled).toBe(false);

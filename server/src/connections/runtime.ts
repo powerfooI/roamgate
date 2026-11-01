@@ -25,6 +25,8 @@ import {
 } from "../bridge/protocol-compat";
 import { roamgateEnv } from "../config/environment";
 import { createSettingsRpcHandler } from "../bridge/settings-rpc";
+import { createForwardRpcHandler } from "../bridge/forward-rpc";
+import type { SshForwards } from "../bridge/ssh-forward";
 import {
   readGuiSettings,
   terminalSurfaceCodecsEnabled,
@@ -35,6 +37,7 @@ import {
   type SshTunnelError,
 } from "../bridge/ssh-tunnel";
 import { dropCoalescedMessage } from "../bridge/websocket-send";
+import { annotateSshArgv } from "../bridge/ssh-metrics";
 import { createTerminalBridge } from "../bridge/terminal-bridge";
 import { createHerdrInfoHandler } from "../http/herdr-info";
 import { createImageUploadHandler } from "../http/image-upload";
@@ -45,9 +48,9 @@ import {
   silentLogger,
 } from "../utils/logger";
 import {
-  runProcess,
-  runProcessWithCode,
-  runProcessWithCodeTimeout,
+  runProcess as runProcessBase,
+  runProcessWithCode as runProcessWithCodeBase,
+  runProcessWithCodeTimeout as runProcessWithCodeTimeoutBase,
   shQuote,
 } from "../utils/process-utils";
 import { createWorkspaceAutoSync } from "../workspace/auto-sync";
@@ -57,7 +60,7 @@ import {
   type LastStepBaselineStore,
 } from "../workspace/git-diff";
 import { createLastStepTurnTracker } from "../workspace/last-step-turns";
-import { runBinaryProcessWithTimeout } from "../workspace/process";
+import { runBinaryProcessWithTimeout as runBinaryProcessWithTimeoutBase } from "../workspace/process";
 import { createStatusEnricher } from "../workspace/status";
 import { createWorktreeHookRunner } from "../worktree/worktree-hooks";
 import { createWorktreeParentStore } from "../worktree/parents";
@@ -122,10 +125,14 @@ export function createLegacyConnectionRuntime(args: {
   taskNotificationSource?: TaskNotificationSource;
   onError?: (error: unknown, identity: ConnectionIdentity) => void;
   onTransportExit?: (error: SshTunnelError) => void;
+  /** Shared across connections: local ports are a single machine-wide space. */
+  forwards?: SshForwards;
   /** Test seam for deterministic shutdown coverage. */
   lastStepBaselines?: LastStepBaselineStore;
   resolveLastStepWorkspaceGitRoot?: (workspaceId: string) => Promise<string>;
   lastStepTransitionDebounceMs?: number;
+  /** Test seam for the background git status reads. */
+  runGitStatusProcess?: typeof runProcessWithCodeTimeoutBase;
 }) {
   const { config } = args;
   const remotePlatform = config.remotePlatform;
@@ -134,7 +141,25 @@ export function createLegacyConnectionRuntime(args: {
   const socketPath = config.socketPath;
   const clientSocketPath = config.clientSocketPath;
   const sshHost = () => config.sshHost;
-  const herdr = new HerdrClient(socketPath);
+  // Label this runtime's ssh children with its connection in the debug log.
+  const forConnection = (argv: string[]) =>
+    annotateSshArgv(argv, { connection: identity.id });
+  const runProcess: typeof runProcessBase = (argv, ...rest) =>
+    runProcessBase(forConnection(argv), ...rest);
+  const runProcessWithCode: typeof runProcessWithCodeBase = (argv, ...rest) =>
+    runProcessWithCodeBase(forConnection(argv), ...rest);
+  const runProcessWithCodeTimeout: typeof runProcessWithCodeTimeoutBase = (
+    argv,
+    ...rest
+  ) => runProcessWithCodeTimeoutBase(forConnection(argv), ...rest);
+  const runBinaryProcessWithTimeout: typeof runBinaryProcessWithTimeoutBase = (
+    argv,
+    ...rest
+  ) => runBinaryProcessWithTimeoutBase(forConnection(argv), ...rest);
+  const herdr = new HerdrClient(socketPath, {
+    logger: logger.child("herdr"),
+    connectionId: identity.id,
+  });
   const agentSessionFiles = createAgentSessionFileAccess({
     sshHost: config.sshHost,
     runBinaryProcessWithTimeout,
@@ -178,8 +203,24 @@ export function createLegacyConnectionRuntime(args: {
   const status = createStatusEnricher({
     connectionId: identity.id,
     sshHost,
-    runProcessWithCodeTimeout,
+    runProcessWithCodeTimeout:
+      args.runGitStatusProcess ?? runProcessWithCodeTimeout,
     shQuote,
+    onGitStatusChanged: (updates) => {
+      if (disposed) return;
+      args.onEvent(
+        {
+          event: "workspace.git_status",
+          data: { type: "workspace.git_status", statuses: updates },
+        },
+        identity,
+      );
+    },
+    onRefreshError: (error) =>
+      logger.warn("git status refresh failed", {
+        connection: identity.id,
+        error: sanitizeConnectionError(error),
+      }),
   });
   const workspaceAutoSync = createWorkspaceAutoSync({
     connectionId: identity.id,
@@ -253,6 +294,18 @@ export function createLegacyConnectionRuntime(args: {
     safeSend: args.safeSend,
     markRpcError: args.markRpcError,
   });
+  const handleForwardRpc = args.forwards
+    ? createForwardRpcHandler({
+        connectionId: identity.id,
+        connectionGeneration: args.connectionGeneration,
+        sshHost,
+        runProcess,
+        forwards: args.forwards,
+        safeSend: args.safeSend,
+        markRpcError: args.markRpcError,
+      })
+    : null;
+
   const terminalBridge = createTerminalBridge({
     connectionId: identity.id,
     broadcast: args.broadcast,
@@ -348,6 +401,8 @@ export function createLegacyConnectionRuntime(args: {
       });
     },
     completeWorkspaceStep: async (workspaceId) => {
+      // A finished agent turn is the likeliest moment for the tree to change.
+      status.invalidateWorkspaceGitStatus(workspaceId);
       try {
         await lastStepBaselines.completeWorkspace(workspaceId);
       } finally {
@@ -646,7 +701,12 @@ export function createLegacyConnectionRuntime(args: {
     taskEvents.stop();
     pendingTaskEvents.clear();
     herdrNotifications?.stop();
+    status.dispose();
     const autoSyncStop = workspaceAutoSync.stop();
+    // A forward outlives nothing: its ssh process rides the same credentials
+    // and host as the connection that asked for it. Listed as lost, not
+    // removed, so a reconnect does not make forwards vanish unexplained.
+    args.forwards?.loseConnection(identity.id);
     terminalBridge.dispose();
     const subscriptionStop = subscriptionLoop.stop();
     const agentStatusStop = agentStatusSubscriptions.stop();
@@ -679,6 +739,7 @@ export function createLegacyConnectionRuntime(args: {
     handleImageUpload,
     handleTerminalUpload,
     handleSettingsRpc,
+    handleForwardRpc,
     files,
     status,
     workspaceAutoSync,
