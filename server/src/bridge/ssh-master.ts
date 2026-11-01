@@ -401,7 +401,18 @@ export async function sweepOrphanedSshMasters(
       const controlPath = join(directory, "m.ctl");
       const socket = lstatSync(controlPath, { throwIfNoEntry: false });
       if (socket?.isSocket() && socket.uid === uid) {
-        await runExit(sshMasterExitArgv(controlPath)).catch(() => undefined);
+        const code = await runExit(sshMasterExitArgv(controlPath)).catch(
+          () => undefined,
+        );
+        // Keep the socket addressable if exit failed; unlinking it would
+        // strand a live master so the next startup could never stop it.
+        if (code !== 0) {
+          logger.debug(
+            "Orphaned SSH master exit failed; retaining its socket",
+            { directory },
+          );
+          continue;
+        }
       }
       remove(directory);
       swept += 1;

@@ -209,6 +209,17 @@ export type AssistantMessage = {
   sources: AssistantSource[];
   actions?: AssistantAction[];
   task_proposals?: AssistantTaskProposal[];
+  /** What the reply put on screen, for the browser that asked. */
+  show?: AssistantShow;
+};
+
+/**
+ * A workspace, or a pane in it, a reply showed in Roamgate: only the browser
+ * that sent `request_id` switches to it.
+ */
+export type AssistantShow = AssistantWorkspaceRef & {
+  pane_id?: string;
+  request_id: string;
 };
 
 export type AssistantTaskSchedule =
@@ -221,6 +232,11 @@ export type AssistantTaskInput = {
   prompt: string;
   mentions?: AssistantMentionTarget[];
   scope: AssistantWorkspaceRef[];
+  /**
+   * Every workspace Ranger may use when a run starts, new ones included:
+   * `scope` is then the list as of the last run (or creation).
+   */
+  all_workspaces?: true;
   schedule: AssistantTaskSchedule;
   notification_mode?: "status" | "agent";
 };
@@ -246,6 +262,8 @@ export type AssistantTaskRun = {
   started_at?: string;
   finished_at?: string;
   error: string | null;
+  /** What the run left out, such as workspaces past the limit. */
+  notice?: string;
 };
 
 export type AssistantTaskNotification = {
@@ -585,7 +603,8 @@ function taskRun(value: unknown): value is AssistantTaskRun {
     timestamp(value.scheduled_at) &&
     (value.started_at === undefined || timestamp(value.started_at)) &&
     (value.finished_at === undefined || timestamp(value.finished_at)) &&
-    (value.error === null || text(value.error))
+    (value.error === null || text(value.error)) &&
+    (value.notice === undefined || text(value.notice))
   );
 }
 
@@ -715,9 +734,23 @@ function action(value: unknown): value is AssistantAction {
   );
 }
 
+export function isAssistantShow(value: unknown): value is AssistantShow {
+  return (
+    record(value) &&
+    text(value.connection_id) &&
+    text(value.workspace_id) &&
+    (value.pane_id === undefined || text(value.pane_id)) &&
+    text(value.request_id) &&
+    Object.keys(value).every((key) =>
+      ["connection_id", "workspace_id", "pane_id", "request_id"].includes(key),
+    )
+  );
+}
+
 export function isAssistantMessage(value: unknown): value is AssistantMessage {
   return (
     record(value) &&
+    (value.show === undefined || isAssistantShow(value.show)) &&
     text(value.id) &&
     (value.role === "user" || value.role === "assistant") &&
     text(value.text) &&

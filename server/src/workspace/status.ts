@@ -8,9 +8,10 @@ import {
 type RunProcessWithCodeTimeout = (
   argv: string[],
   timeoutMs: number,
+  options?: { env?: NodeJS.ProcessEnv },
 ) => Promise<{ code: number; stdout: string; stderr: string }>;
 
-type GitStatusSummary = {
+export type GitStatusSummary = {
   branch?: string;
   upstream?: string;
   ahead: number;
@@ -23,50 +24,163 @@ type GitStatusSummary = {
   error?: string;
 };
 
+export type GitStatusUpdate = {
+  checkout_path: string;
+  git_status: GitStatusSummary;
+};
+
 type CachedGitStatus = {
+  /** When the git command that produced `summary` started. */
   loadedAt: number;
+  /** Invalidation sequence observed when that command started. */
+  loadedSeq: number;
   summary: GitStatusSummary;
 };
 
-const GIT_STATUS_CACHE_MS = 4000;
+type GitStatusResult = {
+  summary: GitStatusSummary;
+  /** ssh or spawn failed, so the summary says nothing about the checkout. */
+  transportError?: boolean;
+};
+
+/**
+ * workspace.list answers from this cache at any age; entries older than this
+ * are refreshed in the background and pushed when they change.
+ */
+export const GIT_STATUS_REFRESH_MS = 20_000;
 const GIT_STATUS_TIMEOUT_MS = 8000;
+/**
+ * How long workspace.list waits for a checkout's first status. A checkout
+ * without one reads as detached with no changes, and local git usually
+ * answers within this; a slower read (a cold ssh login) is pushed later.
+ */
+export const GIT_STATUS_COLD_BUDGET_MS = 300;
 
 export function createStatusEnricher(args: {
   connectionId?: string;
   sshHost: () => string | undefined;
   runProcessWithCodeTimeout: RunProcessWithCodeTimeout;
   shQuote: (value: string) => string;
+  /** Receives only the checkouts whose status changed in a refresh. */
+  onGitStatusChanged?: (updates: GitStatusUpdate[]) => void;
+  onRefreshError?: (error: unknown) => void;
+  readSettings?: typeof readGuiSettings;
+  /** Defaults to `GIT_STATUS_COLD_BUDGET_MS`; 0 never waits. */
+  coldBudgetMs?: number;
 }) {
+  const readSettings = args.readSettings ?? readGuiSettings;
+  const coldBudgetMs = args.coldBudgetMs ?? GIT_STATUS_COLD_BUDGET_MS;
+  // Checkouts a list already waited for, so a slow first read delays only
+  // the first list that sees the checkout, not every list until it lands.
+  const coldWaited = new Set<string>();
   const gitStatusCache = new Map<string, CachedGitStatus>();
+  // Invalidations are ordered by sequence, not time, because a refresh often
+  // starts in the same millisecond as the git action that invalidated it.
+  const invalidatedSeqs = new Map<string, number>();
+  let invalidationSeq = 0;
+  // Checkouts and workspace IDs from the latest workspace.list.
+  let knownCheckoutPaths: string[] = [];
+  let checkoutPathByWorkspace = new Map<string, string>();
+  let refreshing: Promise<void> | null = null;
+  let refreshAgain = false;
+  let disposed = false;
 
   function gitStatusCacheKey(host: string | undefined, checkoutPath: string) {
     return `${host ?? "local"}\0${checkoutPath}`;
   }
 
-  function cachedGitStatus(
-    host: string | undefined,
-    checkoutPath: string,
-  ): GitStatusSummary | null {
-    const cached = gitStatusCache.get(gitStatusCacheKey(host, checkoutPath));
-    if (!cached || Date.now() - cached.loadedAt >= GIT_STATUS_CACHE_MS) {
-      return null;
-    }
-    return cached.summary;
+  function gitStatusIsFresh(key: string) {
+    const cached = gitStatusCache.get(key);
+    return (
+      cached !== undefined &&
+      Date.now() - cached.loadedAt < GIT_STATUS_REFRESH_MS &&
+      cached.loadedSeq >= (invalidatedSeqs.get(key) ?? 0)
+    );
   }
 
-  function cacheGitStatus(
-    host: string | undefined,
-    checkoutPath: string,
-    summary: GitStatusSummary,
-  ) {
-    gitStatusCache.set(gitStatusCacheKey(host, checkoutPath), {
-      loadedAt: Date.now(),
-      summary,
-    });
+  function staleCheckoutPaths(host: string | undefined) {
+    return knownCheckoutPaths.filter(
+      (path) => !gitStatusIsFresh(gitStatusCacheKey(host, path)),
+    );
   }
 
   function invalidateGitStatus(checkoutPath: string) {
-    gitStatusCache.delete(gitStatusCacheKey(args.sshHost(), checkoutPath));
+    invalidatedSeqs.set(
+      gitStatusCacheKey(args.sshHost(), checkoutPath),
+      ++invalidationSeq,
+    );
+    void refreshInBackground();
+  }
+
+  function invalidateWorkspaceGitStatus(workspaceId: string) {
+    const checkoutPath = checkoutPathByWorkspace.get(workspaceId);
+    if (checkoutPath) invalidateGitStatus(checkoutPath);
+  }
+
+  /**
+   * Single-flight: a request while a refresh runs schedules one more pass, so
+   * an invalidation during an in-flight read is never lost.
+   */
+  function refreshInBackground(): Promise<void> {
+    if (disposed) return refreshing ?? Promise.resolve();
+    if (refreshing) {
+      refreshAgain = true;
+      return refreshing;
+    }
+    const task = (async () => {
+      do {
+        if (disposed) return;
+        refreshAgain = false;
+        const host = args.sshHost();
+        const paths = staleCheckoutPaths(host);
+        if (paths.length === 0) return;
+        await refreshGitStatuses(host, paths);
+      } while (refreshAgain);
+    })()
+      .catch((error) => args.onRefreshError?.(error))
+      .finally(() => {
+        refreshing = null;
+      });
+    refreshing = task;
+    return task;
+  }
+
+  async function refreshGitStatuses(host: string | undefined, paths: string[]) {
+    const startedAt = Date.now();
+    const startedSeq = invalidationSeq;
+    const results = host
+      ? await readRemoteGitStatuses(host, paths)
+      : new Map(
+          await Promise.all(
+            paths.map(
+              async (path) => [path, await readGitStatus(path)] as const,
+            ),
+          ),
+        );
+    if (disposed) return;
+    const known = new Set(knownCheckoutPaths);
+    const updates: GitStatusUpdate[] = [];
+    for (const [path, result] of results) {
+      if (!known.has(path)) continue;
+      const key = gitStatusCacheKey(host, path);
+      const previous = gitStatusCache.get(key);
+      // A dropped ssh keeps the last real answer instead of replacing every
+      // badge with a transport error; it is retried after the refresh period.
+      const summary =
+        result.transportError && previous ? previous.summary : result.summary;
+      gitStatusCache.set(key, {
+        loadedAt: startedAt,
+        loadedSeq: startedSeq,
+        summary,
+      });
+      if (
+        !previous ||
+        JSON.stringify(previous.summary) !== JSON.stringify(summary)
+      ) {
+        updates.push({ checkout_path: path, git_status: summary });
+      }
+    }
+    if (updates.length > 0) args.onGitStatusChanged?.(updates);
   }
 
   function emptyGitStatus(): GitStatusSummary {
@@ -130,70 +244,43 @@ export function createStatusEnricher(args: {
     return summary;
   }
 
-  async function readGitStatus(
-    checkoutPath: string,
-  ): Promise<GitStatusSummary> {
-    const host = args.sshHost();
-    const cached = cachedGitStatus(host, checkoutPath);
-    if (cached) return cached;
-
+  async function readGitStatus(checkoutPath: string): Promise<GitStatusResult> {
     try {
-      const argv = host
-        ? sshReadCommandArgv(
-            host,
-            `git -C ${args.shQuote(checkoutPath)} status --porcelain=v1 --branch`,
-            [],
-            "git.status",
-          )
-        : ["git", "-C", checkoutPath, "status", "--porcelain=v1", "--branch"];
       const result = await args.runProcessWithCodeTimeout(
-        argv,
+        ["git", "-C", checkoutPath, "status", "--porcelain=v1", "--branch"],
         GIT_STATUS_TIMEOUT_MS,
+        // Polling must never take index.lock from the user's own git.
+        { env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } },
       );
-      const summary =
-        result.code === 0
-          ? parseGitStatus(result.stdout)
-          : {
-              ...emptyGitStatus(),
-              error: (
-                result.stderr ||
-                result.stdout ||
-                `git exited ${result.code}`
-              )
-                .trim()
-                .slice(0, 300),
-            };
-      cacheGitStatus(host, checkoutPath, summary);
-      return summary;
-    } catch (e) {
-      const summary = {
-        ...emptyGitStatus(),
-        error: (e as Error).message.slice(0, 300),
+      if (result.code === 0) return { summary: parseGitStatus(result.stdout) };
+      return {
+        summary: {
+          ...emptyGitStatus(),
+          error: (result.stderr || result.stdout || `git exited ${result.code}`)
+            .trim()
+            .slice(0, 300),
+        },
       };
-      cacheGitStatus(host, checkoutPath, summary);
-      return summary;
+    } catch (e) {
+      return {
+        summary: {
+          ...emptyGitStatus(),
+          error: (e as Error).message.slice(0, 300),
+        },
+        transportError: true,
+      };
     }
   }
 
   async function readRemoteGitStatuses(
     host: string,
     checkoutPaths: string[],
-  ): Promise<Map<string, GitStatusSummary>> {
-    const summaries = new Map<string, GitStatusSummary>();
-    const missing: string[] = [];
-    for (const path of checkoutPaths) {
-      const cached = cachedGitStatus(host, path);
-      if (cached) {
-        summaries.set(path, cached);
-      } else {
-        missing.push(path);
-      }
-    }
-    if (missing.length === 0) return summaries;
-
+  ): Promise<Map<string, GitStatusResult>> {
+    const summaries = new Map<string, GitStatusResult>();
     const marker = `__ROAMGATE_GIT_STATUS_${randomBytes(4).toString("hex")}__`;
-    const command = missing
-      .map(
+    const command = [
+      "export GIT_OPTIONAL_LOCKS=0",
+      ...checkoutPaths.map(
         (path, index) => `
 p=${args.shQuote(path)}
 printf '${marker}BEGIN ${index}\\n'
@@ -201,12 +288,19 @@ git -C "$p" status --porcelain=v1 --branch 2>&1
 code=$?
 printf '${marker}END ${index} %s\\n' "$code"
 `,
-      )
-      .join("\n");
+      ),
+    ].join("\n");
     const timeoutMs = Math.max(
       GIT_STATUS_TIMEOUT_MS,
-      2500 + missing.length * 1000,
+      2500 + checkoutPaths.length * 1000,
     );
+    const failAll = (error: string) => {
+      const summary = { ...emptyGitStatus(), error };
+      for (const path of checkoutPaths) {
+        summaries.set(path, { summary, transportError: true });
+      }
+      return summaries;
+    };
     let result: { code: number; stdout: string; stderr: string };
     try {
       result = await args.runProcessWithCodeTimeout(
@@ -214,35 +308,21 @@ printf '${marker}END ${index} %s\\n' "$code"
         timeoutMs,
       );
     } catch (e) {
-      const summary = {
-        ...emptyGitStatus(),
-        error: (e as Error).message.slice(0, 300),
-      };
-      for (const path of missing) {
-        cacheGitStatus(host, path, summary);
-        summaries.set(path, summary);
-      }
-      return summaries;
+      return failAll((e as Error).message.slice(0, 300));
     }
 
     if (result.code !== 0) {
-      const summary = {
-        ...emptyGitStatus(),
-        error: (result.stderr || result.stdout || `ssh exited ${result.code}`)
+      return failAll(
+        (result.stderr || result.stdout || `ssh exited ${result.code}`)
           .trim()
           .slice(0, 300),
-      };
-      for (const path of missing) {
-        cacheGitStatus(host, path, summary);
-        summaries.set(path, summary);
-      }
-      return summaries;
+      );
     }
 
     let currentIndex: number | null = null;
     let currentLines: string[] = [];
     const finish = (index: number, code: number) => {
-      const path = missing[index];
+      const path = checkoutPaths[index];
       if (!path) return;
       const output = currentLines.join("\n");
       const summary =
@@ -252,8 +332,7 @@ printf '${marker}END ${index} %s\\n' "$code"
               ...emptyGitStatus(),
               error: (output || `git exited ${code}`).trim().slice(0, 300),
             };
-      cacheGitStatus(host, path, summary);
-      summaries.set(path, summary);
+      summaries.set(path, { summary });
     };
 
     for (const line of result.stdout.split(/\r?\n/)) {
@@ -276,19 +355,23 @@ printf '${marker}END ${index} %s\\n' "$code"
       if (currentIndex !== null) currentLines.push(line);
     }
 
-    for (let index = 0; index < missing.length; index++) {
-      const path = missing[index];
+    for (const path of checkoutPaths) {
       if (summaries.has(path)) continue;
-      const summary = {
-        ...emptyGitStatus(),
-        error: "git status did not return a result",
-      };
-      cacheGitStatus(host, path, summary);
-      summaries.set(path, summary);
+      summaries.set(path, {
+        summary: {
+          ...emptyGitStatus(),
+          error: "git status did not return a result",
+        },
+      });
     }
     return summaries;
   }
 
+  /**
+   * Attaches the last known status. Stale or missing entries refresh in the
+   * background and changes reach the browser through `onGitStatusChanged`;
+   * only a checkout seen for the first time waits, up to `coldBudgetMs`.
+   */
   async function enrichWorkspacesWithGitStatus(
     result: unknown,
   ): Promise<unknown> {
@@ -299,7 +382,7 @@ printf '${marker}END ${index} %s\\n' "$code"
       return typeof checkoutPath === "string" && checkoutPath;
     });
     const host = args.sshHost();
-    const settings = await readGuiSettings();
+    const settings = await readSettings();
     for (const workspace of worktreeWorkspaces) {
       const key = workspaceRepoSettingsKey(workspace, host, args.connectionId);
       if (!key) continue;
@@ -308,28 +391,74 @@ printf '${marker}END ${index} %s\\n' "$code"
         settings.repositories[key]?.worktree_hooks_enabled !== false;
     }
 
-    if (host) {
-      const statuses = await readRemoteGitStatuses(
-        host,
-        worktreeWorkspaces.map(
-          (workspace: any) => workspace.worktree.checkout_path,
-        ),
-      );
-      for (const workspace of worktreeWorkspaces) {
-        workspace.worktree.git_status = statuses.get(
+    checkoutPathByWorkspace = new Map();
+    for (const workspace of worktreeWorkspaces) {
+      if (typeof workspace.workspace_id === "string") {
+        checkoutPathByWorkspace.set(
+          workspace.workspace_id,
           workspace.worktree.checkout_path,
         );
       }
-      return payload;
     }
-    await Promise.all(
-      worktreeWorkspaces.map(async (workspace: any) => {
-        const checkoutPath = workspace.worktree.checkout_path;
-        workspace.worktree.git_status = await readGitStatus(checkoutPath);
-      }),
+    knownCheckoutPaths = [...new Set(checkoutPathByWorkspace.values())];
+    const knownKeys = new Set(
+      knownCheckoutPaths.map((path) => gitStatusCacheKey(host, path)),
     );
+    for (const key of gitStatusCache.keys()) {
+      if (!knownKeys.has(key)) gitStatusCache.delete(key);
+    }
+    for (const key of invalidatedSeqs.keys()) {
+      if (!knownKeys.has(key)) invalidatedSeqs.delete(key);
+    }
+    for (const key of coldWaited) {
+      if (!knownKeys.has(key)) coldWaited.delete(key);
+    }
+
+    if (staleCheckoutPaths(host).length > 0) {
+      const refresh = refreshInBackground();
+      const cold = [...knownKeys].filter(
+        (key) => !gitStatusCache.has(key) && !coldWaited.has(key),
+      );
+      if (cold.length > 0 && coldBudgetMs > 0 && !disposed) {
+        for (const key of cold) coldWaited.add(key);
+        await settledWithin(refresh, coldBudgetMs);
+      }
+    }
+    for (const workspace of worktreeWorkspaces) {
+      const cached = gitStatusCache.get(
+        gitStatusCacheKey(host, workspace.worktree.checkout_path),
+      );
+      if (cached) workspace.worktree.git_status = cached.summary;
+    }
     return payload;
   }
 
-  return { enrichWorkspacesWithGitStatus, invalidateGitStatus };
+  return {
+    enrichWorkspacesWithGitStatus,
+    invalidateGitStatus,
+    invalidateWorkspaceGitStatus,
+    /** Settles when the background refresh in flight, if any, finishes. */
+    gitStatusRefreshSettled: () => refreshing ?? Promise.resolve(),
+    /**
+     * Stops background refreshes: no new git or ssh process starts and a read
+     * already in flight neither updates the cache nor reports a change.
+     */
+    dispose() {
+      disposed = true;
+    },
+  };
+}
+
+async function settledWithin(task: Promise<void>, timeoutMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      task,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

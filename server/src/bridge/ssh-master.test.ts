@@ -398,4 +398,20 @@ describe.skipIf(process.platform === "win32")("orphaned master sweep", () => {
       expect(existsSync(join(directory, "m.ctl"))).toBeTrue();
     }
   });
+  test("a failed orphan exit keeps its control socket available for retry", async () => {
+    const root = mkdtempSync("/tmp/rg-sweep-retry-");
+    roots.push(root);
+    const directory = await runtimeDirectory(root, "roamgate-ssh-Retry1", {
+      owner: 2 ** 22 + 19,
+    });
+    const options = { root, isProcessAlive: () => false };
+    expect(
+      await sweepOrphanedSshMasters({ ...options, runExit: async () => 255 }),
+    ).toBe(0);
+    expect(existsSync(join(directory, "m.ctl"))).toBe(true);
+    expect(
+      await sweepOrphanedSshMasters({ ...options, runExit: async () => 0 }),
+    ).toBe(1);
+    expect(existsSync(directory)).toBe(false);
+  });
 });

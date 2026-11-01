@@ -1,4 +1,5 @@
 import { MobileBottomBar } from "./components/MobileBottomBar";
+import { useMarkAgentsSeen } from "./agentSeen";
 import { createPortal } from "react-dom";
 import { bridge } from "./api";
 import {
@@ -101,7 +102,12 @@ import {
 } from "./components/fileExplorerResources";
 import { type ActiveFilePreviewSelection } from "./components/FilePreviewContent";
 import { AnnotationPanel } from "./components/AnnotationPanel";
-import { assistantActionExecuting, useAssistantState } from "./assistant";
+import {
+  assistantActionExecuting,
+  onAssistantShow,
+  useAssistantState,
+} from "./assistant";
+
 import type { AssistantSource } from "../../shared/assistant";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import "./components/MobileTabSheet.css";
@@ -1239,6 +1245,18 @@ function TerminalPaneLayout({
 }
 
 export default function App() {
+  // Ranger showing a workspace or session switches this browser to it.
+  useEffect(
+    () =>
+      onAssistantShow((show) => {
+        void store.jumpToConnectionWorkspace(
+          show.connection_id,
+          show.workspace_id,
+          show.pane_id,
+        );
+      }),
+    [],
+  );
   useShortcutPreferences();
   const { snapshot: assistantSnapshot } = useAssistantState();
   const s = useStoreSelector(
@@ -1312,6 +1330,8 @@ export default function App() {
       }),
     [],
   );
+  // Finished agents on screen are seen: no longer Done anywhere.
+  useMarkAgentsSeen(!mobile || mobileView === "session", mobile);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantMounted, setAssistantMounted] = useState(false);
   const [assistantTaskTarget, setAssistantTaskTarget] =
