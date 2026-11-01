@@ -6400,6 +6400,88 @@ test("an interrupted Claude turn fails closed through service recovery and holds
   mcp.stop();
 });
 
+describe("showing a workspace in the asking browser", () => {
+  test("records what the reply showed, with the question that asked", async () => {
+    const results: string[] = [];
+    const f = setup({
+      run: async (input) => {
+        results.push(
+          (
+            await input.show!({
+              connection_id: "local",
+              workspace_id: "ws",
+              pane_id: "ws:p2",
+            })
+          ).text,
+        );
+        input.message("Here it is.");
+        return [];
+      },
+    });
+    await f.service.handle("configure", { config: configured });
+    await f.service.handle("send", { request_id: "go-1", text: "Go to it" });
+    await until(() => !f.service.peek().running);
+    const reply = f.service.peek().messages.at(-1)!;
+    expect(reply.show).toEqual({
+      connection_id: "local",
+      workspace_id: "ws",
+      pane_id: "ws:p2",
+      request_id: "go-1",
+    });
+    expect(results).toEqual(["Shown in the user's Roamgate window."]);
+    expect(isAssistantSnapshot(f.service.peek())).toBe(true);
+  });
+
+  test("refuses a workspace outside the question's scope", async () => {
+    let refused = "";
+    const f = setup({
+      run: async (input) => {
+        await input.show!({
+          connection_id: "desktop",
+          workspace_id: "other",
+        }).catch((error: Error) => {
+          refused = error.message;
+        });
+        return [];
+      },
+    });
+    await f.service.handle("configure", { config: configured });
+    await f.service.handle("send", { request_id: "go-2", text: "Go there" });
+    await until(() => !f.service.peek().running);
+    expect(refused).toBe(
+      "That workspace is outside this question's authorized scope.",
+    );
+    expect(f.service.peek().messages.at(-1)!.show).toBeUndefined();
+  });
+});
+
+test("a scheduled task run has nothing to show anything in", async () => {
+  jest.useFakeTimers();
+  const offered: boolean[] = [];
+  const f = setup({}, () => ({
+    ...f.driver,
+    run: async (input) => {
+      offered.push(input.show !== undefined);
+      input.message("Checked");
+      return [];
+    },
+  }));
+  stableTaskIdentity(f.context);
+  await f.service.handle("configure", { config: configured });
+  const created = await f.service.handle("task.create", {
+    request_id: randomUUID(),
+    title: "Check",
+    prompt: "Check",
+    scope: configured.allowed_workspaces,
+    schedule: { type: "interval", minutes: 1 },
+  });
+  await f.service.resume();
+  await f.service.handle("task.run_now", { task_id: created.tasks![0]!.id });
+  jest.advanceTimersByTime(0);
+  await flushTasks();
+  expect(offered).toEqual([false]);
+});
+
 test("a task over all workspaces runs over those Ranger may use when it starts", async () => {
   jest.useFakeTimers();
   const f = setup({}, () => ({

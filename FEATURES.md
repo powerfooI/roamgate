@@ -197,6 +197,8 @@ or its shortcut.
   (**Option+Enter** on macOS, or **Queue**) sends it once the answer finishes.
   Waiting messages show above the message box, where you can edit or remove
   queued ones. After **Stop** they wait until you choose **Send next**.
+- **Go to:** asked to go to or open a workspace or agent session, Ranger shows
+  it in the browser you asked from, switching connection when needed.
 - **Act:** Ranger can create workspaces, worktrees, tabs, and splits, and start,
   prompt, or close agents and panes. You confirm each action unless
   **High-permission mode** is on. Closing never deletes files or history.
