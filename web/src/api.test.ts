@@ -788,6 +788,43 @@ describe("bridge connection lifecycle", () => {
     await Promise.all(background);
   });
 
+  test("queued compatibility calls cannot move to a different connection", async () => {
+    class ManualWebSocket extends HangingWebSocket {
+      static instance: ManualWebSocket;
+      sent: string[] = [];
+      constructor() {
+        super();
+        ManualWebSocket.instance = this;
+        queueMicrotask(() => {
+          this.readyState = ManualWebSocket.OPEN;
+          this.onopen?.();
+        });
+      }
+      send(raw = "") {
+        this.sent.push(raw);
+      }
+    }
+    installBrowserGlobals(ManualWebSocket as unknown as typeof WebSocket);
+    const bridge = createTestBridge();
+    bridge.connect();
+    await Bun.sleep(1);
+    sendHello(ManualWebSocket.instance);
+    bridge.setActiveConnection("alpha");
+    const calls = Array.from({ length: BACKGROUND_RPC_LIMIT + 1 }, (_, i) =>
+      bridge.call("git.pull_request", { branch: `b${i}` }, null, {
+        lane: "background",
+      }),
+    );
+    const settled = Promise.allSettled(calls);
+    expect(ManualWebSocket.instance.sent).toHaveLength(BACKGROUND_RPC_LIMIT);
+    bridge.setActiveConnection("beta");
+    expect(
+      (await settled).every((result) => result.status === "rejected"),
+    ).toBe(true);
+    expect(ManualWebSocket.instance.sent).toHaveLength(BACKGROUND_RPC_LIMIT);
+    bridge.disconnect();
+  });
+
   test("binds scoped clients, replies, and pushes to server runtime generation", async () => {
     class ManualWebSocket extends HangingWebSocket {
       static instance: ManualWebSocket;

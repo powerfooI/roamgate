@@ -1199,6 +1199,11 @@ export class Bridge {
   ): Promise<any> {
     if (options.lane !== "background")
       return this.callNow(method, params, timeoutMs, "interactive");
+    if (!isBridgeGlobalMethod(method))
+      return this.connection(
+        this._activeConnectionId,
+        this.runtimeGenerations.get(this._activeConnectionId) ?? null,
+      ).call(method, params, timeoutMs, options);
     return this.backgroundLane("\u0000bridge").run(
       backgroundCallKey(String(this._clientGeneration), method, params),
       () => this.callNow(method, params, timeoutMs, "background"),
