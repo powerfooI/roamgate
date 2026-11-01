@@ -107,4 +107,21 @@ describe("extractAgentSessionTitle", () => {
       }
     });
   });
+
+  describe("generic fallback", () => {
+    test("extracts title or name from other agents like pi or codex", () => {
+      const records = [
+        { type: "header", timestamp: 123 },
+        { title: "Optimize Query Execution" },
+      ];
+      expect(extractAgentSessionTitle("pi", dummyFile, records)).toBe(
+        "Optimize Query Execution",
+      );
+      expect(
+        extractAgentSessionTitle("codex", dummyFile, [
+          { name: "Build Release Binary" },
+        ]),
+      ).toBe("Build Release Binary");
+    });
+  });
 });

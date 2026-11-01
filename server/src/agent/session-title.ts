@@ -74,5 +74,17 @@ export function extractAgentSessionTitle(
     return latestTitle;
   }
 
-  return null;
+  // Generic fallback for other agents (pi, codex, kimi, grok, muse, omp)
+  let latestGenericTitle: string | null = null;
+  for (const record of records) {
+    if (!isRecord(record)) continue;
+    const title =
+      cleanTitle(record.title) ??
+      cleanTitle(record.name) ??
+      cleanTitle(record.customTitle) ??
+      cleanTitle(record.custom_title) ??
+      cleanTitle(record.session_title);
+    if (title) latestGenericTitle = title;
+  }
+  return latestGenericTitle;
 }
