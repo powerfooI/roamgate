@@ -171,12 +171,15 @@ test("source navigation refuses replaced or disconnected servers before switchin
       ],
     });
     expect(await openServerSession(source, "w1", "w1:p1")).toBe(true);
-    expect(navigate).toHaveBeenLastCalledWith({
-      connectionId: "alpha",
-      runtimeGeneration: 2,
-      workspaceId: "w1",
-      paneId: "w1:p1",
-    });
+    expect(navigate).toHaveBeenLastCalledWith(
+      {
+        connectionId: "alpha",
+        runtimeGeneration: 2,
+        workspaceId: "w1",
+        paneId: "w1:p1",
+      },
+      { fromKnownList: true },
+    );
     expect(
       await openServerSession({ ...source, runtimeGeneration: 1 }, "w1"),
     ).toBe(false);
