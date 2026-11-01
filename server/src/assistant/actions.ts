@@ -4,6 +4,7 @@ import type {
   AssistantAction,
   AssistantActionKind,
   AssistantWorkspace,
+  AssistantWorkspaceRef,
 } from "../../../shared/assistant";
 import { isRecord } from "../agent/session-utils";
 import {
@@ -28,6 +29,8 @@ export type AssistantActionPreview = Omit<
 export type AssistantActionResult = {
   status: "succeeded" | "failed" | "uncertain";
   detail: string;
+  /** The workspace the operation made, verified, whatever the status. */
+  created?: AssistantWorkspaceRef;
 };
 export type PreparedAssistantAction = {
   preview: AssistantActionPreview;
@@ -451,10 +454,12 @@ export async function prepareAssistantAction(args: {
             status: "uncertain",
             detail:
               "A new workspace was observed, but its directory could not be verified. Inspect it before retrying.",
+            created: { connection_id: target.connection_id, workspace_id: id },
           };
         return {
           status: "succeeded",
           detail: "The new workspace and its directory were verified.",
+          created: { connection_id: target.connection_id, workspace_id: id },
         };
       };
     } else if (
@@ -700,9 +705,14 @@ export async function prepareAssistantAction(args: {
           )
         )
           throw new Error("Worktree result unavailable");
+        const worktreeRef = {
+          connection_id: target.connection_id,
+          workspace_id: created,
+        };
         if (isRecord(response) && response.parent_tracking_failed === true)
           return {
             status: "failed",
+            created: worktreeRef,
             detail:
               "The worktree was created, but its source relationship could not be saved. Inspect it before retrying.",
           };
@@ -716,17 +726,20 @@ export async function prepareAssistantAction(args: {
         )
           return {
             status: "failed",
+            created: worktreeRef,
             detail:
               "The worktree was created, but setup was skipped because its configuration changed. Inspect it before retrying.",
           };
         if (hook?.status === "failed")
           return {
             status: "failed",
+            created: worktreeRef,
             detail:
               "The worktree was created, but its setup hook failed. Inspect it before retrying.",
           };
         return {
           status: "succeeded",
+          created: worktreeRef,
           detail:
             "The worktree and its workspace were verified. The configured creation flow completed.",
         };
