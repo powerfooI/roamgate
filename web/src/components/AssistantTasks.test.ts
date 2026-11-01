@@ -786,6 +786,38 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
     }
   });
 
+  test("a failed last run offers a fresh run, an older failed one does not", async () => {
+    const ui = await install();
+    try {
+      const failed = (id: string): AssistantTaskRun => ({
+        ...run("retry", id, "failed"),
+        error: "This run could not safely resume.",
+      });
+      const latest = failed("latest");
+      const older = failed("older");
+      const saved = task("retry", { last_run: latest });
+      ui.get.mockImplementation(async (_taskId, runId) => ({
+        task: saved,
+        runs: [latest, older],
+        run: { ...(runId === "older" ? older : latest), messages: [] },
+      }));
+      await ui.render({ ...snapshot([saved]), running: false });
+      await React.act(async () =>
+        ui.container
+          .querySelector<HTMLButtonElement>(".assistant-task-row")!
+          .click(),
+      );
+      await ui.click("Start a fresh run");
+      expect(ui.call).toHaveBeenCalledWith("task.run_now", {
+        task_id: "retry",
+      });
+      await ui.input("Task run", "older");
+      expect(() => ui.button("Start a fresh run")).toThrow();
+    } finally {
+      await ui.close();
+    }
+  });
+
   test("task history survives reselection and stays selectable while another run loads or fails", async () => {
     const ui = await install();
     try {

@@ -28,6 +28,7 @@ import {
 import {
   type AssistantContext,
   AssistantRecoveryNotReadyError,
+  AssistantServerRestartedError,
 } from "./context";
 import { type AssistantDriver, createPiDriver } from "./pi-driver";
 import {
@@ -6619,7 +6620,10 @@ describe("a task over workspaces closed since it was saved", () => {
       },
     }));
     stableTaskIdentity(f.context);
-    const state = { listed: [workspace, second, third] };
+    const state = {
+      listed: [workspace, second, third],
+      boot: "original-server",
+    };
     // A checkout's identity: one per name, so a recreated one keeps it.
     f.context.recoveryScope = async (captured) =>
       captured.map((ref) => ({
@@ -6629,10 +6633,13 @@ describe("a task over workspaces closed since it was saved", () => {
         workspace_identity: createHash("sha256")
           .update(ref.label)
           .digest("hex"),
-        herdr_boot_id: "original-server",
+        herdr_boot_id: state.boot,
       }));
     const restored: string[][] = [];
     f.context.restoreScope = async (targets) => {
+      // As the real one: a target checked on another Herdr boot is refused.
+      if (targets.some((target) => target.herdr_boot_id !== state.boot))
+        throw new AssistantServerRestartedError("Local");
       restored.push(targets.map((target) => target.workspace_id));
       return targets.map((target) => ({
         ...state.listed.find(
@@ -6738,6 +6745,40 @@ describe("a task over workspaces closed since it was saved", () => {
     expect(detail.runs[0]?.error).toContain(
       "None of the task's workspaces is open any more: Local / Workspace (closed)",
     );
+  });
+
+  test("a scheduled run after Herdr restarted finds its workspaces again", async () => {
+    jest.useFakeTimers();
+    const { f, state, taskId, restored } = await threeWorkspaceTask();
+    state.boot = "restarted-server";
+    jest.advanceTimersByTime(60 * 60_000);
+    await flushTasks();
+    let detail = await f.service.taskDetail({ task_id: taskId });
+    expect(detail.runs[0]?.status).toBe("succeeded");
+    expect(detail.runs[0]?.notice).toBe(
+      "Herdr on Local restarted since the task was saved: its workspaces were checked again.",
+    );
+    expect(restored.at(-1)).toEqual(["ws", "ws2", "ws3"]);
+    // The task keeps them under the new server identity: no notice again.
+    jest.advanceTimersByTime(60 * 60_000);
+    await flushTasks();
+    detail = await f.service.taskDetail({ task_id: taskId });
+    expect(detail.runs[0]?.status).toBe("succeeded");
+    expect(detail.runs[0]?.notice).toBeUndefined();
+  });
+
+  test("Run now after Herdr restarted skips an id that now holds another workspace", async () => {
+    jest.useFakeTimers();
+    const { f, state, taskId, runNow, restored } = await threeWorkspaceTask();
+    state.boot = "restarted-server";
+    state.listed = [workspace, second, { ...third, label: "Elsewhere" }];
+    expect(await runNow()).toBeUndefined();
+    const detail = await f.service.taskDetail({ task_id: taskId });
+    expect(detail.runs[0]?.status).toBe("succeeded");
+    expect(detail.runs[0]?.notice).toBe(
+      "Herdr on Local restarted since the task was saved: its workspaces were checked again. Skipped a workspace no longer open: Local / Third (its id now holds another workspace). Edit the task to update its workspaces.",
+    );
+    expect(restored.at(-1)).toEqual(["ws", "ws2"]);
   });
 
   test("still fails when Ranger may no longer use one still open", async () => {
