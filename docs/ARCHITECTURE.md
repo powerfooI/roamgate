@@ -285,7 +285,13 @@ state; sends are never replayed.
 - **Scope:** no workspaces are allowed by default. Each turn captures concrete
   connection/workspace pairs (at most 512) and rechecks runtime leases around
   every read. Only the dedicated confirmation can enable high-permission mode
-  (`approval_mode: "auto"` with `workspace_scope: "all"`).
+  (`approval_mode: "auto"` with `workspace_scope: "all"`, "Full access"); its
+  turns also reach workspaces created after they started, which join the turn
+  (`extendScope`) when a tool names one or lists the scope. A workspace Ranger
+  creates (a `created` action result) joins the running turn at once and the
+  chat's later turns (`created_workspaces` in the chat's saved state), without
+  changing the settings' grant; tasks, which outlive the chat, count only the
+  grant. Like a grant, it is dropped once a complete listing no longer has it.
 - **Actions:** a proposal pins its runtime lease and target, and
   `action.confirm` accepts only the proposal ID. A receipt is saved before
   dispatch, one action runs at a time, and failed or uncertain actions are never
