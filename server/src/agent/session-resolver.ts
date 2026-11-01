@@ -429,6 +429,22 @@ export async function resolveAgentSessionInfo(
       };
     }
   }
+  if (agent === "pi" && !resolvedSession && cwd) {
+    // Without Herdr's Pi integration: the newest session in its directory.
+    const found = await files.findPiSessionForCwd(cwd);
+    const id = found
+      ? /(?:^|_)([^_]+)\.jsonl$/.exec(basename(found.path))?.[1]
+      : undefined;
+    if (found && id) {
+      file = found;
+      resolvedSession = {
+        source: "pi-local",
+        agent: "pi",
+        kind: "id",
+        value: id,
+      };
+    }
+  }
   if (agent === "muse" && !resolvedSession && !files.remote) {
     file = await findMuseSession({ cwd, metadataCache: context.museMetadata });
     if (file?.sessionId) {

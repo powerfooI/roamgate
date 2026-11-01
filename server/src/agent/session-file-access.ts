@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { sshReadCommandArgv } from "../bridge/ssh-command";
@@ -27,6 +27,11 @@ export type AgentSessionFileAccess = {
   readPrefix(path: string, byteLimit: number): Promise<Uint8Array>;
   readDownloadBody(path: string): Promise<BodyInit>;
   findPiSessionById(id: string): Promise<SessionFile | null>;
+  /**
+   * The newest Pi session started in a directory: without Herdr's Pi
+   * integration, nothing names the pane's session.
+   */
+  findPiSessionForCwd(cwd: string): Promise<SessionFile | null>;
   /** A remote Claude transcript by session ID; local ones are found locally. */
   findClaudeSessionById(id: string): Promise<SessionFile | null>;
   /**
@@ -111,6 +116,25 @@ find "$(dirname "$f")" -maxdepth 1 -name '*.jsonl' -newer "$f" -exec grep -l -E 
 }
 `;
 
+/**
+ * The directory Pi keeps a working directory's sessions in, under its
+ * sessions directory: the path with its slashes as dashes, between "--"
+ * (/a/b-c becomes --a-b-c--). Null for a path that would not be safe to
+ * name in a shell command.
+ */
+export function piSessionDirectoryName(cwd: string): string | null {
+  if (!cwd.startsWith("/") || /["$`\\\n]/.test(cwd)) return null;
+  return `--${cwd.slice(1).replace(/\//g, "-")}--`;
+}
+
+function localPiDirectory() {
+  const configured = process.env.PI_CODING_AGENT_DIR?.trim();
+  if (!configured) return join(homedir(), ".pi", "agent");
+  if (configured === "~") return homedir();
+  if (configured.startsWith("~/")) return join(homedir(), configured.slice(2));
+  return resolve(configured);
+}
+
 function validClaudeSessionId(id: string): boolean {
   return /^[0-9a-f-]{36}$/i.test(id);
 }
@@ -129,6 +153,22 @@ export const localAgentSessionFiles: AgentSessionFileAccess = {
   },
   async findPiSessionById() {
     return null;
+  },
+  async findPiSessionForCwd(cwd) {
+    const name = piSessionDirectoryName(cwd);
+    if (!name) return null;
+    const directory = join(localPiDirectory(), "sessions", name);
+    let newest: SessionFile | null = null;
+    try {
+      for (const entry of await readdir(directory)) {
+        if (!entry.endsWith(".jsonl")) continue;
+        const file = await localSessionFile(join(directory, entry));
+        if (file && (!newest || file.mtimeMs > newest.mtimeMs)) newest = file;
+      }
+    } catch {
+      return null;
+    }
+    return newest;
   },
   async findClaudeSessionById() {
     return null;
@@ -401,6 +441,16 @@ if matches:
         id,
         "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/sessions",
         '-name "$id.jsonl" -o -name "*_$id.jsonl"',
+        "Pi",
+      );
+    },
+    findPiSessionForCwd(cwd) {
+      const name = piSessionDirectoryName(cwd);
+      if (!name) return Promise.resolve(null);
+      return findRemoteSession(
+        "",
+        `\${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/sessions/${name}`,
+        '-name "*.jsonl"',
         "Pi",
       );
     },

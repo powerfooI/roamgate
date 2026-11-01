@@ -309,6 +309,41 @@ describe("session search", () => {
   });
 });
 
+describe("Pi without Herdr's Pi integration", () => {
+  test("a Pi pane with no reported session takes its directory's newest", async () => {
+    const root = await mkdtemp(join(tmpdir(), "roamgate-pi-cwd-"));
+    tempDirectories.push(root);
+    process.env.PI_CODING_AGENT_DIR = root;
+    const dir = join(root, "sessions", "--repo-app--");
+    await mkdir(dir, { recursive: true });
+    const older = join(dir, "2026-10-01T10-00-00-000Z_older-id.jsonl");
+    const newer = join(dir, "2026-10-02T10-00-00-000Z_newer-id.jsonl");
+    await writeFile(older, "{}\n");
+    await writeFile(newer, "{}\n");
+    const old = new Date(Date.now() - 60_000);
+    await utimes(older, old, old);
+    const resolve = (cwd: string) =>
+      resolveAgentSession(
+        { pane_id: "p1" },
+        async () => ({
+          agent: { agent: "pi", workspace_id: "w1", tab_id: "t1", cwd },
+        }),
+        localAgentSessionFiles,
+        createAgentSessionResolverContext(),
+      );
+    const found = await resolve("/repo/app");
+    expect(found.path).toBe(newer);
+    expect(found.session).toEqual({
+      source: "pi-local",
+      agent: "pi",
+      kind: "id",
+      value: "newer-id",
+    });
+    // Another directory has no session of its own.
+    expect((await resolve("/repo/other")).status).toBe("missing_session");
+  });
+});
+
 describe("Claude transcripts", () => {
   const id = "69775585-98cc-4cb1-9275-4956ebb07add";
 
