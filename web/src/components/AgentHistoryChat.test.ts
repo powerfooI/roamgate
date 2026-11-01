@@ -100,3 +100,17 @@ test("long chat messages are clipped behind a full-message button", () => {
   expect(markup).toContain("View full message");
   expect(markup).not.toContain(text);
 });
+
+test("queued messages are marked and a compaction summary is one line", () => {
+  const summary = "This session is being continued from an earlier one";
+  const markup = renderChat([
+    entry("1", "user", { text: summary, compact_summary: true }),
+    entry("2", "user", { text: "waiting", queued: true }),
+    entry("3", "user", { text: "landed" }),
+  ]);
+  expect(markup).toContain("Conversation compacted");
+  expect(markup).toContain("Show the summary");
+  expect(markup).not.toContain(summary);
+  expect(markup.match(/is-queued/g)).toHaveLength(1);
+  expect(markup.match(/>Queued</g)).toHaveLength(1);
+});
