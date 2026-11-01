@@ -48,3 +48,16 @@ describe("latency debug", () => {
     expect(probe.presented()).toBeNull();
   });
 });
+
+test("an unanswered browser echo expires rather than measuring idle time", () => {
+  let now = 0;
+  const probe = createEchoProbe(() => now);
+  probe.sent("a");
+  now = 6000;
+  expect(probe.presented()).toBeNull();
+  probe.sent("b");
+  now = 12000;
+  probe.sent("c");
+  now = 12020;
+  expect(probe.presented()).toBe(20);
+});
