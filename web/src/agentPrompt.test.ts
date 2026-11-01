@@ -71,7 +71,8 @@ test("Claude Code's trust question is an unnumbered menu answered with Enter", (
   const prompt = parseAgentPrompt(screen);
   expect(prompt.confirm).toBe(true);
   expect(prompt.options).toEqual([
-    { key: "", label: "No, exit", input: "\r" },
+    // The choice under the cursor is marked, as in a numbered menu.
+    { key: "", label: "No, exit", input: "\r", cursor: true },
     { key: "", label: "Yes, I trust this folder", input: "\x1b[B\r" },
   ]);
 });

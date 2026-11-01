@@ -286,6 +286,7 @@ function parseCursorMenu(
       key: "",
       label,
       input: (moves > 0 ? DOWN : UP).repeat(Math.abs(moves)) + "\r",
+      ...(index === marked ? { cursor: true } : {}),
     };
   });
 }
