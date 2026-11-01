@@ -1,4 +1,5 @@
 import { MobileBottomBar } from "./components/MobileBottomBar";
+import { useMarkAgentsSeen } from "./agentSeen";
 import { createPortal } from "react-dom";
 import { bridge } from "./api";
 import {
@@ -1329,6 +1330,8 @@ export default function App() {
       }),
     [],
   );
+  // Finished agents on screen are seen: no longer Done anywhere.
+  useMarkAgentsSeen(!mobile || mobileView === "session", mobile);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantMounted, setAssistantMounted] = useState(false);
   const [assistantTaskTarget, setAssistantTaskTarget] =

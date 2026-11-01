@@ -132,6 +132,8 @@ if (process.env.ROAMGATE_APP_HISTORY_TEST !== "1") {
       connectionId: "local",
       generation: 1,
       isCurrent: () => true,
+      // Agents coming on screen are marked seen.
+      call: async () => ({}),
     };
     mock.module("./useConnectionClient", () => ({
       useConnectionClient: () => client,
