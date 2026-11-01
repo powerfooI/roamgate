@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  normalizeWorktreeDirectory,
   repoSettingsKey,
   workspaceAutoSyncSettingsKey,
   workspaceRepoSettingsKey,
@@ -171,4 +172,11 @@ test("settings keys preserve legacy format and isolate connection identities", (
   expect(repoSettingsKey("same", undefined, "alpha:local:beta")).toBe(
     "connection:alpha%3Alocal%3Abeta:local:same",
   );
+});
+
+test("a repository's worktree directory is kept only when absolute", () => {
+  expect(normalizeWorktreeDirectory("  /srv/trees//  ")).toBe("/srv/trees");
+  expect(normalizeWorktreeDirectory("/")).toBe("/");
+  for (const value of ["", "   ", "trees", "./trees", "~/trees", 3, null])
+    expect(normalizeWorktreeDirectory(value)).toBeUndefined();
 });

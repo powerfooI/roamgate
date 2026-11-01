@@ -9,6 +9,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AssistantActionKind } from "../../../shared/assistant";
+import {
+  updateGuiSettings,
+  workspaceRepoSettingsKey,
+} from "../config/gui-settings";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
 import * as processUtils from "../utils/process-utils";
 import { createWorkspaceWorktree } from "../worktree/create";
@@ -1011,6 +1015,61 @@ describe("confirmed Ranger action targets", () => {
     expect(
       f.call.mock.calls.some(([method]) => method === "worktree.create"),
     ).toBe(false);
+  });
+
+  test("worktree preview shows the location's path, and a changed location blocks dispatch", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "assistant-worktree-dir-"));
+    const previous = process.env.ROAMGATE_SETTINGS_PATH;
+    process.env.ROAMGATE_SETTINGS_PATH = join(dir, "settings.json");
+    const setDirectory = (directory: string | undefined) =>
+      updateGuiSettings((settings) => ({
+        ...settings,
+        repositories: Object.fromEntries(
+          Object.keys(settings.repositories).map((key) => [
+            key,
+            { ...settings.repositories[key], worktree_directory: directory },
+          ]),
+        ),
+      }));
+    try {
+      const f = fixture();
+      const unset = await f.prepare("create_worktree", {
+        branch: "feature/ranger",
+      });
+      expect(unset.preview.params.path).toBe(
+        "(Herdr's default worktree location)",
+      );
+      // Any repository key the fixture's workspace maps to gets a location.
+      await updateGuiSettings((settings) => ({
+        ...settings,
+        repositories: {
+          [workspaceRepoSettingsKey(
+            { cwd: fixtureDirectory },
+            undefined,
+            "local",
+          )!]: { worktree_directory: "/srv/trees" },
+        },
+      }));
+      const prepared = await f.prepare("create_worktree", {
+        branch: "feature/ranger",
+      });
+      expect(prepared.preview.params.path).toBe("/srv/trees/feature-ranger");
+      expect((await prepared.execute()).status).toBe("succeeded");
+      expect(f.createWorktree.mock.calls[0]?.[1]?.path).toBe(
+        "/srv/trees/feature-ranger",
+      );
+
+      const moved = await f.prepare("create_worktree", {
+        branch: "feature/ranger",
+      });
+      await setDirectory("/elsewhere");
+      expect((await moved.execute()).status).toBe("failed");
+      expect(f.createWorktree).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previous === undefined) delete process.env.ROAMGATE_SETTINGS_PATH;
+      else process.env.ROAMGATE_SETTINGS_PATH = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("worktree source hook changes block dispatch and target hook guards report partial failure", async () => {

@@ -1,7 +1,18 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  updateGuiSettings,
+  workspaceRepoSettingsKey,
+} from "../config/gui-settings";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
 import { shQuote } from "../utils/process-utils";
-import { createWorkspaceWorktree, syncWorktreeBase } from "./create";
+import {
+  createWorkspaceWorktree,
+  syncWorktreeBase,
+  worktreeCheckoutPath,
+} from "./create";
 
 const commit = "a".repeat(40);
 const remoteHead = `ref: refs/heads/master\tHEAD\n${commit}\tHEAD\n`;
@@ -516,4 +527,63 @@ test("Windows runtimes refuse worktree creation before any helper runs", async (
     ),
   ).rejects.toThrow("unavailable on Windows");
   expect(fixture.calls).toEqual([]);
+});
+
+describe("repository worktree directory", () => {
+  test("a branch becomes one safe directory name under it", () => {
+    expect(worktreeCheckoutPath("/w/repo", "feature/login")).toBe(
+      "/w/repo/feature-login",
+    );
+    expect(worktreeCheckoutPath("/w/repo/", "  fix: a b  ")).toBe(
+      "/w/repo/fix-a-b",
+    );
+    // Leading dots never climb out of the directory.
+    expect(worktreeCheckoutPath("/w/repo", "../../etc")).toBe("/w/repo/etc");
+    expect(() => worktreeCheckoutPath("/w/repo", "///")).toThrow("empty");
+  });
+
+  test("creation puts the worktree in the repository's directory unless a path is given", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "roamgate-worktree-dir-"));
+    const previous = process.env.ROAMGATE_SETTINGS_PATH;
+    process.env.ROAMGATE_SETTINGS_PATH = join(dir, "settings.json");
+    try {
+      const key = workspaceRepoSettingsKey(
+        { cwd: "/source", worktree: { checkout_path: "/source/checkout" } },
+        "host",
+        undefined,
+      );
+      expect(key).toBeTruthy();
+      await updateGuiSettings((settings) => ({
+        ...settings,
+        repositories: {
+          ...settings.repositories,
+          [key!]: { worktree_directory: "/srv/trees" },
+        },
+      }));
+
+      const placed = creationFixture();
+      await createWorkspaceWorktree(
+        placed.runtime,
+        { workspace_id: "source", branch: "team/feature" },
+        placed.isCurrent,
+        undefined,
+        placed.syncBase,
+      );
+      expect(placed.rpcParams[0]?.path).toBe("/srv/trees/team-feature");
+
+      const explicit = creationFixture();
+      await createWorkspaceWorktree(
+        explicit.runtime,
+        { workspace_id: "source", branch: "team/feature", path: "/elsewhere" },
+        explicit.isCurrent,
+        undefined,
+        explicit.syncBase,
+      );
+      expect(explicit.rpcParams[0]?.path).toBe("/elsewhere");
+    } finally {
+      if (previous === undefined) delete process.env.ROAMGATE_SETTINGS_PATH;
+      else process.env.ROAMGATE_SETTINGS_PATH = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

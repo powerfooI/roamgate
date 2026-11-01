@@ -256,6 +256,7 @@ const IMPORTANT_RPC_METHODS = new Set([
   "settings.workspace_auto_sync.update",
   "settings.workspace_auto_sync.update_key",
   "settings.worktree_hooks.get",
+  "settings.worktree_directory.get",
   "worktree.create",
   "worktree.open",
   "worktree.remove",

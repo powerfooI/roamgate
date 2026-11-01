@@ -10,6 +10,8 @@ import { sourceCheckoutPath as workspaceSourceCheckoutPath } from "../workspace/
 
 export type GuiRepoSettings = {
   worktree_hooks_enabled?: boolean;
+  /** Absolute directory that new worktrees of this repository are created in. */
+  worktree_directory?: string;
   custom?: Record<string, unknown>;
 };
 
@@ -103,6 +105,13 @@ function storedTitleSuffix(value: unknown): string {
   }
 }
 
+/** Returns a trimmed absolute directory, or undefined when unset or invalid. */
+export function normalizeWorktreeDirectory(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim().replace(/(?<=.)\/+$/, "");
+  return trimmed.startsWith("/") ? trimmed : undefined;
+}
+
 function normalizeGuiSettings(raw: unknown): GuiSettings {
   const obj = raw && typeof raw === "object" ? (raw as any) : {};
   const repositories =
@@ -118,6 +127,7 @@ function normalizeGuiSettings(raw: unknown): GuiSettings {
         typeof repo.worktree_hooks_enabled === "boolean"
           ? repo.worktree_hooks_enabled
           : undefined,
+      worktree_directory: normalizeWorktreeDirectory(repo.worktree_directory),
       custom:
         repo.custom && typeof repo.custom === "object"
           ? (repo.custom as Record<string, unknown>)
@@ -319,4 +329,12 @@ export async function repoWorktreeHooksEnabled(
   if (!repoKey) return true;
   const settings = await readGuiSettings();
   return settings.repositories[repoKey]?.worktree_hooks_enabled !== false;
+}
+
+export async function repoWorktreeDirectory(
+  repoKey?: string | null,
+): Promise<string | undefined> {
+  if (!repoKey) return undefined;
+  const settings = await readGuiSettings();
+  return settings.repositories[repoKey]?.worktree_directory;
 }

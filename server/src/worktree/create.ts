@@ -5,6 +5,10 @@ import type { RunProcessWithCodeTimeout } from "../workspace/file-types";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
 import { assertUnixHost } from "../connections/unix-only";
 import { runProcessWithCodeTimeout, shQuote } from "../utils/process-utils";
+import {
+  repoWorktreeDirectory,
+  workspaceRepoSettingsKey,
+} from "../config/gui-settings";
 import type { WorktreeHookExpectation } from "./worktree-hooks";
 
 type GitRootResolver = (workspaceId: string) => Promise<{ root: string }>;
@@ -60,6 +64,16 @@ export async function syncWorktreeBase({
       stderr: "",
     };
   }
+}
+
+/** Checkout path for `branch` inside the repository's configured directory. */
+export function worktreeCheckoutPath(directory: string, branch: string) {
+  const name = branch
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^[-.]+|-+$/g, "");
+  if (!name) throw new Error("Worktree branch name is empty.");
+  return `${directory.replace(/\/+$/, "")}/${name}`;
 }
 
 /** Shared by the workspace UI and Ranger's confirmed operations. */
@@ -132,6 +146,16 @@ export async function createWorkspaceWorktree(
     ...createParams,
     base: baseSync.commit,
   };
+  if (!rpcParams.path && typeof rpcParams.branch === "string") {
+    const key = workspaceRepoSettingsKey(
+      sourceWorkspace,
+      runtime.sshHost(),
+      runtime.identity?.id,
+    );
+    const directory = await repoWorktreeDirectory(key);
+    if (directory)
+      rpcParams.path = worktreeCheckoutPath(directory, rpcParams.branch);
+  }
   if (guardedRoot) {
     if (baseSync.root !== expectedRoot)
       throw new Error("The worktree source repository changed.");

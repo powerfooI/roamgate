@@ -45,6 +45,7 @@ import { basename, shortId } from "../utils";
 import { luckyWorktreeBranchName } from "../luckyName";
 import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
 import { WorktreeHooksDialog } from "./WorktreeHooksDialog";
+import { WorktreeLocationDialog } from "./WorktreeLocationDialog";
 import { WorktreeOpenDialog } from "./WorktreeOpenDialog";
 import { AgentIcon } from "./AgentIcon";
 import {
@@ -272,6 +273,9 @@ export function CommandCombobox({
   const [worktreeHooksWorkspaceId, setWorktreeHooksWorkspaceId] = useState<
     string | null
   >(null);
+  const [locationWorkspaceId, setLocationWorkspaceId] = useState<string | null>(
+    null,
+  );
   const [lifecycleWorkspaceId, setLifecycleWorkspaceId] = useState<
     string | null
   >(null);
@@ -525,6 +529,19 @@ export function CommandCombobox({
       detail: workspaceName(focusedWorkspace),
       keywords: ["existing worktree", "open existing", "checkout", "branch"],
       run: () => setOpenWorktreeWorkspaceId(focusedWorkspace.workspace_id),
+    });
+    currentActions.push({
+      key: "current-worktree-location",
+      icon: <FolderOpen size={15} />,
+      title: "Worktree location",
+      detail: workspaceName(focusedWorkspace),
+      keywords: [
+        "worktree directory",
+        "worktree path",
+        "where worktrees are created",
+        "worktree folder",
+      ],
+      run: () => setLocationWorkspaceId(focusedWorkspace.workspace_id),
     });
   }
   if (focusedWorkspace?.worktree) {
@@ -1199,6 +1216,11 @@ export function CommandCombobox({
         open={!!worktreeHooksWorkspaceId}
         workspaceId={worktreeHooksWorkspaceId ?? undefined}
         onClose={() => setWorktreeHooksWorkspaceId(null)}
+      />
+      <WorktreeLocationDialog
+        open={!!locationWorkspaceId}
+        workspaceId={locationWorkspaceId}
+        onClose={() => setLocationWorkspaceId(null)}
       />
       <WorktreeLifecycleDialog
         open={!!lifecycleWorkspaceId}
