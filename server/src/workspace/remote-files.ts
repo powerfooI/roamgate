@@ -127,7 +127,7 @@ while IFS= read -r -d '' p; do
 done < <(find "$target_real" -mindepth 1 -maxdepth 1 -print0)
 `;
   const result = await runProcessWithCodeTimeout(
-    sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
+    sshCommandArgv(host, `bash -lc ${shQuote(command)}`, [], "files.list"),
     LIST_TIMEOUT_MS,
   );
   if (result.code !== 0) {
@@ -174,7 +174,7 @@ for request in "\${requests[@]}"; do
 done
 `;
   const result = await runProcessWithCodeTimeout(
-    sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
+    sshCommandArgv(host, `bash -lc ${shQuote(command)}`, [], "files.resolve"),
     PREVIEW_TIMEOUT_MS,
   );
   if (result.code !== 0) {
@@ -289,7 +289,7 @@ head -c $((limit + 1)) "$target_real" | base64 | tr -d '\\n'
 printf '\\n'
 `;
   const result = await runProcessWithCodeTimeout(
-    sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
+    sshCommandArgv(host, `bash -lc ${shQuote(command)}`, [], "files.read"),
     PREVIEW_TIMEOUT_MS,
   );
   if (result.code !== 0) {
@@ -401,7 +401,12 @@ fi
 printf '\\n'
 `;
     const result = await runProcessWithCodeTimeout(
-      sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
+      sshCommandArgv(
+        host,
+        `bash -lc ${shQuote(command)}`,
+        [],
+        "files.download",
+      ),
       DOWNLOAD_TIMEOUT_MS,
     );
     if (result.code === 15) {
@@ -515,7 +520,7 @@ rel_path="\${target#"$root_real"/}"
 printf 'META\\t%s\\t%s\\t%s\\n' "$(printf '%s' "$rel_path" | base64 | tr -d '\\n')" "$size" "$overwritten"
 `;
   const result = await runProcessWithInputTimeout(
-    sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
+    sshCommandArgv(host, `bash -lc ${shQuote(command)}`, [], "files.upload"),
     body.toString("base64"),
     UPLOAD_TIMEOUT_MS,
   );
@@ -579,7 +584,7 @@ rm -rf -- "$target"
 printf 'META\\t%s\\t%s\\n' "$(printf '%s' "$rel" | base64 | tr -d '\\n')" "$type"
 `;
   const result = await runProcessWithCodeTimeout(
-    sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
+    sshCommandArgv(host, `bash -lc ${shQuote(command)}`, [], "files.delete"),
     DELETE_TIMEOUT_MS,
   );
   if (result.code !== 0) {

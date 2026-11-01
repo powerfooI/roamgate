@@ -304,7 +304,7 @@ printf '${marker}END ${index} %s\\n' "$code"
     let result: { code: number; stdout: string; stderr: string };
     try {
       result = await args.runProcessWithCodeTimeout(
-        sshCommandArgv(host, command),
+        sshCommandArgv(host, command, [], "git.status.batch"),
         timeoutMs,
       );
     } catch (e) {

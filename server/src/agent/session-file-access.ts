@@ -116,7 +116,12 @@ export function createAgentSessionFileAccess(args: {
 
   async function runRemote(command: string) {
     const result = await args.runBinaryProcessWithTimeout(
-      sshCommandArgv(host, `bash -lc ${args.shQuote(command)}`),
+      sshCommandArgv(
+        host,
+        `bash -lc ${args.shQuote(command)}`,
+        [],
+        "agent.session.read",
+      ),
       SESSION_FILE_TIMEOUT_MS,
     );
     if (result.code !== 0) {
@@ -146,7 +151,12 @@ change="$(stat -c '%y:%z' "$path" 2>/dev/null || stat -f '%Fm:%Fc' "$path")"
 printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$size" "$mtime" "$path64" "$identity" "$change"
 `;
     const result = await args.runBinaryProcessWithTimeout(
-      sshCommandArgv(host, `bash -lc ${args.shQuote(command)}`),
+      sshCommandArgv(
+        host,
+        `bash -lc ${args.shQuote(command)}`,
+        [],
+        "agent.session.stat",
+      ),
       SESSION_FILE_TIMEOUT_MS,
     );
     if (result.code === 44) return null;
@@ -226,7 +236,12 @@ path64="$(printf '%s' "$latest" | base64 | tr -d '\\n')"
 printf '%s\\t%s\\t%s\\n' "$size" "$latest_mtime" "$path64"
 `;
       const result = await args.runBinaryProcessWithTimeout(
-        sshCommandArgv(host, `bash -lc ${args.shQuote(command)}`),
+        sshCommandArgv(
+          host,
+          `bash -lc ${args.shQuote(command)}`,
+          [],
+          "agent.session.find",
+        ),
         SESSION_FILE_TIMEOUT_MS,
       );
       if (result.code === 44) return null;

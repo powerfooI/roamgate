@@ -182,6 +182,11 @@ import {
   terminalWheelScroll,
 } from "../terminalScroll";
 import { TerminalSelectionDragGuard } from "../terminalSelectionGuard";
+import {
+  createEchoProbe,
+  latencyDebugEnabled,
+  logLatency,
+} from "../latencyDebug";
 import { applyTerminalTheme } from "../terminalThemes";
 import { useTerminalOptionAsMeta } from "../terminalOptionKey";
 import {
@@ -1338,6 +1343,7 @@ export function TerminalView({
       acceptsEndpointInput() &&
       isActivePaneRef.current &&
       (!shouldAvoidVirtualKeyboard() || inputActiveRef.current);
+    const echoProbe = latencyDebugEnabled ? createEchoProbe() : null;
 
     term.onData((data) => {
       invalidateLinks();
@@ -1368,6 +1374,7 @@ export function TerminalView({
       if (!terminalId) return;
       imeKeyEvent.recordXtermData(unsuppressedData);
       const bytes = new TextEncoder().encode(unsuppressedData);
+      echoProbe?.sent(unsuppressedData);
       sendBytes(connectionClient, bytes, terminalId).catch(() => {});
     });
 
@@ -1376,6 +1383,13 @@ export function TerminalView({
         () => term.hasSelection() || historySelection.active,
         (text, parsed, linksChanged) =>
           term.write(text, () => {
+            const echoMs = echoProbe?.presented() ?? null;
+            if (echoMs !== null) {
+              logLatency("terminal echo", {
+                terminal: desiredTerminalRef.current ?? undefined,
+                input_to_frame_ms: echoMs,
+              });
+            }
             parsed();
             if (!terminalEffectDisposed && linksChanged)
               term.refresh(0, term.rows - 1);
@@ -3246,6 +3260,11 @@ export function TerminalView({
                 return;
               }
               attachTimeoutCountRef.current += 1;
+              logLatency("attach watchdog fired", {
+                terminal: terminalId,
+                watchdog_ms: watchdogMs,
+                consecutive: attachTimeoutCountRef.current,
+              });
               attachedRef.current = null;
               attachingRef.current = null;
               void connectionClient

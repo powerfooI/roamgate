@@ -2,6 +2,7 @@ import { open, lstat, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sshCommandArgv } from "../bridge/ssh-command";
+import { trackSshProcess } from "../bridge/ssh-metrics";
 import { roamgateEnv } from "../config/environment";
 import { shQuote } from "../utils/process-utils";
 import { terminalPathText } from "./terminal-path-text";
@@ -133,22 +134,21 @@ export function createTerminalUploadHandler(args: {
       await privateRoot();
       const host = args.sshHost();
       if (!host) return;
-      const proc = Bun.spawn(
-        sshCommandArgv(
-          host,
-          `sh -c ${shQuote(remoteTerminalCleanupScript(retentionHours * 60))}`,
-        ),
-        {
-          stdin: "ignore",
-          stdout: "ignore",
-          stderr: "pipe",
-          timeout: 30_000,
-        },
+      const argv = sshCommandArgv(
+        host,
+        `sh -c ${shQuote(remoteTerminalCleanupScript(retentionHours * 60))}`,
+        [],
+        "upload.cleanup",
       );
-      const [code, stderr] = await Promise.all([
-        proc.exited,
-        new Response(proc.stderr).text(),
-      ]);
+      const proc = Bun.spawn(argv, {
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "pipe",
+        timeout: 30_000,
+      });
+      const stderrText = new Response(proc.stderr).text();
+      trackSshProcess(argv, proc.exited, stderrText);
+      const [code, stderr] = await Promise.all([proc.exited, stderrText]);
       if (code !== 0) {
         throw new Error(
           `ssh upload cleanup failed: ${stderr.trim() || `exit ${code}`}`,
@@ -197,24 +197,26 @@ export function createTerminalUploadHandler(args: {
       const host = args.sshHost();
       if (host) {
         req.signal.throwIfAborted();
-        const proc = Bun.spawn(
-          sshCommandArgv(
-            host,
-            `sh -c ${shQuote(remoteTerminalUploadScript(name, retentionHours * 60))}`,
-          ),
-          {
-            stdin: Bun.file(localPath),
-            stdout: "pipe",
-            stderr: "pipe",
-            signal: req.signal,
-            timeout: args.uploadTimeoutMs ?? TERMINAL_UPLOAD_TIMEOUT_MS,
-            killSignal: "SIGKILL",
-          },
+        const argv = sshCommandArgv(
+          host,
+          `sh -c ${shQuote(remoteTerminalUploadScript(name, retentionHours * 60))}`,
+          [],
+          "upload",
         );
+        const proc = Bun.spawn(argv, {
+          stdin: Bun.file(localPath),
+          stdout: "pipe",
+          stderr: "pipe",
+          signal: req.signal,
+          timeout: args.uploadTimeoutMs ?? TERMINAL_UPLOAD_TIMEOUT_MS,
+          killSignal: "SIGKILL",
+        });
+        const stderrText = new Response(proc.stderr).text();
+        trackSshProcess(argv, proc.exited, stderrText);
         const [code, path, stderr] = await Promise.all([
           proc.exited,
           new Response(proc.stdout).text(),
-          new Response(proc.stderr).text(),
+          stderrText,
         ]);
         if (code !== 0 || !path.startsWith("/")) {
           return Response.json(

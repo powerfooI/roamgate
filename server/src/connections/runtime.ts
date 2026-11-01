@@ -37,6 +37,7 @@ import {
   type SshTunnelError,
 } from "../bridge/ssh-tunnel";
 import { dropCoalescedMessage } from "../bridge/websocket-send";
+import { annotateSshArgv } from "../bridge/ssh-metrics";
 import { createTerminalBridge } from "../bridge/terminal-bridge";
 import { createHerdrInfoHandler } from "../http/herdr-info";
 import { createImageUploadHandler } from "../http/image-upload";
@@ -47,9 +48,9 @@ import {
   silentLogger,
 } from "../utils/logger";
 import {
-  runProcess,
-  runProcessWithCode,
-  runProcessWithCodeTimeout,
+  runProcess as runProcessBase,
+  runProcessWithCode as runProcessWithCodeBase,
+  runProcessWithCodeTimeout as runProcessWithCodeTimeoutBase,
   shQuote,
 } from "../utils/process-utils";
 import { createWorkspaceAutoSync } from "../workspace/auto-sync";
@@ -59,7 +60,7 @@ import {
   type LastStepBaselineStore,
 } from "../workspace/git-diff";
 import { createLastStepTurnTracker } from "../workspace/last-step-turns";
-import { runBinaryProcessWithTimeout } from "../workspace/process";
+import { runBinaryProcessWithTimeout as runBinaryProcessWithTimeoutBase } from "../workspace/process";
 import { createStatusEnricher } from "../workspace/status";
 import { createWorktreeHookRunner } from "../worktree/worktree-hooks";
 import { createWorktreeParentStore } from "../worktree/parents";
@@ -131,7 +132,7 @@ export function createLegacyConnectionRuntime(args: {
   resolveLastStepWorkspaceGitRoot?: (workspaceId: string) => Promise<string>;
   lastStepTransitionDebounceMs?: number;
   /** Test seam for the background git status reads. */
-  runGitStatusProcess?: typeof runProcessWithCodeTimeout;
+  runGitStatusProcess?: typeof runProcessWithCodeTimeoutBase;
 }) {
   const { config } = args;
   const remotePlatform = config.remotePlatform;
@@ -140,7 +141,25 @@ export function createLegacyConnectionRuntime(args: {
   const socketPath = config.socketPath;
   const clientSocketPath = config.clientSocketPath;
   const sshHost = () => config.sshHost;
-  const herdr = new HerdrClient(socketPath);
+  // Label this runtime's ssh children with its connection in the debug log.
+  const forConnection = (argv: string[]) =>
+    annotateSshArgv(argv, { connection: identity.id });
+  const runProcess: typeof runProcessBase = (argv, ...rest) =>
+    runProcessBase(forConnection(argv), ...rest);
+  const runProcessWithCode: typeof runProcessWithCodeBase = (argv, ...rest) =>
+    runProcessWithCodeBase(forConnection(argv), ...rest);
+  const runProcessWithCodeTimeout: typeof runProcessWithCodeTimeoutBase = (
+    argv,
+    ...rest
+  ) => runProcessWithCodeTimeoutBase(forConnection(argv), ...rest);
+  const runBinaryProcessWithTimeout: typeof runBinaryProcessWithTimeoutBase = (
+    argv,
+    ...rest
+  ) => runBinaryProcessWithTimeoutBase(forConnection(argv), ...rest);
+  const herdr = new HerdrClient(socketPath, {
+    logger: logger.child("herdr"),
+    connectionId: identity.id,
+  });
   const agentSessionFiles = createAgentSessionFileAccess({
     sshHost: config.sshHost,
     runBinaryProcessWithTimeout,

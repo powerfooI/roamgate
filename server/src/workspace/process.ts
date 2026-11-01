@@ -1,3 +1,5 @@
+import { trackSshProcess } from "../bridge/ssh-metrics";
+
 export async function runBinaryProcessWithTimeout(
   argv: string[],
   timeoutMs: number,
@@ -8,11 +10,13 @@ export async function runBinaryProcessWithTimeout(
     stdout: "pipe",
     stderr: "pipe",
   });
+  const stderrText = new Response(proc.stderr).text();
+  trackSshProcess(argv, proc.exited, stderrText);
   let timer: ReturnType<typeof setTimeout> | null = null;
   const output = Promise.all([
     proc.exited,
     new Response(proc.stdout).arrayBuffer(),
-    new Response(proc.stderr).text(),
+    stderrText,
   ]).then(([code, stdout, stderr]) => {
     if (timer) clearTimeout(timer);
     return { code, stdout: Buffer.from(stdout), stderr };
@@ -51,11 +55,13 @@ export async function runProcessWithInputTimeout(
   });
   ignoreBrokenStdin(proc.stdin.write(input));
   ignoreBrokenStdin(proc.stdin.end());
+  const stderrText = new Response(proc.stderr).text();
+  trackSshProcess(argv, proc.exited, stderrText);
   let timer: ReturnType<typeof setTimeout> | null = null;
   const output = Promise.all([
     proc.exited,
     new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
+    stderrText,
   ]).then(([code, stdout, stderr]) => {
     if (timer) clearTimeout(timer);
     return { code, stdout, stderr };

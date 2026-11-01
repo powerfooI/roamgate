@@ -7,7 +7,23 @@ import type { Logger } from "../utils/logger";
 import { silentLogger } from "../utils/logger";
 import { MOUSE_KIND, VtInputClassifier } from "./vt-input-classifier";
 
+/**
+ * Echo timing only samples one typed character. Control keys, escape
+ * sequences and pastes often redraw without a plain echo and skew the sample.
+ */
+export function isTypedCharacter(data: Uint8Array): boolean {
+  if (data.length === 0 || data.length > 4) return false;
+  const text = Buffer.from(data).toString("utf8");
+  return (
+    Array.from(text).length === 1 &&
+    !/[\u0000-\u001f\u007f-\u009f\ufffd]/.test(text)
+  );
+}
+
 const ESC_FLUSH_MS = 25;
+// A typed character the next surface has not followed within this long is
+// dropped from echo timing: the sample would mostly measure idle time.
+export const ECHO_SAMPLE_MAX_MS = 5000;
 const FIRST_SURFACE_WAIT_MS = 10_000;
 // Boot correction plus rounding follow-ups; nested splits can need three.
 const SURFACE_FIT_MAX_ATTEMPTS = 3;
@@ -50,6 +66,11 @@ export class EndpointTerminalSession extends EventEmitter {
   private scrollDispatched: ScrollDispatch | null = null;
   private closed = false;
   private seq = 0;
+  // Debug echo timing: when the oldest unanswered typed character was sent.
+  // The next surface for the pane may come from unrelated output, so the
+  // sample is an upper bound on the echo, and it expires after
+  // ECHO_SAMPLE_MAX_MS.
+  private pendingEchoAt: number | null = null;
   private readonly linkSessionId = crypto.randomUUID();
   private linkLookupEpoch = 0;
   private linkFrame: {
@@ -283,6 +304,13 @@ export class EndpointTerminalSession extends EventEmitter {
       this.scrollDispatched = null;
       return;
     }
+    const surfaceAt = performance.now();
+    const echoSentAt =
+      this.pendingEchoAt !== null &&
+      surfaceAt - this.pendingEchoAt <= ECHO_SAMPLE_MAX_MS
+        ? this.pendingEchoAt
+        : null;
+    this.pendingEchoAt = null;
     this.fitSurface(surface, pane);
     const previousMaxOffset = this.lastScroll?.maxOffsetFromBottom;
     this.lastScroll = pane.scroll
@@ -370,6 +398,14 @@ export class EndpointTerminalSession extends EventEmitter {
         bytes,
         frame: cropped,
       });
+      if (echoSentAt !== null) {
+        this.logger.debug("terminal echo", {
+          terminal: this.terminalId,
+          // The next surface, not necessarily the echo itself.
+          input_to_surface_max_ms: Math.round(surfaceAt - echoSentAt),
+          surface_to_send_ms: Math.round(performance.now() - surfaceAt),
+        });
+      }
     };
     // Wait for the requested geometry regardless of split ratio. New
     // frames replace the pending payload, never extend its deadline.
@@ -549,6 +585,15 @@ export class EndpointTerminalSession extends EventEmitter {
   input(data: Buffer) {
     this.linkFrame = null;
     if (!this.paneId || this.closed) return;
+    if (this.logger.enabled("debug") && isTypedCharacter(data)) {
+      const now = performance.now();
+      if (
+        this.pendingEchoAt === null ||
+        now - this.pendingEchoAt > ECHO_SAMPLE_MAX_MS
+      ) {
+        this.pendingEchoAt = now;
+      }
+    }
     // Typing or application input supersedes a queued history gesture.
     if (data.length > 0) {
       this.scrollTarget = null;

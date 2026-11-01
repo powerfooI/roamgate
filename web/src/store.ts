@@ -74,6 +74,7 @@ import {
 } from "./shortcutPreferences";
 import { isReconnectRetryableError } from "./reconnectRetry";
 import { publishLastStepCompletion } from "./lastStepCompletionStore";
+import { timeLatency } from "./latencyDebug";
 import {
   clearTerminalRelayViewports,
   forgetTerminalRelayViewportsExcept,
@@ -1439,13 +1440,23 @@ async function refreshNow(lease = captureConnectionLease()) {
     settledAt: state.pendingFocusWorkspaceSettledAt,
   };
   try {
-    const [wsRes, tabRes, paneRes, agentRes] = await Promise.all([
-      lease.client.call("workspace.list"),
-      lease.client.call("tab.list"),
-      lease.client.call("pane.list"),
-      // Older servers may omit agent metadata; ordinary navigation still works.
-      lease.client.call("agent.list").catch(() => null),
-    ]);
+    const timedCall = (method: string) =>
+      timeLatency(
+        "refresh call",
+        { connection: lease.connectionId, method },
+        lease.client.call(method),
+      );
+    const [wsRes, tabRes, paneRes, agentRes] = await timeLatency(
+      "refresh",
+      { connection: lease.connectionId },
+      Promise.all([
+        timedCall("workspace.list"),
+        timedCall("tab.list"),
+        timedCall("pane.list"),
+        // Older servers may omit agent metadata; ordinary navigation still works.
+        timedCall("agent.list").catch(() => null),
+      ]),
+    );
     if (!leaseIsCurrent(lease)) return;
     const workspaces: Workspace[] = wsRes?.workspaces ?? [];
     const tabs: Tab[] = tabRes?.tabs ?? [];

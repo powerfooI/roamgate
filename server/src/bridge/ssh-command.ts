@@ -1,3 +1,5 @@
+import { annotateSshArgv } from "./ssh-metrics";
+
 const SSH_DESTINATION_MAX_LENGTH = 320;
 const SSH_USER_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$/;
 const SSH_HOST_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$/;
@@ -61,8 +63,10 @@ export function sshCommandArgv(
   destination: string,
   command: string,
   trustedArgs: readonly string[] = [],
+  /** Caller name for the debug ssh process log. */
+  tag?: string,
 ): string[] {
-  return [
+  const argv = [
     "ssh",
     ...SSH_NONINTERACTIVE_ARGS,
     ...trustedArgs,
@@ -70,6 +74,7 @@ export function sshCommandArgv(
     validateSshDestination(destination),
     command,
   ];
+  return tag ? annotateSshArgv(argv, { tag }) : argv;
 }
 
 export function sshTunnelArgv(
