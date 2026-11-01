@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import type { AgentCommand } from "../../server/src/agent/session-commands";
 import type { Pane } from "./types";
-import { useConnectionClient } from "./useConnectionClient";
+import {
+  useConnectionClient,
+  connectionClientScopeKey,
+} from "./useConnectionClient";
 
 export type { AgentCommand };
 
@@ -46,11 +49,21 @@ const REFRESH_MS = 60_000;
 /** The /commands a Claude pane offers: its own, then the session's. */
 export function useAgentCommands(pane: Pane, enabled: boolean): AgentCommand[] {
   const client = useConnectionClient();
-  const [session, setSession] = useState<AgentCommand[]>([]);
+  const scope = connectionClientScopeKey(
+    client,
+    pane.pane_id,
+    pane.terminal_id,
+    pane.workspace_id,
+    pane.tab_id,
+  );
+  const [session, setSession] = useState<{
+    scope: string;
+    values: AgentCommand[];
+  } | null>(null);
   const claude = enabled && pane.agent === "claude";
   useEffect(() => {
     if (!claude) {
-      setSession([]);
+      setSession(null);
       return;
     }
     let live = true;
@@ -63,7 +76,8 @@ export function useAgentCommands(pane: Pane, enabled: boolean): AgentCommand[] {
           tab_id: pane.tab_id,
           agent: pane.agent,
         })) as { commands?: AgentCommand[] };
-        if (live) setSession(result.commands ?? []);
+        if (live && client.isCurrent())
+          setSession({ scope, values: result.commands ?? [] });
       } catch {
         // Not readable now: the built-in commands still show.
       }
@@ -76,6 +90,7 @@ export function useAgentCommands(pane: Pane, enabled: boolean): AgentCommand[] {
     };
   }, [
     client,
+    scope,
     claude,
     pane.agent,
     pane.pane_id,
@@ -86,7 +101,9 @@ export function useAgentCommands(pane: Pane, enabled: boolean): AgentCommand[] {
   const builtin = new Set(CLAUDE_BUILTIN_COMMANDS.map((each) => each.name));
   return [
     ...CLAUDE_BUILTIN_COMMANDS,
-    ...session.filter((each) => !builtin.has(each.name)),
+    ...(session?.scope === scope ? session.values : []).filter(
+      (each) => !builtin.has(each.name),
+    ),
   ];
 }
 

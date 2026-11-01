@@ -84,6 +84,7 @@ import {
   formatCount,
   formatOptionalCompact,
   formatTokenTotal,
+  agentPromptWarning,
   tokenUsage,
 } from "./agentSession";
 import {
@@ -96,6 +97,7 @@ import {
   updateOutbox,
 } from "./chatOutbox";
 import { promptKeyInput } from "./promptKeys";
+import { ConfirmDialog } from "./ModalDialogs";
 import "./AgentHistoryDrawer.css";
 
 function formatRelativeTime(timestamp: string) {
@@ -225,6 +227,7 @@ export function AgentHistoryDrawer({
     DEFAULT_INSPECTOR_NAVIGATION_RATIO,
   );
   const [wideSelectedId, setWideSelectedId] = useState<string | null>(null);
+  const drawerRef = useRef<HTMLElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const wideSplitRef = useRef<HTMLDivElement>(null);
@@ -1015,9 +1018,28 @@ export function AgentHistoryDrawer({
     },
     [outboxKey, pane.pane_id, paneChat?.prompt, sendMessage],
   );
+  const retryContext = JSON.stringify([
+    outboxKey,
+    pane.agent,
+    pane.agent_status,
+    pane.state_change_seq,
+    open,
+  ]);
+  const [retryConfirmation, setRetryConfirmation] = useState<{
+    message: OutboxMessage;
+    context: string;
+  } | null>(null);
+  useEffect(() => {
+    if (retryConfirmation?.context !== retryContext) setRetryConfirmation(null);
+  }, [retryConfirmation, retryContext]);
+  const retryWarning = agentPromptWarning(pane.agent, pane.agent_status);
   const retrySend = useCallback(
-    (message: OutboxMessage) => void sendFromBox(message.text, message.id),
-    [sendFromBox],
+    (message: OutboxMessage) => {
+      if (retryWarning)
+        setRetryConfirmation({ message, context: retryContext });
+      else void sendFromBox(message.text, message.id);
+    },
+    [retryWarning, retryContext, sendFromBox],
   );
   const discardSend = useCallback(
     (message: OutboxMessage) =>
@@ -1063,8 +1085,8 @@ export function AgentHistoryDrawer({
     (option) => option.cursor && option.freeText,
   );
   const focusChatBox = useCallback(() => {
-    (paneChat?.composerTarget ?? document)
-      .querySelector<HTMLElement>(
+    (paneChat?.composerTarget ?? drawerRef.current)
+      ?.querySelector<HTMLElement>(
         ".agent-history-composer :is(textarea, [contenteditable='true'])",
       )
       ?.focus({ preventScroll: true });
@@ -1453,6 +1475,7 @@ export function AgentHistoryDrawer({
   return (
     <>
       <aside
+        ref={drawerRef}
         className={`agent-history-drawer ${open ? "is-open" : ""} ${
           embedded ? "is-embedded" : ""
         } ${wide ? "is-wide" : ""}${paneChat ? " is-pane-chat" : ""}`}
@@ -1770,6 +1793,23 @@ export function AgentHistoryDrawer({
           </>
         )}
       </aside>
+      <ConfirmDialog
+        open={open && retryConfirmation?.context === retryContext}
+        title="Send this message again?"
+        message={retryWarning ?? "Send the message to the agent's terminal."}
+        confirmLabel="Send anyway"
+        onClose={() => setRetryConfirmation(null)}
+        onConfirm={() => {
+          if (retryConfirmation?.context !== retryContext) return;
+          const message = readOutbox(outboxKey).find(
+            (each) =>
+              each.id === retryConfirmation.message.id &&
+              each.state === "failed",
+          );
+          if (message) void sendFromBox(message.text, message.id);
+          setRetryConfirmation(null);
+        }}
+      />
       <AgentMessageDialog
         message={
           !masterDetail && expandedMessage

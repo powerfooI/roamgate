@@ -44,10 +44,12 @@ if (process.env.ROAMGATE_PANE_CHAT_DOM_TEST !== "1") {
         configurable: true,
         writable: true,
       });
+    const terminalCalls: string[] = [];
     const client = {
       isCurrent: () => true,
-      call: async (method: string) =>
-        !method.startsWith("agent_")
+      call: async (method: string) => {
+        if (!method.startsWith("agent_")) terminalCalls.push(method);
+        return !method.startsWith("agent_")
           ? Promise.reject(new Error("pane closed"))
           : method === "agent_session.get"
             ? { status: "ok", stats: {}, session: { value: "s1" } }
@@ -72,7 +74,8 @@ if (process.env.ROAMGATE_PANE_CHAT_DOM_TEST !== "1") {
                     sent_at: "2026-01-01T00:00:00Z",
                   },
                 ],
-              },
+              };
+      },
     };
     mock.module("../useConnectionClient", () => ({
       useConnectionClient: () => client,
@@ -217,6 +220,57 @@ if (process.env.ROAMGATE_PANE_CHAT_DOM_TEST !== "1") {
       await click(yes);
       expect(activeKeys.mock.calls).toEqual([["2"], ["1"]]);
 
+      // An active pane's free-text question must focus its own box, even
+      // when another pane's composer appears first in the document.
+      await React.act(async () => {
+        root.render(
+          <>
+            <AgentHistoryDrawer
+              pane={{
+                ...pane,
+                pane_id: "pane-two",
+                terminal_id: "term-two",
+                agent_status: "idle",
+              }}
+              open
+              embedded
+              paneChat={{ active: false, onKeys: otherKeys, onShowTerminal }}
+              onOpenChange={() => {}}
+            />
+            <AgentHistoryDrawer
+              pane={{ ...pane, agent_status: "blocked" }}
+              open
+              embedded
+              paneChat={{
+                active: true,
+                onKeys,
+                onShowTerminal,
+                prompt: {
+                  lines: ["Your answer?"],
+                  options: [
+                    {
+                      key: "1",
+                      label: "Type something.",
+                      input: "",
+                      freeText: true,
+                      cursor: true,
+                      checked: true,
+                    },
+                  ],
+                },
+              }}
+              onOpenChange={() => {}}
+            />
+          </>,
+        );
+      });
+      await React.act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      const boxes = container.querySelectorAll("textarea");
+      expect(boxes).toHaveLength(2);
+      expect(document.activeElement).toBe(boxes[1]);
+
       // A message the pane refused stays in the chat, marked, and is still
       // there after the pane went to its terminal and back.
       await render("idle");
@@ -245,6 +299,22 @@ if (process.env.ROAMGATE_PANE_CHAT_DOM_TEST !== "1") {
       expect(container.textContent).toContain("Also check the docs");
       expect(container.textContent).toContain("Not delivered");
       expect(button("Send this message again")).not.toBeNull();
+      await render("working");
+      const callsBeforeRetry = terminalCalls.length;
+      await click(button("Send this message again")!);
+      expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+      expect(container.textContent).toContain("still working");
+      expect(terminalCalls).toHaveLength(callsBeforeRetry);
+      // An agent state change revokes the pending confirmation.
+      await render("idle");
+      expect(container.querySelector('[role="dialog"]')).toBeNull();
+      await render("working");
+      await click(button("Send this message again")!);
+      const confirm = Array.from(
+        container.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+      ).find((each) => each.textContent === "Send anyway")!;
+      await click(confirm);
+      expect(terminalCalls.length).toBeGreaterThan(callsBeforeRetry);
       await click(button("Discard this message")!);
       expect(container.textContent).not.toContain("Not delivered");
     } finally {

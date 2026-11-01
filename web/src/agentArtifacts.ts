@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import type { SessionArtifact } from "../../server/src/agent/session-artifacts";
 import type { Pane } from "./types";
-import { useConnectionClient } from "./useConnectionClient";
+import {
+  useConnectionClient,
+  connectionClientScopeKey,
+} from "./useConnectionClient";
 
 export type { SessionArtifact };
 
@@ -13,11 +16,21 @@ export function useAgentArtifacts(
   enabled: boolean,
 ): SessionArtifact[] {
   const client = useConnectionClient();
-  const [artifacts, setArtifacts] = useState<SessionArtifact[]>([]);
+  const scope = connectionClientScopeKey(
+    client,
+    pane.pane_id,
+    pane.terminal_id,
+    pane.workspace_id,
+    pane.tab_id,
+  );
+  const [artifacts, setArtifacts] = useState<{
+    scope: string;
+    values: SessionArtifact[];
+  } | null>(null);
   const claude = enabled && pane.agent === "claude";
   useEffect(() => {
     if (!claude) {
-      setArtifacts([]);
+      setArtifacts(null);
       return;
     }
     let live = true;
@@ -30,7 +43,8 @@ export function useAgentArtifacts(
           tab_id: pane.tab_id,
           agent: pane.agent,
         })) as { artifacts?: SessionArtifact[] };
-        if (live) setArtifacts(result.artifacts ?? []);
+        if (live && client.isCurrent())
+          setArtifacts({ scope, values: result.artifacts ?? [] });
       } catch {
         // Not readable now (a reconnect): the next poll tries again.
       }
@@ -43,11 +57,14 @@ export function useAgentArtifacts(
     };
   }, [
     client,
+    scope,
     claude,
     pane.agent,
     pane.pane_id,
     pane.tab_id,
     pane.workspace_id,
   ]);
-  return artifacts;
+  return claude && artifacts?.scope === scope && client.isCurrent()
+    ? artifacts.values
+    : [];
 }
