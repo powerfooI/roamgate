@@ -240,7 +240,12 @@ export async function readAgentSessionSummary(
       );
     }
   }
-  const trajectory = includeTrajectory ? projected.trajectory : null;
+  const trajectory = !includeTrajectory
+    ? null
+    : cache
+      ? await cache.trajectory(resolved)
+      : (await readSessionProjection(resolved.agent, resolved.file, files))
+          .trajectory;
   return {
     ...resolved,
     file: projected.file,
@@ -320,9 +325,10 @@ export async function downloadAgentSessionAtif(
       headers: { "content-type": "text/plain; charset=utf-8" },
     });
   }
-  const { trajectory } = cache
-    ? await cache.get(resolved)
-    : await readSessionProjection(resolved.agent, resolved.file, files);
+  const trajectory = cache
+    ? await cache.trajectory(resolved)
+    : (await readSessionProjection(resolved.agent, resolved.file, files))
+        .trajectory;
   return new Response(`${JSON.stringify(trajectory, null, 2)}\n`, {
     headers: {
       "content-type": "application/json; charset=utf-8",

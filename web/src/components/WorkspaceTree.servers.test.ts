@@ -258,19 +258,25 @@ if (process.env.ROAMGATE_SERVER_TREE_DOM_TEST !== "1") {
       expect(store.get().activeConnectionId).toBe("alpha");
 
       await act(async () => workspace("beta", "beta w1").click());
-      expect(navigate).toHaveBeenLastCalledWith({
-        connectionId: "beta",
-        runtimeGeneration: 1,
-        workspaceId: "w1",
-        paneId: undefined,
-      });
+      expect(navigate).toHaveBeenLastCalledWith(
+        {
+          connectionId: "beta",
+          runtimeGeneration: 1,
+          workspaceId: "w1",
+          paneId: undefined,
+        },
+        { fromKnownList: true },
+      );
       await act(async () => agent("beta").click());
-      expect(navigate).toHaveBeenLastCalledWith({
-        connectionId: "beta",
-        runtimeGeneration: 1,
-        workspaceId: "w1",
-        paneId: "w1:p1",
-      });
+      expect(navigate).toHaveBeenLastCalledWith(
+        {
+          connectionId: "beta",
+          runtimeGeneration: 1,
+          workspaceId: "w1",
+          paneId: "w1:p1",
+        },
+        { fromKnownList: true },
+      );
       expect(focus).not.toHaveBeenCalled();
       expect(selected).not.toHaveBeenCalled();
 
@@ -304,12 +310,15 @@ if (process.env.ROAMGATE_SERVER_TREE_DOM_TEST !== "1") {
         ),
       ).not.toBeNull();
       await act(async () => chips[1].click());
-      expect(navigate).toHaveBeenLastCalledWith({
-        connectionId: "beta",
-        runtimeGeneration: 1,
-        workspaceId: "w2",
-        paneId: "w2:p2",
-      });
+      expect(navigate).toHaveBeenLastCalledWith(
+        {
+          connectionId: "beta",
+          runtimeGeneration: 1,
+          workspaceId: "w2",
+          paneId: "w2:p2",
+        },
+        { fromKnownList: true },
+      );
       const localChip = workspace(
         "alpha",
         "alpha w2",
@@ -362,12 +371,15 @@ if (process.env.ROAMGATE_SERVER_TREE_DOM_TEST !== "1") {
       await act(async () =>
         menu.querySelector<HTMLButtonElement>(".context-menu-item")!.click(),
       );
-      expect(navigate).toHaveBeenLastCalledWith({
-        connectionId: "beta",
-        runtimeGeneration: 1,
-        workspaceId: "w1",
-        paneId: undefined,
-      });
+      expect(navigate).toHaveBeenLastCalledWith(
+        {
+          connectionId: "beta",
+          runtimeGeneration: 1,
+          workspaceId: "w1",
+          paneId: undefined,
+        },
+        { fromKnownList: true },
+      );
       expect(rename).not.toHaveBeenCalled();
       expect(close).not.toHaveBeenCalled();
 

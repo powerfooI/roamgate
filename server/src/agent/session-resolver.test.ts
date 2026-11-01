@@ -1,9 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { localAgentSessionFiles } from "./session-file-access";
+import {
+  type AgentSessionFileAccess,
+  localAgentSessionFiles,
+} from "./session-file-access";
 import {
   createAgentSessionResolverContext,
   resolveAgentSession,
@@ -255,5 +265,196 @@ describe("OMP session resolution", () => {
     );
     expect(byId.status).toBe("missing_file");
     expect(byId.path).toBe("");
+  });
+});
+
+describe("session search", () => {
+  test("follows a session folder that is a link", async () => {
+    const root = await mkdtemp(join(tmpdir(), "roamgate-session-link-"));
+    tempDirectories.push(root);
+    process.env.PI_CODING_AGENT_DIR = root;
+    const sessionId = `session-${crypto.randomUUID()}`;
+    const kept = join(root, "kept", "project");
+    await mkdir(kept, { recursive: true });
+    await mkdir(join(root, "sessions"));
+    await symlink(kept, join(root, "sessions", "project"));
+    // A link to itself: skipped, not followed forever.
+    await symlink(
+      join(root, "sessions", "loop"),
+      join(root, "sessions", "loop"),
+    );
+    await writeFile(join(kept, `${sessionId}.jsonl`), "{}\n");
+    const result = await resolveAgentSession(
+      { pane_id: "p1" },
+      async () => ({
+        agent: {
+          agent: "pi",
+          workspace_id: "w1",
+          tab_id: "t1",
+          cwd: "/repo",
+          agent_session: {
+            source: "herdr:pi",
+            agent: "pi",
+            kind: "id",
+            value: sessionId,
+          },
+        },
+      }),
+      localAgentSessionFiles,
+      createAgentSessionResolverContext(),
+    );
+    expect(result.path).toBe(
+      join(root, "sessions", "project", `${sessionId}.jsonl`),
+    );
+  });
+});
+
+describe("Pi without Herdr's Pi integration", () => {
+  test("a Pi pane with no reported session takes its directory's newest", async () => {
+    const root = await mkdtemp(join(tmpdir(), "roamgate-pi-cwd-"));
+    tempDirectories.push(root);
+    process.env.PI_CODING_AGENT_DIR = root;
+    const dir = join(root, "sessions", "--repo-app--");
+    await mkdir(dir, { recursive: true });
+    const older = join(dir, "2026-10-01T10-00-00-000Z_older-id.jsonl");
+    const newer = join(dir, "2026-10-02T10-00-00-000Z_newer-id.jsonl");
+    await writeFile(older, "{}\n");
+    await writeFile(newer, "{}\n");
+    const old = new Date(Date.now() - 60_000);
+    await utimes(older, old, old);
+    const resolve = (cwd: string) =>
+      resolveAgentSession(
+        { pane_id: "p1" },
+        async () => ({
+          agent: { agent: "pi", workspace_id: "w1", tab_id: "t1", cwd },
+        }),
+        localAgentSessionFiles,
+        createAgentSessionResolverContext(),
+      );
+    const found = await resolve("/repo/app");
+    expect(found.path).toBe(newer);
+    expect(found.session).toEqual({
+      source: "pi-local",
+      agent: "pi",
+      kind: "id",
+      value: "newer-id",
+    });
+    // Another directory has no session of its own.
+    expect((await resolve("/repo/other")).status).toBe("missing_session");
+  });
+});
+
+describe("Claude transcripts", () => {
+  const id = "69775585-98cc-4cb1-9275-4956ebb07add";
+
+  test("a resumed session is followed to the transcript it went on in", async () => {
+    const root = await mkdtemp(join(tmpdir(), "roamgate-claude-successor-"));
+    tempDirectories.push(root);
+    const reported = join(root, `${id}.jsonl`);
+    const resumed = join(root, "b6a8466c-831a-4cf8-9659-d65d02fa7db3.jsonl");
+    const other = join(root, "0e3b0c44-298f-4c14-9a3b-2c1d9e5f0a11.jsonl");
+    await writeFile(reported, `{"sessionId":"${id}"}\n`);
+    await writeFile(resumed, `{"sessionId":"${id}"}\n{"sessionId":"b6a8"}\n`);
+    await writeFile(other, '{"sessionId":"0e3b"}\n');
+    const old = new Date(Date.now() - 60_000);
+    await utimes(reported, old, old);
+
+    expect(await localAgentSessionFiles.findClaudeSuccessor(reported, id)).toBe(
+      resumed,
+    );
+    expect(
+      await localAgentSessionFiles.findClaudeSuccessor(resumed, id),
+    ).toBeNull();
+  });
+
+  test("mentioning another session in user text does not make a successor", async () => {
+    const root = await mkdtemp(join(tmpdir(), "roamgate-claude-unrelated-"));
+    tempDirectories.push(root);
+    const reported = join(root, `${id}.jsonl`);
+    const other = join(root, "b6a8466c-831a-4cf8-9659-d65d02fa7db3.jsonl");
+    await writeFile(reported, JSON.stringify({ sessionId: id }) + "\n");
+    await writeFile(
+      other,
+      JSON.stringify({
+        sessionId: "b6a8466c-831a-4cf8-9659-d65d02fa7db3",
+        message: {
+          role: "user",
+          content: `Check ${id} and {"sessionId":"${id}"}`,
+        },
+      }) + "\n",
+    );
+    const old = new Date(Date.now() - 60_000);
+    await utimes(reported, old, old);
+    expect(
+      await localAgentSessionFiles.findClaudeSuccessor(reported, id),
+    ).toBeNull();
+  });
+
+  test("a successor is found in a folder with spaces, and not on Windows", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "roamgate-claude-successor-"));
+    tempDirectories.push(parent);
+    const root = join(parent, "my project");
+    await mkdir(root);
+    const reported = join(root, `${id}.jsonl`);
+    const resumed = join(root, "b6a8466c-831a-4cf8-9659-d65d02fa7db3.jsonl");
+    await writeFile(reported, `{"sessionId":"${id}"}\n`);
+    await writeFile(resumed, `{"sessionId":"${id}"}\n`);
+    const old = new Date(Date.now() - 60_000);
+    await utimes(reported, old, old);
+    expect(await localAgentSessionFiles.findClaudeSuccessor(reported, id)).toBe(
+      resumed,
+    );
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      expect(
+        await localAgentSessionFiles.findClaudeSuccessor(reported, id),
+      ).toBeNull();
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
+  });
+
+  test("a remote lookup is kept and its successor checked at most every 30s", async () => {
+    const calls = { find: 0, successor: 0 };
+    const reported = "/remote/p/old.jsonl";
+    const resumed = "/remote/p/new.jsonl";
+    let successor: string | null = null;
+    const files = {
+      remote: true,
+      async statFile(path: string) {
+        return { path, mtimeMs: 1, size: 1 };
+      },
+      async findClaudeSessionById() {
+        calls.find += 1;
+        return { path: reported, mtimeMs: 1, size: 1 };
+      },
+      async findClaudeSuccessor() {
+        calls.successor += 1;
+        return successor;
+      },
+    } as unknown as AgentSessionFileAccess;
+    const herdrCall = async () => ({
+      agent: {
+        agent: "claude",
+        workspace_id: "w1",
+        tab_id: "t1",
+        cwd: "/repo",
+        agent_session: { agent: "claude", kind: "id", value: id },
+      },
+    });
+    const context = createAgentSessionResolverContext();
+    const read = () =>
+      resolveAgentSession({ pane_id: "p1" }, herdrCall, files, context);
+
+    expect((await read()).path).toBe(reported);
+    successor = resumed;
+    expect((await read()).path).toBe(reported);
+    expect(calls).toEqual({ find: 1, successor: 1 });
+
+    context.successorChecked.clear();
+    expect((await read()).path).toBe(resumed);
+    expect((await read()).path).toBe(resumed);
+    expect(calls).toEqual({ find: 1, successor: 2 });
   });
 });

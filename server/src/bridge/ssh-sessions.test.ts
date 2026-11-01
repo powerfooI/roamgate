@@ -6,7 +6,12 @@ import { sshCommandArgv, sshReadCommandArgv } from "./ssh-command";
 import { createSshProcessMonitor } from "./ssh-metrics";
 import {
   acquireSshSession,
+  currentSshLane,
   holdSshSession,
+  isSshBackgroundShed,
+  runInSshLane,
+  SSH_BACKGROUND_SESSION_LIMIT,
+  SSH_BACKGROUND_WAITER_LIMIT,
   registerSshMaster,
   runSshCommand,
   SSH_SESSION_DEFAULT_WAIT_MS,
@@ -402,4 +407,109 @@ test("an abort after a queued slot is granted still prevents command dispatch", 
     ),
   );
   for (const release of after) release();
+});
+
+describe("SSH session lanes", () => {
+  test("work is interactive unless it runs in the background lane", async () => {
+    expect(currentSshLane()).toBe("interactive");
+    const seen = await runInSshLane("background", async () => {
+      await Bun.sleep(0);
+      return currentSshLane();
+    });
+    expect(seen).toBe("background");
+    expect(currentSshLane()).toBe("interactive");
+  });
+
+  test("background work keeps slots free for interactive work", async () => {
+    const background = await Promise.all(
+      Array.from({ length: SSH_BACKGROUND_SESSION_LIMIT }, () =>
+        acquireSshSession("lane-box", {}, "background"),
+      ),
+    );
+    let queued = false;
+    const more = acquireSshSession("lane-box", {}, "background").then(
+      (release) => {
+        queued = true;
+        return release;
+      },
+    );
+    await Bun.sleep(0);
+    expect(queued).toBeFalse();
+    // Every slot background work may not take is still there for the user.
+    const interactive = await Promise.all(
+      Array.from(
+        { length: SSH_SESSION_LIMIT - SSH_BACKGROUND_SESSION_LIMIT },
+        () => acquireSshSession("lane-box"),
+      ),
+    );
+    background[0]!();
+    const release = await more;
+    expect(queued).toBeTrue();
+    release();
+    for (const each of [...background, ...interactive]) each();
+  });
+
+  test("a full background queue never delays an interactive command", async () => {
+    jest.useFakeTimers();
+    try {
+      const held = await Promise.all(
+        Array.from({ length: SSH_SESSION_LIMIT }, (_, index) =>
+          acquireSshSession(
+            "queue-box",
+            {},
+            index < SSH_BACKGROUND_SESSION_LIMIT ? "background" : "interactive",
+          ),
+        ),
+      );
+      const backlog = Array.from({ length: SSH_BACKGROUND_WAITER_LIMIT }, () =>
+        acquireSshSession("queue-box", { timeoutMs: 60_000 }, "background"),
+      );
+      for (const waiter of backlog) waiter.catch(() => {});
+      let granted = false;
+      const interactive = acquireSshSession("queue-box", {
+        timeoutMs: 60_000,
+      }).then((release) => {
+        granted = true;
+        return release;
+      });
+      // The first slot freed goes to the interactive command, ahead of the
+      // whole background line.
+      held[0]!();
+      const release = await interactive;
+      expect(granted).toBeTrue();
+      release();
+      jest.advanceTimersByTime(60_000);
+      await Promise.allSettled(backlog);
+      for (const done of held) done();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("sheds background work quietly once its line is full", async () => {
+    jest.useFakeTimers();
+    try {
+      const held = await Promise.all(
+        Array.from({ length: SSH_SESSION_LIMIT }, () =>
+          acquireSshSession("shed-box"),
+        ),
+      );
+      const backlog = Array.from({ length: SSH_BACKGROUND_WAITER_LIMIT }, () =>
+        acquireSshSession("shed-box", { timeoutMs: 1000 }, "background"),
+      );
+      for (const waiter of backlog) waiter.catch(() => {});
+      const shed = await runInSshLane("background", () =>
+        acquireSshSession("shed-box").catch((error) => error),
+      );
+      expect(isSshBackgroundShed(shed)).toBeTrue();
+      // Interactive commands have a line of their own.
+      const interactive = acquireSshSession("shed-box", { timeoutMs: 1000 });
+      interactive.catch(() => {});
+      jest.advanceTimersByTime(1000);
+      await Promise.allSettled([...backlog, interactive]);
+      for (const done of held) done();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });

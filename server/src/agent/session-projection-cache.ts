@@ -64,7 +64,18 @@ export async function readSessionProjection(
   };
 }
 
-type Projection = Awaited<ReturnType<typeof readSessionProjection>>;
+type FullProjection = Awaited<ReturnType<typeof readSessionProjection>>;
+/**
+ * What the cache keeps: the trajectory is most of a projection's size (20 of
+ * 27 MB for a 33 MB transcript) and only previews and exports need it, so
+ * they build it again with `trajectory()`.
+ */
+type Projection = Omit<FullProjection, "trajectory">;
+function withoutTrajectory(projection: FullProjection): Projection {
+  const kept: Partial<FullProjection> = { ...projection };
+  delete kept.trajectory;
+  return kept as Projection;
+}
 type Cached = {
   projection: Projection;
   signature: string;
@@ -135,7 +146,7 @@ function sessionKey(resolved: AgentSessionResolved) {
 // served but not retained. Changed files still require a full provider projection.
 export function createSessionProjectionCache(
   files: AgentSessionFileAccess,
-  limits = { entries: 16, bytes: 32 * 1024 * 1024 },
+  limits = { entries: 16, bytes: 64 * 1024 * 1024 },
 ) {
   const cache = new Map<string, Cached>();
   const pending = new Map<string, Promise<Cached>>();
@@ -189,11 +200,13 @@ export function createSessionProjectionCache(
           old.projection.file.createdAtMs === current.createdAtMs
             ? old.fallbackTime
             : (current.createdAtMs ?? current.mtimeMs);
-        projection = await readSessionProjection(
-          resolved.agent,
-          current,
-          files,
-          fallbackTime,
+        projection = withoutTrajectory(
+          await readSessionProjection(
+            resolved.agent,
+            current,
+            files,
+            fallbackTime,
+          ),
         );
         const after = await files.statFile(file.path);
         if (!after) throw new Error("Session file disappeared while reading");
@@ -250,6 +263,17 @@ export function createSessionProjectionCache(
     invalidate,
     async get(resolved: AgentSessionResolved) {
       return (await load(resolved)).projection;
+    },
+    /** The session's trajectory, built again from its file. */
+    async trajectory(resolved: AgentSessionResolved) {
+      const cached = await load(resolved);
+      const projection = await readSessionProjection(
+        resolved.agent,
+        cached.projection.file,
+        files,
+        cached.fallbackTime,
+      );
+      return projection.trajectory;
     },
     async history(resolved: AgentSessionResolved, cursor: unknown) {
       const cached = await load(resolved);

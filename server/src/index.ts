@@ -1,4 +1,5 @@
 import { createUiSettingsRpcHandler } from "./bridge/settings-rpc";
+import { runInSshLane, type SshLane } from "./bridge/ssh-sessions";
 import { loadOrCreateSessionSecret } from "./config/session-secret";
 import {
   createAgentSeenStore,
@@ -293,12 +294,15 @@ function parseRpcMeta(raw: string): {
   method: string | null;
   connectionId: unknown;
   connectionGeneration: unknown;
+  lane: SshLane;
 } {
   try {
     const msg = JSON.parse(raw);
     return {
       id: typeof msg?.id === "string" ? msg.id : null,
       method: typeof msg?.method === "string" ? msg.method : null,
+      // What the browser marks background (badges, polls) yields on the host.
+      lane: msg?.lane === "background" ? "background" : "interactive",
       connectionId: Object.hasOwn(msg ?? {}, "connection_id")
         ? msg.connection_id
         : undefined,
@@ -312,6 +316,7 @@ function parseRpcMeta(raw: string): {
       method: null,
       connectionId: undefined,
       connectionGeneration: undefined,
+      lane: "interactive",
     };
   }
 }
@@ -1904,7 +1909,7 @@ function main() {
             if (!clients.has(ws)) return;
             const text =
               typeof message === "string" ? message : message.toString();
-            const { id, method, connectionId, connectionGeneration } =
+            const { id, method, connectionId, connectionGeneration, lane } =
               parseRpcMeta(text);
             const startedAt = Date.now();
             let responseConnectionId: string | null = null;
@@ -1922,7 +1927,7 @@ function main() {
                 }
               }
             }
-            handleRpc(ws, text)
+            runInSshLane(lane, () => handleRpc(ws, text))
               .then(() => {
                 const outcome = takeRpcOutcome(ws, id);
                 logRpc(
