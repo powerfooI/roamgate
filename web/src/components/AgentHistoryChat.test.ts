@@ -191,3 +191,29 @@ test("an image the user sent shows instead of its uploaded path", () => {
   // Without a place to load it from, the path shows as sent.
   expect(render()).toContain(`<p>${path} what is wrong here?</p>`);
 });
+
+test("an image a Claude message carried shows where it says [Image #N]", () => {
+  const items = groupHistoryChatItems([
+    entry("1", "user", {
+      text: "[Image #2] what is wrong here?",
+      images: [{ media_type: "image/png", bytes: 9, hash: "h1" }],
+    }),
+  ]);
+  const render = (attachedImages?: ReadonlyMap<string, readonly string[]>) =>
+    renderToStaticMarkup(
+      createElement(AgentHistoryChat, {
+        items,
+        listRef: createRef<HTMLDivElement>(),
+        contentRef: createRef<HTMLDivElement>(),
+        onOpen() {},
+        attachedImages,
+      }),
+    );
+  const markup = render(new Map([["1", ["blob:http://x/one"]]]));
+  expect(markup).toContain('<img src="blob:http://x/one"');
+  expect(markup).toContain('alt="Image #2"');
+  expect(markup).toContain("<p>what is wrong here?</p>");
+  expect(markup).not.toContain("[Image #2]");
+  // Until its data is loaded, the message shows as Claude Code wrote it.
+  expect(render()).toContain("<p>[Image #2] what is wrong here?</p>");
+});

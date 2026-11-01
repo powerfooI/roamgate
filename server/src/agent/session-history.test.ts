@@ -698,3 +698,45 @@ test("content identities survive early step renumbering and disambiguate repeate
   expect(first.map((entry) => entry.id)).toEqual(next.map((entry) => entry.id));
   expect(new Set(first.map((entry) => entry.id)).size).toBe(2);
 });
+
+test("an image pasted into a Claude message comes with it, without its data", () => {
+  const png = Buffer.from("not really a png").toString("base64");
+  const records = [
+    {
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "[Image #1] what is wrong here?" },
+          {
+            type: "image",
+            source: { type: "base64", media_type: "image/png", data: png },
+          },
+          // Not something a browser should be handed.
+          {
+            type: "image",
+            source: { type: "base64", media_type: "image/svg+xml", data: png },
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "text", text: "Ok" }] },
+    },
+  ];
+  const trajectory = projectAgentTrajectory("claude", file, records);
+  const entries = historyEntriesFromTrajectory(file, trajectory);
+  expect(entries[0]!.text).toBe("[Image #1] what is wrong here?");
+  expect(entries[0]!.images).toEqual([
+    { media_type: "image/png", bytes: 16, hash: expect.any(String) },
+  ]);
+  expect(entries[1]!.images).toBeUndefined();
+  // Neither the history nor the trajectory (previews, exports) has the data.
+  expect(JSON.stringify(trajectory)).not.toContain(png);
+  const snapshot = redactHistoryUpdate(
+    historyUpdate({ epoch: "e", revision: 1 }, entries, null, new Map()),
+  );
+  if (snapshot.mode !== "snapshot") throw new Error("expected a snapshot");
+  expect(snapshot.entries[0]!.images).toEqual(entries[0]!.images);
+});

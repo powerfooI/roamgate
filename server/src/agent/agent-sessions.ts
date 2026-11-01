@@ -98,10 +98,18 @@ export function createAgentSessionHandlers(args: {
           "That history entry is no longer available; refresh the history and try again",
         );
       }
+      // A message's images, with their data while the session keeps it.
+      const images = entry.images?.map((image) => ({
+        ...image,
+        data: projection.images[image.hash]?.data,
+      }));
       return {
         entry_id: entry.id,
         text: entry.text,
         text_hash: historyTextHash(entry.text),
+        ...(images?.length && images.every((image) => image.data)
+          ? { images }
+          : {}),
       };
     },
     /** The skills and custom commands a Claude session offers as /name. */

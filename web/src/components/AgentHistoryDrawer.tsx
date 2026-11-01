@@ -75,6 +75,7 @@ import {
   type AgentHistory,
   type AgentHistoryResponse,
   type HistoryEntry as AgentHistoryEntry,
+  type HistoryImage as AgentHistoryImage,
 } from "./agentHistory";
 import { AgentSessionPreviewDialog } from "./AgentSessionPreviewDialog";
 import {
@@ -97,6 +98,7 @@ import {
   updateOutbox,
 } from "./chatOutbox";
 import { promptKeyInput } from "./promptKeys";
+import { useAttachedImages } from "./useAttachedImages";
 import { ConfirmDialog } from "./ModalDialogs";
 import "./AgentHistoryDrawer.css";
 
@@ -439,6 +441,41 @@ export function AgentHistoryDrawer({
   );
 
   const messages = useMemo(() => history?.messages ?? [], [history?.messages]);
+  // The images the user's messages carried (Claude Code keeps a pasted image
+  // in the message): their data comes with the entry, fetched once.
+  const fetchEntryImages = useCallback(
+    async (entryId: string) => {
+      if (!pane.agent) return undefined;
+      const result = (await connectionClient.call("agent_history.entry", {
+        pane_id: pane.pane_id,
+        workspace_id: pane.workspace_id,
+        tab_id: pane.tab_id,
+        agent: pane.agent,
+        entry_id: entryId,
+      })) as { images?: unknown };
+      return Array.isArray(result.images)
+        ? (result.images as AgentHistoryImage[])
+        : undefined;
+    },
+    [
+      connectionClient,
+      pane.agent,
+      pane.pane_id,
+      pane.tab_id,
+      pane.workspace_id,
+    ],
+  );
+  const attachedImages = useAttachedImages(
+    messages,
+    fetchEntryImages,
+    JSON.stringify([
+      activeConnectionId,
+      connectionGeneration,
+      pane.pane_id,
+      pane.terminal_id,
+      history?.path,
+    ]),
+  );
   // Substitute fetched tool payloads only while they still match the entry.
   const hydrateEntry = useCallback(
     (entry: AgentHistoryEntry): AgentHistoryEntry => {
@@ -1381,6 +1418,7 @@ export function AgentHistoryDrawer({
             onLoadTool={loadToolEntry}
             onOpen={setExpandedMessage}
             imageUrl={imageUrl}
+            attachedImages={attachedImages}
             outbox={paneOutbox}
             onRetrySend={retrySend}
             onDiscardSend={discardSend}

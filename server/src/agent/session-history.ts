@@ -3,6 +3,8 @@ import type { AtifTrajectory, SessionFile } from "./session-types";
 import { isConversationStep } from "./session-messages";
 import { historyWindowEntries } from "./session-history-window";
 import { type PublishedArtifact, publishedArtifact } from "./session-artifacts";
+import type { HistoryImage } from "./session-images";
+export type { HistoryImage };
 
 export type HistoryEntry = {
   id: string;
@@ -21,6 +23,8 @@ export type HistoryEntry = {
   // On an Artifact tool result: the page it published. Kept when the
   // payload is redacted, so the chat can link to it.
   artifact?: PublishedArtifact;
+  // On a user message: the images it carried, without their data.
+  images?: HistoryImage[];
   // Set on redacted wire entries: UTF-8 byte length of the withheld text,
   // fetchable via agent_history.entry when the user expands the card.
   text_bytes?: number;
@@ -86,6 +90,11 @@ export function historyEntriesFromTrajectory(
         ...(step.extra?.queued === true ? { queued: true } : {}),
         ...(step.extra?.compact_summary === true
           ? { compact_summary: true }
+          : {}),
+        ...(step.source === "user" && Array.isArray(step.extra?.images)
+          ? {
+              images: step.extra.images as HistoryImage[],
+            }
           : {}),
       });
     }

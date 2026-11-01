@@ -43,7 +43,11 @@ import {
 } from "./agentHistoryView";
 import { formatBytes } from "./agentSession";
 import { MarkdownPreview } from "./markdown";
-import { messageImagePieces } from "../chatImages";
+import {
+  attachedImagePieces,
+  type MessagePiece,
+  messageImagePieces,
+} from "../chatImages";
 import { ImageLightbox } from "./ImageLightbox";
 import "./AgentHistoryChat.css";
 
@@ -62,6 +66,8 @@ type BubbleProps = {
   speech: ReturnType<typeof useChatSpeech>;
   onOpen: (entry: HistoryEntry) => void;
   imageUrl?: (path: string) => string;
+  /** The images the message carried, loaded. */
+  images?: readonly string[];
 };
 // A history refresh hands over new entry objects even for messages that did
 // not change: a bubble re-renders only when what it shows changed.
@@ -74,6 +80,7 @@ function sameBubble(a: BubbleProps, b: BubbleProps): boolean {
     a.speech === b.speech &&
     a.onOpen === b.onOpen &&
     a.imageUrl === b.imageUrl &&
+    a.images === b.images &&
     (x === y ||
       (x.id === y.id &&
         x.text === y.text &&
@@ -94,6 +101,7 @@ const ChatBubble = memo(function ChatBubble({
   speech,
   onOpen,
   imageUrl,
+  images,
 }: BubbleProps) {
   // A compaction summary is long and written by Claude Code, not the user:
   // one line, with the summary a tap away.
@@ -129,8 +137,8 @@ const ChatBubble = memo(function ChatBubble({
     >
       <div className="agent-history-chat-bubble">
         {entry.role === "user" ? (
-          imageUrl ? (
-            <UserText text={preview} imageUrl={imageUrl} />
+          imageUrl || images?.length ? (
+            <UserText text={preview} imageUrl={imageUrl} images={images} />
           ) : (
             <p>{preview}</p>
           )
@@ -203,18 +211,32 @@ const ChatBubble = memo(function ChatBubble({
   );
 }, sameBubble);
 
+type MessageImage = Extract<MessagePiece, { image: string }>;
+
 /** A message of the user's, with the images it sent shown, not their paths. */
 function UserText({
   text,
   imageUrl,
+  images,
 }: {
   text: string;
-  imageUrl: (path: string) => string;
+  imageUrl?: (path: string) => string;
+  images?: readonly string[];
 }) {
-  const [shown, setShown] = useState<string | null>(null);
-  const pieces = messageImagePieces(text);
+  const [shown, setShown] = useState<MessageImage | null>(null);
+  const pieces = (
+    images?.length
+      ? attachedImagePieces(text, images)
+      : messageImagePieces(text)
+  ).flatMap((piece): MessagePiece[] =>
+    // A path with nowhere to load it from stays text.
+    "image" in piece && !piece.url && !imageUrl
+      ? [{ text: piece.image }]
+      : [piece],
+  );
   if (!pieces.some((piece) => "image" in piece)) return <p>{text}</p>;
   const nameOf = (path: string) => path.split(/[\\/]/).pop() ?? path;
+  const urlOf = (piece: MessageImage) => piece.url ?? imageUrl!(piece.image);
   return (
     <>
       {pieces.map((piece, index) =>
@@ -223,7 +245,7 @@ function UserText({
             // The pieces of a message never move.
             key={index}
             className="agent-history-chat-image"
-            href={imageUrl(piece.image)}
+            href={urlOf(piece)}
             target="_blank"
             rel="noreferrer"
             title={piece.image}
@@ -238,14 +260,10 @@ function UserText({
               )
                 return;
               event.preventDefault();
-              setShown(piece.image);
+              setShown(piece);
             }}
           >
-            <img
-              src={imageUrl(piece.image)}
-              alt={nameOf(piece.image)}
-              loading="lazy"
-            />
+            <img src={urlOf(piece)} alt={nameOf(piece.image)} loading="lazy" />
           </a>
         ) : (
           <p key={index}>{piece.text}</p>
@@ -253,8 +271,8 @@ function UserText({
       )}
       {shown ? (
         <ImageLightbox
-          src={imageUrl(shown)}
-          name={nameOf(shown)}
+          src={urlOf(shown)}
+          name={nameOf(shown.image)}
           onClose={() => setShown(null)}
           // Focus left in the list would stop the chat following new messages.
           returnFocus={false}
@@ -691,6 +709,7 @@ export const AgentHistoryChat = memo(function AgentHistoryChat({
   onRetrySend,
   onDiscardSend,
   imageUrl,
+  attachedImages,
 }: {
   items: HistoryChatItem[];
   listRef: RefObject<HTMLDivElement | null>;
@@ -710,6 +729,8 @@ export const AgentHistoryChat = memo(function AgentHistoryChat({
   onDiscardSend?: (message: OutboxMessage) => void;
   /** Where an image the user uploaded loads from; none shows the path. */
   imageUrl?: (path: string) => string;
+  /** The images messages carried, loaded, by entry id. */
+  attachedImages?: ReadonlyMap<string, readonly string[]>;
 }) {
   const speech = useChatSpeech(speechActive, speechScopeKey);
   const followRef = useRef(true);
@@ -810,6 +831,7 @@ export const AgentHistoryChat = memo(function AgentHistoryChat({
               speech={speech}
               onOpen={onOpen}
               imageUrl={imageUrl}
+              images={attachedImages?.get(item.entry.id)}
             />
           ) : (
             <ToolBlock

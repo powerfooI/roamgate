@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { messageImagePieces } from "./chatImages";
+import { attachedImagePieces, messageImagePieces } from "./chatImages";
 
 const PNG =
   "/var/folders/9w/T/roamgate-uploads-501/upload-PkYw2p/img-1793284936305-iiuqcn.png";
@@ -54,5 +54,33 @@ describe("messageImagePieces", () => {
       `foo${PNG}`,
     ])
       expect(messageImagePieces(text)).toEqual([{ text }]);
+  });
+});
+
+describe("attachedImagePieces", () => {
+  test("puts the images a Claude message carried where it shows [Image #N]", () => {
+    expect(
+      attachedImagePieces("[Image #3] why is this red? [Image #4]", [
+        "blob:a",
+        "blob:b",
+      ]),
+    ).toEqual([
+      { image: "Image #3", url: "blob:a" },
+      { text: "why is this red?" },
+      { image: "Image #4", url: "blob:b" },
+    ]);
+  });
+
+  test("keeps a mark with no image as text, and shows an image with no mark", () => {
+    expect(
+      attachedImagePieces("[Image #1] and [Image #2]", ["blob:a"]),
+    ).toEqual([
+      { image: "Image #1", url: "blob:a" },
+      { text: "and [Image #2]" },
+    ]);
+    expect(attachedImagePieces("look", ["blob:a"])).toEqual([
+      { text: "look" },
+      { image: "Image #1", url: "blob:a" },
+    ]);
   });
 });
