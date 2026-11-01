@@ -244,6 +244,7 @@ export async function runSshCommand<T extends { code: number; stderr: string }>(
   run: (argv: string[], remainingMs: number | undefined) => Promise<T>,
   wait: SshSessionWait = {},
 ): Promise<T> {
+  wait.signal?.throwIfAborted();
   const route = routes.get(argv);
   if (!route) return run(argv, wait.timeoutMs);
   const startedAt = Date.now();
@@ -256,6 +257,7 @@ export async function runSshCommand<T extends { code: number; stderr: string }>(
   const release = await acquireSshSession(route.destination, wait);
   const releaseMux = holdMuxSession(route.controlPath);
   try {
+    wait.signal?.throwIfAborted();
     const result = await run(argv, remaining());
     if (
       route.retrySafe &&
@@ -265,6 +267,7 @@ export async function runSshCommand<T extends { code: number; stderr: string }>(
       (await masterDied(route.controlPath))
     ) {
       releaseMux();
+      wait.signal?.throwIfAborted();
       return await run(route.cold, remaining());
     }
     return result;

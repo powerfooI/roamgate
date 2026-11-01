@@ -370,3 +370,36 @@ describe("SSH session wait", () => {
     }
   });
 });
+
+test("an abort after a queued slot is granted still prevents command dispatch", async () => {
+  const destination = "grant-abort-box";
+  const held = await Promise.all(
+    Array.from({ length: SSH_SESSION_LIMIT }, () =>
+      acquireSshSession(destination),
+    ),
+  );
+  const controller = new AbortController();
+  let dispatched = false;
+  const pending = runSshCommand(
+    sshCommandArgv(destination, "write-operation"),
+    async () => {
+      dispatched = true;
+      return { code: 0, stderr: "" };
+    },
+    { signal: controller.signal },
+  );
+  try {
+    held[0]!();
+    controller.abort(new Error("request cancelled"));
+    await expect(pending).rejects.toThrow("request cancelled");
+    expect(dispatched).toBe(false);
+  } finally {
+    for (const release of held) release();
+  }
+  const after = await Promise.all(
+    Array.from({ length: SSH_SESSION_LIMIT }, () =>
+      acquireSshSession(destination),
+    ),
+  );
+  for (const release of after) release();
+});
