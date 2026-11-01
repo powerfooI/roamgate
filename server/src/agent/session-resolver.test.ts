@@ -256,4 +256,32 @@ describe("OMP session resolution", () => {
     expect(byId.status).toBe("missing_file");
     expect(byId.path).toBe("");
   });
+
+  test("resolves Hermes session from .hermes directory", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "hermes-test-"));
+    tempDirectories.push(dir);
+    const hermesDir = join(dir, ".hermes");
+    await mkdir(hermesDir, { recursive: true });
+    const sessionFile = join(hermesDir, "session-123.jsonl");
+    await writeFile(
+      sessionFile,
+      JSON.stringify({ title: "Hermes Kanban Task" }),
+    );
+
+    const resolved = await resolveAgentSession(
+      { pane_id: "p1" },
+      async () => ({
+        agent: {
+          agent: "hermes",
+          cwd: dir,
+          agent_session: { agent: "hermes", kind: "id", value: "session-123" },
+        },
+      }),
+      localAgentSessionFiles,
+      createAgentSessionResolverContext(),
+    );
+
+    expect(resolved.status).toBe("ok");
+    expect(resolved.path).toBe(sessionFile);
+  });
 });

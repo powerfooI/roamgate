@@ -11,6 +11,7 @@ import {
 import { isRecord } from "./session-utils";
 import { summarizeTokenUsage } from "./token-usage";
 import { readAntigravitySessionRecords } from "./antigravity-session";
+import { extractAgentSessionTitle } from "./session-title";
 
 function parseJsonl(text: string) {
   const records: Record<string, unknown>[] = [];
@@ -42,8 +43,10 @@ export async function readSessionProjection(
     projectionFile,
     trajectory,
   );
+  const title = extractAgentSessionTitle(agent, projectionFile, records);
   return {
     file,
+    title,
     trajectory,
     messages,
     entries: historyEntriesFromTrajectory(projectionFile, trajectory),

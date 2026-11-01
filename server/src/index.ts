@@ -1426,6 +1426,9 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       if (inputTerminalId)
         terminalBridge.noteTerminalInput(ws, inputTerminalId);
     });
+    if (method === "tab.rename" && typeof params?.tab_id === "string") {
+      connection.tabAutoRenamer?.markManualRename(params.tab_id);
+    }
     let result = rawResult;
     if (
       method === "integration.list" &&

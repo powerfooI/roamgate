@@ -33,6 +33,7 @@ export type GuiWorkspaceAutoSyncSettings = {
 export type GuiSettings = {
   version: 1;
   title_suffix?: string;
+  auto_rename_agent_tabs?: boolean;
   repositories: Record<string, GuiRepoSettings>;
   workspace_auto_sync: Record<string, GuiWorkspaceAutoSyncSettings>;
   terminal_transport?: Record<string, { surface_codecs: boolean }>;
@@ -87,6 +88,7 @@ function defaultGuiSettings(): GuiSettings {
   return {
     version: 1,
     title_suffix: "",
+    auto_rename_agent_tabs: true,
     repositories: {},
     workspace_auto_sync: {},
     terminal_transport: {},
@@ -165,6 +167,10 @@ function normalizeGuiSettings(raw: unknown): GuiSettings {
   return {
     version: 1,
     title_suffix: storedTitleSuffix(obj.title_suffix),
+    auto_rename_agent_tabs:
+      typeof obj.auto_rename_agent_tabs === "boolean"
+        ? obj.auto_rename_agent_tabs
+        : true,
     repositories: normalizedRepos,
     workspace_auto_sync: normalizedWorkspaceAutoSync,
     terminal_transport: Object.fromEntries(

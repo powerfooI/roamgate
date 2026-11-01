@@ -66,6 +66,7 @@ import {
   createWorktreeRemovalRuntime,
 } from "../worktree/remove";
 import { createAgentStatusSubscriptionLoop } from "./agent-status-subscription";
+import { createTabAutoRenamer } from "./tab-auto-rename";
 import { sanitizeConnectionError } from "./manager";
 import { createEventSubscriptionLoop } from "./subscription-loop";
 import { type ConnectionIdentity, LEGACY_DEFAULT_CONNECTION } from "./types";
@@ -529,10 +530,32 @@ export function createLegacyConnectionRuntime(args: {
     },
   });
 
+  const tabAutoRenamer = createTabAutoRenamer({
+    herdr,
+    getAgentTitleForPane: async (paneId) => {
+      try {
+        const summary = (await agentSessions.readSummary({
+          pane_id: paneId,
+        })) as {
+          title?: string | null;
+        };
+        return summary?.title ?? null;
+      } catch {
+        return null;
+      }
+    },
+    isEnabled: async () => {
+      const settings = await readGuiSettings().catch(() => null);
+      return settings?.auto_rename_agent_tabs !== false;
+    },
+    log: (message) => logger.debug(message, { connection: identity.id }),
+  });
+
   const onHerdrEvent = (event: unknown) => {
     taskEvents.handleHerdrEvent(event);
     lastStepTurns.handleHerdrEvent(event);
     agentStatusSubscriptions.handleHerdrEvent(event);
+    tabAutoRenamer.handleHerdrEvent(event);
     if ((event as { event?: string })?.event === "workspace.focused")
       terminalBridge.refreshPopupObserverFocus();
     args.onEvent(event, identity);
@@ -641,6 +664,7 @@ export function createLegacyConnectionRuntime(args: {
     disposed = true;
     backgroundStarted = false;
     handleTerminalUpload.stopCleanup();
+    tabAutoRenamer.dispose();
     herdr.off("event", onHerdrEvent);
     herdr.off("error", onHerdrError);
     taskEvents.stop();
@@ -687,6 +711,7 @@ export function createLegacyConnectionRuntime(args: {
     worktreeRemovalRuntime,
     terminalBridge,
     agentSessions,
+    tabAutoRenamer,
     recoveryIdentity,
     taskNotificationSource,
     startTransport,

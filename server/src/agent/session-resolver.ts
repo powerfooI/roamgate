@@ -129,6 +129,50 @@ async function findClaudeSession(
   });
 }
 
+async function findHermesSession(
+  id: string,
+  cwd: string,
+  context: AgentSessionResolverContext,
+) {
+  return resolveCachedSessionPath(context, `hermes:${id}:${cwd}`, async () => {
+    const roots: string[] = [];
+    if (cwd) {
+      roots.push(join(cwd, ".hermes"));
+    }
+    roots.push(join(homedir(), ".hermes", "sessions"));
+    roots.push(join(homedir(), ".hermes"));
+    roots.push(join(homedir(), ".local", "state", "hermes", "sessions"));
+
+    const files = (
+      await Promise.all(
+        roots.map((root) =>
+          walkFiles(root, (path) => {
+            const name = basename(path);
+            return (
+              name === `${id}.jsonl` ||
+              name === `${id}.json` ||
+              name.endsWith(`_${id}.jsonl`) ||
+              name.endsWith(`_${id}.json`)
+            );
+          }),
+        ),
+      )
+    ).flat();
+
+    const matched = newestFile(files);
+    if (matched) return matched;
+
+    if (cwd) {
+      const localFiles = await walkFiles(
+        join(cwd, ".hermes"),
+        (path) => path.endsWith(".jsonl") || path.endsWith(".json"),
+      );
+      return newestFile(localFiles);
+    }
+    return null;
+  });
+}
+
 async function findKimiSession(
   id: string,
   context: AgentSessionResolverContext,
@@ -261,6 +305,8 @@ async function sessionFileFor(
   let path: string | null = null;
   if (agent === "claude")
     path = await findClaudeSession(session.value, context);
+  if (agent === "hermes")
+    path = await findHermesSession(session.value, cwd, context);
   if (agent === "kimi") path = await findKimiSession(session.value, context);
   if (agent === "pi" || agent === "omp")
     path =
@@ -330,10 +376,11 @@ export async function resolveAgentSessionInfo(
     agent !== "pi" &&
     agent !== "omp" &&
     agent !== "muse" &&
-    agent !== "agy"
+    agent !== "agy" &&
+    agent !== "hermes"
   ) {
     throw new Error(
-      `agent session only supports codex, claude, kimi, grok, pi, omp, muse, and agy`,
+      `agent session only supports codex, claude, kimi, grok, pi, omp, muse, agy, and hermes`,
     );
   }
   // Native session files follow the agent process, which may have been

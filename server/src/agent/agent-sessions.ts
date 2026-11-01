@@ -156,6 +156,7 @@ export async function readAgentMessageHistory(
   const messages = projected.messages.slice(-MAX_MESSAGES_PER_AGENT);
   return {
     ...resolved,
+    title: projected.title ?? null,
     file: projected.file,
     updated_at: new Date(projected.file.mtimeMs).toISOString(),
     messages,
@@ -179,6 +180,7 @@ export async function readAgentSessionSummary(
     cache?.invalidate(resolved);
     return {
       ...resolved,
+      title: null,
       stats: { turns: 0, records: 0, token_usage: null },
       text: null,
       truncated: false,
@@ -219,6 +221,7 @@ export async function readAgentSessionSummary(
   const trajectory = includeTrajectory ? projected.trajectory : null;
   return {
     ...resolved,
+    title: projected.title ?? null,
     file: projected.file,
     updated_at: new Date(projected.file.mtimeMs).toISOString(),
     stats,

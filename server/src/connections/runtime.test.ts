@@ -566,3 +566,28 @@ test("Windows runtimes refuse Unix-only helper groups", async () => {
     await runtime.stop();
   }
 });
+
+test("legacy runtime exposes tabAutoRenamer for automatic tab renaming", async () => {
+  const runtime = createLegacyConnectionRuntime({
+    config: {
+      socketPath: "/tmp/m3-runtime-autorename-control.sock",
+      clientSocketPath: "/tmp/m3-runtime-autorename-client.sock",
+      sshHost: undefined,
+      session: undefined,
+      hasExplicitSocketPath: true,
+      hasExplicitClientSocketPath: true,
+    },
+    safeSend: () => true,
+    clientLabel: () => "browser",
+    markRpcError: () => undefined,
+    onEvent: () => undefined,
+  });
+  try {
+    expect(runtime.tabAutoRenamer).toBeDefined();
+    expect(runtime.tabAutoRenamer.isManuallyRenamed("tab-1")).toBe(false);
+    runtime.tabAutoRenamer.markManualRename("tab-1");
+    expect(runtime.tabAutoRenamer.isManuallyRenamed("tab-1")).toBe(true);
+  } finally {
+    await runtime.stop();
+  }
+});
