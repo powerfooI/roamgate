@@ -221,6 +221,12 @@ export async function createWorkspaceWorktree(
       runProcess,
     });
     assertCurrent();
+    // The install probe can await SSH: do not dispatch a command that was
+    // changed or disabled while it was pending.
+    const latestCommand = worktreeCommandFor(await readSettings(), key);
+    assertCurrent();
+    if (latestCommand !== command)
+      throw new Error("The worktree command changed.");
   }
   const result =
     command && !commandFallback

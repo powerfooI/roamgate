@@ -1,9 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
+import type { ConnectionClient } from "../api";
 import { store } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
 import { TextInputDialog } from "./ModalDialogs";
 
-type Location = { key: string | null; directory: string };
+type Location = {
+  client: ConnectionClient;
+  workspaceId: string;
+  key: string | null;
+  directory: string;
+};
 
 /** Edits where new worktrees of the workspace's repository are created. */
 export function WorktreeLocationDialog({
@@ -17,6 +23,12 @@ export function WorktreeLocationDialog({
 }) {
   const connectionClient = useConnectionClient();
   const [location, setLocation] = useState<Location | null>(null);
+  const close = useEffectEvent(onClose);
+  const current =
+    location?.client === connectionClient &&
+    location.workspaceId === workspaceId
+      ? location
+      : null;
 
   useEffect(() => {
     if (!open || !workspaceId) {
@@ -29,6 +41,8 @@ export function WorktreeLocationDialog({
       .then((result) => {
         if (cancelled || !connectionClient.isCurrent()) return;
         setLocation({
+          client: connectionClient,
+          workspaceId,
           key: result?.key ?? null,
           directory: result?.worktree_directory ?? "",
         });
@@ -40,24 +54,30 @@ export function WorktreeLocationDialog({
           message: "Unable to read the worktree location",
           detail: (error as Error).message,
         });
-        onClose();
+        close();
       });
     return () => {
       cancelled = true;
     };
-  }, [connectionClient, open, workspaceId, onClose]);
+  }, [connectionClient, open, workspaceId]);
 
   return (
     <TextInputDialog
-      open={open && !!location}
+      open={open && !!current}
       title="Worktree Location"
       label="Directory for new worktrees (empty for Herdr's default)"
-      initialValue={location?.directory ?? ""}
+      initialValue={current?.directory ?? ""}
       placeholder="/path/to/worktrees"
       submitLabel="Save"
       onClose={onClose}
       onSubmit={(value) => {
-        const key = location?.key;
+        if (
+          !current ||
+          !connectionClient.isCurrent() ||
+          store.get().activeConnectionId !== connectionClient.connectionId
+        )
+          return;
+        const key = current.key;
         onClose();
         if (!key) return;
         void store.setRepoWorktreeDirectory(key, value.trim());

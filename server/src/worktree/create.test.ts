@@ -860,3 +860,37 @@ describe("repository worktree directory", () => {
     }
   });
 });
+
+test("a command changed while its install probe runs is not dispatched", async () => {
+  const template = "git recworktree add {path} --branch {branch}";
+  const settings: Partial<GuiSettings> = { worktree_command: template };
+  const f = creationFixture(undefined, false, undefined, settings);
+  let executed = false;
+  await expect(
+    createWorkspaceWorktree(
+      f.runtime,
+      {
+        workspace_id: "source",
+        branch: "feature",
+        expected_worktree_command: template,
+      },
+      f.isCurrent,
+      undefined,
+      f.syncBase,
+      undefined,
+      {
+        readSettings: f.readSettings,
+        runProcess: async (argv) => {
+          if (argv.at(-1)!.includes("command -v")) {
+            settings.worktree_command = "different-command {path}";
+            return { code: 0, stdout: "", stderr: "" };
+          }
+          executed = true;
+          return { code: 0, stdout: "/created/checkout\n", stderr: "" };
+        },
+      },
+    ),
+  ).rejects.toThrow("The worktree command changed");
+  expect(executed).toBe(false);
+  expect(f.methods).toEqual([]);
+});

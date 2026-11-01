@@ -32,6 +32,8 @@ export function worktreeCommandTemplateError(
     if (quote === "'") {
       if (char === "'") quote = null;
     } else if (char === "\\") {
+      if (/^\{(path|branch|base|repo|force)\}/.test(template.slice(index + 1)))
+        return "Remove the escape before the placeholder: Roamgate quotes placeholders itself.";
       index++;
       continue;
     } else if (quote === '"') {

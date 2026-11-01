@@ -468,8 +468,8 @@ from `origin`) and `{repo}` (the source repository) stand for the variables
 `ROAMGATE_WORKTREE_PATH`, `ROAMGATE_WORKTREE_BRANCH`, `ROAMGATE_WORKTREE_BASE`
 and `ROAMGATE_WORKTREE_REPO`, which Roamgate exports first: each placeholder
 becomes `"$ROAMGATE_WORKTREE_..."`, so a value is never read as shell syntax.
-Do not quote placeholders yourself; a command with a placeholder inside quotes
-is refused. Branch names must be valid for git and free of spaces and shell
+Do not quote or escape placeholders yourself; commands with quoted or escaped
+placeholders are refused. Branch names must be valid for git and free of spaces and shell
 syntax characters (`$`, backquote, quotes, `\`, `;`, `|`, `&`, `<`, `>`,
 parentheses, braces, `!`).
 

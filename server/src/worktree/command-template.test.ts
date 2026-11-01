@@ -154,3 +154,9 @@ describe("worktree command install probe", () => {
     expect(probe("git roamgate-no-such-subcommand {path}")).toBe(127);
   });
 });
+
+test("an escaped placeholder is refused before its inserted quote can be escaped", () => {
+  expect(() => worktreeCommandScript("mk \\{path}", { path: "/a b" })).toThrow(
+    "escape",
+  );
+});
