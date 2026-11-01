@@ -235,3 +235,45 @@ test("several answers: Submit moves down to its line and confirms", () => {
   ]);
   expect(prompt.submit).toBe("\x1b[B\r");
 });
+
+test("a permission question starts under the rule over its dialog", () => {
+  // Claude Code on a narrow screen: the conversation fills what is above
+  // the dialog, and must not stand for the question.
+  const prompt = parseAgentPrompt([
+    "⏺ I created /Users/me/repo/second.txt",
+    "  containing hi, using the Write tool.",
+    "",
+    "✻ Sautéed for 1s · done 3:33 PM",
+    "",
+    "❯ Create a file named third.txt containing the word hi,",
+    "  with the Write tool. Do nothing else.",
+    "",
+    "⏺ Write(third.txt)",
+    "",
+    "─".repeat(56),
+    " Create file",
+    " third.txt",
+    "╌".repeat(56),
+    "  1 hi",
+    "╌".repeat(56),
+    " Do you want to create third.txt?",
+    " ❯ 1. Yes",
+    "   2. Yes, and switch to accept edits (auto-approve file",
+    "      edits and common file commands) for this session",
+    "      (shift+tab)",
+    "   3. No",
+    "",
+    " Esc to cancel · Tab to amend",
+  ]);
+  expect(prompt.lines).toEqual([
+    "Create file",
+    "third.txt",
+    "1 hi",
+    "Do you want to create third.txt?",
+  ]);
+  expect(prompt.options.map((option) => option.label)).toEqual([
+    "Yes",
+    "Yes, and switch to accept edits (auto-approve file",
+    "No",
+  ]);
+});

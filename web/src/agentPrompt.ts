@@ -120,11 +120,31 @@ function parseTabs(
   return null;
 }
 
+/** A solid line across the screen: where an agent's dialog starts. */
+const DIALOG_RULE = /^\s*[─━═]{8,}\s*$/;
+
 function parsePrompt(screen: readonly string[]): AgentPrompt {
-  const lines = screen
-    .map((line) => line.replace(BORDER, ""))
-    .filter((line) => line && !RULE.test(line))
-    .slice(-MAX_LINES);
+  const kept: string[] = [];
+  // Where in `kept` each solid rule was drawn.
+  const rules: number[] = [];
+  for (const raw of screen) {
+    if (DIALOG_RULE.test(raw)) rules.push(kept.length);
+    const line = raw.replace(BORDER, "");
+    if (line && !RULE.test(line)) kept.push(line);
+  }
+  const lines = kept.slice(-MAX_LINES);
+  const dropped = kept.length - lines.length;
+  /**
+   * The question's own lines above `end`: from the last solid rule over
+   * them, as Claude Code draws one on top of its dialogs; above it is the
+   * conversation, which a narrow screen would show instead of the question.
+   */
+  const questionLines = (end: number) => {
+    let start = 0;
+    for (const at of rules)
+      if (at - dropped <= end) start = Math.max(start, at - dropped);
+    return lines.slice(start, end);
+  };
   // The choices are the last numbered run, counting down to 1 from its
   // last line; a choice's description goes on in the lines under it.
   let last = -1;
@@ -201,7 +221,7 @@ function parsePrompt(screen: readonly string[]): AgentPrompt {
       .slice(last + 1)
       .some((line) => CONFIRM_HINT.test(line));
     return {
-      lines: lines.slice(0, first),
+      lines: questionLines(first),
       options,
       ...(confirm ? { confirm } : {}),
       ...(submit ? { submit } : {}),
@@ -212,7 +232,7 @@ function parsePrompt(screen: readonly string[]): AgentPrompt {
     if (menu) {
       const first = lines.findIndex((line) => line.includes(menu[0]!.label));
       return {
-        lines: first >= 0 ? lines.slice(0, first) : lines,
+        lines: questionLines(first >= 0 ? first : lines.length),
         options: menu,
         confirm: true,
       };
