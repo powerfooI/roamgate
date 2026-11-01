@@ -185,8 +185,12 @@ Inspector state is scoped to each checkout; see
   and configured roots, including `PI_CONFIG_DIR` (resolved relative to the
   user's home directory). Remote panes must report the transcript path because
   local profile discovery is never used over SSH. Transcripts must be readable
-  by the bridge. Over SSH, Roamgate reads the session path Herdr reports; it
-  never searches local files for a remote pane. Muse needs session logging
+  by the bridge. Over SSH, Roamgate reads the session path Herdr reports, or
+  finds a Claude, Codex or Pi transcript by its ID on the remote host; it never
+  searches local files for a remote Claude, Codex or Pi pane. A Claude session
+  that went on in a new transcript (a resume or `/clear` that Herdr still
+  reports under the old ID) is followed there. Session folders that are
+  symbolic links are followed. Muse needs session logging
   enabled (no `--no-session-log`). See
   [History synchronization](docs/HISTORY.md).
 
