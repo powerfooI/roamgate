@@ -1777,6 +1777,15 @@ function main() {
               }),
               "hello",
             );
+            // The registry is global and must arrive before any Herdr catalog
+            // or runtime lease is available, including with an offline default.
+            safeSend(
+              ws,
+              JSON.stringify({
+                forwards: sshForwards.list().map(forwardToWire),
+              }),
+              "forwards",
+            );
           },
           drain(ws) {
             // The viewer caught up: send the newest repaint we held back.

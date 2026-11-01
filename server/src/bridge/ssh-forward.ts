@@ -348,7 +348,19 @@ export function createSshForwards(args: {
       localPort,
       remotePort: record.remotePort,
     });
-    const proc = spawn(argv);
+    let proc: ForwardProcess;
+    try {
+      proc = spawn(argv);
+    } catch (error) {
+      const failed = {
+        ...record,
+        state: "failed" as const,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      records.set(id, failed);
+      publish();
+      return { ...failed };
+    }
     processes.set(id, proc);
     if (direction === "remote") {
       remoteReady.set(

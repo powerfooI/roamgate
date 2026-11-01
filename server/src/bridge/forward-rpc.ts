@@ -108,6 +108,11 @@ export function createForwardRpcHandler(args: {
       if (method === "forward.list") {
         return reply({ forwards: args.forwards.list().map(forwardToWire) });
       }
+      if (method === "forward.close") {
+        const forwardId = String(params.id ?? "");
+        if (!forwardId) return fail("forward.close requires id");
+        return reply({ closed: args.forwards.close(forwardId) });
+      }
       const destination = args.sshHost();
       if (!destination) {
         return fail(
@@ -180,11 +185,6 @@ export function createForwardRpcHandler(args: {
             )
             .slice(0, MAX_FORWARD_CANDIDATES),
         });
-      }
-      if (method === "forward.close") {
-        const forwardId = String(params.id ?? "");
-        if (!forwardId) return fail("forward.close requires id");
-        return reply({ closed: args.forwards.close(forwardId) });
       }
       return fail(`unknown forward method: ${method}`);
     } catch (e) {

@@ -145,7 +145,7 @@ import {
 } from "./TerminalFileLinkMenu";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
 import { directoryPreviewName } from "../filesystemPaths";
-import { canForwardPorts } from "../portForwarding";
+import { canForwardPorts, localForwardFor } from "../portForwarding";
 import {
   sanitizeTerminalHttpUrl,
   terminalFileUriPath,
@@ -482,6 +482,7 @@ export function TerminalView({
     url: string;
     port: number;
     rewrite: (localPort: number) => string;
+    target: { connectionId: string; generation: number };
   } | null>(null);
   const [localAgentHistoryOpen, setLocalAgentHistoryOpen] = useState(false);
   const containerRef = useCallback(
@@ -568,11 +569,10 @@ export function TerminalView({
       if (!candidate) return false;
       // Already forwarded: open it rather than asking again. The proposal is
       // for ports that have no tunnel, not a toll on every click.
-      const existing = forwardsRef.current.find(
-        (forward) =>
-          forward.remote_port === candidate.port &&
-          forward.connection_id === s.activeConnectionId &&
-          forward.state !== "failed",
+      const existing = localForwardFor(
+        forwardsRef.current,
+        s.activeConnectionId,
+        candidate.port,
       );
       if (existing) {
         window.open(
@@ -586,6 +586,10 @@ export function TerminalView({
         url,
         port: candidate.port,
         rewrite: candidate.rewrite,
+        target: {
+          connectionId: s.activeConnectionId,
+          generation: s.connectionGeneration,
+        },
       });
       return true;
     } catch {
@@ -4094,12 +4098,13 @@ export function TerminalView({
           setForwardRequest(null);
           if (!request) return;
           void store
-            .openForward(request.port)
+            .openForward(request.port, { target: request.target })
             .then((forward) => {
               // Open what was actually bound: the local port differs from the
               // remote's when that number is already taken here.
+              if (!forward) return;
               window.open(
-                forward ? request.rewrite(forward.local_port) : request.url,
+                request.rewrite(forward.local_port),
                 "_blank",
                 "noopener,noreferrer",
               );

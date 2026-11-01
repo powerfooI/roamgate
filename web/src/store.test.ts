@@ -2375,3 +2375,62 @@ describe("listening port scans", () => {
     }
   });
 });
+
+test("a failed forward.close keeps the still-live forward visible", async () => {
+  const previous = store.get();
+  const originalConnection = bridge.connection;
+  const forward = {
+    id: "alpha:local:3000",
+    connection_id: "alpha",
+    direction: "local" as const,
+    local_port: 3000,
+    remote_port: 3000,
+    state: "open" as const,
+  };
+  const snapshot = { ...partitionState(), forwards: [forward] };
+  bridge.connection = (connectionId = "alpha") => ({
+    connectionId,
+    generation: snapshot.connectionGeneration,
+    serverRuntimeGeneration: 1,
+    isCurrent: () => true,
+    acceptsServerGeneration: () => true,
+    call: async () => {
+      throw new Error("close failed");
+    },
+  });
+  try {
+    __storeTesting.replaceState(snapshot);
+    await store.closeForward(forward.id);
+    expect(store.get().forwards).toEqual([forward]);
+  } finally {
+    bridge.connection = originalConnection;
+    __storeTesting.replaceState(previous);
+  }
+});
+
+test("a port confirmation cannot open on a replacement connection", async () => {
+  const previous = store.get();
+  const originalConnection = bridge.connection;
+  let called = false;
+  bridge.connection = (() => {
+    called = true;
+    throw new Error("must not dispatch");
+  }) as typeof bridge.connection;
+  try {
+    const snapshot = partitionState();
+    __storeTesting.replaceState(snapshot);
+    expect(
+      await store.openForward(3000, {
+        direction: "remote",
+        target: {
+          connectionId: "alpha",
+          generation: snapshot.connectionGeneration - 1,
+        },
+      }),
+    ).toBeNull();
+    expect(called).toBe(false);
+  } finally {
+    bridge.connection = originalConnection;
+    __storeTesting.replaceState(previous);
+  }
+});

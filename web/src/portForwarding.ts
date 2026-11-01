@@ -1,3 +1,5 @@
+import type { ForwardRecord } from "./api";
+
 /**
  * Whether port forwarding is offered here. Kept apart from terminalLinks so
  * the command menu and connection switcher, which load with the app, do not
@@ -36,4 +38,19 @@ export function canForwardPorts(
   hostname?: string,
 ): boolean {
   return connectionType === "ssh" && browserSharesRoamgateHost(hostname);
+}
+
+/** A terminal URL needs a ready local listener for this remote service. */
+export function localForwardFor(
+  forwards: readonly ForwardRecord[],
+  connectionId: string,
+  port: number,
+) {
+  return forwards.find(
+    (forward) =>
+      forward.connection_id === connectionId &&
+      forward.remote_port === port &&
+      forward.direction === "local" &&
+      forward.state === "open",
+  );
 }

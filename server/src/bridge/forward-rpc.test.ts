@@ -565,3 +565,25 @@ describe("forward.list, forward.close and local connections", () => {
     expect(forwards.list()).toEqual([]);
   });
 });
+
+test("the global forward registry can be closed while a local profile is active", async () => {
+  const fake = fakeProcess();
+  const forwards = createSshForwards({
+    spawn: () => fake.proc,
+    isPortFree: () => true,
+  });
+  const record = forwards.open({
+    connectionId: "ssh-profile",
+    destination: "user@host",
+    port: 3000,
+  });
+  const h = harness(forwards, { sshHost: undefined });
+  const result = await h.call("forward.close", { id: record.id });
+  try {
+    expect(result.result).toEqual({ closed: true });
+    expect(fake.killed).toHaveLength(1);
+    expect(forwards.list()).toHaveLength(0);
+  } finally {
+    forwards.closeAll();
+  }
+});

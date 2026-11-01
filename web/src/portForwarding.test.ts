@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { browserSharesRoamgateHost, canForwardPorts } from "./portForwarding";
+import {
+  browserSharesRoamgateHost,
+  canForwardPorts,
+  localForwardFor,
+} from "./portForwarding";
 
 describe("forward availability", () => {
   test("offered only when the browser and Roamgate share a machine", () => {
@@ -23,4 +27,23 @@ describe("forwarding gate", () => {
     expect(canForwardPorts("local", "localhost")).toBe(false);
     expect(canForwardPorts(undefined, "localhost")).toBe(false);
   });
+});
+
+test("a reverse or starting forward cannot open a remote terminal URL", () => {
+  const base = {
+    id: "forward",
+    connection_id: "ssh",
+    direction: "local" as const,
+    local_port: 3001,
+    remote_port: 3000,
+    state: "open" as const,
+  };
+  expect(
+    localForwardFor([{ ...base, direction: "remote" }], "ssh", 3000),
+  ).toBeUndefined();
+  expect(
+    localForwardFor([{ ...base, state: "starting" }], "ssh", 3000),
+  ).toBeUndefined();
+  expect(localForwardFor([base], "other", 3000)).toBeUndefined();
+  expect(localForwardFor([base], "ssh", 3000)?.local_port).toBe(3001);
 });

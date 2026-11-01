@@ -1182,6 +1182,7 @@ export function ConnectionSwitcher() {
   const state = useStoreSelector(
     (snapshot) => ({
       activeConnectionId: snapshot.activeConnectionId,
+      connectionGeneration: snapshot.connectionGeneration,
       connectionPaused: snapshot.connectionPaused,
       connections: snapshot.connections,
       defaultConnectionId: snapshot.defaultConnectionId,
@@ -1216,7 +1217,11 @@ export function ConnectionSwitcher() {
   const [manageOpen, setManageOpen] = useState(false);
   // A remote forward hands this machine's port to everything on the far
   // host, so it is confirmed rather than one click away.
-  const [exposePort, setExposePort] = useState<number | null>(null);
+  const [exposePort, setExposePort] = useState<{
+    port: number;
+    label: string;
+    target: { connectionId: string; generation: number };
+  } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const initialMenuFocus = useRef<"active" | "first" | "last">("active");
@@ -1477,7 +1482,14 @@ export function ConnectionSwitcher() {
               describe={(port) => `Expose ${port} to ${activeLabel}`}
               onForward={(port) => {
                 setOpen(false);
-                setExposePort(port);
+                setExposePort({
+                  port,
+                  label: activeLabel,
+                  target: {
+                    connectionId: state.activeConnectionId,
+                    generation: state.connectionGeneration,
+                  },
+                });
               }}
             />
             {state.forwards.length > 0 ? (
@@ -1551,7 +1563,7 @@ export function ConnectionSwitcher() {
       <ConfirmDialog
         open={exposePort !== null}
         title="Expose port"
-        message={`Anything on ${activeLabel} will reach port ${exposePort} on this machine, with no authentication of its own. It binds ${activeLabel}'s loopback unless its sshd sets GatewayPorts yes, which opens it to that host's network.`}
+        message={`Anything on ${exposePort?.label} will reach port ${exposePort?.port} on this machine, with no authentication of its own. It binds ${exposePort?.label}'s loopback unless its sshd sets GatewayPorts yes, which opens it to that host's network.`}
         confirmLabel="Expose"
         danger
         onClose={() => setExposePort(null)}
@@ -1559,7 +1571,10 @@ export function ConnectionSwitcher() {
           const port = exposePort;
           setExposePort(null);
           if (port !== null)
-            void store.openForward(port, { direction: "remote" });
+            void store.openForward(port.port, {
+              direction: "remote",
+              target: port.target,
+            });
         }}
       />
       {manageOpen && typeof document !== "undefined"

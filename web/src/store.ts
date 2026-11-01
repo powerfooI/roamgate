@@ -1381,25 +1381,7 @@ async function hydrateUiSettings() {
   }
 }
 
-/**
- * Reads the server's forward registry once a socket is up. Without this the
- * list is only ever learned from the change push, so a reloaded page shows
- * nothing forwarded and offers to forward ports that already are.
- */
 let listenersScan = 0;
-
-async function hydrateForwards() {
-  try {
-    const result = await action((lease) => lease.client.call("forward.list"), {
-      refresh: "none",
-    });
-    const forwards = result?.forwards as ForwardRecord[] | undefined;
-    if (Array.isArray(forwards)) set({ forwards });
-  } catch {
-    // An older bridge has no forward.list; the push still fills the list if
-    // anything changes, and nothing else depends on it.
-  }
-}
 
 async function refreshNow(lease = captureConnectionLease()) {
   if (
@@ -2266,13 +2248,11 @@ function handleBridgeHello(hello: { default_connection_id: string }) {
     void refreshConnectionCatalog();
   }
   void hydrateUiSettings();
-  void hydrateForwards();
 }
 
 function handleBridgeStatus(s: ConnectionStatus) {
   if (s === "connected") {
     void hydrateUiSettings();
-    void hydrateForwards();
   }
   if (s === "disconnected") {
     set({ tabMoveSupported: false, endpointAvailability: {} });
@@ -2984,8 +2964,24 @@ export const store = {
    */
   async openForward(
     port: number,
-    options: { direction?: "local" | "remote"; label?: string } = {},
+    options: {
+      direction?: "local" | "remote";
+      label?: string;
+      target?: { connectionId: string; generation: number };
+    } = {},
   ) {
+    if (
+      options.target &&
+      (options.target.connectionId !== state.activeConnectionId ||
+        options.target.generation !== state.connectionGeneration)
+    ) {
+      store.notify({
+        kind: "error",
+        message: "Connection changed",
+        detail: "Open the port confirmation again on the intended connection.",
+      });
+      return null;
+    }
     // Through a lease like every other RPC: the lease carries the runtime
     // generation from the catalog, which bridge.connection() alone does not
     // know and rejects the call without.
@@ -3054,10 +3050,14 @@ export const store = {
   },
 
   async closeForward(id: string) {
-    await action((lease) => lease.client.call("forward.close", { id }), {
-      refresh: "none",
-    });
-    set({ forwards: state.forwards.filter((entry) => entry.id !== id) });
+    const result = await action(
+      (lease) => lease.client.call("forward.close", { id }),
+      {
+        refresh: "none",
+      },
+    );
+    if (result)
+      set({ forwards: state.forwards.filter((entry) => entry.id !== id) });
   },
 
   focusTaskNotificationTarget(target: TaskNotificationTarget) {

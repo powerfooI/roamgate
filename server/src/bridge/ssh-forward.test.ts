@@ -435,3 +435,31 @@ describe("local port availability", () => {
     }
   });
 });
+
+test("a spawn failure is failed immediately and does not retain a live slot", async () => {
+  const forwards = createSshForwards({
+    spawn: () => {
+      throw new Error("spawn ssh ENOENT");
+    },
+    isPortFree: () => true,
+  });
+  try {
+    const record = forwards.open({
+      connectionId: "ssh",
+      destination: "user@host",
+      port: 3000,
+    });
+    expect(record.state).toBe("failed");
+    expect((await forwards.waitUntilOpen(record.id))?.error).toContain(
+      "ENOENT",
+    );
+    const retry = forwards.open({
+      connectionId: "ssh",
+      destination: "user@host",
+      port: 3000,
+    });
+    expect(retry.state).toBe("failed");
+  } finally {
+    forwards.closeAll();
+  }
+});
