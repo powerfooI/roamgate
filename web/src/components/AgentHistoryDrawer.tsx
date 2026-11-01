@@ -1325,6 +1325,16 @@ export function AgentHistoryDrawer({
       ) : null}
     </>
   );
+  // Until a pane's transcript can be read, its chat says so in place of the
+  // conversation; a message sent meanwhile shows instead, on its way.
+  const paneWaiting =
+    paneChat && unavailable ? (
+      <div className="agent-chat-waiting" role="status">
+        <span className="agent-chat-activity-mark" aria-hidden="true" />
+        <span>No conversation yet</span>
+        {unavailableLasted ? <small>{unavailableDetail}</small> : null}
+      </div>
+    ) : null;
   const historyChat = (
     <div
       className="agent-history-messages"
@@ -1353,7 +1363,7 @@ export function AgentHistoryDrawer({
       }}
     >
       {!paneChat || searchOpen || query ? historySearch : null}
-      {(paneOutbox.length ? null : historyEmptyState) ?? (
+      {(paneOutbox.length ? null : (paneWaiting ?? historyEmptyState)) ?? (
         <div className="agent-history-chat-frame">
           <AgentHistoryChat
             items={chatItems}
@@ -1659,13 +1669,7 @@ export function AgentHistoryDrawer({
           </div>
         </div>
 
-        {unavailable && paneChat ? (
-          <div className="agent-chat-waiting" role="status">
-            <span className="agent-chat-activity-mark" aria-hidden="true" />
-            <span>No conversation yet</span>
-            {unavailableLasted ? <small>{unavailableDetail}</small> : null}
-          </div>
-        ) : unavailable ? (
+        {unavailable && !paneChat ? (
           <div className="agent-history-unavailable" role="status">
             <strong>Session unavailable</strong>
             <p>{unavailableDetail}</p>
@@ -1693,16 +1697,16 @@ export function AgentHistoryDrawer({
             </button>
           </div>
         ) : null}
-        {unavailable && paneChat ? (
-          // A pane's chat still types into the agent, and answers its
-          // questions, without its transcript.
+        {/* A pane's chat still types into the agent, and answers its
+            questions, without its transcript: its message box stays where
+            it is, so a transcript appearing or going away keeps the focus
+            and what is being typed. */}
+        {unavailable && !paneChat ? null : (
           <>
-            {chatStatus}
-            {paneComposer}
-          </>
-        ) : unavailable ? null : (
-          <>
-            {error ? <div className="agent-history-error">{error}</div> : null}
+            {/* Without a transcript, a pane's chat gives the reason once it lasted. */}
+            {error && !paneWaiting ? (
+              <div className="agent-history-error">{error}</div>
+            ) : null}
             {!detailsOpen ? (
               chatView ? (
                 historyChat
