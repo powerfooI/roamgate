@@ -63,6 +63,13 @@ function connectOneShot(
   }).catch((error: Error) => handlers.error(error));
 }
 
+/**
+ * The longest request line Herdr reads, not counting its newline (1 MiB,
+ * found by trying against Herdr 0.9.0: a 1 MiB line is answered, one byte
+ * more is dropped without an answer).
+ */
+export const HERDR_MAX_REQUEST_BYTES = 1024 * 1024;
+
 /** Subscription selector: a bare event type or a parameterized subscription. */
 export type HerdrSubscription =
   | string
@@ -99,6 +106,23 @@ export class HerdrClient extends EventEmitter {
     const requestId = `r_${Date.now().toString(36)}_${Math.random()
       .toString(36)
       .slice(2, 6)}`;
+    // What the socket has not taken yet. A Bun socket write takes only
+    // what fits in the socket buffer, and a long request (a long message
+    // sent with pane.send_input) does not fit in one; Herdr waits for the
+    // whole line.
+    let unsent = Buffer.from(
+      JSON.stringify({ id: requestId, method, params }) + "\n",
+    );
+    // Herdr drops a request line over 1 MiB without answering, so refuse it
+    // before connecting or arming the timeout.
+    const lineBytes = unsent.length - 1;
+    if (lineBytes > HERDR_MAX_REQUEST_BYTES) {
+      return Promise.reject(
+        new Error(
+          `${method}: too large for Herdr (${Math.ceil(lineBytes / 1024)} KiB, at most 1024)`,
+        ),
+      );
+    }
     return new Promise((resolve, reject) => {
       let s: OneShotSocket | null = null;
       let buf = "";
@@ -173,13 +197,6 @@ export class HerdrClient extends EventEmitter {
           finish(undefined, envelope.result);
         }
       };
-      // What the socket has not taken yet. A Bun socket write takes only
-      // what fits in the socket buffer, and a long request (a long message
-      // sent with pane.send_input) does not fit in one; Herdr waits for the
-      // whole line.
-      let unsent = Buffer.from(
-        JSON.stringify({ id: requestId, method, params }) + "\n",
-      );
       const sendRest = (socket: OneShotSocket) => {
         while (unsent.length) {
           const written = socket.write(unsent);
