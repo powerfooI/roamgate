@@ -130,7 +130,7 @@ export const taskTools = [
     kind: "create",
     label: "Propose a scheduled task",
     description:
-      "Propose a Ranger task with an exact prompt, authorized workspace scope and schedule. Selected workspace and Agent reference identities within that scope are preserved for monitoring. A once schedule uses a future UTC ISO 8601 timestamp ending in Z. A daily schedule uses HH:mm and an IANA timezone; skipped DST times do not run and repeated times run once. An interval starts the given number of minutes after confirmation. Choose notification_mode agent for monitoring and follow-up requests: Ranger can notify only on meaningful requested outcomes or needed input, with its own title and body. The default status mode sends fixed run status notifications. Returns a pending preview: the task is enabled only when the user clicks Confirm. Scheduled tasks may read and propose operations; they never automatically confirm management actions. Ask the user if their schedule or timezone is ambiguous.",
+      "Propose a Ranger task with an exact prompt, authorized workspace scope and schedule. Selected workspace and Agent reference identities within that scope are preserved for monitoring. A once schedule uses a future UTC ISO 8601 timestamp ending in Z. A daily schedule uses HH:mm and an IANA timezone; skipped DST times do not run and repeated times run once. An interval starts the given number of minutes after confirmation. Choose notification_mode agent for monitoring and follow-up requests: Ranger can notify only on meaningful requested outcomes or needed input, with its own title and body. The default status mode sends fixed run status notifications. Returns a pending preview: the task is enabled only when the user clicks Confirm. Scheduled tasks may read and propose operations; they never automatically confirm management actions. Ask the user if their schedule or timezone is ambiguous. Set all_workspaces when the user wants the task to cover every workspace, including ones created later: each run then uses every workspace Ranger may use at that time. scope is still required: give the workspaces to cover now; each run replaces it with those it covers.",
     parameters: Type.Object(
       {
         title: Type.String({ minLength: 1, maxLength: 100 }),
@@ -142,6 +142,7 @@ export const taskTools = [
           Type.Object(actionTarget, { additionalProperties: false }),
           { minItems: 1, maxItems: ASSISTANT_MAX_WORKSPACES },
         ),
+        all_workspaces: Type.Optional(Type.Literal(true)),
         schedule: taskSchedule,
       },
       { additionalProperties: false },

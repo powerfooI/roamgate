@@ -232,6 +232,11 @@ export type AssistantTaskInput = {
   prompt: string;
   mentions?: AssistantMentionTarget[];
   scope: AssistantWorkspaceRef[];
+  /**
+   * Every workspace Ranger may use when a run starts, new ones included:
+   * `scope` is then the list as of the last run (or creation).
+   */
+  all_workspaces?: true;
   schedule: AssistantTaskSchedule;
   notification_mode?: "status" | "agent";
 };
@@ -257,6 +262,8 @@ export type AssistantTaskRun = {
   started_at?: string;
   finished_at?: string;
   error: string | null;
+  /** What the run left out, such as workspaces past the limit. */
+  notice?: string;
 };
 
 export type AssistantTaskNotification = {
@@ -596,7 +603,8 @@ function taskRun(value: unknown): value is AssistantTaskRun {
     timestamp(value.scheduled_at) &&
     (value.started_at === undefined || timestamp(value.started_at)) &&
     (value.finished_at === undefined || timestamp(value.finished_at)) &&
-    (value.error === null || text(value.error))
+    (value.error === null || text(value.error)) &&
+    (value.notice === undefined || text(value.notice))
   );
 }
 

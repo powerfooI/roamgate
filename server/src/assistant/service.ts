@@ -2460,12 +2460,59 @@ export function createAssistantService(options: {
     await validatePreparedTask(prepared, signal);
     return prepared;
   }
+  /**
+   * A task over all workspaces, prepared again over every workspace Ranger
+   * may use now (its settings' grant), as its first run was: those whose
+   * connection cannot run scheduled tasks are left out rather than failing
+   * the run.
+   */
+  async function rescopeTask(prepared: PreparedTask, signal?: AbortSignal) {
+    await workspaceCatalog();
+    signal?.throwIfAborted();
+    if (!context.recoveryScope)
+      throw new AssistantUserError(
+        "These workspace connections do not support safe scheduled tasks.",
+      );
+    const listed = new Set((workspaceInventory?.workspaces ?? []).map(refKey));
+    const granted = effectiveScope();
+    const usable = granted.filter(
+      (ref) => listed.has(refKey(ref)) && workspaceAllowed(ref),
+    );
+    const allowed = usable.slice(0, ASSISTANT_MAX_WORKSPACES);
+    // Past the limit, in the grant or in a listing, workspaces are left out.
+    const cut =
+      usable.length > allowed.length ||
+      (!!workspaceInventory?.truncated &&
+        (allWorkspaces() || usable.length < granted.length));
+    const captured = await context.captureScope(allowed, signal);
+    const supported = new Set(
+      (await context.recoveryScope(captured, signal)).map(refKey),
+    );
+    const scope = allowed.filter((ref) => supported.has(refKey(ref)));
+    if (!scope.length)
+      throw new AssistantUserError(
+        "No workspace Ranger may use is available for this task.",
+      );
+    const inScope = new Set(scope.map(refKey));
+    const { mentions, ...input } = prepared.input;
+    const kept = mentions?.filter((mention) => inScope.has(refKey(mention)));
+    const rescoped: PreparedTask & { notice?: string } = await prepareTask(
+      { ...input, scope, ...(kept?.length ? { mentions: kept } : {}) },
+      signal,
+      captured.filter((workspace) => inScope.has(refKey(workspace))),
+      prepared.config,
+    );
+    if (cut)
+      rescoped.notice = `Ranger uses at most ${ASSISTANT_MAX_WORKSPACES} workspaces at once: this run may have left out some it may use.`;
+    return rescoped;
+  }
   if (!options.taskRun) {
     tasks = createAssistantTasks({
       directory,
       publish: publishTaskChanges,
       notify: options.notify,
       validate: validatePreparedTask,
+      rescope: rescopeTask,
       validateCleanup: async (prepared, signal) => {
         await workspaceCatalog();
         signal?.throwIfAborted();
