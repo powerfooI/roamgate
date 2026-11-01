@@ -29,7 +29,7 @@ import {
   taskNotificationTargetIsCurrent,
   worktreeRemovalCompletionNotice,
 } from "./store";
-import type { Pane } from "./types";
+import type { GitStatusSummary, Pane } from "./types";
 import { __resetTabPinsForTests, setTabPinned } from "./tabPins";
 import {
   activateTerminalComposerDraftScope,
@@ -2129,6 +2129,136 @@ describe("basic Herdr 0.9 compatibility", () => {
       }
     });
   }
+});
+
+describe("git status pushes", () => {
+  function gitStatus(branch: string): GitStatusSummary {
+    return {
+      branch,
+      ahead: 0,
+      behind: 0,
+      staged: 0,
+      unstaged: 0,
+      untracked: 0,
+      conflicted: 0,
+      dirty: false,
+    };
+  }
+
+  function withCheckout(snapshot: State, branch: string): State {
+    return {
+      ...snapshot,
+      workspaces: snapshot.workspaces.map((workspace) => ({
+        ...workspace,
+        worktree: worktreeAt(branch),
+      })),
+    };
+  }
+
+  function worktreeAt(branch: string) {
+    return {
+      repo_key: "repo",
+      repo_name: "repo",
+      repo_root: "/a",
+      checkout_path: "/a",
+      is_linked_worktree: false,
+      git_status: gitStatus(branch),
+    };
+  }
+
+  function pushEvent(branch: string, connection = "alpha") {
+    return {
+      connection_id: connection,
+      connection_generation: 1,
+      event: "workspace.git_status",
+      data: {
+        type: "workspace.git_status",
+        statuses: [{ checkout_path: "/a", git_status: gitStatus(branch) }],
+      },
+    };
+  }
+
+  const branch = () => store.get().workspaces[0]?.worktree?.git_status?.branch;
+
+  test("patches only the active, unpaused connection", () => {
+    const previousState = store.get();
+    const originalConnection = bridge.connection;
+    bridge.connection = (() => ({
+      connectionId: "alpha",
+      generation: 10,
+      isCurrent: () => true,
+      call: (async () => ({})) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    try {
+      __storeTesting.replaceState(withCheckout(partitionState(), "old"));
+      __storeTesting.handleHerdrEvent(pushEvent("other", "beta"));
+      expect(branch()).toBe("old");
+
+      __storeTesting.replaceState({
+        ...withCheckout(partitionState(), "old"),
+        connectionPaused: true,
+      });
+      __storeTesting.handleHerdrEvent(pushEvent("paused"));
+      expect(branch()).toBe("old");
+
+      __storeTesting.replaceState(withCheckout(partitionState(), "old"));
+      __storeTesting.handleHerdrEvent(pushEvent("main"));
+      expect(branch()).toBe("main");
+      // Other workspace fields come from the last topology read, untouched.
+      expect(store.get().workspaces[0]?.label).toBe("alpha");
+    } finally {
+      bridge.connection = originalConnection;
+      __storeTesting.replaceState(previousState);
+    }
+  });
+
+  test("a push during an in-flight workspace.list outlives its older reply", async () => {
+    const previousState = store.get();
+    const originalConnection = bridge.connection;
+    const snapshot = withCheckout(partitionState(), "old");
+    let listBranch = "old";
+    const gate = Promise.withResolvers<void>();
+    let gated = true;
+    bridge.connection = (() => ({
+      connectionId: "alpha",
+      generation: 10,
+      isCurrent: () => true,
+      call: (async (method) => {
+        if (method === "workspace.list") {
+          // The server answered from its cache before the push was sent.
+          const workspaces = snapshot.workspaces.map((workspace) => ({
+            ...workspace,
+            worktree: worktreeAt(listBranch),
+          }));
+          if (gated) await gate.promise;
+          return { workspaces };
+        }
+        if (method === "tab.list") return { tabs: snapshot.tabs };
+        if (method === "pane.list") return { panes: snapshot.panes };
+        if (method === "pane.layout") return { layout: null };
+        return {};
+      }) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    try {
+      __storeTesting.replaceState(snapshot);
+      const refreshing = store.refresh();
+      __storeTesting.handleHerdrEvent(pushEvent("new"));
+      expect(branch()).toBe("new");
+      gate.resolve();
+      await refreshing;
+      expect(branch()).toBe("new");
+
+      // The overlap ends with that refresh: a later list is authoritative.
+      gated = false;
+      listBranch = "newer";
+      await store.refresh();
+      expect(branch()).toBe("newer");
+    } finally {
+      gate.resolve();
+      bridge.connection = originalConnection;
+      __storeTesting.replaceState(previousState);
+    }
+  });
 });
 
 describe("agent activity refresh", () => {
