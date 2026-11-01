@@ -48,12 +48,16 @@ export async function openServerSession(
 ): Promise<boolean> {
   const opened =
     isServerSourceAvailable(source) &&
-    (await store.focusWorkspaceSource({
-      connectionId: source.connectionId,
-      runtimeGeneration: source.runtimeGeneration,
-      workspaceId,
-      paneId,
-    }));
+    (await store.focusWorkspaceSource(
+      {
+        connectionId: source.connectionId,
+        runtimeGeneration: source.runtimeGeneration,
+        workspaceId,
+        paneId,
+      },
+      // Picked from a list on screen: shown at once, checked after.
+      { fromKnownList: true },
+    ));
   if (!opened) store.notify({ kind: "error", message: "Session unavailable." });
   return opened;
 }

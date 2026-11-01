@@ -24,6 +24,12 @@ Browser RPC sends `{ id, method, params }` and receives `{ id, result }` or
 snapshot, and events during a refresh queue another refresh: this reconciles
 missed changes but is not a replayable event log.
 
+A request may add `lane: "background"` for work nobody is waiting on (PR/MR
+badges). The browser sends at most four such calls per connection at once,
+shares an identical call already in flight, and sends interactive calls at once
+whatever the background queue holds. The bridge runs a background request's SSH
+commands in the background lane (see [SSH transport](#ssh-transport)).
+
 ## Connection isolation
 
 `ConnectionManager` owns the shared profiles and one `ConnectionRuntime` per
@@ -370,6 +376,15 @@ session reads, workspace path checks, the HOME probe) are rerun once cold. File 
 output itself and is not rerun. Every other command, including worktree, hook,
 upload, write, delete, and Git actions, reports that failure instead of risking
 a second run. A 255 from a live master is the remote command's status.
+
+Commands run in one of two lanes. Interactive work, the default, is what the
+user waits on. Background work (the Git status refresh, and requests the
+browser marks background) holds at most five of the eight sessions, so three
+always stay free for the user, and waits behind every queued interactive
+command: a freed session goes to the oldest interactive waiter first. Its own
+queue holds at most 64 commands; past that a background command is shed at
+once. The RPC log treats that error as expected, a shed Git status read keeps
+the previous status like any transport failure, and the next round asks again.
 
 
 At startup, orphaned command masters are stopped only in private, user-owned
