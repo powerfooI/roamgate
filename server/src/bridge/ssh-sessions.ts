@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 /**
  * Bounds concurrent SSH sessions per destination. OpenSSH's sshd defaults to
  * MaxSessions 10 per connection and MaxStartups 10 unauthenticated logins, so
@@ -12,6 +14,51 @@ export const SSH_SESSION_LIMIT = 8;
 export const SSH_SESSION_WAITER_LIMIT = 64;
 /** Longest wait for a session slot when the caller has no deadline of its own. */
 export const SSH_SESSION_DEFAULT_WAIT_MS = 60_000;
+/**
+ * Slots background reads (badges, polls, prefetches) may hold at once: the
+ * others stay free for what the user is doing, so a switch, an attach or the
+ * chat on screen never queues behind them.
+ */
+export const SSH_BACKGROUND_SESSION_LIMIT = 5;
+/** Background commands queued behind a full destination before more are shed. */
+export const SSH_BACKGROUND_WAITER_LIMIT = 64;
+
+/**
+ * Who a command is for. Interactive work (the default) is what the user is
+ * waiting on; background work yields to it and is shed, not failed loudly,
+ * when its line is full.
+ */
+export type SshLane = "interactive" | "background";
+
+const lanes = new AsyncLocalStorage<SshLane>();
+
+/** Runs `fn`, and every SSH command it starts, in `lane`. */
+export function runInSshLane<T>(lane: SshLane, fn: () => T): T {
+  return lanes.run(lane, fn);
+}
+
+/** The lane of the work running now: interactive unless said otherwise. */
+export function currentSshLane(): SshLane {
+  return lanes.getStore() ?? "interactive";
+}
+
+/**
+ * A background command dropped because its line is full: nothing the user
+ * asked for failed, so callers log it quietly and try again later.
+ */
+export class SshBackgroundShedError extends Error {
+  readonly shed = true;
+  constructor(destination: string) {
+    super(
+      `ssh: ${SSH_BACKGROUND_WAITER_LIMIT} background commands already waiting for ${destination}`,
+    );
+    this.name = "SshBackgroundShedError";
+  }
+}
+
+export function isSshBackgroundShed(error: unknown): boolean {
+  return (error as { shed?: unknown } | null)?.shed === true;
+}
 
 /** How long a caller waits for a session slot. */
 export type SshSessionWait = {
@@ -52,10 +99,14 @@ const masters = new Map<object, SshMasterRegistration>();
 // Command argv built by sshCommandArgv, recognised by identity so callers that
 // pass the array through unchanged need no knowledge of multiplexing.
 const routes = new WeakMap<readonly string[], SshCommandRoute>();
-const sessionSlots = new Map<
-  string,
-  { active: number; waiters: Array<() => void> }
->();
+type SessionSlots = {
+  active: number;
+  /** Of `active`, those held by background commands. */
+  background: number;
+  waiters: Array<() => void>;
+  backgroundWaiters: Array<() => void>;
+};
+const sessionSlots = new Map<string, SessionSlots>();
 // Commands in flight over each master's control socket, so a master that is
 // stopping can let them finish.
 const muxSessions = new Map<
@@ -124,25 +175,62 @@ function sessionWaitTimeout(destination: string, timeoutMs: number): Error {
   );
 }
 
+/** Gives free slots to the waiters: interactive ones first. */
+function grantWaiters(slot: SessionSlots) {
+  while (slot.active < SSH_SESSION_LIMIT) {
+    const interactive = slot.waiters.shift();
+    if (interactive) {
+      slot.active += 1;
+      interactive();
+      continue;
+    }
+    if (slot.background >= SSH_BACKGROUND_SESSION_LIMIT) return;
+    const background = slot.backgroundWaiters.shift();
+    if (!background) return;
+    slot.active += 1;
+    slot.background += 1;
+    background();
+  }
+}
+
 /**
  * Takes one of the destination's session slots, waiting in line while all are
  * busy. The wait ends with an error at `timeoutMs` (default
  * SSH_SESSION_DEFAULT_WAIT_MS), when `signal` aborts, or at once when
  * SSH_SESSION_WAITER_LIMIT commands are already queued.
+ *
+ * Background work (`lane`, else the lane it runs in) holds at most
+ * SSH_BACKGROUND_SESSION_LIMIT slots and waits behind every interactive
+ * command; past SSH_BACKGROUND_WAITER_LIMIT queued it is shed with
+ * SshBackgroundShedError.
  */
 export async function acquireSshSession(
   destination: string,
   wait: SshSessionWait = {},
+  lane: SshLane = currentSshLane(),
 ): Promise<() => void> {
   wait.signal?.throwIfAborted();
   let slot = sessionSlots.get(destination);
   if (!slot) {
-    slot = { active: 0, waiters: [] };
+    slot = { active: 0, background: 0, waiters: [], backgroundWaiters: [] };
     sessionSlots.set(destination, slot);
   }
   const current = slot;
-  if (current.active >= SSH_SESSION_LIMIT) {
-    if (current.waiters.length >= SSH_SESSION_WAITER_LIMIT) {
+  const background = lane === "background";
+  const free = background
+    ? current.active < SSH_SESSION_LIMIT &&
+      current.background < SSH_BACKGROUND_SESSION_LIMIT &&
+      current.waiters.length === 0 &&
+      current.backgroundWaiters.length === 0
+    : current.active < SSH_SESSION_LIMIT;
+  if (free) {
+    current.active += 1;
+    if (background) current.background += 1;
+  } else {
+    const line = background ? current.backgroundWaiters : current.waiters;
+    if (background && line.length >= SSH_BACKGROUND_WAITER_LIMIT)
+      throw new SshBackgroundShedError(destination);
+    if (!background && line.length >= SSH_SESSION_WAITER_LIMIT) {
       throw new Error(
         `ssh: ${SSH_SESSION_WAITER_LIMIT} commands already waiting for ${destination}`,
       );
@@ -154,12 +242,12 @@ export async function acquireSshSession(
       const settle = (error?: unknown) => {
         clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
-        const index = current.waiters.indexOf(grant);
-        if (index >= 0) current.waiters.splice(index, 1);
+        const index = line.indexOf(grant);
+        if (index >= 0) line.splice(index, 1);
         if (error === undefined) resolve();
         else reject(error);
       };
-      // Called by release with the slot already handed over.
+      // Called by grantWaiters with the slot already counted as taken.
       const grant = () => settle();
       const onAbort = () => settle(signal?.reason);
       const timer = setTimeout(
@@ -167,23 +255,23 @@ export async function acquireSshSession(
         timeoutMs,
       );
       signal?.addEventListener("abort", onAbort, { once: true });
-      current.waiters.push(grant);
+      line.push(grant);
     });
-  } else {
-    current.active += 1;
   }
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    // Hand the slot straight to the next waiter so a newcomer cannot jump it.
-    const next = current.waiters.shift();
-    if (next) {
-      next();
-      return;
-    }
     current.active -= 1;
-    if (current.active === 0) sessionSlots.delete(destination);
+    if (background) current.background -= 1;
+    // Hand the slot straight to the next waiter so a newcomer cannot jump it.
+    grantWaiters(current);
+    if (
+      current.active === 0 &&
+      !current.waiters.length &&
+      !current.backgroundWaiters.length
+    )
+      sessionSlots.delete(destination);
   };
 }
 
