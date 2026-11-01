@@ -95,4 +95,14 @@ describe("ssh process monitor", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("code=null");
   });
+
+  test("tags follow the argv array, not its copies", async () => {
+    const { monitor, lines } = monitorWithClock();
+    const argv = sshCommandArgv("desktop", "git status", [], "git.status");
+    monitor.track(argv, Promise.resolve(0));
+    monitor.track([...argv], Promise.resolve(0));
+    await Bun.sleep(0);
+    expect(lines[0]).toContain("tag=git.status");
+    expect(lines[1]).toContain("tag=untagged");
+  });
 });

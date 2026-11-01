@@ -379,11 +379,13 @@ managed service.
 At `debug`, the server logs one line per Herdr control call (`herdr call`:
 method, sizes, `total_ms`, `connect_ms`, `first_byte_ms` from request write to
 first response byte), per ssh child exit (`ssh process exited`: caller `tag`,
-`connection`, `host`, `code`, `total_ms`, live children, `master=true` when
-the command multiplexed over the profile's command master, and
+`connection`, `master=true` for multiplexed commands, `host`, `code`, `total_ms`, live children, and
 `startup_failures` for sshd `kex_exchange_identification` drops), and per typed
-character echo (`terminal echo`: `input_to_surface_ms`, `surface_to_send_ms`).
-Attach phases appear in `endpoint connected`.
+character echo (`terminal echo`: `input_to_surface_max_ms`,
+`surface_to_send_ms`). The echo sample runs to the pane's next surface, which
+other output can trigger first, so it is an upper bound; a character with no
+surface within 5 s is not sampled. Tags ride on the argv array itself, so an
+argv copied before it is spawned logs as `untagged`. Attach phases appear in `endpoint connected`.
 
 The browser keeps its samples off by default. Add `?debugLatency` to the page
 URL, or run `localStorage.setItem("roamgate:debugLatency", "1")` and reload,

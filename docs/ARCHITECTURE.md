@@ -371,6 +371,11 @@ output itself and is not rerun. Every other command, including worktree, hook,
 upload, write, delete, and Git actions, reports that failure instead of risking
 a second run. A 255 from a live master is the remote command's status.
 
+
+At startup, orphaned command masters are stopped only in private, user-owned
+runtime directories whose recorded Roamgate owner process is gone. A failed
+exit request retains the directory and socket for a later cleanup attempt.
+
 ## Distribution model
 
 Production builds embed the frontend and Bun into one executable. Release
