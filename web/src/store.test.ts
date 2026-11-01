@@ -510,6 +510,9 @@ function partitionState(): State {
   const beta = session("beta");
   return {
     ...alpha,
+    forwards: [],
+    listeners: null,
+    listenersBusy: false,
     status: "connected",
     connectionPaused: false,
     bridgeStatus: null,
@@ -2592,5 +2595,127 @@ test("a delayed Ranger pane lookup cannot override a newer show target", async (
     bridge.connection = originalConnection;
     store.focusPane = originalPane;
     store.focusWorkspace = originalWorkspace;
+  }
+});
+
+describe("listening port scans", () => {
+  test("a rescan is not blocked, and a stale scan cannot overwrite a newer connection's", async () => {
+    const previousState = store.get();
+    const previousConnection = bridge.connection;
+    const snapshot = partitionState();
+    const pending: {
+      connectionId: string;
+      resolve: (value: unknown) => void;
+    }[] = [];
+    bridge.connection = (connectionId = "alpha") => ({
+      connectionId,
+      generation: snapshot.connectionGeneration,
+      serverRuntimeGeneration: 1,
+      isCurrent: () => true,
+      acceptsServerGeneration: () => true,
+      call: (method: string) => {
+        expect(method).toBe("forward.candidates");
+        return new Promise((resolve) =>
+          pending.push({ connectionId, resolve }),
+        );
+      },
+    });
+    const answer = (connectionId: string, port: number) => {
+      for (const call of pending.filter((c) => c.connectionId === connectionId))
+        call.resolve({ candidates: [{ port }] });
+    };
+    try {
+      __storeTesting.replaceState(snapshot);
+      const first = store.refreshListeners();
+      await Promise.resolve();
+      expect(store.get().listenersBusy).toBe(true);
+
+      __storeTesting.replaceState({
+        ...store.get(),
+        activeConnectionId: "beta",
+      });
+      const second = store.refreshListeners();
+      await Promise.resolve();
+      // Both scans reached the server: the second was not swallowed.
+      expect(pending.map((c) => c.connectionId)).toEqual([
+        "alpha",
+        "alpha",
+        "beta",
+        "beta",
+      ]);
+
+      answer("beta", 4000);
+      await second;
+      answer("alpha", 3000);
+      await first;
+      expect(store.get().listeners).toEqual({
+        connectionId: "beta",
+        remote: [{ port: 4000 }],
+        local: [{ port: 4000 }],
+      });
+      expect(store.get().listenersBusy).toBe(false);
+    } finally {
+      bridge.connection = previousConnection;
+      __storeTesting.replaceState(previousState);
+    }
+  });
+});
+
+test("a failed forward.close keeps the still-live forward visible", async () => {
+  const previous = store.get();
+  const originalConnection = bridge.connection;
+  const forward = {
+    id: "alpha:local:3000",
+    connection_id: "alpha",
+    direction: "local" as const,
+    local_port: 3000,
+    remote_port: 3000,
+    state: "open" as const,
+  };
+  const snapshot = { ...partitionState(), forwards: [forward] };
+  bridge.connection = (connectionId = "alpha") => ({
+    connectionId,
+    generation: snapshot.connectionGeneration,
+    serverRuntimeGeneration: 1,
+    isCurrent: () => true,
+    acceptsServerGeneration: () => true,
+    call: async () => {
+      throw new Error("close failed");
+    },
+  });
+  try {
+    __storeTesting.replaceState(snapshot);
+    await store.closeForward(forward.id);
+    expect(store.get().forwards).toEqual([forward]);
+  } finally {
+    bridge.connection = originalConnection;
+    __storeTesting.replaceState(previous);
+  }
+});
+
+test("a port confirmation cannot open on a replacement connection", async () => {
+  const previous = store.get();
+  const originalConnection = bridge.connection;
+  let called = false;
+  bridge.connection = (() => {
+    called = true;
+    throw new Error("must not dispatch");
+  }) as typeof bridge.connection;
+  try {
+    const snapshot = partitionState();
+    __storeTesting.replaceState(snapshot);
+    expect(
+      await store.openForward(3000, {
+        direction: "remote",
+        target: {
+          connectionId: "alpha",
+          generation: snapshot.connectionGeneration - 1,
+        },
+      }),
+    ).toBeNull();
+    expect(called).toBe(false);
+  } finally {
+    bridge.connection = originalConnection;
+    __storeTesting.replaceState(previous);
   }
 });

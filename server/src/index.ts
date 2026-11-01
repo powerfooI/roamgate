@@ -92,6 +92,11 @@ import { readConnectionAgentSessions } from "./connections/agent-sessions";
 import { bindListenerBeforeConnectionStart } from "./connections/startup";
 import { LEGACY_DEFAULT_CONNECTION_ID } from "./connections/types";
 import { unixOnlyMessage } from "./connections/unix-only";
+import {
+  createSshForwards,
+  forwardToWire,
+  roamgateOwnPorts,
+} from "./bridge/ssh-forward";
 import { createAuthHandlers, unauthenticatedLoginRedirect } from "./http/auth";
 import { serveStatic } from "./http/static-files";
 import { handleInstanceSettings } from "./http/instance-settings";
@@ -371,6 +376,29 @@ function summarizeHerdrEvent(event: any): string {
   return [`type=${type}`, ...ids].join(" ");
 }
 
+/**
+ * One registry for the whole server: local ports are a single machine-wide
+ * space, so two connections cannot each decide they own 5173.
+ */
+// Updated once the listener is bound (a configured port 0 resolves then).
+let forwardReservedListeningPort = config.port;
+// Read at runtime, as server-config does, so Bun does not inline it.
+const { NODE_ENV: forwardNodeEnvironment } = process.env;
+const sshForwards = createSshForwards({
+  logger: logger.child("forward"),
+  reservedPorts: () =>
+    roamgateOwnPorts(
+      forwardReservedListeningPort,
+      forwardNodeEnvironment === "development",
+    ),
+});
+// Forwards belong to the machine, not to a browser tab: every open tab shows
+// the same list, so a port one of them opened can be found and closed from
+// another. Carries no connection envelope for the same reason.
+sshForwards.onChange((forwards) => {
+  const line = JSON.stringify({ forwards: forwards.map(forwardToWire) });
+  for (const ws of clients) safeSend(ws, line, "forwards");
+});
 const connectionProfileStore = new ConnectionProfileStore();
 const syntheticLegacyProfile: SyntheticLocalProfile = {
   id: LEGACY_DEFAULT_CONNECTION_ID,
@@ -606,6 +634,7 @@ function runtimeFactoryForProfile(
             });
           }
         },
+        forwards: sshForwards,
         onTransportExit: profileConfig.sshHost
           ? (error) => {
               if (!context.isCurrent()) return;
@@ -995,6 +1024,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     herdr,
     worktreeParents,
     handleSettingsRpc,
+    handleForwardRpc,
     worktreeRemovalCoordinator,
     worktreeRemovalRuntime,
     terminalBridge,
@@ -1301,6 +1331,13 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
   }
   if (method.startsWith("settings.")) {
     return handleSettingsRpc(ws, id, method, params ?? {}, requestIsCurrent);
+  }
+  if (method.startsWith("forward.")) {
+    if (!handleForwardRpc) {
+      markRpcError(ws, id, "port forwarding is unavailable");
+      return;
+    }
+    return handleForwardRpc(ws, id, method, params ?? {}, requestIsCurrent);
   }
   if (method === "worktree.create") {
     try {
@@ -1772,6 +1809,15 @@ function main() {
               }),
               "hello",
             );
+            // The registry is global and must arrive before any Herdr catalog
+            // or runtime lease is available, including with an offline default.
+            safeSend(
+              ws,
+              JSON.stringify({
+                forwards: sshForwards.list().map(forwardToWire),
+              }),
+              "forwards",
+            );
           },
           drain(ws) {
             // The viewer caught up: send the newest repaint we held back.
@@ -1890,6 +1936,7 @@ function main() {
     },
   });
   const listeningPort = server.port ?? config.port;
+  forwardReservedListeningPort = listeningPort;
   const publicBrowserUrl = browserUrlFor(
     config.host,
     listeningPort,
