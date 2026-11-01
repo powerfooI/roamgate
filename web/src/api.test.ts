@@ -3,6 +3,7 @@ import type {
   AssistantSnapshot,
   AssistantTaskNotification,
 } from "../../shared/assistant";
+import { BACKGROUND_RPC_LIMIT } from "./rpcLanes";
 import {
   Bridge,
   type ConnectionStatus,
@@ -714,6 +715,77 @@ describe("bridge connection lifecycle", () => {
 
     await expect(downstream).resolves.toEqual({ workspaces: [] });
     await expect(global).resolves.toEqual({ connections: [] });
+  });
+
+  test("sends interactive calls at once while background calls wait their turn", async () => {
+    class ManualWebSocket extends HangingWebSocket {
+      static instance: ManualWebSocket;
+      sent: string[] = [];
+
+      constructor() {
+        super();
+        ManualWebSocket.instance = this;
+        queueMicrotask(() => {
+          this.readyState = ManualWebSocket.OPEN;
+          this.onopen?.();
+        });
+      }
+
+      send(raw = "") {
+        this.sent.push(raw);
+      }
+    }
+    installBrowserGlobals(ManualWebSocket as unknown as typeof WebSocket);
+    const bridge = createTestBridge();
+    bridge.connect();
+    await Bun.sleep(1);
+    sendHello(ManualWebSocket.instance);
+    bridge.setActiveConnection("alpha");
+    const client = bridge.connection("alpha");
+    const sent = () =>
+      ManualWebSocket.instance.sent.map((raw) => JSON.parse(raw));
+
+    const background = Array.from(
+      { length: BACKGROUND_RPC_LIMIT + 2 },
+      (_, i) =>
+        client.call("git.pull_request", { branch: `b${i}` }, null, {
+          lane: "background",
+        }),
+    );
+    // An identical background call shares the one in flight.
+    const shared = client.call("git.pull_request", { branch: "b0" }, null, {
+      lane: "background",
+    });
+    expect(sent()).toHaveLength(BACKGROUND_RPC_LIMIT);
+    expect(sent().every((request) => request.lane === "background")).toBe(true);
+    const interactive = client.call("workspace.list");
+    const last = sent()[sent().length - 1];
+    expect(sent()).toHaveLength(BACKGROUND_RPC_LIMIT + 1);
+    expect(last.method).toBe("workspace.list");
+    expect(last).not.toHaveProperty("lane");
+    const reply = (request: { id: string }, result: unknown) =>
+      ManualWebSocket.instance.onmessage?.({
+        data: JSON.stringify({
+          id: request.id,
+          connection_id: "alpha",
+          result,
+        }),
+      } as MessageEvent);
+    reply(last, { workspaces: [] });
+    await expect(interactive).resolves.toEqual({ workspaces: [] });
+
+    // A background answer lets the next one go.
+    reply(sent()[0], { state: "none" });
+    await expect(shared).resolves.toEqual({ state: "none" });
+    await Bun.sleep(0);
+    expect(sent()).toHaveLength(BACKGROUND_RPC_LIMIT + 2);
+    for (const request of sent().slice(1))
+      if (request.method === "git.pull_request")
+        reply(request, { state: "none" });
+    await Bun.sleep(0);
+    for (const request of sent().slice(BACKGROUND_RPC_LIMIT + 2))
+      reply(request, { state: "none" });
+    await Promise.all(background);
   });
 
   test("binds scoped clients, replies, and pushes to server runtime generation", async () => {
