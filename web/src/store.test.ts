@@ -29,7 +29,7 @@ import {
   taskNotificationTargetIsCurrent,
   worktreeRemovalCompletionNotice,
 } from "./store";
-import type { Pane } from "./types";
+import type { GitStatusSummary, Pane } from "./types";
 import { __resetTabPinsForTests, setTabPinned } from "./tabPins";
 import {
   activateTerminalComposerDraftScope,
@@ -510,11 +510,11 @@ function partitionState(): State {
   const beta = session("beta");
   return {
     ...alpha,
-    status: "connected",
-    connectionPaused: false,
     forwards: [],
     listeners: null,
     listenersBusy: false,
+    status: "connected",
+    connectionPaused: false,
     bridgeStatus: null,
     connections: [
       {
@@ -2134,6 +2134,136 @@ describe("basic Herdr 0.9 compatibility", () => {
   }
 });
 
+describe("git status pushes", () => {
+  function gitStatus(branch: string): GitStatusSummary {
+    return {
+      branch,
+      ahead: 0,
+      behind: 0,
+      staged: 0,
+      unstaged: 0,
+      untracked: 0,
+      conflicted: 0,
+      dirty: false,
+    };
+  }
+
+  function withCheckout(snapshot: State, branch: string): State {
+    return {
+      ...snapshot,
+      workspaces: snapshot.workspaces.map((workspace) => ({
+        ...workspace,
+        worktree: worktreeAt(branch),
+      })),
+    };
+  }
+
+  function worktreeAt(branch: string) {
+    return {
+      repo_key: "repo",
+      repo_name: "repo",
+      repo_root: "/a",
+      checkout_path: "/a",
+      is_linked_worktree: false,
+      git_status: gitStatus(branch),
+    };
+  }
+
+  function pushEvent(branch: string, connection = "alpha") {
+    return {
+      connection_id: connection,
+      connection_generation: 1,
+      event: "workspace.git_status",
+      data: {
+        type: "workspace.git_status",
+        statuses: [{ checkout_path: "/a", git_status: gitStatus(branch) }],
+      },
+    };
+  }
+
+  const branch = () => store.get().workspaces[0]?.worktree?.git_status?.branch;
+
+  test("patches only the active, unpaused connection", () => {
+    const previousState = store.get();
+    const originalConnection = bridge.connection;
+    bridge.connection = (() => ({
+      connectionId: "alpha",
+      generation: 10,
+      isCurrent: () => true,
+      call: (async () => ({})) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    try {
+      __storeTesting.replaceState(withCheckout(partitionState(), "old"));
+      __storeTesting.handleHerdrEvent(pushEvent("other", "beta"));
+      expect(branch()).toBe("old");
+
+      __storeTesting.replaceState({
+        ...withCheckout(partitionState(), "old"),
+        connectionPaused: true,
+      });
+      __storeTesting.handleHerdrEvent(pushEvent("paused"));
+      expect(branch()).toBe("old");
+
+      __storeTesting.replaceState(withCheckout(partitionState(), "old"));
+      __storeTesting.handleHerdrEvent(pushEvent("main"));
+      expect(branch()).toBe("main");
+      // Other workspace fields come from the last topology read, untouched.
+      expect(store.get().workspaces[0]?.label).toBe("alpha");
+    } finally {
+      bridge.connection = originalConnection;
+      __storeTesting.replaceState(previousState);
+    }
+  });
+
+  test("a push during an in-flight workspace.list outlives its older reply", async () => {
+    const previousState = store.get();
+    const originalConnection = bridge.connection;
+    const snapshot = withCheckout(partitionState(), "old");
+    let listBranch = "old";
+    const gate = Promise.withResolvers<void>();
+    let gated = true;
+    bridge.connection = (() => ({
+      connectionId: "alpha",
+      generation: 10,
+      isCurrent: () => true,
+      call: (async (method) => {
+        if (method === "workspace.list") {
+          // The server answered from its cache before the push was sent.
+          const workspaces = snapshot.workspaces.map((workspace) => ({
+            ...workspace,
+            worktree: worktreeAt(listBranch),
+          }));
+          if (gated) await gate.promise;
+          return { workspaces };
+        }
+        if (method === "tab.list") return { tabs: snapshot.tabs };
+        if (method === "pane.list") return { panes: snapshot.panes };
+        if (method === "pane.layout") return { layout: null };
+        return {};
+      }) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    try {
+      __storeTesting.replaceState(snapshot);
+      const refreshing = store.refresh();
+      __storeTesting.handleHerdrEvent(pushEvent("new"));
+      expect(branch()).toBe("new");
+      gate.resolve();
+      await refreshing;
+      expect(branch()).toBe("new");
+
+      // The overlap ends with that refresh: a later list is authoritative.
+      gated = false;
+      listBranch = "newer";
+      await store.refresh();
+      expect(branch()).toBe("newer");
+    } finally {
+      gate.resolve();
+      bridge.connection = originalConnection;
+      __storeTesting.replaceState(previousState);
+    }
+  });
+});
+
 describe("agent activity refresh", () => {
   test("reloads server recency and tolerates unavailable agent metadata", async () => {
     const originalConnection = bridge.connection;
@@ -2311,6 +2441,161 @@ describe("Herdr task notifications", () => {
       __storeTesting.replaceState(partitionState());
     }
   });
+});
+
+describe("jumping to another connection's workspace", () => {
+  test("lands on a pane only when it is in the named workspace", async () => {
+    const originalConnection = bridge.connection;
+    const calls: string[] = [];
+    bridge.connection = ((connectionId = "alpha") => ({
+      connectionId,
+      generation: 10,
+      isCurrent: () => true,
+      call: (async (method: string) => {
+        calls.push(`${connectionId}:${method}`);
+        if (method === "pane.get") return { pane: pane("alpha", "idle") };
+        return {};
+      }) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    try {
+      __storeTesting.replaceState(partitionState());
+      // The pane lives in same-workspace: a target naming another workspace
+      // only focuses that workspace.
+      await store.jumpToConnectionWorkspace(
+        "alpha",
+        "other-workspace",
+        "same-pane",
+      );
+      await Promise.resolve();
+      expect(calls).toEqual(["alpha:pane.get", "alpha:workspace.focus"]);
+
+      calls.length = 0;
+      await store.jumpToConnectionWorkspace(
+        "alpha",
+        "same-workspace",
+        "same-pane",
+      );
+      await Promise.resolve();
+      expect(calls[0]).toBe("alpha:pane.get");
+      expect(calls.slice(-2)).toEqual([
+        "alpha:workspace.focus",
+        "alpha:tab.focus",
+      ]);
+    } finally {
+      bridge.connection = originalConnection;
+    }
+  });
+});
+
+describe("jumping to a workspace while the connection changes", () => {
+  function mockConnections(
+    onCall?: (connectionId: string, method: string) => void,
+  ) {
+    const originalConnection = bridge.connection;
+    const calls: string[] = [];
+    bridge.connection = ((connectionId = "alpha") => ({
+      connectionId,
+      generation: 10,
+      isCurrent: () => true,
+      call: (async (method: string) => {
+        calls.push(`${connectionId}:${method}`);
+        onCall?.(connectionId, method);
+        const listed = session(connectionId);
+        if (method === "pane.get") return { pane: listed.panes[0] };
+        if (method === "workspace.list")
+          return { workspaces: listed.workspaces };
+        if (method === "tab.list") return { tabs: listed.tabs };
+        if (method === "pane.list") return { panes: listed.panes };
+        return {};
+      }) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    return {
+      calls,
+      restore: () => {
+        bridge.connection = originalConnection;
+      },
+    };
+  }
+
+  test("focuses nothing when another connection is chosen during the pane check", async () => {
+    const { calls, restore } = mockConnections((_connection, method) => {
+      if (method === "pane.get")
+        __storeTesting.replaceState({
+          ...partitionState(),
+          activeConnectionId: "beta",
+          connectionGeneration: 11,
+        });
+    });
+    try {
+      __storeTesting.replaceState(partitionState());
+      await store.jumpToConnectionWorkspace(
+        "alpha",
+        "same-workspace",
+        "same-pane",
+      );
+      await Promise.resolve();
+      expect(calls).toEqual(["alpha:pane.get"]);
+    } finally {
+      restore();
+    }
+  });
+
+  test("switches to the target's connection and focuses there", async () => {
+    const { calls, restore } = mockConnections();
+    try {
+      __storeTesting.replaceState(partitionState());
+      await store.jumpToConnectionWorkspace(
+        "beta",
+        "same-workspace",
+        "same-pane",
+      );
+      await Promise.resolve();
+      expect(calls).toContain("beta:pane.get");
+      expect(calls.slice(-2)).toEqual([
+        "beta:workspace.focus",
+        "beta:tab.focus",
+      ]);
+      expect(calls.some((call) => call.startsWith("alpha:"))).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+});
+
+test("a delayed Ranger pane lookup cannot override a newer show target", async () => {
+  const originalConnection = bridge.connection;
+  const originalPane = store.focusPane;
+  const originalWorkspace = store.focusWorkspace;
+  const pending = Promise.withResolvers<unknown>();
+  const focused: string[] = [];
+  bridge.connection = ((connectionId = "alpha") => ({
+    connectionId,
+    generation: 10,
+    isCurrent: () => true,
+    call: (async () => pending.promise) as ConnectionClient["call"],
+  })) as typeof bridge.connection;
+  store.focusPane = async (id) => {
+    focused.push(`pane:${id}`);
+  };
+  store.focusWorkspace = async (id) => {
+    focused.push(`workspace:${id}`);
+  };
+  try {
+    __storeTesting.replaceState(partitionState());
+    const first = store.jumpToConnectionWorkspace(
+      "alpha",
+      "same-workspace",
+      "same-pane",
+    );
+    await store.jumpToConnectionWorkspace("alpha", "newer-workspace");
+    pending.resolve({ pane: pane("alpha", "idle") });
+    await first;
+    expect(focused).toEqual(["workspace:newer-workspace"]);
+  } finally {
+    bridge.connection = originalConnection;
+    store.focusPane = originalPane;
+    store.focusWorkspace = originalWorkspace;
+  }
 });
 
 describe("listening port scans", () => {

@@ -130,6 +130,8 @@ export function createLegacyConnectionRuntime(args: {
   lastStepBaselines?: LastStepBaselineStore;
   resolveLastStepWorkspaceGitRoot?: (workspaceId: string) => Promise<string>;
   lastStepTransitionDebounceMs?: number;
+  /** Test seam for the background git status reads. */
+  runGitStatusProcess?: typeof runProcessWithCodeTimeout;
 }) {
   const { config } = args;
   const remotePlatform = config.remotePlatform;
@@ -182,8 +184,24 @@ export function createLegacyConnectionRuntime(args: {
   const status = createStatusEnricher({
     connectionId: identity.id,
     sshHost,
-    runProcessWithCodeTimeout,
+    runProcessWithCodeTimeout:
+      args.runGitStatusProcess ?? runProcessWithCodeTimeout,
     shQuote,
+    onGitStatusChanged: (updates) => {
+      if (disposed) return;
+      args.onEvent(
+        {
+          event: "workspace.git_status",
+          data: { type: "workspace.git_status", statuses: updates },
+        },
+        identity,
+      );
+    },
+    onRefreshError: (error) =>
+      logger.warn("git status refresh failed", {
+        connection: identity.id,
+        error: sanitizeConnectionError(error),
+      }),
   });
   const workspaceAutoSync = createWorkspaceAutoSync({
     connectionId: identity.id,
@@ -364,6 +382,8 @@ export function createLegacyConnectionRuntime(args: {
       });
     },
     completeWorkspaceStep: async (workspaceId) => {
+      // A finished agent turn is the likeliest moment for the tree to change.
+      status.invalidateWorkspaceGitStatus(workspaceId);
       try {
         await lastStepBaselines.completeWorkspace(workspaceId);
       } finally {
@@ -662,6 +682,7 @@ export function createLegacyConnectionRuntime(args: {
     taskEvents.stop();
     pendingTaskEvents.clear();
     herdrNotifications?.stop();
+    status.dispose();
     const autoSyncStop = workspaceAutoSync.stop();
     // A forward outlives nothing: its ssh process rides the same credentials
     // and host as the connection that asked for it. Listed as lost, not

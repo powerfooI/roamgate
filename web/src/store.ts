@@ -62,6 +62,11 @@ import {
 } from "./connectionStorage";
 import { disposeTerminalConnection } from "./terminalConnection";
 import {
+  type GitStatusPush,
+  parseGitStatusPush,
+  withGitStatuses,
+} from "./gitStatusPush";
+import {
   adoptShortcutPreferences,
   connectShortcutPreferences,
   disconnectShortcutPreferences,
@@ -817,6 +822,9 @@ export function numberedCreatedTabRename(
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 const refreshingConnectionKeys = new Set<string>();
 const queuedConnectionKeys = new Set<string>();
+// Git status pushes received while a refresh is in flight. That refresh's
+// workspace.list reply predates them, so it must not publish older statuses.
+const gitStatusPushesDuringRefresh = new Map<string, GitStatusPush>();
 let initialized = false;
 let initialConnectionSelectionPending = true;
 let catalogRequestSeq = 0;
@@ -825,6 +833,7 @@ let catalogReadyForConnection = false;
 let terminalReattachPending = false;
 let connectionRecoveryIntent: "resume" | "reconnect" | null = null;
 let focusActionChain: Promise<unknown> = Promise.resolve();
+let rangerJumpSeq = 0;
 type PaneStatusTracker = {
   ready: boolean;
   byId: Map<string, string>;
@@ -1383,6 +1392,29 @@ async function hydrateUiSettings() {
 
 let listenersScan = 0;
 
+/**
+ * Whether a pane belongs to a workspace on the active connection. A target
+ * that names both (Ranger's show_in_roamgate) is only trusted for the
+ * workspace, which the server checked against the question's scope.
+ */
+async function paneIsInWorkspace(
+  lease: StoreConnectionLease,
+  paneId: string,
+  workspaceId: string,
+): Promise<boolean> {
+  try {
+    const result = await lease.client.call("pane.get", { pane_id: paneId });
+    const pane = result?.pane ?? result;
+    return (
+      leaseIsCurrent(lease) &&
+      pane?.pane_id === paneId &&
+      pane?.workspace_id === workspaceId
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function refreshNow(lease = captureConnectionLease()) {
   if (
     state.connectionPaused ||
@@ -1560,6 +1592,13 @@ async function refreshNow(lease = captureConnectionLease()) {
       delete next.endpointAvailability;
       queuedConnectionKeys.add(refreshKey);
     }
+    const overlappingGitStatuses = gitStatusPushesDuringRefresh.get(refreshKey);
+    if (overlappingGitStatuses && next.workspaces) {
+      next.workspaces = withGitStatuses(
+        next.workspaces,
+        overlappingGitStatuses,
+      );
+    }
     const patch = stabilizeRefreshPatch(state, next);
     if (patch) {
       if (!setForConnection(lease, patch)) return;
@@ -1571,6 +1610,7 @@ async function refreshNow(lease = captureConnectionLease()) {
     setForConnection(lease, { error: (error as Error).message });
   } finally {
     refreshingConnectionKeys.delete(refreshKey);
+    gitStatusPushesDuringRefresh.delete(refreshKey);
     if (queuedConnectionKeys.delete(refreshKey) && leaseIsCurrent(lease)) {
       void refreshNow(lease);
     }
@@ -2348,6 +2388,11 @@ function handleHerdrEvent(event: HerdrEventMsg) {
       if (notification) notifyHerdrTask(event.connection_id, notification);
       return;
     }
+    if (event.event === "workspace.git_status") {
+      const push = parseGitStatusPush(event.data);
+      if (push) applyGitStatusPush(push);
+      return;
+    }
     if (
       event.event === "workspace.last_step_completed" &&
       typeof event.data.workspace_id === "string"
@@ -2356,6 +2401,20 @@ function handleHerdrEvent(event: HerdrEventMsg) {
     }
     scheduleRefresh();
   }
+}
+
+// Background git status refreshes push only changed checkouts, so patch them
+// in place instead of re-reading the whole topology.
+function applyGitStatusPush(push: GitStatusPush) {
+  const lease = captureConnectionLease();
+  const refreshKey = `${lease.connectionId}:${lease.generation}`;
+  if (refreshingConnectionKeys.has(refreshKey)) {
+    const pending = gitStatusPushesDuringRefresh.get(refreshKey) ?? new Map();
+    for (const [path, status] of push) pending.set(path, status);
+    gitStatusPushesDuringRefresh.set(refreshKey, pending);
+  }
+  const workspaces = withGitStatuses(state.workspaces, push);
+  if (workspaces !== state.workspaces) setForConnection(lease, { workspaces });
 }
 
 function browserSelectionIsCurrent(navigation: BrowserNavigation) {
@@ -3058,6 +3117,42 @@ export const store = {
     );
     if (result)
       set({ forwards: state.forwards.filter((entry) => entry.id !== id) });
+  },
+
+  /**
+   * Switches to another connection when needed, waits for its workspaces to
+   * load, then focuses a workspace there, or one of its panes. Ranger's
+   * show_in_roamgate targets can live on a connection other than the active
+   * one.
+   */
+  async jumpToConnectionWorkspace(
+    connectionId: string,
+    workspaceId: string,
+    paneId?: string,
+  ) {
+    const jump = ++rangerJumpSeq;
+    // Another connection chosen meanwhile decides what is shown: a target
+    // checked on one connection must not be focused on another.
+    if (state.activeConnectionId !== connectionId) {
+      if (!selectConnectionNow(connectionId)) return;
+      const switched = captureConnectionLease();
+      await refreshNow(switched);
+      if (
+        jump !== rangerJumpSeq ||
+        !isStoreConnectionLeaseCurrent(state, switched)
+      )
+        return;
+    }
+    if (paneId) {
+      const lease = captureConnectionLease();
+      const inWorkspace = await paneIsInWorkspace(lease, paneId, workspaceId);
+      if (jump !== rangerJumpSeq || !leaseIsCurrent(lease)) return;
+      if (inWorkspace) {
+        void store.focusPane(paneId);
+        return;
+      }
+    }
+    void store.focusWorkspace(workspaceId);
   },
 
   focusTaskNotificationTarget(target: TaskNotificationTarget) {
@@ -4348,6 +4443,7 @@ export const __storeTesting = {
     initialConnectionSelectionPending = true;
     refreshingConnectionKeys.clear();
     queuedConnectionKeys.clear();
+    gitStatusPushesDuringRefresh.clear();
     focusActionChain = Promise.resolve();
     taskCompletionTracker.clear();
     state = snapshot;

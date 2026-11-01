@@ -1,6 +1,11 @@
 import { createUiSettingsRpcHandler } from "./bridge/settings-rpc";
 import { loadOrCreateSessionSecret } from "./config/session-secret";
 import {
+  createAgentSeenStore,
+  createHerdrBootCache,
+  markAgentSeen,
+} from "./agent/agent-seen";
+import {
   authTokenPrintCommand,
   isShortAuthPassword,
   RECOMMENDED_PASSWORD_LENGTH,
@@ -174,6 +179,10 @@ const cpuProfile = config.profile
       logger,
     )
   : undefined;
+// Which agents' finished turns the user saw in Roamgate (agent-seen.ts).
+const agentSeen = createAgentSeenStore();
+// Seen marks hold for one Herdr server process: its boot id, per connection.
+const herdrBoots = createHerdrBootCache();
 const webPush = createWebPushService({
   warn: (message) => logger.warn(message),
 });
@@ -1111,18 +1120,41 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     return;
   }
 
+  const herdrBoot = () =>
+    herdrBoots.get(connection.identity.id, () =>
+      connection.recoveryIdentity(AbortSignal.timeout(3_000)),
+    );
   if (method === "agent.list") {
     try {
-      const result =
+      const [list, boot] = await Promise.all([
         connection.remotePlatform === "windows"
-          ? await herdr.call("agent.list", params ?? {})
-          : await connection.agentSessions.listWithActivity(params ?? {});
+          ? herdr.call("agent.list", params ?? {})
+          : connection.agentSessions.listWithActivity(params ?? {}),
+        herdrBoot(),
+      ]);
+      const result = agentSeen.annotate(connection.identity.id, list, boot);
       sendReply({ id, result }, "agent-list");
     } catch (e) {
       sendError("agent-list-error", e);
     }
     return;
   }
+  if (method === "agent_seen.mark") {
+    try {
+      const result = await markAgentSeen(
+        agentSeen,
+        herdrBoots,
+        connection.identity.id,
+        params,
+        () => connection.recoveryIdentity(AbortSignal.timeout(3_000)),
+      );
+      sendReply({ id, result }, method);
+    } catch (e) {
+      sendError("agent-seen-error", e);
+    }
+    return;
+  }
+
   if (method === "agent_history.get") {
     try {
       const result = await readAgentMessageHistory(params ?? {});
@@ -1951,6 +1983,8 @@ function main() {
 
 let managerStopTask: Promise<void> | null = null;
 function stopManagerOnce(): Promise<void> {
+  // Seen marks are written in batches: keep the last ones.
+  agentSeen.flush();
   webPush.stop();
   connectionProfiles.stopSupervision();
   managerStopTask ??= (async () => {

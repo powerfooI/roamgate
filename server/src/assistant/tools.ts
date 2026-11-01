@@ -130,7 +130,7 @@ export const taskTools = [
     kind: "create",
     label: "Propose a scheduled task",
     description:
-      "Propose a Ranger task with an exact prompt, authorized workspace scope and schedule. Selected workspace and Agent reference identities within that scope are preserved for monitoring. A once schedule uses a future UTC ISO 8601 timestamp ending in Z. A daily schedule uses HH:mm and an IANA timezone; skipped DST times do not run and repeated times run once. An interval starts the given number of minutes after confirmation. Choose notification_mode agent for monitoring and follow-up requests: Ranger can notify only on meaningful requested outcomes or needed input, with its own title and body. The default status mode sends fixed run status notifications. Returns a pending preview: the task is enabled only when the user clicks Confirm. Scheduled tasks may read and propose operations; they never automatically confirm management actions. Ask the user if their schedule or timezone is ambiguous.",
+      "Propose a Ranger task with an exact prompt, authorized workspace scope and schedule. Selected workspace and Agent reference identities within that scope are preserved for monitoring. A once schedule uses a future UTC ISO 8601 timestamp ending in Z. A daily schedule uses HH:mm and an IANA timezone; skipped DST times do not run and repeated times run once. An interval starts the given number of minutes after confirmation. Choose notification_mode agent for monitoring and follow-up requests: Ranger can notify only on meaningful requested outcomes or needed input, with its own title and body. The default status mode sends fixed run status notifications. Returns a pending preview: the task is enabled only when the user clicks Confirm. Scheduled tasks may read and propose operations; they never automatically confirm management actions. Ask the user if their schedule or timezone is ambiguous. Set all_workspaces when the user wants the task to cover every workspace, including ones created later: each run then uses every workspace Ranger may use at that time. scope is still required: give the workspaces to cover now; each run replaces it with those it covers.",
     parameters: Type.Object(
       {
         title: Type.String({ minLength: 1, maxLength: 100 }),
@@ -142,6 +142,7 @@ export const taskTools = [
           Type.Object(actionTarget, { additionalProperties: false }),
           { minItems: 1, maxItems: ASSISTANT_MAX_WORKSPACES },
         ),
+        all_workspaces: Type.Optional(Type.Literal(true)),
         schedule: taskSchedule,
       },
       { additionalProperties: false },
@@ -313,6 +314,49 @@ export const actionTools = [
     ),
   },
 ] as const;
+
+export type ShowToolHandler = (
+  params: { connection_id: string; workspace_id: string; pane_id?: string },
+  signal?: AbortSignal,
+) => Promise<WorkspaceToolResult>;
+
+export const showTools = [
+  {
+    name: "show_in_roamgate",
+    kind: "show",
+    label: "Show in Roamgate",
+    description:
+      "Show an authorized workspace, or one of its panes, in the user's Roamgate window, the browser this question came from, switching connection when needed. Use it when the user asks to go to, open, switch to or look at a workspace or agent session. It only changes what is on screen: nothing runs and no confirmation is needed. Use identifiers from workspace_status.",
+    parameters: Type.Object(
+      { ...actionTarget, pane_id: Type.Optional(Type.String()) },
+      { additionalProperties: false },
+    ),
+  },
+] as const;
+
+/** The handler must be bound to the current turn and its browser. */
+export async function callShowTool(
+  name: string,
+  params: unknown,
+  show: ShowToolHandler,
+  signal?: AbortSignal,
+): Promise<WorkspaceToolResult> {
+  const tool = showTools.find((entry) => entry.name === name);
+  if (!tool) throw new Error("Unknown show tool.");
+  if (!Value.Check(tool.parameters, params))
+    throw new AssistantUserError("Invalid show tool parameters.");
+  try {
+    signal?.throwIfAborted();
+    const result = await show(params as Parameters<ShowToolHandler>[0], signal);
+    signal?.throwIfAborted();
+    return result;
+  } catch (error) {
+    surfaceAssistantUserError(
+      error,
+      "That workspace cannot be shown, or is outside the authorized scope.",
+    );
+  }
+}
 
 /** The reader must be bound to the current turn's authorized scope and leases. */
 export async function callWorkspaceTool(
