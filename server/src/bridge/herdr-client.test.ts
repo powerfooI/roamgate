@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test";
 import * as net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HerdrClient } from "./herdr-client";
+import { HERDR_MAX_REQUEST_BYTES, HerdrClient } from "./herdr-client";
 
 const servers: net.Server[] = [];
 const sockets = new Set<net.Socket>();
@@ -42,6 +42,56 @@ async function startServer(
     server.listen(socketPath, resolve);
   });
   return socketPath;
+}
+
+/** A server that answers each request line with the length of its text. */
+async function startLineServer() {
+  const socketPath = join(
+    tmpdir(),
+    `herdr-gui-herdr-client-${process.pid}-${crypto.randomUUID()}.sock`,
+  );
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    let received = "";
+    socket.on("data", (data) => {
+      received += data.toString("utf8");
+      const end = received.indexOf("\n");
+      if (end < 0) return;
+      const request = JSON.parse(received.slice(0, end));
+      socket.end(
+        `${JSON.stringify({ id: request.id, result: { length: request.params.text.length } })}\n`,
+      );
+    });
+  });
+  servers.push(server);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, resolve);
+  });
+  return socketPath;
+}
+
+/**
+ * Sends pane.send_input with a text sized so the request line, without its
+ * newline, is exactly `lineBytes` long.
+ */
+function sizedSendInput(client: HerdrClient, lineBytes: number) {
+  const now = spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+  const random = spyOn(Math, "random").mockReturnValue(0.5);
+  try {
+    const id = `r_${Date.now().toString(36)}_${(0.5).toString(36).slice(2, 6)}`;
+    const empty = JSON.stringify({
+      id,
+      method: "pane.send_input",
+      params: { text: "" },
+    });
+    const text = "x".repeat(lineBytes - Buffer.byteLength(empty));
+    return { pending: client.call("pane.send_input", { text }), text };
+  } finally {
+    now.mockRestore();
+    random.mockRestore();
+  }
 }
 
 for (const [transport, useBunSocket] of [
@@ -100,35 +150,40 @@ for (const [transport, useBunSocket] of [
     });
 
     test("sends a request too large for one socket write", async () => {
-      const socketPath = join(
-        tmpdir(),
-        `herdr-gui-herdr-client-${process.pid}-${crypto.randomUUID()}.sock`,
-      );
-      const server = net.createServer((socket) => {
-        sockets.add(socket);
-        socket.on("close", () => sockets.delete(socket));
-        let received = "";
-        socket.on("data", (data) => {
-          received += data.toString("utf8");
-          const end = received.indexOf("\n");
-          if (end < 0) return;
-          const request = JSON.parse(received.slice(0, end));
-          socket.end(
-            `${JSON.stringify({ id: request.id, result: { length: request.params.text.length } })}\n`,
-          );
-        });
-      });
-      servers.push(server);
-      await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(socketPath, resolve);
-      });
       // Larger than a unix socket buffer, so one write cannot take it all.
       const text = "long message ".repeat(70_000);
-      const result = await oneShot(socketPath).call("pane.send_input", {
-        text,
-      });
+      const result = await oneShot(await startLineServer()).call(
+        "pane.send_input",
+        { text },
+      );
       expect(result).toEqual({ length: text.length });
+    });
+
+    test("sends a request line of exactly Herdr's 1 MiB", async () => {
+      const client = oneShot(await startLineServer());
+      const { pending, text } = sizedSendInput(client, HERDR_MAX_REQUEST_BYTES);
+      expect(await pending).toEqual({ length: text.length });
+    });
+
+    test("refuses a request line one byte over Herdr's 1 MiB, at once", async () => {
+      let connected = false;
+      const client = oneShot(
+        await startServer(() => {
+          connected = true;
+        }),
+      );
+      jest.useFakeTimers();
+      try {
+        const { pending } = sizedSendInput(client, HERDR_MAX_REQUEST_BYTES + 1);
+        // Rejects without the clock moving: no timeout is left armed.
+        await expect(pending).rejects.toThrow(
+          "pane.send_input: too large for Herdr (1025 KiB, at most 1024)",
+        );
+        expect(jest.getTimerCount()).toBe(0);
+      } finally {
+        jest.useRealTimers();
+      }
+      expect(connected).toBe(false);
     });
 
     test("bounds a one-shot response without a newline", async () => {

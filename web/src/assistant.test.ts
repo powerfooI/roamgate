@@ -13,6 +13,7 @@ import {
   callAssistant,
   getAssistantTask,
   getAssistantMentions,
+  onAssistantShow,
   readAssistantState,
   parseAssistantContext,
   permittedAssistantWorkspaces,
@@ -979,5 +980,98 @@ test("send binds the visible model and effort and a changed selection starts a f
     ).toBe(second?.request_id);
   } finally {
     close();
+  }
+});
+
+test("a reply's show moves only the browser that asked, once", async () => {
+  const server = installBridge();
+  startAssistantClient();
+  await refreshAssistant();
+  const shows: unknown[] = [];
+  const stop = onAssistantShow((show) => shows.push(show));
+  try {
+    server.call.mockResolvedValueOnce(snapshot(1));
+    await sendAssistant("Open the review workspace", scope);
+    const ours = server.call.mock.calls[server.call.mock.calls.length - 1]?.[1]
+      ?.request_id as string;
+    const reply = (id: string, request_id: string) => ({
+      id,
+      role: "assistant" as const,
+      sent_at: "2026-10-31T00:00:00Z",
+      text: "Here it is",
+      tools: [],
+      sources: [],
+      show: { ...scope[0]!, pane_id: "p1", request_id },
+    });
+    // Another browser's question: this one stays where it is.
+    server.push({ ...snapshot(2), messages: [reply("theirs", "other-tab")] });
+    expect(shows).toEqual([]);
+    server.push({ ...snapshot(3), messages: [reply("ours", ours)] });
+    // A later snapshot repeats the reply: it is not followed again.
+    server.push({ ...snapshot(4), messages: [reply("ours", ours)] });
+    expect(shows).toEqual([{ ...scope[0]!, pane_id: "p1", request_id: ours }]);
+  } finally {
+    stop();
+  }
+});
+
+const showReply = (
+  id: string,
+  request_id: string,
+  pane_id?: string,
+): AssistantSnapshot["messages"][number] => ({
+  id,
+  role: "assistant",
+  sent_at: "2026-10-31T00:00:00Z",
+  text: "Here it is",
+  tools: [],
+  sources: [],
+  show: { ...scope[0]!, ...(pane_id ? { pane_id } : {}), request_id },
+});
+
+test("a reply showing a second target moves the browser again, once", async () => {
+  const server = installBridge();
+  startAssistantClient();
+  await refreshAssistant();
+  const shows: unknown[] = [];
+  const stop = onAssistantShow((show) => shows.push(show));
+  try {
+    server.call.mockResolvedValueOnce(snapshot(1));
+    await sendAssistant("Open the review session", scope);
+    const ours = server.call.mock.calls[server.call.mock.calls.length - 1]?.[1]
+      ?.request_id as string;
+    server.push({ ...snapshot(2), messages: [showReply("ours", ours, "p1")] });
+    server.push({ ...snapshot(3), messages: [showReply("ours", ours, "p2")] });
+    server.push({ ...snapshot(4), messages: [showReply("ours", ours, "p2")] });
+    expect(shows).toEqual([
+      { ...scope[0]!, pane_id: "p1", request_id: ours },
+      { ...scope[0]!, pane_id: "p2", request_id: ours },
+    ]);
+  } finally {
+    stop();
+  }
+});
+
+test("after a reload, a reply to a question sent before it does not move the browser", async () => {
+  const server = installBridge();
+  // The chat already holds a show answering this tab's question before the
+  // reload: the reloaded tab has no record of having asked it.
+  const earlier = {
+    ...snapshot(1),
+    messages: [showReply("earlier", "before-reload", "p1")],
+  };
+  server.call.mockResolvedValue(earlier);
+  const shows: unknown[] = [];
+  const stop = onAssistantShow((show) => shows.push(show));
+  try {
+    startAssistantClient();
+    await refreshAssistant();
+    expect(readAssistantState().snapshot?.messages.map((m) => m.id)).toEqual([
+      "earlier",
+    ]);
+    server.push({ ...earlier, revision: 2 });
+    expect(shows).toEqual([]);
+  } finally {
+    stop();
   }
 });
