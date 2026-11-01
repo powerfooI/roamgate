@@ -208,6 +208,59 @@
   font-size: 10px;
 }
 
+/* Forwards are machine-wide rather than per connection, so they sit below the
+   connection list as their own section rather than against any one entry. */
+.connection-forwards {
+  border-top: 1px solid var(--border-soft);
+  padding: 7px 12px 8px;
+}
+
+.connection-forwards-head {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.connection-forward {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+}
+
+.connection-forward-ports {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-forward-failed {
+  color: var(--danger, #e87979);
+}
+
+.connection-forward-stop {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.connection-forward-stop:hover,
+.connection-forward-stop:focus-visible {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
 .connection-switcher-manage {
   width: 100%;
   display: flex;

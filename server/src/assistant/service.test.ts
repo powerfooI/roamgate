@@ -6399,3 +6399,210 @@ test("an interrupted Claude turn fails closed through service recovery and holds
   expect(f.reads).toHaveLength(0);
   mcp.stop();
 });
+
+describe("showing a workspace in the asking browser", () => {
+  test("records what the reply showed, with the question that asked", async () => {
+    const results: string[] = [];
+    const f = setup({
+      run: async (input) => {
+        results.push(
+          (
+            await input.show!({
+              connection_id: "local",
+              workspace_id: "ws",
+              pane_id: "ws:p2",
+            })
+          ).text,
+        );
+        input.message("Here it is.");
+        return [];
+      },
+    });
+    await f.service.handle("configure", { config: configured });
+    await f.service.handle("send", { request_id: "go-1", text: "Go to it" });
+    await until(() => !f.service.peek().running);
+    const reply = f.service.peek().messages.at(-1)!;
+    expect(reply.show).toEqual({
+      connection_id: "local",
+      workspace_id: "ws",
+      pane_id: "ws:p2",
+      request_id: "go-1",
+    });
+    expect(results).toEqual(["Shown in the user's Roamgate window."]);
+    expect(isAssistantSnapshot(f.service.peek())).toBe(true);
+  });
+
+  test("refuses a workspace outside the question's scope", async () => {
+    let refused = "";
+    const f = setup({
+      run: async (input) => {
+        await input.show!({
+          connection_id: "desktop",
+          workspace_id: "other",
+        }).catch((error: Error) => {
+          refused = error.message;
+        });
+        return [];
+      },
+    });
+    await f.service.handle("configure", { config: configured });
+    await f.service.handle("send", { request_id: "go-2", text: "Go there" });
+    await until(() => !f.service.peek().running);
+    expect(refused).toBe(
+      "That workspace is outside this question's authorized scope.",
+    );
+    expect(f.service.peek().messages.at(-1)!.show).toBeUndefined();
+  });
+});
+
+test("a scheduled task run has nothing to show anything in", async () => {
+  jest.useFakeTimers();
+  const offered: boolean[] = [];
+  const f = setup({}, () => ({
+    ...f.driver,
+    run: async (input) => {
+      offered.push(input.show !== undefined);
+      input.message("Checked");
+      return [];
+    },
+  }));
+  stableTaskIdentity(f.context);
+  await f.service.handle("configure", { config: configured });
+  const created = await f.service.handle("task.create", {
+    request_id: randomUUID(),
+    title: "Check",
+    prompt: "Check",
+    scope: configured.allowed_workspaces,
+    schedule: { type: "interval", minutes: 1 },
+  });
+  await f.service.resume();
+  await f.service.handle("task.run_now", { task_id: created.tasks![0]!.id });
+  jest.advanceTimersByTime(0);
+  await flushTasks();
+  expect(offered).toEqual([false]);
+});
+
+test("a task over all workspaces runs over those Ranger may use when it starts", async () => {
+  jest.useFakeTimers();
+  const f = setup({}, () => ({
+    ...f.driver,
+    run: async (input) => {
+      input.message("Checked");
+      return [{ persisted: true }];
+    },
+  }));
+  stableTaskIdentity(f.context);
+  const second = { ...workspace, workspace_id: "ws2", label: "Second" };
+  const hidden = { ...workspace, workspace_id: "ws3", label: "Not allowed" };
+  let listed = [workspace];
+  f.context.catalog = async () => ({ workspaces: listed, errors: [] });
+  f.context.captureScope = async (scope) =>
+    scope.map((ref) => {
+      const found = listed.find(
+        (item) => item.workspace_id === ref.workspace_id,
+      );
+      if (!found) throw new Error("Unknown workspace");
+      return structuredClone(found);
+    });
+  await f.service.handle("configure", { config: configured });
+  const created = await f.service.handle("task.create", {
+    request_id: randomUUID(),
+    title: "Check every agent",
+    prompt: "Check every agent",
+    scope: configured.allowed_workspaces,
+    all_workspaces: true,
+    schedule: { type: "interval", minutes: 60 },
+  });
+  const taskId = created.tasks![0]!.id;
+  expect(created.tasks![0]!.all_workspaces).toBe(true);
+  // A workspace created since, allowed in Ranger's settings; another not.
+  listed = [workspace, second, hidden];
+  await f.service.handle("configure", {
+    config: {
+      ...configured,
+      allowed_workspaces: [
+        ...configured.allowed_workspaces,
+        { connection_id: "local", workspace_id: "ws2" },
+      ],
+    },
+  });
+  await f.service.resume();
+  await f.service.handle("task.run_now", { task_id: taskId });
+  jest.advanceTimersByTime(0);
+  await flushTasks();
+  const detail = await f.service.taskDetail({ task_id: taskId });
+  expect(detail.runs[0]?.status).not.toBe("failed");
+  expect(detail.task.scope.map((ref) => ref.workspace_id)).toEqual([
+    "ws",
+    "ws2",
+  ]);
+  expect(detail.task.workspaces.map((ref) => ref.workspace_id)).toEqual([
+    "ws",
+    "ws2",
+  ]);
+});
+
+test("a run over all workspaces says when workspaces past the limit were left out", async () => {
+  jest.useFakeTimers();
+  const f = setup({}, () => ({
+    ...f.driver,
+    run: async (input) => {
+      input.message("Checked");
+      return [{ persisted: true }];
+    },
+  }));
+  stableTaskIdentity(f.context);
+  const second = { ...workspace, workspace_id: "ws2", label: "Second" };
+  let truncated = false;
+  let listed = [workspace];
+  f.context.catalog = async () => ({
+    workspaces: listed,
+    errors: [],
+    truncated,
+  });
+  f.context.captureScope = async (scope) =>
+    scope.map((ref) => {
+      const found = listed.find(
+        (item) => item.workspace_id === ref.workspace_id,
+      );
+      if (!found) throw new Error("Unknown workspace");
+      return structuredClone(found);
+    });
+  await f.service.handle("configure", { config: configured });
+  const created = await f.service.handle("task.create", {
+    request_id: randomUUID(),
+    title: "Check every agent",
+    prompt: "Check every agent",
+    scope: configured.allowed_workspaces,
+    all_workspaces: true,
+    schedule: { type: "interval", minutes: 60 },
+  });
+  const taskId = created.tasks![0]!.id;
+  await f.service.resume();
+  await f.service.handle("task.run_now", { task_id: taskId });
+  jest.advanceTimersByTime(0);
+  await flushTasks();
+  let detail = await f.service.taskDetail({ task_id: taskId });
+  expect(detail.runs[0]?.status).toBe("succeeded");
+  expect(detail.runs[0]?.notice).toBeUndefined();
+
+  listed = [workspace, second];
+  await f.service.handle("configure", {
+    config: {
+      ...configured,
+      allowed_workspaces: [
+        ...configured.allowed_workspaces,
+        { connection_id: "local", workspace_id: "ws2" },
+      ],
+    },
+  });
+  // A granted workspace a truncated listing did not reach.
+  listed = [workspace];
+  truncated = true;
+  await f.service.handle("task.run_now", { task_id: taskId });
+  jest.advanceTimersByTime(0);
+  await flushTasks();
+  detail = await f.service.taskDetail({ task_id: taskId });
+  expect(detail.runs[0]?.status).toBe("succeeded");
+  expect(detail.runs[0]?.notice).toContain("may have left out");
+});

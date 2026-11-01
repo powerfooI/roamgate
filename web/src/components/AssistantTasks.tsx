@@ -108,8 +108,9 @@ export function TaskProposalCard({
       ) : null}
       <p>{taskScheduleLabel(proposal.schedule)}</p>
       <span className="assistant-hint">
-        {proposal.scope.length} authorized workspace
-        {proposal.scope.length === 1 ? "" : "s"}
+        {proposal.all_workspaces
+          ? `Every workspace Ranger may use when it runs (${proposal.scope.length} now)`
+          : `${proposal.scope.length} authorized workspace${proposal.scope.length === 1 ? "" : "s"}`}
       </span>
       <details className="assistant-task-prompt">
         <summary>Task prompt</summary>
@@ -190,6 +191,8 @@ function TaskForm({
   const [scope, setScope] = useState<AssistantWorkspaceRef[]>(
     task?.scope ?? [],
   );
+  // Every workspace when it runs, new ones too: the list is then theirs.
+  const [allWorkspaces, setAllWorkspaces] = useState(!!task?.all_workspaces);
   const [kind, setKind] = useState<AssistantTaskSchedule["type"]>(
     task?.schedule.type ?? "once",
   );
@@ -217,7 +220,13 @@ function TaskForm({
     if (active) nameRef.current?.focus({ preventScroll: true });
   }, [active]);
   const choices = workspaces;
-  const unavailableScope = scope.filter(
+  const everyChoice = choices
+    .slice(0, ASSISTANT_MAX_WORKSPACES)
+    .map(({ connection_id, workspace_id }) => ({
+      connection_id,
+      workspace_id,
+    }));
+  const unavailableScope = (allWorkspaces ? [] : scope).filter(
     (ref) =>
       !workspaces.some(
         (workspace) => workspaceKey(ref) === workspaceKey(workspace),
@@ -240,14 +249,16 @@ function TaskForm({
             : kind === "daily"
               ? { type: "daily", time, timezone: timezone.trim() }
               : { type: "interval", minutes: Number(minutes) };
+        const chosen = allWorkspaces ? everyChoice : scope;
         const input = {
           title: title.trim(),
           prompt: prompt.trim(),
-          scope,
+          scope: chosen,
+          ...(allWorkspaces ? { all_workspaces: true as const } : {}),
           ...(task?.mentions
             ? {
                 mentions: task.mentions.filter((mention) =>
-                  scope.some(
+                  chosen.some(
                     (ref) => workspaceKey(ref) === workspaceKey(mention),
                   ),
                 ),
@@ -426,7 +437,8 @@ function TaskForm({
           {allWorkspacesAllowed ? (
             <p className="assistant-hint">
               All available workspaces are allowed. Choose the workspaces this
-              task should use; its scope stays fixed when new workspaces appear.
+              task should use; its scope stays fixed when new workspaces appear,
+              unless it covers all of them.
             </p>
           ) : null}
           {unavailableScope.length ? (
@@ -451,11 +463,50 @@ function TaskForm({
               </button>
             </div>
           ) : null}
-          <div className="assistant-workspaces">
+          <label className="assistant-workspace-all">
+            <input
+              type="checkbox"
+              checked={allWorkspaces}
+              onChange={(event) =>
+                setAllWorkspaces(event.currentTarget.checked)
+              }
+            />
+            <span>
+              All workspaces, new ones too
+              <small>
+                Each run covers every workspace Ranger may use at that time.
+              </small>
+            </span>
+          </label>
+          {allWorkspaces ? null : (
+            <div className="assistant-workspace-bulk">
+              <button
+                type="button"
+                className="ghost"
+                disabled={!choices.length}
+                onClick={() => setScope(everyChoice)}
+              >
+                Select all
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                disabled={!scope.length}
+                onClick={() => setScope([])}
+              >
+                Clear
+              </button>
+            </div>
+          )}
+          <div
+            className={`assistant-workspaces${allWorkspaces ? " is-all" : ""}`}
+          >
             {choices.map((workspace) => {
-              const checked = scope.some(
-                (ref) => workspaceKey(ref) === workspaceKey(workspace),
-              );
+              const checked =
+                allWorkspaces ||
+                scope.some(
+                  (ref) => workspaceKey(ref) === workspaceKey(workspace),
+                );
               return (
                 <label
                   key={workspaceKey(workspace)}
@@ -465,7 +516,8 @@ function TaskForm({
                     type="checkbox"
                     checked={checked}
                     disabled={
-                      !checked && scope.length >= ASSISTANT_MAX_WORKSPACES
+                      allWorkspaces ||
+                      (!checked && scope.length >= ASSISTANT_MAX_WORKSPACES)
                     }
                     onChange={() =>
                       setScope(
@@ -527,7 +579,7 @@ function TaskForm({
             !ready ||
             !title.trim() ||
             !prompt.trim() ||
-            !scope.length ||
+            !(allWorkspaces ? everyChoice : scope).length ||
             !!unavailableScope.length
           }
         >
@@ -977,6 +1029,11 @@ export function AssistantTasks({
                   <div>
                     <dt>Workspaces</dt>
                     <dd>
+                      {task.all_workspaces ? (
+                        <p className="assistant-hint">
+                          All, new ones too. As of the last run:
+                        </p>
+                      ) : null}
                       <ul className="assistant-task-workspaces">
                         {task.workspaces.map((ref) => (
                           <li key={workspaceKey(ref)}>
@@ -1054,6 +1111,9 @@ export function AssistantTasks({
                       ? ` / Started ${formatUiDateTime(selectedRun.started_at)}`
                       : ""}
                   </div>
+                  {selectedRun.notice ? (
+                    <p className="assistant-hint">{selectedRun.notice}</p>
+                  ) : null}
                   {selectedRun.error ? (
                     <p className="assistant-task-error" role="alert">
                       {selectedRun.error}

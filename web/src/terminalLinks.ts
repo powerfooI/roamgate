@@ -1,3 +1,5 @@
+import { LOOPBACK_HOSTS } from "./portForwarding";
+
 /** OSC 8 file URIs are local paths, never network/UNC shares or shell schemes. */
 export function terminalFileUriPath(raw: string): string | null {
   if (
@@ -142,4 +144,46 @@ export function findTerminalHttpLinks(text: string): TerminalHttpLink[] {
     HTTP_URL_START_RE.lastIndex = end;
   }
   return links;
+}
+
+/**
+ * A loopback URL printed by a pane on an SSH connection points at the remote's
+ * own machine, so opening it locally reaches the wrong host or nothing at all.
+ * Those are exactly the links worth offering a port forward for, and the pane
+ * naming one is better evidence than scanning the remote for listeners: it is
+ * a port someone actually published.
+ */
+export type TerminalForwardCandidate = {
+  url: string;
+  port: number;
+  /** The same URL with the local port substituted, once one is known. */
+  rewrite: (localPort: number) => string;
+};
+
+export function terminalForwardCandidate(
+  raw: string,
+): TerminalForwardCandidate | null {
+  const url = sanitizeTerminalHttpUrl(raw);
+  if (!url) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (!LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+  const port = Number(
+    parsed.port || (parsed.protocol === "https:" ? "443" : "80"),
+  );
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  return {
+    url,
+    port,
+    rewrite: (localPort: number) => {
+      const local = new URL(url);
+      local.hostname = "localhost";
+      local.port = String(localPort);
+      return local.toString();
+    },
+  };
 }

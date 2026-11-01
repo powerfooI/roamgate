@@ -25,6 +25,8 @@ import {
 } from "../bridge/protocol-compat";
 import { roamgateEnv } from "../config/environment";
 import { createSettingsRpcHandler } from "../bridge/settings-rpc";
+import { createForwardRpcHandler } from "../bridge/forward-rpc";
+import type { SshForwards } from "../bridge/ssh-forward";
 import {
   readGuiSettings,
   terminalSurfaceCodecsEnabled,
@@ -123,10 +125,14 @@ export function createLegacyConnectionRuntime(args: {
   taskNotificationSource?: TaskNotificationSource;
   onError?: (error: unknown, identity: ConnectionIdentity) => void;
   onTransportExit?: (error: SshTunnelError) => void;
+  /** Shared across connections: local ports are a single machine-wide space. */
+  forwards?: SshForwards;
   /** Test seam for deterministic shutdown coverage. */
   lastStepBaselines?: LastStepBaselineStore;
   resolveLastStepWorkspaceGitRoot?: (workspaceId: string) => Promise<string>;
   lastStepTransitionDebounceMs?: number;
+  /** Test seam for the background git status reads. */
+  runGitStatusProcess?: typeof runProcessWithCodeTimeoutBase;
 }) {
   const { config } = args;
   const remotePlatform = config.remotePlatform;
@@ -197,8 +203,24 @@ export function createLegacyConnectionRuntime(args: {
   const status = createStatusEnricher({
     connectionId: identity.id,
     sshHost,
-    runProcessWithCodeTimeout,
+    runProcessWithCodeTimeout:
+      args.runGitStatusProcess ?? runProcessWithCodeTimeout,
     shQuote,
+    onGitStatusChanged: (updates) => {
+      if (disposed) return;
+      args.onEvent(
+        {
+          event: "workspace.git_status",
+          data: { type: "workspace.git_status", statuses: updates },
+        },
+        identity,
+      );
+    },
+    onRefreshError: (error) =>
+      logger.warn("git status refresh failed", {
+        connection: identity.id,
+        error: sanitizeConnectionError(error),
+      }),
   });
   const workspaceAutoSync = createWorkspaceAutoSync({
     connectionId: identity.id,
@@ -272,6 +294,18 @@ export function createLegacyConnectionRuntime(args: {
     safeSend: args.safeSend,
     markRpcError: args.markRpcError,
   });
+  const handleForwardRpc = args.forwards
+    ? createForwardRpcHandler({
+        connectionId: identity.id,
+        connectionGeneration: args.connectionGeneration,
+        sshHost,
+        runProcess,
+        forwards: args.forwards,
+        safeSend: args.safeSend,
+        markRpcError: args.markRpcError,
+      })
+    : null;
+
   const terminalBridge = createTerminalBridge({
     connectionId: identity.id,
     broadcast: args.broadcast,
@@ -367,6 +401,8 @@ export function createLegacyConnectionRuntime(args: {
       });
     },
     completeWorkspaceStep: async (workspaceId) => {
+      // A finished agent turn is the likeliest moment for the tree to change.
+      status.invalidateWorkspaceGitStatus(workspaceId);
       try {
         await lastStepBaselines.completeWorkspace(workspaceId);
       } finally {
@@ -665,7 +701,12 @@ export function createLegacyConnectionRuntime(args: {
     taskEvents.stop();
     pendingTaskEvents.clear();
     herdrNotifications?.stop();
+    status.dispose();
     const autoSyncStop = workspaceAutoSync.stop();
+    // A forward outlives nothing: its ssh process rides the same credentials
+    // and host as the connection that asked for it. Listed as lost, not
+    // removed, so a reconnect does not make forwards vanish unexplained.
+    args.forwards?.loseConnection(identity.id);
     terminalBridge.dispose();
     const subscriptionStop = subscriptionLoop.stop();
     const agentStatusStop = agentStatusSubscriptions.stop();
@@ -698,6 +739,7 @@ export function createLegacyConnectionRuntime(args: {
     handleImageUpload,
     handleTerminalUpload,
     handleSettingsRpc,
+    handleForwardRpc,
     files,
     status,
     workspaceAutoSync,

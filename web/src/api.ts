@@ -274,6 +274,18 @@ export interface UiSettingPush {
   value: unknown;
 }
 
+/** One on-demand SSH port forward, as the server currently has it. */
+export interface ForwardRecord {
+  id: string;
+  connection_id: string;
+  direction: "local" | "remote";
+  remote_port: number;
+  local_port: number;
+  label?: string;
+  state: "starting" | "open" | "failed" | "closed";
+  error?: string;
+}
+
 export interface BridgeControlMsg {
   type: "pause_connection";
   reason?: string;
@@ -426,6 +438,7 @@ export class Bridge {
   >();
   private popupHandlers = new Set<(popup: PopupStatePush) => void>();
   private uiSettingsHandlers = new Set<(push: UiSettingPush) => void>();
+  private forwardsHandlers = new Set<(forwards: ForwardRecord[]) => void>();
   private statusHandlers = new Set<(s: ConnectionStatus) => void>();
   private controlHandlers = new Set<(c: BridgeControlMsg) => void>();
   private helloHandlers = new Set<(hello: BridgeHello) => void>();
@@ -775,6 +788,7 @@ export class Bridge {
     const hasTerminalClosed = owns("terminal_closed");
     const hasPopup = owns("popup");
     const hasUiSettings = owns("ui_settings");
+    const hasForwards = owns("forwards");
     const hasControl = owns("control");
     const hasAssistant = owns("assistant");
     const hasAssistantNotification = owns("assistant_notification");
@@ -787,6 +801,7 @@ export class Bridge {
       hasTerminalClosed,
       hasPopup,
       hasUiSettings,
+      hasForwards,
       hasControl,
       hasAssistant,
       hasAssistantNotification,
@@ -1019,6 +1034,16 @@ export class Bridge {
       return;
     }
 
+    if (hasForwards) {
+      // Machine-wide, like the preferences push: a forward opened in one tab
+      // is listed in every tab, whichever connection is active there.
+      if (Array.isArray(msg.forwards)) {
+        const forwards = msg.forwards as ForwardRecord[];
+        this.forwardsHandlers.forEach((handler) => handler(forwards));
+      }
+      return;
+    }
+
     if (hasUiSettings) {
       // Accepted regardless of the active Herdr connection: the preference
       // belongs to the Roamgate server that served this page.
@@ -1202,6 +1227,11 @@ export class Bridge {
   onPopup(cb: (popup: PopupStatePush) => void): () => void {
     this.popupHandlers.add(cb);
     return () => this.popupHandlers.delete(cb);
+  }
+
+  onForwards(cb: (forwards: ForwardRecord[]) => void): () => void {
+    this.forwardsHandlers.add(cb);
+    return () => this.forwardsHandlers.delete(cb);
   }
 
   onUiSetting(cb: (push: UiSettingPush) => void): () => void {

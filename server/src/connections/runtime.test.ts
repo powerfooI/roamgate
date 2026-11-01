@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { silentLogger } from "../utils/logger";
 import { createLastStepBaselineStore } from "../workspace/git-diff";
+import { serializeHerdrEventEnvelope } from "./protocol";
 import { createLegacyConnectionRuntime } from "./runtime";
 
 test("legacy runtime exposes and reports its configured connection identity", async () => {
@@ -239,6 +240,92 @@ test("runtime stop drains an in-flight completion and suppresses publication", a
   await expect(
     baselines.captureWorkspace("w1", async () => "/repo"),
   ).rejects.toMatchObject({ code: "LAST_STEP_STORE_DISPOSED" });
+});
+
+test("runtime pushes git status under its identity and stops reading once stopped", async () => {
+  const branchReply = (branch: string) => ({
+    code: 0,
+    stdout: `## ${branch}\n`,
+    stderr: "",
+  });
+  const runs: Array<
+    PromiseWithResolvers<{ code: number; stdout: string; stderr: string }>
+  > = [];
+  const events: Array<{ event: unknown; connectionId: string }> = [];
+  const runtime = createLegacyConnectionRuntime({
+    identity: { id: "remote-dev", label: "Remote Dev", source: "test" },
+    connectionGeneration: 3,
+    config: {
+      socketPath: "/tmp/m3-runtime-git-control.sock",
+      clientSocketPath: "/tmp/m3-runtime-git-client.sock",
+      sshHost: undefined,
+      session: undefined,
+      hasExplicitSocketPath: true,
+      hasExplicitClientSocketPath: true,
+    },
+    safeSend: () => true,
+    clientLabel: () => "browser",
+    markRpcError: () => undefined,
+    onEvent: (event, identity) => {
+      events.push({ event, connectionId: identity.id });
+    },
+    runGitStatusProcess: () => {
+      const run = Promise.withResolvers<{
+        code: number;
+        stdout: string;
+        stderr: string;
+      }>();
+      // The first read answers at once, within the first list's cold budget.
+      if (runs.length === 0) run.resolve(branchReply("main"));
+      runs.push(run);
+      return run.promise;
+    },
+  });
+  const listed = await runtime.status.enrichWorkspacesWithGitStatus({
+    workspaces: [
+      {
+        workspace_id: "w1",
+        worktree: { repo_key: "repo", repo_root: "/a", checkout_path: "/a" },
+      },
+    ],
+  });
+  expect(runs).toHaveLength(1);
+  expect(
+    (listed as { workspaces: Array<{ worktree: { git_status?: unknown } }> })
+      .workspaces[0].worktree.git_status,
+  ).toMatchObject({ branch: "main" });
+  await runtime.status.gitStatusRefreshSettled();
+
+  expect(events).toHaveLength(1);
+  expect(events[0].connectionId).toBe("remote-dev");
+  expect(
+    JSON.parse(serializeHerdrEventEnvelope("remote-dev", events[0].event, 3)),
+  ).toEqual({
+    connection_id: "remote-dev",
+    connection_generation: 3,
+    event: "workspace.git_status",
+    data: {
+      type: "workspace.git_status",
+      statuses: [
+        {
+          checkout_path: "/a",
+          git_status: expect.objectContaining({ branch: "main", dirty: false }),
+        },
+      ],
+    },
+  });
+
+  // A read in flight at stop neither publishes nor schedules another.
+  runtime.status.invalidateGitStatus("/a");
+  expect(runs).toHaveLength(2);
+  const stopping = runtime.stop();
+  runs[1].resolve(branchReply("topic"));
+  await runtime.status.gitStatusRefreshSettled();
+  await stopping;
+  runtime.status.invalidateGitStatus("/a");
+  runtime.status.invalidateWorkspaceGitStatus("w1");
+  expect(runs).toHaveLength(2);
+  expect(events).toHaveLength(1);
 });
 
 test("layout subscription ACK and reconnect request browser reconciliation", async () => {

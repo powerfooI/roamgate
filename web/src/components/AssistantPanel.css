@@ -730,6 +730,38 @@
   overscroll-behavior: contain;
 }
 
+/* A task over every workspace, and the buttons for the list. */
+.assistant-workspace-all {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.assistant-workspace-all small {
+  display: block;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.assistant-workspace-all input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.assistant-workspace-bulk {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.assistant-workspaces.is-all {
+  opacity: 0.6;
+}
+
 .assistant-workspace-choice {
   display: flex;
   align-items: flex-start;

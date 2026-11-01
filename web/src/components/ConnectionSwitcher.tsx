@@ -33,6 +33,7 @@ import {
   suggestConnectionId,
 } from "../connectionProfiles";
 import { shallowEqual, store, useStoreSelector } from "../store";
+import { canForwardPorts } from "../portForwarding";
 import { browserTransportPresentation } from "./browserTransport";
 import { CloseButton } from "./CloseButton";
 import { focusDialogElement } from "./dialogFocus";
@@ -1127,20 +1128,100 @@ function ConnectionManagerDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** One side of the port list: what a host is listening on, and the button
+ * that tunnels it to the other. Both directions render identically; only the
+ * wording and which way the tunnel runs differ. */
+function ListenerSection({
+  show,
+  busy,
+  heading,
+  listeners,
+  describe,
+  onForward,
+}: {
+  show: boolean;
+  busy: boolean;
+  heading: string;
+  listeners: { port: number; process?: string }[];
+  describe: (port: number) => string;
+  onForward: (port: number) => void;
+}) {
+  if (!show || (listeners.length === 0 && !busy)) return null;
+  return (
+    <div className="connection-forwards">
+      <p className="connection-forwards-head">
+        {heading}
+        {busy ? "\u2026" : ""}
+      </p>
+      {listeners.map((listener) => (
+        <div className="connection-forward" key={listener.port}>
+          <span className="connection-forward-ports">
+            {listener.port}
+            {listener.process ? (
+              <span className="muted"> {listener.process}</span>
+            ) : null}
+          </span>
+          <button
+            type="button"
+            role="menuitem"
+            tabIndex={-1}
+            className="connection-forward-stop"
+            title={describe(listener.port)}
+            aria-label={describe(listener.port)}
+            onClick={() => onForward(listener.port)}
+          >
+            <Plus size={13} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ConnectionSwitcher() {
   const state = useStoreSelector(
     (snapshot) => ({
       activeConnectionId: snapshot.activeConnectionId,
+      connectionGeneration: snapshot.connectionGeneration,
       connectionPaused: snapshot.connectionPaused,
       connections: snapshot.connections,
       defaultConnectionId: snapshot.defaultConnectionId,
+      forwards: snapshot.forwards,
+      listeners: snapshot.listeners,
+      listenersBusy: snapshot.listenersBusy,
       status: snapshot.status,
     }),
     shallowEqual,
   );
   const [open, setOpen] = useState(false);
   useCloseGlobalMenuForDialog(open, setOpen);
+  const activeLabel =
+    state.connections.find(
+      (connection) => connection.id === state.activeConnectionId,
+    )?.label ?? "the remote";
+  const forwardingOffered = canForwardPorts(
+    state.connections.find(
+      (connection) => connection.id === state.activeConnectionId,
+    )?.type,
+  );
+  // Scanning costs an ssh round trip, so it happens when someone opens the
+  // menu to look at ports, not on a timer.
+  useEffect(() => {
+    if (open && forwardingOffered) void store.refreshListeners();
+  }, [open, forwardingOffered, state.activeConnectionId]);
+  // A scan of another connection is not this one's ports.
+  const scan =
+    state.listeners?.connectionId === state.activeConnectionId
+      ? state.listeners
+      : null;
   const [manageOpen, setManageOpen] = useState(false);
+  // A remote forward hands this machine's port to everything on the far
+  // host, so it is confirmed rather than one click away.
+  const [exposePort, setExposePort] = useState<{
+    port: number;
+    label: string;
+    target: { connectionId: string; generation: number };
+  } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const initialMenuFocus = useRef<"active" | "first" | "last">("active");
@@ -1383,6 +1464,86 @@ export function ConnectionSwitcher() {
                 </button>
               ))}
             </div>
+            <ListenerSection
+              show={forwardingOffered}
+              busy={state.listenersBusy}
+              heading={`On ${activeLabel}, bring here`}
+              listeners={scan?.remote ?? []}
+              describe={(port) =>
+                `Forward ${port} from ${activeLabel} to this machine`
+              }
+              onForward={(port) => void store.openForward(port)}
+            />
+            <ListenerSection
+              show={forwardingOffered}
+              busy={false}
+              heading={`Here, expose to ${activeLabel}`}
+              listeners={scan?.local ?? []}
+              describe={(port) => `Expose ${port} to ${activeLabel}`}
+              onForward={(port) => {
+                setOpen(false);
+                setExposePort({
+                  port,
+                  label: activeLabel,
+                  target: {
+                    connectionId: state.activeConnectionId,
+                    generation: state.connectionGeneration,
+                  },
+                });
+              }}
+            />
+            {state.forwards.length > 0 ? (
+              <div className="connection-forwards">
+                <p className="connection-forwards-head">Forwarded ports</p>
+                {state.forwards.map((forward) => (
+                  <div className="connection-forward" key={forward.id}>
+                    <span className="connection-forward-ports">
+                      {forward.state === "failed" ? (
+                        <span className="connection-forward-failed">
+                          {forward.remote_port} failed
+                        </span>
+                      ) : forward.direction === "remote" ? (
+                        <>
+                          {forward.local_port}
+                          <span className="muted">
+                            {" "}
+                            →{" "}
+                            {state.connections.find(
+                              (connection) =>
+                                connection.id === forward.connection_id,
+                            )?.label ?? forward.connection_id}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          localhost:{forward.local_port}
+                          {forward.local_port === forward.remote_port ? null : (
+                            <span className="muted">
+                              {" "}
+                              → {forward.remote_port}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      tabIndex={-1}
+                      className="connection-forward-stop"
+                      title={
+                        forward.error ??
+                        `Stop forwarding port ${forward.remote_port}`
+                      }
+                      aria-label={`Stop forwarding port ${forward.remote_port}`}
+                      onClick={() => void store.closeForward(forward.id)}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <button
               type="button"
               role="menuitem"
@@ -1399,6 +1560,23 @@ export function ConnectionSwitcher() {
           </PopoverContent>
         </div>
       </Popover>
+      <ConfirmDialog
+        open={exposePort !== null}
+        title="Expose port"
+        message={`Anything on ${exposePort?.label} will reach port ${exposePort?.port} on this machine, with no authentication of its own. It binds ${exposePort?.label}'s loopback unless its sshd sets GatewayPorts yes, which opens it to that host's network.`}
+        confirmLabel="Expose"
+        danger
+        onClose={() => setExposePort(null)}
+        onConfirm={() => {
+          const port = exposePort;
+          setExposePort(null);
+          if (port !== null)
+            void store.openForward(port.port, {
+              direction: "remote",
+              target: port.target,
+            });
+        }}
+      />
       {manageOpen && typeof document !== "undefined"
         ? createPortal(
             <ConnectionManagerDialog onClose={closeManager} />,

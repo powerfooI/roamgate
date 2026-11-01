@@ -170,6 +170,25 @@ edits or sending input. Unsent input may contain sensitive information and
 remains in this browser until cleared. If browser storage is unavailable, only
 in-memory reconnect recovery is available.
 
+### Worktree Git status
+
+`workspace.list` attaches each checkout's last known `worktree.git_status`
+without waiting on Git, except that the first list to see a checkout waits up
+to 300 ms for its first read; a slower read (such as a cold SSH login) leaves
+that list without a status and arrives as a push. Entries older
+than 20 seconds, or invalidated by Roamgate Git actions, auto-sync and finished
+agent turns, refresh in the background: one refresh per runtime at a time, with
+one batched SSH command on remote hosts and `GIT_OPTIONAL_LOCKS=0` so polling
+never takes the user's `index.lock`. A transport failure keeps the previous
+status until the next refresh 20 seconds later or an invalidation: SSH exiting
+non-zero, a process that cannot start, and a Git or SSH read that exceeds its
+timeout (8 seconds, longer for large remote batches) all count as one, so a hung
+Git never replaces a known status with an error. A checkout with no previous
+status shows the error instead. Stopping a runtime stops its refreshes.
+Changed checkouts arrive as a `workspace.git_status` event whose `data.statuses`
+holds `{ checkout_path, git_status }` entries; the browser patches matching
+workspaces in place and reapplies pushes that overlap an in-flight refresh.
+
 ### Last step capture limits and ownership
 
 Last step snapshots the checkout when the workspace goes from active to idle.
