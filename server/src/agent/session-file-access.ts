@@ -22,7 +22,7 @@ export type AgentSessionFileAccess = {
   findClaudeSessionById(id: string): Promise<SessionFile | null>;
   /**
    * The transcript a Claude session went on in: the newest one beside it,
-   * written since, that names its session (a resume or /clear starts a new
+   * written since, whose records name its session (a resume or /clear starts a new
    * file Herdr does not learn about). Null when it is still the latest.
    */
   findClaudeSuccessor(path: string, id: string): Promise<string | null>;
@@ -84,11 +84,11 @@ async function localSessionFile(path: string): Promise<SessionFile | null> {
 }
 
 /**
- * The newest .jsonl beside $f, newer than it, that names $id. Paths are read
+ * The newest .jsonl beside $f, newer than it, whose sessionId metadata names $id. Paths are read
  * one per line, so a folder with spaces in its name works too.
  */
 const CLAUDE_SUCCESSOR_SCRIPT = `
-find "$(dirname "$f")" -maxdepth 1 -name '*.jsonl' -newer "$f" -exec grep -l -F -- "$id" {} + 2>/dev/null | {
+find "$(dirname "$f")" -maxdepth 1 -name '*.jsonl' -newer "$f" -exec grep -l -E -- '"sessionId"[[:space:]]*:[[:space:]]*"'"$id"'"' {} + 2>/dev/null | {
   best=""
   best_mtime=0
   while IFS= read -r g; do
