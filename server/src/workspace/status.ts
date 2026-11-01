@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { sshCommandArgv } from "../bridge/ssh-command";
+import { sshReadCommandArgv } from "../bridge/ssh-command";
 import {
   readGuiSettings,
   workspaceRepoSettingsKey,
@@ -304,7 +304,7 @@ printf '${marker}END ${index} %s\\n' "$code"
     let result: { code: number; stdout: string; stderr: string };
     try {
       result = await args.runProcessWithCodeTimeout(
-        sshCommandArgv(host, command, [], "git.status.batch"),
+        sshReadCommandArgv(host, command, [], "git.status.batch"),
         timeoutMs,
       );
     } catch (e) {

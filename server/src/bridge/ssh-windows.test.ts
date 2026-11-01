@@ -7,6 +7,7 @@ import {
   createWindowsSshTunnel,
   windowsHerdrBridgeCommand,
 } from "./ssh-windows";
+import { registerSshMaster, unregisterSshMaster } from "./ssh-sessions";
 import type { SshTunnelError } from "./ssh-tunnel";
 
 const herdrPath = String.raw`C:\Herdr O'Brien\herdr.exe`;
@@ -62,10 +63,20 @@ describe.skipIf(process.platform === "win32")(
     test("preserves binary data on both channels and terminates active children on cleanup", async () => {
       const settings = config();
       const children: ReturnType<typeof spawn>[] = [];
+      const masterOwner = {};
+      registerSshMaster(masterOwner, {
+        destination: settings.sshHost,
+        controlPath: `${settings.ownedRuntimeDirectory}/m.ctl`,
+        isListening: () => true,
+        isAlive: async () => true,
+      });
       const manager = createWindowsSshTunnel({
         config: settings,
         runProcess: async () => discovered(),
         spawnBridge: (argv) => {
+          // A long-lived bridge keeps its own connection even while a master
+          // for the same destination listens.
+          expect(argv).not.toContain("-S");
           expect(argv).toContain("BatchMode=yes");
           expect(argv).toContain("StrictHostKeyChecking=yes");
           expect(argv).toContain("ServerAliveCountMax=3");
@@ -102,6 +113,7 @@ describe.skipIf(process.platform === "win32")(
         ).toBeTrue();
         expect(existsSync(settings.ownedRuntimeDirectory)).toBeFalse();
       } finally {
+        unregisterSshMaster(masterOwner);
         await manager.cleanupAutoSshTunnel();
       }
     });

@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { sshCommandArgv } from "../bridge/ssh-command";
+import { sshReadCommandArgv } from "../bridge/ssh-command";
 import type { SessionFile } from "./session-types";
 
 const SESSION_FILE_TIMEOUT_MS = 15_000;
@@ -116,7 +116,7 @@ export function createAgentSessionFileAccess(args: {
 
   async function runRemote(command: string) {
     const result = await args.runBinaryProcessWithTimeout(
-      sshCommandArgv(
+      sshReadCommandArgv(
         host,
         `bash -lc ${args.shQuote(command)}`,
         [],
@@ -151,7 +151,7 @@ change="$(stat -c '%y:%z' "$path" 2>/dev/null || stat -f '%Fm:%Fc' "$path")"
 printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$size" "$mtime" "$path64" "$identity" "$change"
 `;
     const result = await args.runBinaryProcessWithTimeout(
-      sshCommandArgv(
+      sshReadCommandArgv(
         host,
         `bash -lc ${args.shQuote(command)}`,
         [],
@@ -236,7 +236,7 @@ path64="$(printf '%s' "$latest" | base64 | tr -d '\\n')"
 printf '%s\\t%s\\t%s\\n' "$size" "$latest_mtime" "$path64"
 `;
       const result = await args.runBinaryProcessWithTimeout(
-        sshCommandArgv(
+        sshReadCommandArgv(
           host,
           `bash -lc ${args.shQuote(command)}`,
           [],

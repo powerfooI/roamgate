@@ -67,6 +67,7 @@ import {
   connectionRecoveryFingerprint,
 } from "./connections/profiles";
 import { createSshProfileRuntimeConfig } from "./connections/ssh-profile-runtime";
+import { sweepOrphanedSshMasters } from "./bridge/ssh-master";
 import {
   CONNECTION_CHANGED_DURING_REQUEST,
   ConnectionRoutingError,
@@ -158,6 +159,10 @@ if (config.authRequired) {
 }
 configureServerLogger(config.logLevel);
 const logger = serverLogger;
+// Command masters of a Roamgate that crashed outlive it; end them.
+void sweepOrphanedSshMasters({ logger: logger.child("ssh") }).catch(
+  () => undefined,
+);
 if (
   config.authRequired &&
   !config.generatedAuthToken &&

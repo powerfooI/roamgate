@@ -5,6 +5,8 @@ export type SshProcessAnnotation = {
   /** Short, stable caller name, for example `git.status`. */
   tag?: string;
   connection?: string;
+  /** Multiplexed over the runtime command master. */
+  master?: boolean;
 };
 
 // sshd drops connections beyond MaxStartups before the banner exchange; the
@@ -64,6 +66,7 @@ export function createSshProcessMonitor(
       logger.debug("ssh process exited", {
         tag: annotation?.tag ?? "untagged",
         connection: annotation?.connection,
+        master: annotation?.master || undefined,
         host,
         code,
         total_ms: Math.round(now() - startedAt),

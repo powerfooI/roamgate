@@ -8,7 +8,7 @@ import {
   fileDownloadRange,
   type FileDownloadOptions,
 } from "./file-download";
-import { sshCommandArgv } from "../bridge/ssh-command";
+import { sshCommandArgv, sshReadCommandArgv } from "../bridge/ssh-command";
 import {
   DELETE_TIMEOUT_MS,
   DOWNLOAD_TIMEOUT_MS,
@@ -127,7 +127,7 @@ while IFS= read -r -d '' p; do
 done < <(find "$target_real" -mindepth 1 -maxdepth 1 -print0)
 `;
   const result = await runProcessWithCodeTimeout(
-    sshCommandArgv(host, `bash -lc ${shQuote(command)}`, [], "files.list"),
+    sshReadCommandArgv(host, `bash -lc ${shQuote(command)}`, [], "files.list"),
     LIST_TIMEOUT_MS,
   );
   if (result.code !== 0) {
@@ -174,7 +174,12 @@ for request in "\${requests[@]}"; do
 done
 `;
   const result = await runProcessWithCodeTimeout(
-    sshCommandArgv(host, `bash -lc ${shQuote(command)}`, [], "files.resolve"),
+    sshReadCommandArgv(
+      host,
+      `bash -lc ${shQuote(command)}`,
+      [],
+      "files.resolve",
+    ),
     PREVIEW_TIMEOUT_MS,
   );
   if (result.code !== 0) {
@@ -289,7 +294,7 @@ head -c $((limit + 1)) "$target_real" | base64 | tr -d '\\n'
 printf '\\n'
 `;
   const result = await runProcessWithCodeTimeout(
-    sshCommandArgv(host, `bash -lc ${shQuote(command)}`, [], "files.read"),
+    sshReadCommandArgv(host, `bash -lc ${shQuote(command)}`, [], "files.read"),
     PREVIEW_TIMEOUT_MS,
   );
   if (result.code !== 0) {
@@ -401,7 +406,7 @@ fi
 printf '\\n'
 `;
     const result = await runProcessWithCodeTimeout(
-      sshCommandArgv(
+      sshReadCommandArgv(
         host,
         `bash -lc ${shQuote(command)}`,
         [],

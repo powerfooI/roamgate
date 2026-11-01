@@ -1,5 +1,6 @@
-import { sshCommandArgv } from "../bridge/ssh-command";
+import { sshReadCommandArgv } from "../bridge/ssh-command";
 import { trackSshProcess } from "../bridge/ssh-metrics";
+import { holdSshSession } from "../bridge/ssh-sessions";
 
 export type FileSearchResult = {
   path: string;
@@ -67,18 +68,28 @@ export async function searchWorkspaceFiles({
   const deadline = Date.now() + SEARCH_TIMEOUT_MS;
   for (const args of commands) {
     const argv = host
-      ? sshCommandArgv(
+      ? sshReadCommandArgv(
           host,
           `git -C ${shQuote(root)} ${args.map(shQuote).join(" ")}`,
           [],
           "file.search",
         )
       : ["git", "-C", root, ...args];
-    const proc = Bun.spawn(argv, {
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
+    // Waiting for a session slot spends the search's own deadline.
+    const session = await holdSshSession(argv, {
+      timeoutMs: deadline - Date.now(),
     });
+    let proc: ReturnType<typeof Bun.spawn<"ignore", "pipe", "pipe">>;
+    try {
+      proc = Bun.spawn(argv, {
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+    } catch (error) {
+      session.release();
+      throw error;
+    }
     const stderrText = new Response(proc.stderr).text();
     trackSshProcess(argv, proc.exited, stderrText);
     const decoder = new TextDecoder();
@@ -167,6 +178,7 @@ export async function searchWorkspaceFiles({
     } finally {
       clearTimeout(timer);
       if (!truncated) proc.kill();
+      session.release();
     }
     if (truncated) break;
   }

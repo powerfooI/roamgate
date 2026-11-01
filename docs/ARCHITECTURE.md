@@ -338,6 +338,44 @@ Host-key checks stay on and authentication is non-interactive. Owned paths are
 removed only after the child process exits. Roamgate never installs remote
 software. See [connection setup](./DEPLOYMENT.md#multiple-and-remote-herdr-connections).
 
+Each Unix-host SSH profile runtime owns two OpenSSH connections. Connection A is
+the tunnel above and carries only Herdr's control and render sockets. Connection
+B is a command master (`ssh -M -S <runtime dir>/m.ctl -N`) started alongside the
+tunnel, kept across tunnel reconnects, and stopped before the runtime directory
+is removed. Stopping sends `-O stop`, so new commands log in on their own, and
+gives commands in flight over the master up to ten seconds before killing it.
+A master that exits after it was ready is started again ten seconds
+later, or at the next tunnel start if that comes first, each time it exits. A
+master that never became ready is not retried before the next tunnel start.
+`ROAMGATE_DISABLE_SSH_MASTER=1` turns connection B off; the legacy CLI
+connection and Windows-host profiles never have one, and the Windows stdio
+bridges keep one connection each outside the session limit.
+
+Host commands built by `sshCommandArgv` (Git, files, search, worktrees, hooks,
+uploads, the remote HOME probe) add `-S <socket>` while the master of a runtime
+reaching that destination listens. `-S` overrides the fixed `ControlPath=none`,
+which a later `-o ControlPath=` cannot, and `ControlMaster=no` keeps commands
+clients: no user `ssh_config` socket is ever used, and OpenSSH itself falls back
+to a cold login when the socket is missing, stale, or refuses a session. The
+masters are registered per runtime, so stopping one profile never stops another
+profile's master on the same host. The shared process helpers, file search
+and uploads allow eight concurrent sessions per destination, multiplexed or
+cold, below sshd's default `MaxSessions 10`. Further commands queue, at most 64
+per destination; the wait counts against the command's own timeout (60 seconds
+without one) and ends when an upload's request is aborted. A multiplexed
+command that exits 255 after its master died (`-O check` fails) may still be
+running remotely, so only read-only commands built with `sshReadCommandArgv`
+and run through the process helpers (Git status, file listing and reads, agent
+session reads, workspace path checks, the HOME probe) are rerun once cold. File search streams its
+output itself and is not rerun. Every other command, including worktree, hook,
+upload, write, delete, and Git actions, reports that failure instead of risking
+a second run. A 255 from a live master is the remote command's status.
+
+
+At startup, orphaned command masters are stopped only in private, user-owned
+runtime directories whose recorded Roamgate owner process is gone. A failed
+exit request retains the directory and socket for a later cleanup attempt.
+
 ## Distribution model
 
 Production builds embed the frontend and Bun into one executable. Release
