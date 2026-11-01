@@ -74,18 +74,25 @@ export function isTypedCharacter(data: string) {
  * Only the oldest unanswered key is timed, so fast typing yields one sample
  * per frame rather than stacking keys onto the same frame.
  */
+const ECHO_SAMPLE_MAX_MS = 5000;
+
 export function createEchoProbe(now: () => number = () => performance.now()) {
   let sentAt: number | null = null;
   return {
     sent(data: string) {
-      if (sentAt === null && isTypedCharacter(data)) sentAt = now();
+      const time = now();
+      if (
+        (sentAt === null || time - sentAt > ECHO_SAMPLE_MAX_MS) &&
+        isTypedCharacter(data)
+      )
+        sentAt = time;
     },
     /** Returns the elapsed ms for a pending key, or null when none was sent. */
     presented(): number | null {
       if (sentAt === null) return null;
       const elapsed = now() - sentAt;
       sentAt = null;
-      return Math.round(elapsed);
+      return elapsed > ECHO_SAMPLE_MAX_MS ? null : Math.round(elapsed);
     },
   };
 }
