@@ -12,6 +12,8 @@ export function isExpectedRpcError(
   const message = detail?.toLowerCase() ?? "";
   if (!message) return false;
   if (message.includes("connection changed during request")) return true;
+  // Background work shed while the host is busy: it is tried again later.
+  if (message.includes("background commands already waiting")) return true;
   if (
     message.includes("connection runtime generation") ||
     message.includes("connection is not ready")

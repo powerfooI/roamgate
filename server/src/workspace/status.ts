@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { sshReadCommandArgv } from "../bridge/ssh-command";
+import { runInSshLane } from "../bridge/ssh-sessions";
 import {
   readGuiSettings,
   workspaceRepoSettingsKey,
@@ -127,7 +128,8 @@ export function createStatusEnricher(args: {
       refreshAgain = true;
       return refreshing;
     }
-    const task = (async () => {
+    // Badges: the host serves what the user is doing first.
+    const task = runInSshLane("background", async () => {
       do {
         if (disposed) return;
         refreshAgain = false;
@@ -136,7 +138,7 @@ export function createStatusEnricher(args: {
         if (paths.length === 0) return;
         await refreshGitStatuses(host, paths);
       } while (refreshAgain);
-    })()
+    })
       .catch((error) => args.onRefreshError?.(error))
       .finally(() => {
         refreshing = null;

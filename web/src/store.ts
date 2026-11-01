@@ -2491,6 +2491,26 @@ function browserCreationSource(workspaceId: string | null) {
     : null;
 }
 
+/**
+ * Where to go in the active connection's last known list, when it holds the
+ * workspace (and pane) and the browser chooses what it shows: then going
+ * there needs no round trip first.
+ */
+function knownBrowserTarget(
+  workspaceId: string,
+  paneId?: string,
+): { workspaceId: string; tabId?: string; paneId?: string } | null {
+  if (state.navigationMode !== "browser-local") return null;
+  if (!paneId)
+    return state.workspaces.some((each) => each.workspace_id === workspaceId)
+      ? { workspaceId }
+      : null;
+  const pane = state.panes.find((each) => each.pane_id === paneId);
+  return pane
+    ? { workspaceId: pane.workspace_id, tabId: pane.tab_id, paneId }
+    : null;
+}
+
 function navigateBrowser(workspaceId: string, tabId?: string, paneId?: string) {
   const navigation = selectBrowserTarget(
     state.browserNavigation,
@@ -3170,8 +3190,16 @@ export const store = {
     return store.focusWorkspaceSource(target);
   },
 
-  /** Navigate on the source's original runtime; never retry on a replacement. */
-  focusWorkspaceSource(target: WorkspaceSourceTarget): Promise<boolean> {
+  /**
+   * Navigate on the source's original runtime; never retry on a replacement.
+   * `options.fromKnownList`: the target was picked from a list the browser
+   * shows (the switcher, the Workspaces tree), so where it last was is
+   * where to go at once.
+   */
+  focusWorkspaceSource(
+    target: WorkspaceSourceTarget,
+    options: { fromKnownList?: boolean } = {},
+  ): Promise<boolean> {
     if (!taskNotificationTargetIsCurrent(state, target)) {
       return Promise.resolve(false);
     }
@@ -3186,6 +3214,16 @@ export const store = {
       state.serverRuntimeGeneration !== target.runtimeGeneration
     ) {
       return Promise.resolve(false);
+    }
+    // Known from the connection's last list and shown by the browser alone:
+    // go there now. The refresh navigateBrowser starts corrects the rest,
+    // instead of the switch waiting on a round trip to the host.
+    const known =
+      options.fromKnownList &&
+      knownBrowserTarget(target.workspaceId, target.paneId);
+    if (known) {
+      void navigateBrowser(known.workspaceId, known.tabId, known.paneId);
+      return Promise.resolve(true);
     }
     if (!target.paneId) {
       return action(
