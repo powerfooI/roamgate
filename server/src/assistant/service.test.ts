@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, jest, test } from "bun:test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   mkdtempSync,
   mkdirSync,
@@ -6605,4 +6605,163 @@ test("a run over all workspaces says when workspaces past the limit were left ou
   detail = await f.service.taskDetail({ task_id: taskId });
   expect(detail.runs[0]?.status).toBe("succeeded");
   expect(detail.runs[0]?.notice).toContain("may have left out");
+});
+
+describe("a task over workspaces closed since it was saved", () => {
+  const second = { ...workspace, workspace_id: "ws2", label: "Second" };
+  const third = { ...workspace, workspace_id: "ws3", label: "Third" };
+  async function threeWorkspaceTask(high = false) {
+    const f = setup({}, () => ({
+      ...f.driver,
+      run: async (input) => {
+        input.message("Checked");
+        return [{ persisted: true }];
+      },
+    }));
+    stableTaskIdentity(f.context);
+    const state = { listed: [workspace, second, third] };
+    // A checkout's identity: one per name, so a recreated one keeps it.
+    f.context.recoveryScope = async (captured) =>
+      captured.map((ref) => ({
+        connection_id: ref.connection_id,
+        workspace_id: ref.workspace_id,
+        endpoint_fingerprint: "a".repeat(64),
+        workspace_identity: createHash("sha256")
+          .update(ref.label)
+          .digest("hex"),
+        herdr_boot_id: "original-server",
+      }));
+    const restored: string[][] = [];
+    f.context.restoreScope = async (targets) => {
+      restored.push(targets.map((target) => target.workspace_id));
+      return targets.map((target) => ({
+        ...state.listed.find(
+          (item) => item.workspace_id === target.workspace_id,
+        )!,
+      }));
+    };
+    f.context.catalog = async () => ({
+      workspaces: state.listed,
+      errors: [],
+      connection_ids: ["local"],
+      complete_connection_ids: ["local"],
+    });
+    f.context.captureScope = async (scope) =>
+      scope.map((ref) => {
+        const found = state.listed.find(
+          (item) => item.workspace_id === ref.workspace_id,
+        );
+        if (!found) throw new Error("Unknown workspace");
+        return structuredClone(found);
+      });
+    const scope = ["ws", "ws2", "ws3"].map((workspace_id) => ({
+      connection_id: "local",
+      workspace_id,
+    }));
+    await f.service.handle("configure", {
+      config: { ...configured, allowed_workspaces: scope },
+    });
+    if (high)
+      await f.service.handle("configure_approval", {
+        approval_mode: "auto",
+        workspace_scope: "all",
+      });
+    const created = await f.service.handle("task.create", {
+      request_id: randomUUID(),
+      title: "Check",
+      prompt: "Check",
+      scope,
+      schedule: { type: "interval", minutes: 60 },
+    });
+    await f.service.resume();
+    const taskId = created.tasks![0]!.id;
+    const runNow = async () => {
+      restored.length = 0;
+      const outcome = await f.service
+        .handle("task.run_now", { task_id: taskId })
+        .then(
+          () => undefined,
+          (error: Error) => error.message,
+        );
+      jest.advanceTimersByTime(0);
+      await flushTasks();
+      return outcome;
+    };
+    return { f, state, taskId, runNow, restored };
+  }
+
+  test("runs over those still open and names the one it skipped", async () => {
+    jest.useFakeTimers();
+    const { f, state, taskId, runNow, restored } = await threeWorkspaceTask();
+    state.listed = [workspace, second];
+    expect(await runNow()).toBeUndefined();
+    const detail = await f.service.taskDetail({ task_id: taskId });
+    expect(detail.runs[0]?.status).toBe("succeeded");
+    expect(detail.runs[0]?.notice).toBe(
+      "Skipped a workspace no longer open: Local / Third (closed). Edit the task to update its workspaces.",
+    );
+    expect(restored.at(-1)).toEqual(["ws", "ws2"]);
+    // The task keeps its workspaces for the user to update.
+    expect(detail.task.scope.map((ref) => ref.workspace_id)).toEqual([
+      "ws",
+      "ws2",
+      "ws3",
+    ]);
+  });
+
+  test("says when a skipped workspace was recreated rather than using it", async () => {
+    jest.useFakeTimers();
+    const { f, state, taskId, runNow, restored } =
+      await threeWorkspaceTask(true);
+    state.listed = [workspace, second, { ...third, workspace_id: "ws4" }];
+    expect(await runNow()).toBeUndefined();
+    const detail = await f.service.taskDetail({ task_id: taskId });
+    expect(detail.runs[0]?.status).toBe("succeeded");
+    expect(detail.runs[0]?.notice).toContain(
+      "Local / Third (recreated as ws4)",
+    );
+    expect(restored.at(-1)).toEqual(["ws", "ws2"]);
+  });
+
+  test("fails, naming them, when none is open any more", async () => {
+    jest.useFakeTimers();
+    const { f, state, taskId, runNow } = await threeWorkspaceTask();
+    state.listed = [];
+    expect(await runNow()).toBe(
+      "None of the task's workspaces is open any more: Local / Workspace (closed), Local / Second (closed), Local / Third (closed). Edit the task to choose its workspaces again.",
+    );
+    // A scheduled run fails the same way.
+    jest.advanceTimersByTime(60 * 60_000);
+    await flushTasks();
+    const detail = await f.service.taskDetail({ task_id: taskId });
+    expect(detail.runs[0]?.status).toBe("failed");
+    expect(detail.runs[0]?.error).toContain(
+      "None of the task's workspaces is open any more: Local / Workspace (closed)",
+    );
+  });
+
+  test("still fails when Ranger may no longer use one still open", async () => {
+    jest.useFakeTimers();
+    const { f, taskId, runNow, restored } = await threeWorkspaceTask();
+    await f.service.handle("configure", {
+      config: {
+        ...configured,
+        allowed_workspaces: [
+          { connection_id: "local", workspace_id: "ws" },
+          { connection_id: "local", workspace_id: "ws2" },
+        ],
+      },
+    });
+    expect(await runNow()).toBe(
+      "The original task permission is unavailable for Local / Third (no longer allowed).",
+    );
+    jest.advanceTimersByTime(60 * 60_000);
+    await flushTasks();
+    const detail = await f.service.taskDetail({ task_id: taskId });
+    expect(detail.runs[0]?.status).toBe("failed");
+    expect(detail.runs[0]?.error).toBe(
+      "The task could not safely start or resume: The original task permission is unavailable for Local / Third (no longer allowed).",
+    );
+    expect(restored).toEqual([]);
+  });
 });
