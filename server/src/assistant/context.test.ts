@@ -436,6 +436,44 @@ describe("assistant recovery scope", () => {
   });
 });
 
+describe("widening a turn's scope", () => {
+  test("adds a workspace to a captured scope, keeping the held ones", async () => {
+    const f = fixture();
+    const captured = await f.context.captureScope([first]);
+    const second = { connection_id: first.connection_id, workspace_id: "w2" };
+    await expect(f.context.read("status", captured, second)).rejects.toThrow();
+    const widened = await f.context.extendScope(captured, [first, second]);
+    expect(widened.map((item) => item.workspace_id)).toEqual(["w1", "w2"]);
+    expect(Object.isFrozen(widened)).toBe(true);
+    expect(await f.context.extendScope(widened, [second])).toBe(widened);
+    const output = await f.context.read("status", widened, second);
+    expect(output.text).toContain("PRIVATE WORKSPACE");
+    // A reconnected connection does not mix leases into an older scope.
+    const stale = await f.context.captureScope([first]);
+    f.retire();
+    await expect(f.context.extendScope(stale, [second])).rejects.toThrow(
+      "changed",
+    );
+  });
+
+  test("refuses a scope it did not capture", async () => {
+    const f = fixture();
+    await expect(
+      f.context.extendScope(
+        [
+          {
+            ...first,
+            connection_label: "L",
+            label: "A",
+            runtime_generation: 1,
+          },
+        ],
+        [first],
+      ),
+    ).rejects.toThrow("not approved");
+  });
+});
+
 describe("bounded Ranger scope validation", () => {
   test("capture, recovery and restore keep 512 workspace and identity results ordered with at most eight reads", async () => {
     const f = scopeFixture(512);

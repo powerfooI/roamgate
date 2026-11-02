@@ -27,6 +27,60 @@ type SummaryTarget = {
   params: Record<string, unknown>;
 };
 
+/**
+ * A lookup answered this recently is not asked again: switching connections,
+ * reopening a dialog or remounting the list reuses it. A PR's status changes
+ * on the scale of minutes; the 60 s poll stays the refresh.
+ */
+export const PULL_REQUEST_FRESH_MS = 50_000;
+const freshLookups = new Map<
+  string,
+  { at: number; status: PullRequestSummary }
+>();
+const FRESH_LOOKUPS_KEPT = 500;
+
+/**
+ * Each connection's reconnects so far. A client of a newer generation for
+ * the connection last seen is a reconnect, whose lookups start afresh; one
+ * that comes back after another connection was shown is only a switch.
+ */
+const reconnects = new Map<string, number>();
+let lastClient: { connectionId: string; generation: number } | null = null;
+
+function lookupEpoch(client: ConnectionClient): string {
+  const last = lastClient;
+  if (
+    last?.connectionId === client.connectionId &&
+    client.generation > last.generation
+  )
+    reconnects.set(
+      client.connectionId,
+      (reconnects.get(client.connectionId) ?? 0) + 1,
+    );
+  if (!last || client.generation >= last.generation)
+    lastClient = {
+      connectionId: client.connectionId,
+      generation: client.generation,
+    };
+  return JSON.stringify([
+    client.connectionId,
+    client.serverRuntimeGeneration,
+    reconnects.get(client.connectionId) ?? 0,
+  ]);
+}
+
+/** What a lookup asks, whichever connection client asks it. */
+function lookupQuestion(target: SummaryTarget) {
+  return JSON.stringify([target.identity, target.branch, target.params]);
+}
+
+/** Forgets every recent lookup (tests). */
+export function forgetPullRequestLookups() {
+  freshLookups.clear();
+  reconnects.clear();
+  lastClient = null;
+}
+
 type SummaryEntry = {
   association: string;
   identity: string;
@@ -171,6 +225,8 @@ function usePullRequestSummaries(
   const requested = useRef(
     new Map<string, { association: string; round: string }>(),
   );
+  // What each target last asked, kept across connection switches.
+  const asked = useRef(new Map<string, string>());
   const targetsKey = JSON.stringify(
     targets.map((target) => [target.id, target.association]),
   );
@@ -197,6 +253,7 @@ function usePullRequestSummaries(
         (next) =>
           next.id === target.id && next.association === target.association,
       );
+    const epoch = lookupEpoch(client);
     const run = async () => {
       const due = readTargets().filter((target) => {
         if (!target.queryable) return false;
@@ -208,23 +265,56 @@ function usePullRequestSummaries(
         for (const target of queue) {
           if (cancelled || !client.isCurrent()) return;
           if (!current(target)) continue;
+          const last = requested.current.get(target.id);
           const request = { association: target.association, round };
           requested.current.set(target.id, request);
-          const status: PullRequestSummary = await client
-            .call(
-              "git.pull_request",
-              {
-                ...target.params,
-                summary: true,
-              },
-              65_000,
-            )
-            .catch(() => ({
-              state: "error",
-              message: "PR/MR status request failed. Check the connection.",
-              retryable: true,
-              refreshedAt: new Date().toISOString(),
-            }));
+          const question = lookupQuestion(target);
+          const freshKey = JSON.stringify([epoch, question]);
+          const askedKey = `${client.connectionId}\u0000${target.id}`;
+          const askedBefore = asked.current.get(askedKey);
+          asked.current.set(askedKey, question);
+          // The sidebar's polls, a mount and a target that changed (another
+          // branch) ask again; the same rows shown again after another
+          // connection reuse a recent answer.
+          const fresh =
+            poll &&
+            last?.association !== target.association &&
+            askedBefore === question
+              ? freshLookups.get(freshKey)
+              : undefined;
+          // Badges are background work: the host answers what the user is
+          // doing first, and identical lookups in flight are shared.
+          const status: PullRequestSummary =
+            fresh && Date.now() - fresh.at < PULL_REQUEST_FRESH_MS
+              ? fresh.status
+              : await client
+                  .call(
+                    "git.pull_request",
+                    {
+                      ...target.params,
+                      summary: true,
+                    },
+                    65_000,
+                    { lane: "background" },
+                  )
+                  .then((status: PullRequestSummary) => {
+                    if (!pullRequestUnavailable(status)) {
+                      freshLookups.delete(freshKey);
+                      freshLookups.set(freshKey, { at: Date.now(), status });
+                      if (freshLookups.size > FRESH_LOOKUPS_KEPT)
+                        freshLookups.delete(
+                          freshLookups.keys().next().value as string,
+                        );
+                    }
+                    return status;
+                  })
+                  .catch(() => ({
+                    state: "error",
+                    message:
+                      "PR/MR status request failed. Check the connection.",
+                    retryable: true,
+                    refreshedAt: new Date().toISOString(),
+                  }));
           // A reply stays valid for its association even after this effect
           // re-ran; it must never land on a newer association or connection.
           if (!current(target)) {
@@ -260,15 +350,28 @@ function usePullRequestSummaries(
     return () => {
       cancelled = true;
     };
-  }, [client, ready, targetsKey, refresh, pollRound, pollKey]);
+  }, [client, ready, targetsKey, refresh, pollRound, pollKey, poll]);
 
   // Polling waits for each round to settle, but target changes that only
   // request their own targets never postpone the next round for the others.
   const hasTargets = targets.length > 0;
   useEffect(() => {
     if (!poll || !hasTargets || settledRound !== pollKey) return;
-    const timer = setTimeout(() => setPollRound((value) => value + 1), 60_000);
-    return () => clearTimeout(timer);
+    const next = () => setPollRound((value) => value + 1);
+    // Out of sight, the next round waits for the page to show again.
+    const onVisible = () => {
+      if (document.hidden) return;
+      document.removeEventListener("visibilitychange", onVisible);
+      next();
+    };
+    const timer = setTimeout(() => {
+      if (!document.hidden) return next();
+      document.addEventListener("visibilitychange", onVisible);
+    }, 60_000);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [poll, hasTargets, settledRound, pollKey]);
 
   const cache = readPullRequestCache();
