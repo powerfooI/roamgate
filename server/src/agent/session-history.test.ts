@@ -131,6 +131,51 @@ test("a Claude compaction summary is flagged, not a plain user message", () => {
   ]);
 });
 
+test("an Artifact result keeps the page it published when redacted", () => {
+  const trajectory = projectAgentTrajectory("claude", file, [
+    {
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "a1",
+            name: "Artifact",
+            input: { file_path: "/tmp/notes.html" },
+          },
+        ],
+      },
+    },
+    {
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "a1",
+            content:
+              "Published /tmp/notes.html at https://claude.ai/artifact/N1",
+          },
+        ],
+      },
+    },
+  ]);
+  const update = redactHistoryUpdate({
+    history_version: 2,
+    cursor: { epoch: "e", revision: 1 },
+    window_limit: HISTORY_WINDOW_LIMIT,
+    mode: "snapshot",
+    entries: historyEntriesFromTrajectory(file, trajectory),
+  });
+  const entries = update.mode === "snapshot" ? update.entries : [];
+  expect(entries.find((entry) => entry.kind === "tool_result")).toMatchObject({
+    text: "",
+    artifact: { url: "https://claude.ai/artifact/N1", title: "notes" },
+  });
+});
+
 test("Claude messages still in its queue show as queued until they land", () => {
   const op = (operation: string, content?: string) => ({
     type: "queue-operation",
@@ -652,4 +697,46 @@ test("content identities survive early step renumbering and disambiguate repeate
   });
   expect(first.map((entry) => entry.id)).toEqual(next.map((entry) => entry.id));
   expect(new Set(first.map((entry) => entry.id)).size).toBe(2);
+});
+
+test("an image pasted into a Claude message comes with it, without its data", () => {
+  const png = Buffer.from("not really a png").toString("base64");
+  const records = [
+    {
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "[Image #1] what is wrong here?" },
+          {
+            type: "image",
+            source: { type: "base64", media_type: "image/png", data: png },
+          },
+          // Not something a browser should be handed.
+          {
+            type: "image",
+            source: { type: "base64", media_type: "image/svg+xml", data: png },
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "text", text: "Ok" }] },
+    },
+  ];
+  const trajectory = projectAgentTrajectory("claude", file, records);
+  const entries = historyEntriesFromTrajectory(file, trajectory);
+  expect(entries[0]!.text).toBe("[Image #1] what is wrong here?");
+  expect(entries[0]!.images).toEqual([
+    { media_type: "image/png", bytes: 16, hash: expect.any(String) },
+  ]);
+  expect(entries[1]!.images).toBeUndefined();
+  // Neither the history nor the trajectory (previews, exports) has the data.
+  expect(JSON.stringify(trajectory)).not.toContain(png);
+  const snapshot = redactHistoryUpdate(
+    historyUpdate({ epoch: "e", revision: 1 }, entries, null, new Map()),
+  );
+  if (snapshot.mode !== "snapshot") throw new Error("expected a snapshot");
+  expect(snapshot.entries[0]!.images).toEqual(entries[0]!.images);
 });

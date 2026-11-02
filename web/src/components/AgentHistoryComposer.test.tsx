@@ -322,8 +322,12 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
       await fill("look here please");
       writeTerminalComposerSelection(draftKey, 5, 9);
       await React.act(async () => finishUpload("/tmp/photo.png"));
-      expect(input().value).toBe("look /tmp/photo.png  please");
-      expect(input().selectionStart).toBe("look /tmp/photo.png ".length);
+      // The box shows the attached image short; the draft keeps its path.
+      expect(input().value).toBe("look [Image #1]  please");
+      expect(readTerminalComposerDraft(draftKey)).toBe(
+        "look /tmp/photo.png  please",
+      );
+      expect(input().selectionStart).toBe("look [Image #1] ".length);
       expect(terminalComposerUploadCount(draftKey)).toBe(0);
       await key("Enter");
       expect(send.mock.calls[6]?.[0]).toBe("look /tmp/photo.png  please");
@@ -352,7 +356,8 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
           picker.dispatchEvent(new window.Event("change", { bubbles: true }));
         });
       await chooseImages([image]);
-      expect(input().value).toBe("/tmp/photo.png  ");
+      expect(input().value).toBe("[Image #1]  ");
+      expect(readTerminalComposerDraft(draftKey)).toBe("/tmp/photo.png  ");
       expect(picker.value).toBe("");
       expect(send).toHaveBeenCalledTimes(7);
 
@@ -364,7 +369,7 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
       expect(upload.mock.calls[upload.mock.calls.length - 1]?.[0]).toBe(
         untypedImage,
       );
-      expect(input().value).toBe("/tmp/camera.png  ");
+      expect(readTerminalComposerDraft(draftKey)).toBe("/tmp/camera.png  ");
       const uploadedCount = upload.mock.calls.length;
       await chooseImages([
         new File(["text"], "notes.txt", { type: "text/plain" }),
@@ -373,7 +378,7 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
       expect(error.mock.calls[error.mock.calls.length - 1]?.[0]).toBe(
         "Choose an image to attach.",
       );
-      expect(input().value).toBe("/tmp/camera.png  ");
+      expect(readTerminalComposerDraft(draftKey)).toBe("/tmp/camera.png  ");
       expect(terminalComposerUploadCount(draftKey)).toBe(0);
 
       // Partial failure keeps successful paths and unlocks sending.
@@ -383,7 +388,9 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
         throw new Error("Image too large");
       });
       await paste([image, image]);
-      expect(input().value).toBe("review /tmp/first.png  ");
+      expect(readTerminalComposerDraft(draftKey)).toBe(
+        "review /tmp/first.png  ",
+      );
       expect(error.mock.calls[error.mock.calls.length - 1]?.[0]).toBe(
         "Image too large",
       );
@@ -434,7 +441,9 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
           await React.act(async () => {
             jest.advanceTimersByTime(0);
           });
-          expect(input().value).toBe("look \u4f60 /tmp/ime.png  ");
+          expect(readTerminalComposerDraft(draftKey)).toBe(
+            "look \u4f60 /tmp/ime.png  ",
+          );
           expect(terminalComposerUploadCount(draftKey)).toBe(0);
         }
 

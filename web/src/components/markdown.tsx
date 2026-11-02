@@ -58,7 +58,14 @@ const MARKDOWN_DROP_CONTENT_TAGS = new Set([
 ]);
 
 export function isSafeMarkdownUrl(value: string) {
-  const trimmed = value.trim().toLowerCase();
+  // Browsers drop tabs and line breaks anywhere in a URL, and spaces and
+  // control characters around it: "java\tscript:" is "javascript:". They
+  // also read a backslash as a slash, so "/\host" is another origin.
+  const trimmed = [...value]
+    .filter((char) => char > " " && char !== "\u007f")
+    .join("")
+    .replace(/\\/g, "/")
+    .toLowerCase();
   if (!trimmed || trimmed.startsWith("//")) return false;
   if (trimmed.startsWith("#") || trimmed.startsWith("/")) return true;
   const protocolMatch = trimmed.match(/^([a-z][a-z0-9+.-]*):/);
@@ -175,6 +182,15 @@ export function sanitizeMarkdownHtml(
       ) {
         // Keep the fenced-code language hint so mermaid blocks can be found
         // and replaced with rendered diagrams after sanitization.
+        continue;
+      }
+      if (
+        name === "start" &&
+        tag === "ol" &&
+        /^\d{1,9}$/.test(attr.value.trim())
+      ) {
+        // A list marked splits in parts (an item, then a code block not
+        // indented under it, then the next item) keeps its numbers.
         continue;
       }
       if (

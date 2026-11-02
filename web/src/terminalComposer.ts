@@ -229,6 +229,26 @@ export function writeTerminalComposerSelection(
   selections.set(key, { start, end });
 }
 
+/**
+ * Puts text at the end of a pane's composer draft, after a blank line: the
+ * draft its terminal composer and its agent chat's message box share.
+ */
+export function appendToPaneComposerDraft(
+  connectionId: string,
+  connectionGeneration: number,
+  pane: { pane_id: string; terminal_id: string },
+  text: string,
+): void {
+  const key = terminalComposerDraftKey(
+    connectionId,
+    connectionGeneration,
+    pane.pane_id,
+    pane.terminal_id,
+  );
+  const draft = readTerminalComposerDraft(key).trimEnd();
+  writeTerminalComposerDraft(key, draft ? `${draft}\n\n${text}` : text);
+}
+
 export function writeTerminalComposerDraft(key: string, text: string): void {
   if (!terminalComposerDraftKeyIsActive(key)) return;
   if (!text) {

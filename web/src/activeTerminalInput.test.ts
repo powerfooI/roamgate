@@ -14,6 +14,24 @@ describe("activeTerminalInput", () => {
       await browser.happyDOM.close();
     }
   });
+  test("routes to the message box of a pane shown as a chat", async () => {
+    const browser = new Window();
+    const doc = browser.document;
+    try {
+      doc.body.innerHTML = `<div class="workspace-terminal-surface">
+        <div class="pane-layout-cell is-active"><div class="terminal-shell" data-pane-id="p1"><div class="terminal-view"></div>
+          <div class="terminal-chat-layer"><div class="agent-history-composer"><textarea></textarea></div></div>
+        </div></div>
+      </div>`;
+      expect(activeTerminalInput(doc as unknown as Document)).toBe(
+        doc.querySelector(
+          ".terminal-chat-layer textarea",
+        ) as unknown as HTMLElement | null,
+      );
+    } finally {
+      await browser.happyDOM.close();
+    }
+  });
   test.each(["composer", "direct", "closed", "other-pane"])(
     "routes a portalled %s editor only to its active pane",
     async (state) => {
