@@ -23,6 +23,8 @@ test("an image's size is decoded from its base64", () => {
   ]);
   // Not base64: left out.
   expect(attachedImages(message("<svg>").message.content)).toEqual([]);
+  for (const malformed of ["a", "a=", "aa=", "aaaa="])
+    expect(attachedImages(message(malformed).message.content)).toEqual([]);
 });
 
 test("a session keeps the data of its most recent messages' images, whole messages within its cap", () => {

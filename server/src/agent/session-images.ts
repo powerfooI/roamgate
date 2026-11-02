@@ -36,6 +36,8 @@ function imageData(parts: readonly unknown[]): ImageData[] {
       IMAGE_TYPE.test(media_type) &&
       typeof data === "string" &&
       data.length > 0 &&
+      data.length % 4 !== 1 &&
+      (!data.endsWith("=") || data.length % 4 === 0) &&
       data.length <= MAX_IMAGE_CHARS &&
       /^[A-Za-z0-9+/]+={0,2}$/.test(data)
     )

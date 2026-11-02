@@ -53,24 +53,42 @@ if (process.env.ROAMGATE_ATTACHED_IMAGES_DOM_TEST !== "1") {
     const asked: string[] = [];
     // Replies held until the test gives them.
     const replies = new Map<string, () => void>();
+    let responseImages: HistoryImage[] | undefined;
     const fetchImages = (id: string) => {
       asked.push(id);
       return new Promise<HistoryImage[]>((resolve) =>
         replies.set(id, () =>
-          resolve([
-            { media_type: "image/png", bytes: 2, hash: `h${id}`, data: "aGk=" },
-          ]),
+          resolve(
+            responseImages ?? [
+              {
+                media_type: "image/png",
+                bytes: 2,
+                hash: `h${id}`,
+                data: "aGk=",
+              },
+            ],
+          ),
         ),
       );
     };
     let shown: ReadonlyMap<string, readonly string[]> = new Map();
-    function Probe({ entries }: { entries: HistoryEntry[] }) {
-      shown = useAttachedImages(entries, fetchImages, "scope");
+    const renders: { key: string; count: number }[] = [];
+    function Probe({
+      entries,
+      scopeKey,
+    }: {
+      entries: HistoryEntry[];
+      scopeKey: string;
+    }) {
+      shown = useAttachedImages(entries, fetchImages, scopeKey);
+      renders.push({ key: scopeKey, count: shown.size });
       return null;
     }
     const root = createRoot(document.createElement("div"));
-    const render = (entries: HistoryEntry[]) =>
-      React.act(async () => root.render(<Probe entries={entries} />));
+    const render = (entries: HistoryEntry[], scopeKey = "scope") =>
+      React.act(async () =>
+        root.render(<Probe entries={entries} scopeKey={scopeKey} />),
+      );
     const answer = (...ids: number[]) =>
       React.act(async () => {
         for (const id of ids) replies.get(String(id))?.();
@@ -92,10 +110,48 @@ if (process.env.ROAMGATE_ATTACHED_IMAGES_DOM_TEST !== "1") {
     expect(shown.has("2")).toBe(false);
     expect(live.size).toBe(29);
 
+    // An entry id can be reused in another session: even its first render
+    // must not expose images from the previous session.
+    const beforeSwitch = renders.length;
+    await render([message(31)], "other-session");
+    expect(
+      renders.slice(beforeSwitch).every((render) => render.count === 0),
+    ).toBe(true);
+    expect(live.size).toBe(0);
+    await answer(31);
+    expect(shown.has("31")).toBe(true);
+    expect(live.size).toBe(1);
+
+    // A reply from a newer file revision must match the expected image hash.
+    responseImages = [
+      { media_type: "image/png", bytes: 2, hash: "new-revision", data: "aGk=" },
+    ];
+    await render([message(33)], "other-session");
+    await answer(33);
+    expect(shown.size).toBe(0);
+    expect(live.size).toBe(0);
+
+    // If decoding a later image fails, release URLs already made for it.
+    const pair = {
+      ...message(34),
+      images: [
+        message(34).images![0]!,
+        { media_type: "image/png", bytes: 2, hash: "h34b" },
+      ],
+    };
+    responseImages = [
+      { media_type: "image/png", bytes: 2, hash: "h34", data: "aGk=" },
+      { media_type: "image/png", bytes: 2, hash: "h34b", data: "!" },
+    ];
+    await render([pair], "other-session");
+    await answer(34);
+    expect(shown.size).toBe(0);
+    expect(live.size).toBe(0);
+
     // Leaving releases the rest, and a reply after that makes nothing.
     await React.act(async () => root.unmount());
     expect(live.size).toBe(0);
     await answer(32);
-    expect(made).toBe(30);
+    expect(made).toBe(32);
   });
 }

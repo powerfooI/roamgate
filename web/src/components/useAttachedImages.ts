@@ -3,6 +3,7 @@ import type { HistoryEntry, HistoryImage } from "./agentHistory";
 
 /** The most recent messages whose images are loaded; older ones show [Image #N]. */
 const MAX_MESSAGES = 30;
+const EMPTY_IMAGES: ReadonlyMap<string, readonly string[]> = new Map();
 
 export type FetchEntryImages = (
   entryId: string,
@@ -23,6 +24,7 @@ function objectUrl({ media_type, data }: HistoryImage) {
 
 type Asked = { id: string; urls?: string[] };
 type Scope = {
+  key: string;
   live: boolean;
   /** By images key: the entry, and its URLs once loaded. */
   asked: Map<string, Asked>;
@@ -49,17 +51,18 @@ export function useAttachedImages(
   fetchImages: FetchEntryImages,
   scopeKey: string,
 ): ReadonlyMap<string, readonly string[]> {
-  const [loaded, setLoaded] = useState<ReadonlyMap<string, readonly string[]>>(
-    () => new Map(),
-  );
+  const [loaded, setLoaded] = useState<{
+    key: string;
+    images: ReadonlyMap<string, readonly string[]>;
+  }>(() => ({ key: scopeKey, images: new Map() }));
   const scopeRef = useRef<Scope | null>(null);
   const fetchRef = useRef(fetchImages);
   fetchRef.current = fetchImages;
 
   useEffect(() => {
-    const scope: Scope = { live: true, asked: new Map() };
+    const scope: Scope = { key: scopeKey, live: true, asked: new Map() };
     scopeRef.current = scope;
-    setLoaded(new Map());
+    setLoaded({ key: scope.key, images: new Map() });
     return () => {
       scope.live = false;
       for (const { urls } of scope.asked.values()) revoke(urls);
@@ -82,7 +85,7 @@ export function useAttachedImages(
         revoke(urls);
         dropped ||= !!urls;
       }
-    if (dropped) setLoaded(shown(scope));
+    if (dropped) setLoaded({ key: scope.key, images: shown(scope) });
     for (const [key, id] of wanted) {
       if (scope.asked.has(key)) continue;
       const asked: Asked = { id };
@@ -93,8 +96,17 @@ export function useAttachedImages(
           // Not once the scope or the message is gone.
           if (!scope.live || scope.asked.get(key) !== asked || !images?.length)
             return;
-          asked.urls = images.map(objectUrl);
-          setLoaded(shown(scope));
+          if (`${id}:${images.map((image) => image.hash).join(",")}` !== key)
+            return;
+          const urls: string[] = [];
+          try {
+            for (const image of images) urls.push(objectUrl(image));
+          } catch (error) {
+            revoke(urls);
+            throw error;
+          }
+          asked.urls = urls;
+          setLoaded({ key: scope.key, images: shown(scope) });
         })
         // A failed fetch leaves [Image #N] as text; a later history read of
         // the same message does not ask again.
@@ -102,5 +114,5 @@ export function useAttachedImages(
     }
   }, [entries, scopeKey]);
 
-  return loaded;
+  return loaded.key === scopeKey ? loaded.images : EMPTY_IMAGES;
 }
