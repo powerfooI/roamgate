@@ -227,6 +227,10 @@ or its shortcut.
 - **Act:** Ranger can create workspaces, worktrees, tabs, and splits, and start,
   prompt, or close agents and panes. You confirm each action unless
   **High-permission mode** is on. Closing never deletes files or history.
+  A workspace or worktree Ranger creates is one it may use in that chat (and
+  that task run) without changing your workspace choice, which a scheduled
+  task over it still needs; with **Full access**, workspaces created while
+  Ranger answers are in reach too.
 - **Schedule:** the **Tasks** view runs a prompt once, daily, or every N minutes
   while the bridge is running, and can notify you when a run finishes or when
   Ranger decides something needs attention.
