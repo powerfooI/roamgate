@@ -225,6 +225,11 @@ export function ComposerVimEditor({
         ? EditorSelection.range(clamp(selection.start), clamp(selection.end))
         : EditorSelection.cursor(length),
     });
+    // Emptied by a send: ready for the next message, in insert mode as the
+    // box starts, so its first letter is not taken as a command.
+    const cm = getCM(view);
+    if (!value && cm && !cm.state.vim?.insertMode)
+      Vim.handleKey(cm, "i", "mapping");
   }, [value, selection]);
 
   return <div ref={hostRef} className="agent-history-composer-editor" />;
