@@ -84,6 +84,10 @@ function fixture(
     if (command.includes("'cat' '--'")) return { ...fail, stdout: "" };
     if (command.includes("'for-each-ref'"))
       return ok("refs/heads/feature/card\0\0\n");
+    // No push remote configured; no glab token in glab's configuration.
+    if (command.includes("'config' '--get-regexp'"))
+      return { code: 1, stdout: "", stderr: "" };
+    if (command.includes("'sh' '-c'")) return ok("");
     if (command.includes("'git' 'remote'"))
       return ok(
         options.remoteOutput ??
@@ -117,7 +121,11 @@ function fixture(
     if (command.includes("'reviewDecision'"))
       return ok({ reviewDecision: "CHANGES_REQUESTED" });
     if (command.includes("'projects/alice%2Fproject'"))
-      return ok({ id: 1, forked_from_project: { id: 2 } });
+      return ok({
+        id: 1,
+        path_with_namespace: "alice/project",
+        forked_from_project: { id: 2, path_with_namespace: "team/project" },
+      });
     if (command.includes("'projects/1/merge_requests?")) return ok([]);
     if (command.includes("'projects/2/merge_requests?"))
       return ok([
@@ -790,6 +798,192 @@ describe("PR/MR status", () => {
     }).read();
     expect(failed.state).toBe("error");
     expect(failed.retryable).toBe(true);
+  });
+  test("glab without --all lists its hosts through plain auth status", async () => {
+    const result = await fixture("gitlab", {
+      host: "code.example.com",
+      override: (command) => {
+        if (command.includes("'glab' 'auth' 'status' '--all'"))
+          return { code: 1, stdout: "", stderr: "ERROR: unknown flag: --all" };
+        if (command.endsWith("'glab' 'auth' 'status'"))
+          return {
+            code: 0,
+            stdout: "",
+            stderr:
+              "code.example.com\n  \u2713 Logged in to code.example.com\n",
+          };
+      },
+    }).read();
+    expect(result.state).toBe("ready");
+    expect(result.provider).toBe("gitlab");
+  });
+  describe("fork workflow: origin is the upstream, the branch is pushed to a fork", () => {
+    const remoteOutput = [
+      "origin\tgit@gitlab.com:team/project.git (fetch)",
+      "fork\tgit@gitlab.com:alice/project.git (fetch)",
+      "mirror\tgit@git.example.org:alice/project.git (fetch)",
+      "",
+    ].join("\n");
+    const forkFixture = (options: {
+      refs?: string;
+      config?: string;
+      override?: (command: string) => ReturnType<typeof ok> | undefined;
+    }) =>
+      fixture("gitlab", {
+        remoteOutput,
+        override: (command) => {
+          const overridden = options.override?.(command);
+          if (overridden) return overridden;
+          if (command.includes("'for-each-ref'"))
+            return ok(
+              options.refs ??
+                "refs/heads/feature/card\0origin\0refs/heads/main\0\n",
+            );
+          if (command.includes("'config' '--get-regexp'") && options.config)
+            return ok(options.config);
+          // The upstream's own merge requests are not the fork's.
+          if (command.includes("'projects/team%2Fproject'"))
+            return ok({ id: 2 });
+        },
+      });
+    for (const [name, options] of [
+      [
+        "the branch's push remote",
+        { config: "branch.feature/card.pushremote fork\n" },
+      ],
+      ["the default push remote", { config: "remote.pushdefault fork\n" }],
+      [
+        "the remote that has the branch",
+        {
+          refs: "refs/heads/feature/card\0origin\0refs/heads/main\0\nrefs/remotes/origin/HEAD\0\0\0refs/remotes/origin/main\nrefs/remotes/fork/feature/card\0\0\0\n",
+        },
+      ],
+      [
+        "the configured forge among remotes that have the branch",
+        {
+          refs: "refs/heads/feature/card\0origin\0refs/heads/main\0\nrefs/remotes/mirror/feature/card\0\0\0\nrefs/remotes/fork/feature/card\0\0\0\n",
+        },
+      ],
+      [
+        "the tracked remote when nothing else says",
+        { refs: "refs/heads/feature/card\0fork\0refs/heads/feature/card\0\n" },
+      ],
+    ] as const) {
+      test(`the source is ${name}`, async () => {
+        const result = await forkFixture(options).read();
+        expect(result.state).toBe("ready");
+        expect(result.remote).toBe("fork");
+        expect(result.request?.number).toBe(7);
+      });
+    }
+    test("a branch-specific push remote wins over the default one", async () => {
+      const result = await forkFixture({
+        config:
+          "remote.pushdefault origin\nbranch.other.pushremote origin\nbranch.feature/card.pushremote fork\n",
+      }).read();
+      expect(result.remote).toBe("fork");
+    });
+    test("the merge request is found in the tracked upstream when the fork link is gone", async () => {
+      const f = forkFixture({
+        refs: "refs/heads/feature/card\0origin\0refs/heads/main\0\nrefs/remotes/fork/feature/card\0\0\0\n",
+        override: (command) => {
+          if (command.includes("'projects/alice%2Fproject'"))
+            return ok({ id: 1, path_with_namespace: "alice/project" });
+          if (command.includes("'projects/team%2Fproject/merge_requests?"))
+            return ok([glMR]);
+        },
+      });
+      const result = await f.read({ summary: true });
+      expect(result.state).toBe("ready");
+      expect(result.request?.number).toBe(7);
+    });
+    test("a branch started from the upstream's main is not looked up as main", async () => {
+      const f = fixture("gitlab", {
+        override: (command) =>
+          command.includes("'for-each-ref'")
+            ? ok("refs/heads/feature/card\0origin\0refs/heads/main\0\n")
+            : undefined,
+      });
+      const result = await f.read();
+      expect(result.state).toBe("ready");
+      const queries = f.commands
+        .flat()
+        .filter((arg) => arg.includes("source_branch="));
+      expect(queries.length).toBeGreaterThan(0);
+      expect(
+        queries.every((query) =>
+          query.includes("source_branch=feature%2Fcard"),
+        ),
+      ).toBe(true);
+    });
+  });
+  describe("ssh.<host> remotes use the API of <host>", () => {
+    const remoteOutput =
+      "origin\tgit@ssh.code.example.com:alice/project.git (fetch)\n";
+    test("when glab lists <host>", async () => {
+      const f = fixture("gitlab", { host: "code.example.com", remoteOutput });
+      const result = await f.read();
+      expect(result.state).toBe("ready");
+      expect(result.provider).toBe("gitlab");
+      expect(result.request?.url).toStartWith("https://code.example.com/");
+      expect(
+        f.commands
+          .map((argv) => argv.map(shQuote).join(" "))
+          .filter((command) => command.includes("'--hostname'"))
+          .every((command) =>
+            command.includes("'--hostname' 'code.example.com'"),
+          ),
+      ).toBe(true);
+    });
+    test("when glab's configuration has a token for <host>, without listing every host", async () => {
+      const result = await fixture("gitlab", {
+        host: "code.example.com",
+        remoteOutput,
+        override: (command) => {
+          if (command.includes("'--all'")) throw new Error("timed out");
+          if (command.includes("'sh' '-c'"))
+            return command.endsWith("'sh' 'code.example.com'")
+              ? ok("code.example.com\n")
+              : ok("");
+        },
+      }).read();
+      expect(result.state).toBe("ready");
+      expect(result.provider).toBe("gitlab");
+    });
+  });
+  test("errors name the step that failed without quoting CLI output", async () => {
+    const notFound = await fixture("gitlab", {
+      override: (command) =>
+        command.includes("'projects/alice%2Fproject'")
+          ? {
+              code: 1,
+              stdout: "secret-token",
+              stderr:
+                "https://user:secret-token@gitlab.com glab: 404 Project Not Found (HTTP 404)",
+            }
+          : undefined,
+    }).read();
+    expect(notFound.state).toBe("error");
+    expect(notFound.message).toContain(
+      "glab api projects/alice%2Fproject returned HTTP 404",
+    );
+    expect(JSON.stringify(notFound)).not.toContain("secret-token");
+    const truncated = await fixture("gitlab", {
+      override: (command) =>
+        command.includes("'projects/2/merge_requests?")
+          ? ok(Array(100).fill(glMR))
+          : undefined,
+    }).read();
+    expect(truncated.message).toContain(
+      "glab api projects/2/merge_requests?scope=all&state=all&source_branch=feature%2Fcard&per_page=100 returned 100 or more requests",
+    );
+    const timedOut = await fixture("github", {
+      override: (command) => {
+        if (command.includes("'repos/alice/project'"))
+          throw new Error("ssh timed out after 15000ms");
+      },
+    }).read();
+    expect(timedOut.message).toContain("gh api repos/alice/project timed out");
   });
   test("missing, skipped and pending checks retain their meaning", () => {
     expect(githubChecks(null)).toBe("Unavailable");
