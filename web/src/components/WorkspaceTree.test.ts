@@ -311,12 +311,15 @@ if (process.env.ROAMGATE_WORKSPACE_STORAGE_DOM_TEST !== "1") {
       ).toBeNull();
       expect(store.get().activeConnectionId).toBe("alpha");
       await act(async () => rows()[1].click());
-      expect(navigate).toHaveBeenCalledWith({
-        connectionId: "beta",
-        runtimeGeneration: 1,
-        workspaceId: "w1",
-        paneId: "w1:p1",
-      });
+      expect(navigate).toHaveBeenCalledWith(
+        {
+          connectionId: "beta",
+          runtimeGeneration: 1,
+          workspaceId: "w1",
+          paneId: "w1:p1",
+        },
+        { fromKnownList: true },
+      );
       expect(localFocus).not.toHaveBeenCalled();
       await act(async () =>
         rows()[1].dispatchEvent(
@@ -341,19 +344,25 @@ if (process.env.ROAMGATE_WORKSPACE_STORAGE_DOM_TEST !== "1") {
           .querySelector<HTMLButtonElement>(".context-menu-item")!
           .click(),
       );
-      expect(navigate).toHaveBeenLastCalledWith({
-        connectionId: "beta",
-        runtimeGeneration: 1,
-        workspaceId: "w1",
-        paneId: "w1:p1",
-      });
+      expect(navigate).toHaveBeenLastCalledWith(
+        {
+          connectionId: "beta",
+          runtimeGeneration: 1,
+          workspaceId: "w1",
+          paneId: "w1:p1",
+        },
+        { fromKnownList: true },
+      );
       await act(async () => rows()[0].click());
-      expect(navigate).toHaveBeenLastCalledWith({
-        connectionId: "alpha",
-        runtimeGeneration: 1,
-        workspaceId: "w1",
-        paneId: "w1:p1",
-      });
+      expect(navigate).toHaveBeenLastCalledWith(
+        {
+          connectionId: "alpha",
+          runtimeGeneration: 1,
+          workspaceId: "w1",
+          paneId: "w1:p1",
+        },
+        { fromKnownList: true },
+      );
       expect(localFocus).not.toHaveBeenCalled();
 
       const refresh = async () =>

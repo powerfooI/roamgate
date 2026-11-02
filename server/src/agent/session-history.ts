@@ -12,6 +12,11 @@ export type HistoryEntry = {
   tool_name?: string;
   source_call_id?: string;
   is_error?: boolean;
+  // A message the user sent while the agent worked, still waiting in its
+  // queue. Once delivered it keeps its id and loses the flag.
+  queued?: boolean;
+  // The summary that replaced the earlier conversation when it was compacted.
+  compact_summary?: boolean;
   // Set on redacted wire entries: UTF-8 byte length of the withheld text,
   // fetchable via agent_history.entry when the user expands the card.
   text_bytes?: number;
@@ -71,6 +76,10 @@ export function historyEntriesFromTrajectory(
         role: step.source === "user" ? "user" : "assistant",
         text: step.message,
         sent_at,
+        ...(step.extra?.queued === true ? { queued: true } : {}),
+        ...(step.extra?.compact_summary === true
+          ? { compact_summary: true }
+          : {}),
       });
     }
     for (const call of step.tool_calls ?? []) {

@@ -37,8 +37,17 @@ function fixture(agent = "pi") {
     async readDownloadBody() {
       return text;
     },
+    async findPiSessionForCwd() {
+      return null;
+    },
     async findPiSessionById() {
       return file;
+    },
+    async findClaudeSessionById() {
+      return file;
+    },
+    async findClaudeSuccessor() {
+      return null;
     },
     async findCodexSessionById() {
       return file;
@@ -151,7 +160,7 @@ describe("bounded cache payload estimation", () => {
 });
 
 describe("session projection cache and history revisions", () => {
-  test("coalesces history, summary, preview and ATIF; unchanged refresh never reads again", async () => {
+  test("coalesces history and summary, preview and ATIF build the trajectory; unchanged refresh never reads again", async () => {
     const f = fixture();
     f.set([message("hello")]);
     const [first, summary, atif] = await Promise.all([
@@ -163,7 +172,9 @@ describe("session projection cache and history revisions", () => {
       }),
       f.handlers.downloadAtif({ pane_id: "p" }),
     ]);
-    expect(f.reads).toBe(1);
+    // One read for the cache, one each for the preview's and the ATIF's
+    // trajectory, which the cache does not keep.
+    expect(f.reads).toBe(3);
     expect(summary.stats.turns).toBe(1);
     expect(summary.text).toContain("hello");
     expect((await atif.json()).steps).toHaveLength(1);
@@ -176,7 +187,7 @@ describe("session projection cache and history revisions", () => {
     expect(refresh).not.toHaveProperty("entries");
     expect(refresh).not.toHaveProperty("trajectory");
     await f.handlers.readSummary({ pane_id: "p" });
-    expect(f.reads).toBe(1);
+    expect(f.reads).toBe(3);
   });
 
   test("reprojects changed data once and completes partial JSONL without poisoning cache", async () => {
@@ -397,8 +408,11 @@ describe("session projection cache and history revisions", () => {
       expect(update.cursor.epoch).toBe(cursor.epoch);
       expect(update.cursor.revision).toBe(cursor.revision + 1);
       expect(update.upserts[0].sent_at).toBe(timestamp);
-      expect(changed.projection.trajectory.steps[0].timestamp).toBe(timestamp);
       expect(changed.projection.messages[0].sent_at).toBe(timestamp);
+      expect(f.reads).toBe(++expectedReads);
+      // The trajectory is not kept: it is built again, with the same times.
+      const trajectory = await cache.trajectory(f.resolved);
+      expect(trajectory.steps[0].timestamp).toBe(timestamp);
       expect(f.reads).toBe(++expectedReads);
       cursor = update.cursor;
       const unchanged = await cache.history(f.resolved, cursor);
@@ -423,9 +437,7 @@ describe("session projection cache and history revisions", () => {
     });
     try {
       const first = await cache.history(f.resolved, null);
-      expect(first.projection.trajectory.steps[0].message).toHaveLength(
-        100_000,
-      );
+      expect(first.projection.entries[0].text).toHaveLength(100_000);
       const next = await cache.history(f.resolved, first.update.cursor);
       expect(next.update.mode).toBe("snapshot");
       expect(next.update.cursor.epoch).not.toBe(first.update.cursor.epoch);
