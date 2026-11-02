@@ -98,11 +98,42 @@ export function createAgentSessionHandlers(args: {
           "That history entry is no longer available; refresh the history and try again",
         );
       }
+      // A message's images, with their data while the session keeps it.
+      const images = entry.images?.map((image) => ({
+        ...image,
+        data: projection.images[image.hash]?.data,
+      }));
       return {
         entry_id: entry.id,
         text: entry.text,
         text_hash: historyTextHash(entry.text),
+        ...(images?.length && images.every((image) => image.data)
+          ? { images }
+          : {}),
       };
+    },
+    /** The skills and custom commands a Claude session offers as /name. */
+    readCommands: async (params: Record<string, unknown>) => {
+      const resolved = await resolveAgentSession(
+        params,
+        args.herdrCall,
+        args.files,
+        resolverContext,
+      );
+      if (!resolved.file) return { commands: [] };
+      const projection = await cache.get(resolved);
+      return { commands: projection.commands };
+    },
+    readArtifacts: async (params: Record<string, unknown>) => {
+      const resolved = await resolveAgentSession(
+        params,
+        args.herdrCall,
+        args.files,
+        resolverContext,
+      );
+      if (!resolved.file) return { artifacts: [] };
+      const projection = await cache.get(resolved);
+      return { artifacts: projection.artifacts };
     },
     readSummary: (params: Record<string, unknown>) =>
       readAgentSessionSummary(
@@ -180,6 +211,7 @@ export async function readAgentSessionSummary(
     return {
       ...resolved,
       stats: { turns: 0, records: 0, token_usage: null },
+      title: null,
       text: null,
       truncated: false,
       trajectory: null,
@@ -227,6 +259,7 @@ export async function readAgentSessionSummary(
     file: projected.file,
     updated_at: new Date(projected.file.mtimeMs).toISOString(),
     stats,
+    title: projected.title,
     text,
     truncated,
     trajectory,

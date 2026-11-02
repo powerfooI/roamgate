@@ -1,10 +1,11 @@
 import type {
   HistoryCursor,
   HistoryEntry,
+  HistoryImage,
   HistoryUpdate,
 } from "../../../server/src/agent/session-history";
 import { historyWindowEntries } from "../../../server/src/agent/session-history-window";
-export type { HistoryCursor, HistoryEntry, HistoryUpdate };
+export type { HistoryCursor, HistoryEntry, HistoryImage, HistoryUpdate };
 
 export type AgentHistory = {
   status?: "ok" | "missing_session" | "missing_file";

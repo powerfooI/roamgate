@@ -23,6 +23,7 @@ import {
   readAssistantPaneOccupant,
   type AssistantWorktreeCreator,
 } from "./actions";
+import { AssistantUserError } from "./errors";
 import {
   ASSISTANT_DEFAULT_TERMINAL_LINES,
   ASSISTANT_MAX_TERMINAL_LINES,
@@ -48,6 +49,19 @@ export type RecoveryTarget = AssistantWorkspaceRef & {
 };
 
 export class AssistantRecoveryNotReadyError extends Error {}
+
+/**
+ * A connection's Herdr restarted (its boot identity changed) since a task's
+ * workspaces were checked: what was checked then may not hold any more, so
+ * an interrupted run cannot resume over it. A new run checks them again.
+ */
+export class AssistantServerRestartedError extends AssistantUserError {
+  constructor(readonly connection: string) {
+    super(
+      `Herdr on ${connection} restarted since the task's workspaces were checked (its server identity changed).`,
+    );
+  }
+}
 
 function workspaceIdentity(workspace: Record<string, unknown>): string {
   const worktree = isRecord(workspace.worktree) ? workspace.worktree : {};
@@ -630,7 +644,9 @@ export function createAssistantContext(args: {
           }
           const bootId = await pending;
           if (!bootId || bootId !== expected.herdr_boot_id)
-            throw new Error("Ranger recovery server identity changed");
+            throw new AssistantServerRestartedError(
+              limitedText(connection.label) || connectionId,
+            );
         }
         const item = await workspace(lease, workspaceId, readSignal);
         const identity = workspaceIdentity(item);
@@ -659,6 +675,49 @@ export function createAssistantContext(args: {
     scopes.set(captured, leases);
     workspaceIdentities.set(captured, identities);
     return captured;
+  }
+
+  /**
+   * A turn's scope with more workspaces: those it already holds keep their
+   * leases and mention guards, and only the added ones are read.
+   */
+  const refKey = (ref: AssistantWorkspaceRef) =>
+    `${ref.connection_id}\0${ref.workspace_id}`;
+  async function extendScope(
+    captured: AssistantWorkspace[],
+    refs: AssistantWorkspaceRef[],
+    signal?: AbortSignal,
+  ): Promise<AssistantWorkspace[]> {
+    const leases = scopes.get(captured);
+    const identities = workspaceIdentities.get(captured);
+    if (!leases || !identities)
+      throw new Error("Ranger workspace scope was not approved");
+    const held = new Set(captured.map(refKey));
+    const missing = refs.filter((ref) => !held.has(refKey(ref)));
+    if (!missing.length) return captured;
+    if (captured.length + missing.length > ASSISTANT_MAX_WORKSPACES)
+      throw new Error(
+        `Ranger uses at most ${ASSISTANT_MAX_WORKSPACES} workspaces at once`,
+      );
+    const added = await captureScope(missing, signal);
+    const merged = new Map(leases);
+    for (const [connectionId, lease] of scopes.get(added)!) {
+      const old = merged.get(connectionId);
+      if (old && old.generation !== lease.generation)
+        throw new Error(`Connection ${connectionId} changed`);
+      if (!old) merged.set(connectionId, lease);
+    }
+    for (const lease of merged.values()) assertCurrent(lease, signal);
+    const widened: AssistantWorkspace[] = [...captured, ...added];
+    Object.freeze(widened);
+    scopes.set(widened, merged);
+    workspaceIdentities.set(widened, [
+      ...identities,
+      ...workspaceIdentities.get(added)!,
+    ]);
+    const guards = mentionGuards.get(captured);
+    if (guards) mentionGuards.set(widened, new Map(guards));
+    return widened;
   }
 
   async function recoveryIdentity(lease: RuntimeLease, signal?: AbortSignal) {
@@ -760,8 +819,14 @@ export function createAssistantContext(args: {
       if (
         connections.has(target.connection_id) &&
         connections.get(target.connection_id) !== identity
-      )
-        throw new Error("Inconsistent Ranger recovery connection identity");
+      ) {
+        const label = args
+          .catalog()
+          .find((item) => item.id === target.connection_id)?.label;
+        throw new Error(
+          `Inconsistent Ranger recovery connection identity: the workspaces on ${limitedText(label) || target.connection_id} were checked on different Herdr servers`,
+        );
+      }
       connections.set(target.connection_id, identity);
     }
     return captureScope(expected, signal, expected);
@@ -1146,6 +1211,7 @@ export function createAssistantContext(args: {
   return {
     catalog,
     captureScope,
+    extendScope,
     recoveryScope,
     restoreScope,
     mentionCatalog,
@@ -1157,6 +1223,7 @@ export function createAssistantContext(args: {
 
 export type AssistantContext = Omit<
   ReturnType<typeof createAssistantContext>,
+  | "extendScope"
   | "prepareAction"
   | "recoveryScope"
   | "restoreScope"
@@ -1166,6 +1233,7 @@ export type AssistantContext = Omit<
   Partial<
     Pick<
       ReturnType<typeof createAssistantContext>,
+      | "extendScope"
       | "prepareAction"
       | "recoveryScope"
       | "restoreScope"

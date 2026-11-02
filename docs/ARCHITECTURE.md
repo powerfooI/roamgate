@@ -285,7 +285,13 @@ state; sends are never replayed.
 - **Scope:** no workspaces are allowed by default. Each turn captures concrete
   connection/workspace pairs (at most 512) and rechecks runtime leases around
   every read. Only the dedicated confirmation can enable high-permission mode
-  (`approval_mode: "auto"` with `workspace_scope: "all"`).
+  (`approval_mode: "auto"` with `workspace_scope: "all"`, "Full access"); its
+  turns also reach workspaces created after they started, which join the turn
+  (`extendScope`) when a tool names one or lists the scope. A workspace Ranger
+  creates (a `created` action result) joins the running turn at once and the
+  chat's later turns (`created_workspaces` in the chat's saved state), without
+  changing the settings' grant; tasks, which outlive the chat, count only the
+  grant. Like a grant, it is dropped once a complete listing no longer has it.
 - **Actions:** a proposal pins its runtime lease and target, and
   `action.confirm` accepts only the proposal ID. A receipt is saved before
   dispatch, one action runs at a time, and failed or uncertain actions are never
@@ -307,10 +313,20 @@ state; sends are never replayed.
   directory; one bridge process must own it. After a restart, a turn resumes
   only after its endpoints, Herdr boot IDs, and workspaces are re-verified;
   Claude Code turns instead stop without replay as described above.
-- **Tasks** live in `tasks.sqlite`; each state change commits before it is
+- **Tasks** live in `tasks.sqlite`, at `user_version` 3: later additions
+  (`tasks.all_workspaces`, the `run_notices` table) are made in place, so an
+  older bridge, which refuses other versions, still opens it after a rollback.
+  Each state change commits before it is
   published. One scheduled run executes at a time, overdue occurrences are
   combined, and runs re-verify identities and permissions. Run results emit an
   `assistant_notification` push; custom notices are deduplicated by event key.
+- **Task runs over fixed workspaces** leave out the workspaces closed since the
+  task was saved and name them in the run's notice (a workspace reopened under
+  a new id is named, not used); a run fails when none is left, or when one
+  still open is no longer allowed. After a connection's Herdr restarted (new
+  boot ID), an interrupted run does not resume; a new run reads its workspaces
+  again, keeps one whose ID still holds the same path and checkout under the
+  new boot ID, and skips and names one whose ID now holds another workspace.
 
 ## Task notifications
 
