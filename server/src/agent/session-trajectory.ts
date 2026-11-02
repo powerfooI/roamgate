@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import { grokReasoningText, grokUserMessageText } from "./grok-session";
 import type { AtifStep, AtifTrajectory, SessionFile } from "./session-types";
+import { attachedImages } from "./session-images";
 import {
   cleanMessageText,
   isRecord,
@@ -533,6 +534,9 @@ function projectClaudeTrajectory(
       return;
     }
     if (!text && !usage) return;
+    // An image pasted into Claude Code's prompt is kept with the message,
+    // shown as [Image #N] in its text; its path is not recorded.
+    const images = role === "user" ? attachedImages(parts) : [];
     steps.push({
       timestamp,
       source:
@@ -544,6 +548,7 @@ function projectClaudeTrajectory(
         model: modelNameFromRecord(record) || undefined,
         // The summary Claude Code writes when it compacts the conversation.
         compact_summary: record.isCompactSummary === true || undefined,
+        ...(images.length ? { images } : {}),
       },
     });
   });
