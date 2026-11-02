@@ -388,6 +388,120 @@ test("version two retains existing plans, admissions, proposals and notification
   expect(open(path).load()).toEqual(loaded);
 });
 
+test("a task over all workspaces and its run notices survive reload", () => {
+  const path = directory();
+  const saved = state();
+  const entry = saved.tasks[0]!;
+  entry.input.all_workspaces = true;
+  entry.runs[0]!.input!.all_workspaces = true;
+  entry.runs[0]!.notice = "Herdr on Local restarted since the task was saved.";
+  entry.runs[1]!.notice = "Skipped a workspace no longer open: Local / Gone.";
+  const storage = open(path);
+  storage.save(saved);
+  const loaded = storage.load();
+  expect(loaded.tasks[0]!.input.all_workspaces).toBe(true);
+  expect(loaded.tasks[0]!.runs.map((run) => run.notice)).toEqual([
+    entry.runs[0]!.notice,
+    entry.runs[1]!.notice,
+  ]);
+  storage.close();
+  expect(open(path).load()).toEqual(loaded);
+  // A notice goes with its run.
+  inspect(path, (db) =>
+    expect(db.query("SELECT count(*) AS count FROM run_notices").get()).toEqual(
+      { count: 2 },
+    ),
+  );
+});
+
+test("version three gains the scope flag and run notices in place, and an older Roamgate still reads and writes it", () => {
+  const path = directory();
+  const saved = state();
+  saved.tasks[0]!.runs[1]!.notice = "Skipped a workspace.";
+  createVersionOne(path, saved);
+  inspect(path, (db) =>
+    db.exec(`
+      ALTER TABLE tasks ADD COLUMN notification_mode TEXT;
+      ALTER TABLE tasks ADD COLUMN notifications TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE tasks ADD COLUMN mentions TEXT;
+      PRAGMA user_version = 3;
+    `),
+  );
+  const storage = open(path);
+  const loaded = storage.load();
+  // Nothing was saved for them before: the old notice is gone, nothing else.
+  expect(loaded.tasks[0]!.input).toEqual(saved.tasks[0]!.input);
+  expect(loaded.tasks[0]!.runs[1]!.notice).toBeUndefined();
+  expect(loaded.tasks[0]!.runs[0]).toEqual(saved.tasks[0]!.runs[0]);
+  expect(loaded.proposals).toEqual(saved.proposals);
+  expect(loaded.requests).toEqual(saved.requests);
+  loaded.tasks[0]!.input.all_workspaces = true;
+  loaded.tasks[0]!.runs[1]!.notice = "Skipped a workspace.";
+  storage.save(loaded);
+  storage.close();
+  inspect(path, (db) => {
+    // An older Roamgate accepts versions 1 to 3 only.
+    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 3 });
+    // Its loader reads every column it knows by name.
+    const row = db
+      .query<Record<string, unknown>, []>("SELECT * FROM tasks")
+      .get()!;
+    expect(row.title).toBe("Check workspace");
+    expect(row.all_workspaces).toBe(1);
+    // Its saves: tasks by column name, runs by position.
+    const task = db
+      .query<Record<string, unknown>, []>("SELECT * FROM tasks")
+      .get()!;
+    const runs = db
+      .query<Record<string, unknown>, []>(
+        "SELECT * FROM runs ORDER BY position",
+      )
+      .all();
+    db.transaction(() => {
+      db.exec(
+        "DELETE FROM requests; DELETE FROM runs; DELETE FROM tasks; DELETE FROM proposals",
+      );
+      db.query(
+        `INSERT INTO tasks (
+          id, position, status, created_at, updated_at, next_run_at, due_at,
+          title, prompt, scope, schedule, config, targets, workspaces,
+          notification_mode, notifications, mentions
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        ...([
+          "id",
+          "position",
+          "status",
+          "created_at",
+          "updated_at",
+          "next_run_at",
+          "due_at",
+          "title",
+          "prompt",
+          "scope",
+          "schedule",
+          "config",
+          "targets",
+          "workspaces",
+          "notification_mode",
+          "notifications",
+          "mentions",
+        ].map((column) => task[column]) as never[]),
+      );
+      for (const run of runs)
+        db.query("INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+          ...(Object.values(run) as never[]),
+        );
+    }).immediate();
+  });
+  // Back on this version: the flag the older one did not save is gone, the
+  // run keeps its notice, and nothing else changed.
+  const reloaded = open(path).load();
+  expect(reloaded.tasks[0]!.input.all_workspaces).toBeUndefined();
+  expect(reloaded.tasks[0]!.runs[1]!.notice).toBe("Skipped a workspace.");
+  expect(reloaded.tasks[0]!.runs[0]).toEqual(loaded.tasks[0]!.runs[0]);
+});
+
 test("mention bindings round trip tasks, proposals and admitted runs without keeping completed admissions", () => {
   const path = directory();
   const saved = state();
