@@ -110,6 +110,61 @@ test("terminal transport settings validate input, persist by connection, and rec
   expect(messages.at(-1).error).toBeDefined();
 });
 
+test("agent auto rename settings read and update successfully", async () => {
+  let settings: GuiSettings = {
+    version: 1,
+    auto_rename_agent_tabs: true,
+    repositories: {},
+    workspace_auto_sync: {},
+    custom: {},
+    ui: {},
+  };
+  const messages: any[] = [];
+  let changes = 0;
+  const handler = createSettingsRpcHandler({
+    connectionId: "alpha",
+    connectionGeneration: 1,
+    readSettings: async () => settings,
+    updateSettings: async (update) => {
+      settings = await update(settings);
+      return settings;
+    },
+    herdr: {} as HerdrClient,
+    sshHost: () => undefined,
+    readWorktreeHooks: async () => null,
+    resolveWorkspaceGitRoot: async () => ({ workspace: {}, root: "/tmp" }),
+    workspaceAutoSyncIsRunning: () => false,
+    onWorkspaceAutoSyncSettingsChanged: () => {},
+    safeSend: (_ws, payload) => {
+      messages.push(JSON.parse(payload));
+      return true;
+    },
+    markRpcError: () => {},
+    onAgentAutoRenameSettingsChanged: () => {
+      changes++;
+    },
+  });
+
+  const ws = {} as any;
+  await handler(ws, "1", "settings.agent_auto_rename.get", {});
+  expect(messages.at(-1).result).toEqual({ enabled: true });
+
+  await handler(ws, "2", "settings.agent_auto_rename.update", {
+    enabled: false,
+  });
+  expect(messages.at(-1).result).toEqual({ enabled: false });
+  expect(settings.auto_rename_agent_tabs).toBe(false);
+  expect(changes).toBe(1);
+
+  await handler(ws, "3", "settings.agent_auto_rename.update", {
+    invalid: true,
+  });
+  expect(messages.at(-1).error.message).toContain(
+    "requires only a boolean enabled",
+  );
+  expect(changes).toBe(1);
+});
+
 test("settings RPC errors carry their runtime connection identity", async () => {
   const messages: string[] = [];
   const handler = createSettingsRpcHandler({

@@ -1563,6 +1563,12 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     }
   }
   try {
+    if (method === "tab.rename" && typeof params?.tab_id === "string") {
+      connection.tabAutoRenamer?.markManualRename(
+        params.tab_id,
+        typeof params.label === "string" ? params.label : undefined,
+      );
+    }
     const rawResult = await herdr.call(method, params ?? {}, undefined, () => {
       if (isPaneInput && !requestIsCurrent())
         throw new Error(CONNECTION_CHANGED_DURING_REQUEST);

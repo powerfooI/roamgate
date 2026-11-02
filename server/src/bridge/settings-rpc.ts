@@ -62,6 +62,7 @@ export function createSettingsRpcHandler(args: {
   }>;
   workspaceAutoSyncIsRunning: (key: string) => boolean;
   onWorkspaceAutoSyncSettingsChanged: (key: string, enabled: boolean) => void;
+  onAgentAutoRenameSettingsChanged?: () => void;
   onTerminalTransportSettingsChanged?: (enabled: boolean) => void;
   safeSend: (
     ws: ServerWebSocket<unknown>,
@@ -138,6 +139,33 @@ export function createSettingsRpcHandler(args: {
         : fail(CONNECTION_CHANGED_DURING_REQUEST);
     try {
       if (!requestIsCurrent()) return fail(CONNECTION_CHANGED_DURING_REQUEST);
+      if (method === "settings.agent_auto_rename.get") {
+        const settings = await readSettings();
+        return reply({
+          enabled: settings.auto_rename_agent_tabs !== false,
+        });
+      }
+      if (method === "settings.agent_auto_rename.update") {
+        if (
+          typeof params.enabled !== "boolean" ||
+          Object.keys(params).some((key) => key !== "enabled")
+        )
+          return fail(
+            "settings.agent_auto_rename.update requires only a boolean enabled",
+          );
+        const enabled = params.enabled;
+        const settings = await updateSettings(
+          (current) => ({
+            ...current,
+            auto_rename_agent_tabs: enabled,
+          }),
+          requestIsCurrent,
+        );
+        args.onAgentAutoRenameSettingsChanged?.();
+        return reply({
+          enabled: settings.auto_rename_agent_tabs !== false,
+        });
+      }
       if (method === "settings.terminal_transport.get") {
         const settings = await readSettings();
         return reply({

@@ -50,6 +50,7 @@ import {
   useConnectionClient,
 } from "../useConnectionClient";
 import { AgentIntegrationsSettings } from "./AgentIntegrationsSettings";
+import { AgentAutoRenameSettings } from "./AgentAutoRenameSettings";
 import { AutoSyncRepositoriesDialog } from "./AutoSyncRepositoriesDialog";
 import { CloseButton } from "./CloseButton";
 import { TerminalTransportSettings } from "./TerminalTransportSettings";
@@ -741,14 +742,22 @@ export function ConfigurationDialog({
               hidden={tab !== "Integrations"}
             >
               {tab === "Integrations" ? (
-                <AgentIntegrationsSettings
-                  key={connectionClientScopeKey(
-                    connectionClient,
-                    connectionClient.serverRuntimeGeneration,
-                  )}
-                  connectionLabel={s.connectionLabel}
-                  sshDestination={s.sshDestination}
-                />
+                <>
+                  <AgentAutoRenameSettings
+                    key={`auto-rename-${connectionClientScopeKey(
+                      connectionClient,
+                      connectionClient.serverRuntimeGeneration,
+                    )}`}
+                  />
+                  <AgentIntegrationsSettings
+                    key={connectionClientScopeKey(
+                      connectionClient,
+                      connectionClient.serverRuntimeGeneration,
+                    )}
+                    connectionLabel={s.connectionLabel}
+                    sshDestination={s.sshDestination}
+                  />
+                </>
               ) : null}
             </section>
           </div>
