@@ -101,6 +101,32 @@
   opacity: 1;
 }
 
+/* Over a chat, the pane's buttons sit in its top row, as its own icons do:
+   flat, after a divider, centred on the row. */
+.terminal-pane-toolbar.is-over-chat,
+.terminal-shell:hover .terminal-pane-toolbar.is-over-chat {
+  top: 4px;
+  gap: 4px;
+  padding: 0 0 0 4px;
+  border: none;
+  border-left: 1px solid var(--border-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+}
+
+.terminal-pane-toolbar.is-over-chat .terminal-pane-action {
+  width: 28px;
+  height: 28px;
+  border: none;
+  color: var(--muted);
+}
+
+.terminal-pane-toolbar.is-over-chat .terminal-pane-action:hover:not(:disabled) {
+  color: var(--text-strong);
+}
+
 .terminal-pane-action {
   display: inline-flex;
   align-items: center;
@@ -575,4 +601,24 @@
   pointer-events: none;
   stroke: var(--accent);
   stroke-width: 2px;
+}
+
+/* An agent pane shown as a chat: the conversation over its terminal, which
+   keeps running underneath. */
+.terminal-chat-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  min-height: 0;
+  background: var(--shell-panel);
+}
+
+.terminal-chat-layer > .agent-history-drawer.is-embedded {
+  border: 0;
+  border-radius: 0;
+}
+
+.terminal-main.is-chat > :not(.terminal-chat-layer) {
+  visibility: hidden;
 }

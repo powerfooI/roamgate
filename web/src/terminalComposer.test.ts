@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   activateTerminalComposerDraftScope,
+  appendToPaneComposerDraft,
   beginTerminalComposerSubmission,
   beginTerminalComposerUpload,
   clearTerminalComposerDraft,
@@ -60,6 +61,22 @@ describe("terminal composer drafts", () => {
 
     clearTerminalComposerDraft(first);
     clearTerminalComposerDraft(second);
+  });
+
+  test("appends to the draft the pane's composer and chat box read", () => {
+    const pane = { pane_id: "pane-append", terminal_id: "term-append" };
+    const key = terminalComposerDraftKey(
+      "conn-a",
+      1,
+      "pane-append",
+      "term-append",
+    );
+    appendToPaneComposerDraft("conn-a", 1, pane, "first");
+    expect(readTerminalComposerDraft(key)).toBe("first");
+    writeTerminalComposerDraft(key, "mine\n");
+    appendToPaneComposerDraft("conn-a", 1, pane, "feedback");
+    expect(readTerminalComposerDraft(key)).toBe("mine\n\nfeedback");
+    clearTerminalComposerDraft(key);
   });
 
   test("drops empty drafts instead of retaining them", () => {
