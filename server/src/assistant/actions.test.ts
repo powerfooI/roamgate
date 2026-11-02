@@ -1009,6 +1009,27 @@ describe("confirmed Ranger action targets", () => {
     expect(f.mutations).toEqual(["workspace.create"]);
   });
 
+  test("an unverified creation directory never grants the observed workspace", async () => {
+    const f = fixture();
+    const prepared = await f.prepare("create_workspace", { label: "New" });
+    const original = f.call.getMockImplementation()!;
+    f.call.mockImplementation(
+      async (method, params = {}, timeout, beforeSend) => {
+        const response = await original(method, params, timeout, beforeSend);
+        if (method === "workspace.create") {
+          for (const pane of f.panes)
+            if (pane.workspace_id === "w2")
+              pane.cwd = "/another-private-directory";
+        }
+        return response;
+      },
+    );
+    const result = await prepared.execute();
+    expect(result.status).toBe("uncertain");
+    expect(result).not.toHaveProperty("created");
+    expect(f.mutations).toEqual(["workspace.create"]);
+  });
+
   test("an unverified write is uncertain, sanitized, and is never replayed", async () => {
     const f = fixture();
     const prepared = await f.prepare("create_workspace", { label: "New" });
