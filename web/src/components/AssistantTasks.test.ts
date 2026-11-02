@@ -757,6 +757,35 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
     }
   });
 
+  test("a task's workspaces of the same name show their ids", async () => {
+    const ui = await install();
+    try {
+      const worktree = { ...workspace, workspace_id: "project-wt" };
+      const elsewhere = { ...workspace, workspace_id: "x", label: "Other" };
+      await ui.render(
+        snapshot([
+          task("twins", { workspaces: [workspace, worktree, elsewhere] }),
+        ]),
+      );
+      await React.act(async () =>
+        ui.container
+          .querySelector<HTMLButtonElement>(".assistant-task-row")!
+          .click(),
+      );
+      expect(
+        [...ui.container.querySelectorAll(".assistant-task-workspaces li")].map(
+          (item) => item.textContent,
+        ),
+      ).toEqual([
+        "Local / Project (project)",
+        "Local / Project (project-wt)",
+        "Local / Other",
+      ]);
+    } finally {
+      await ui.close();
+    }
+  });
+
   test("task history survives reselection and stays selectable while another run loads or fails", async () => {
     const ui = await install();
     try {

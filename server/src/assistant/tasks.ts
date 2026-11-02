@@ -502,6 +502,14 @@ export function createAssistantTasks(options: {
     prepared: PreparedTask,
     signal?: AbortSignal,
   ): Promise<PreparedTask & { notice?: string }>;
+  /**
+   * A task over fixed workspaces without those closed since it was saved,
+   * with what it skipped to show on the run, or nothing when none closed.
+   */
+  narrow?(
+    prepared: PreparedTask,
+    signal?: AbortSignal,
+  ): Promise<(PreparedTask & { notice: string }) | undefined>;
   child(
     run: SavedTaskRun,
     directory: string,
@@ -1151,6 +1159,18 @@ export function createAssistantTasks(options: {
             bump(entry.task.id);
           }
         });
+      } else if (!recover && !run.input.all_workspaces && options.narrow) {
+        // A new run over fixed workspaces runs over those still open.
+        const narrowed = await options.narrow(seal(run), admission.signal);
+        if (disposed || !["running", "waiting"].includes(run.status)) {
+          if (busy === run.id) busy = undefined;
+          return;
+        }
+        if (narrowed)
+          change(() => {
+            Object.assign(run, seal(narrowed));
+            run.notice = narrowed.notice;
+          });
       }
       await validate(run, admission.signal);
       if (disposed || !["running", "waiting"].includes(run.status)) {
@@ -1629,8 +1649,14 @@ export function createAssistantTasks(options: {
         const sealed = seal(entry);
         // Dynamic tasks validate their fresh scope in launch, including model
         // and permission checks. Their saved workspace identities may be gone.
+        // Fixed ones run over the workspaces still open (narrow in launch).
         if (!sealed.input.all_workspaces || !options.rescope)
-          await check(entry.task.id, sealed);
+          await check(
+            entry.task.id,
+            (!sealed.input.all_workspaces &&
+              (await options.narrow?.(sealed))) ||
+              sealed,
+          );
         entry = find(id);
         if (entry.task.status === "cancelled")
           throw new Error("This task was cancelled.");

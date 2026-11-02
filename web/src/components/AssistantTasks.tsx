@@ -1039,6 +1039,16 @@ export function AssistantTasks({
                           <li key={workspaceKey(ref)}>
                             <span>{ref.connection_label} / </span>
                             {ref.label}
+                            {/* Two workspaces may share a name, like a
+                                checkout and its worktree: tell them apart. */}
+                            {task.workspaces.some(
+                              (other) =>
+                                other !== ref &&
+                                other.connection_id === ref.connection_id &&
+                                other.label === ref.label,
+                            ) ? (
+                              <small> ({ref.workspace_id})</small>
+                            ) : null}
                           </li>
                         ))}
                       </ul>
