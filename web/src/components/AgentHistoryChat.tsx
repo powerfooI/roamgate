@@ -249,6 +249,12 @@ function UserText({
             target="_blank"
             rel="noreferrer"
             title={piece.image}
+            // A click leaves the focus where it was (the message box), for
+            // the image to give it back there: in the list, it would stop
+            // the chat following new messages.
+            onMouseDown={(event) => {
+              if (event.button === 0) event.preventDefault();
+            }}
             onClick={(event) => {
               // Cmd / Ctrl / Shift / middle click still open a tab.
               if (
@@ -274,8 +280,6 @@ function UserText({
           src={urlOf(shown)}
           name={nameOf(shown.image)}
           onClose={() => setShown(null)}
-          // Focus left in the list would stop the chat following new messages.
-          returnFocus={false}
         />
       ) : null}
     </>

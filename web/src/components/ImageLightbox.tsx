@@ -5,36 +5,34 @@ import { ExternalLink, X } from "lucide-react";
 
 /**
  * An image over the whole app, fitted to the window: a click on it shows it
- * at its own size, Esc, the backdrop or the close button put it away.
+ * at its own size, Esc, the backdrop or the close button put it away and
+ * give the focus back to what had it.
  */
 export function ImageLightbox({
   src,
   name,
   onClose,
-  returnFocus = true,
 }: {
   src: string;
   name: string;
   onClose: () => void;
-  /** Off, nothing keeps the focus once it is put away. */
-  returnFocus?: boolean;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [actualSize, setActualSize] = useState(false);
+  // What has the focus as it opens, before its close button takes it.
+  const [opener] = useState(() =>
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
-    const opener =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
     if (typeof dialog.showModal === "function") dialog.showModal();
     else dialog.setAttribute("open", "");
     return () => {
       if (dialog.open) dialog.close?.();
-      if (returnFocus) opener?.focus({ preventScroll: true });
-      // close() gives it back on its own.
-      else if (opener && document.activeElement === opener) opener.blur();
+      opener?.focus({ preventScroll: true });
     };
     // Once, as it opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
