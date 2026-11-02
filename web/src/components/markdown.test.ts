@@ -37,9 +37,7 @@ function hrefs(html: string): (string | null)[] {
 function runsScript(href: string | null) {
   return (
     href !== null &&
-    /^javascript:/i.test(
-      [...href].filter((char) => char > " " && char !== "\u007f").join(""),
-    )
+    new URL(href, "https://roamgate.invalid/").protocol === "javascript:"
   );
 }
 
