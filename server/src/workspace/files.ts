@@ -1,5 +1,5 @@
 import type { HerdrClient } from "../bridge/herdr-client";
-import { sshCommandArgv } from "../bridge/ssh-command";
+import { sshReadCommandArgv } from "../bridge/ssh-command";
 import { checkoutPath as getCheckoutPath } from "./utils";
 import {
   downloadContentDisposition,
@@ -535,7 +535,7 @@ export function createFileHandlers({
       }
       tried.add(candidate);
       const argv = host
-        ? sshCommandArgv(
+        ? sshReadCommandArgv(
             host,
             `git -C ${shQuote(candidate)} rev-parse --show-toplevel`,
           )

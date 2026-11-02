@@ -394,9 +394,16 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
       await ui.input("Task prompt", "  Summarize progress  ");
       await ui.input("Run at", "2030-05-01T08:30");
       expect(ui.button("Save and enable").disabled).toBe(true);
+      // Every workspace, new ones too, and a quick way to tick them all.
+      expect(
+        ui.container.querySelector(".assistant-workspace-all input"),
+      ).not.toBeNull();
+      expect(ui.button("Select all")).toBeTruthy();
       await React.act(async () =>
         ui.container
-          .querySelector<HTMLInputElement>('[type="checkbox"]')!
+          .querySelector<HTMLInputElement>(
+            '.assistant-workspace-choice [type="checkbox"]',
+          )!
           .click(),
       );
       expect(ui.button("Save and enable").disabled).toBe(false);
@@ -745,6 +752,67 @@ if (process.env.ROAMGATE_ASSISTANT_TASK_DOM_TEST !== "1") {
       expect(ui.container.textContent).not.toContain(
         "Stale notification output",
       );
+    } finally {
+      await ui.close();
+    }
+  });
+
+  test("a task's workspaces of the same name show their ids", async () => {
+    const ui = await install();
+    try {
+      const worktree = { ...workspace, workspace_id: "project-wt" };
+      const elsewhere = { ...workspace, workspace_id: "x", label: "Other" };
+      await ui.render(
+        snapshot([
+          task("twins", { workspaces: [workspace, worktree, elsewhere] }),
+        ]),
+      );
+      await React.act(async () =>
+        ui.container
+          .querySelector<HTMLButtonElement>(".assistant-task-row")!
+          .click(),
+      );
+      expect(
+        [...ui.container.querySelectorAll(".assistant-task-workspaces li")].map(
+          (item) => item.textContent,
+        ),
+      ).toEqual([
+        "Local / Project (project)",
+        "Local / Project (project-wt)",
+        "Local / Other",
+      ]);
+    } finally {
+      await ui.close();
+    }
+  });
+
+  test("a failed last run offers a fresh run, an older failed one does not", async () => {
+    const ui = await install();
+    try {
+      const failed = (id: string): AssistantTaskRun => ({
+        ...run("retry", id, "failed"),
+        error: "This run could not safely resume.",
+      });
+      const latest = failed("latest");
+      const older = failed("older");
+      const saved = task("retry", { last_run: latest });
+      ui.get.mockImplementation(async (_taskId, runId) => ({
+        task: saved,
+        runs: [latest, older],
+        run: { ...(runId === "older" ? older : latest), messages: [] },
+      }));
+      await ui.render({ ...snapshot([saved]), running: false });
+      await React.act(async () =>
+        ui.container
+          .querySelector<HTMLButtonElement>(".assistant-task-row")!
+          .click(),
+      );
+      await ui.click("Start a fresh run");
+      expect(ui.call).toHaveBeenCalledWith("task.run_now", {
+        task_id: "retry",
+      });
+      await ui.input("Task run", "older");
+      expect(() => ui.button("Start a fresh run")).toThrow();
     } finally {
       await ui.close();
     }

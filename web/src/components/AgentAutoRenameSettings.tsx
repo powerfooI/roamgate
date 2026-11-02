@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Info, Sparkles } from "lucide-react";
-import { useConnectionClient } from "../useConnectionClient";
+import {
+  useConnectionClient,
+  useConnectionReady,
+} from "../useConnectionClient";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 const AUTO_RENAME_DESCRIPTION =
-  "Automatically updates the tab title with the session name when an agent " +
-  "(such as Claude Code, Hermes, or Antigravity) is active. Preserves custom names set manually " +
-  "and keeps the session name after the agent finishes.";
+  "Names default tabs from the active agent session or its terminal title. " +
+  "Existing custom names are preserved, including after reconnecting. " +
+  "Custom names stop automatic updates; default tab names remain eligible.";
 
 export function AgentAutoRenameSettings() {
   const client = useConnectionClient();
+  const ready = useConnectionReady(client);
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,31 +49,49 @@ export function AgentAutoRenameSettings() {
 
   useEffect(() => {
     mounted.current = true;
-    void load();
+    pending.current = false;
+    setSaving(false);
+    setEnabled(null);
+    setError(null);
+    if (ready) void load();
     return () => {
       mounted.current = false;
       sequence.current += 1;
     };
-  }, [client, load]);
+  }, [client, load, ready]);
 
   const save = async (value: boolean) => {
     if (pending.current || !client.isCurrent()) return;
     pending.current = true;
     setSaving(true);
     setError(null);
-    sequence.current += 1;
+    const request = ++sequence.current;
     try {
       const result = await client.call("settings.agent_auto_rename.update", {
         enabled: value,
       });
-      if (!mounted.current || !client.isCurrent()) return;
-      setEnabled(result.enabled === true);
+      if (
+        !mounted.current ||
+        !client.isCurrent() ||
+        request !== sequence.current
+      )
+        return;
+      if (typeof result?.enabled !== "boolean")
+        throw new Error("Invalid auto-rename settings");
+      setEnabled(result.enabled);
     } catch (e) {
-      if (!mounted.current || !client.isCurrent()) return;
+      if (
+        !mounted.current ||
+        !client.isCurrent() ||
+        request !== sequence.current
+      )
+        return;
       setError((e as Error).message);
     } finally {
-      pending.current = false;
-      if (mounted.current) setSaving(false);
+      if (mounted.current && request === sequence.current) {
+        pending.current = false;
+        setSaving(false);
+      }
     }
   };
 
@@ -122,7 +144,7 @@ export function AgentAutoRenameSettings() {
           aria-labelledby="agent-auto-rename-label"
           aria-describedby="agent-auto-rename-description"
           aria-checked={enabled === true}
-          aria-disabled={enabled === null || saving || !client.isCurrent()}
+          disabled={enabled === null || saving || !client.isCurrent()}
           className={"settings-switch" + (enabled ? " is-on" : "")}
           onClick={() => {
             if (enabled !== null) void save(!enabled);

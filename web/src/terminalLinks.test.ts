@@ -3,6 +3,7 @@ import {
   findTerminalHttpLinks,
   sanitizeTerminalHttpUrl,
   terminalFileUriPath,
+  terminalForwardCandidate,
 } from "./terminalLinks";
 
 describe("terminal HTTP links", () => {
@@ -125,5 +126,37 @@ describe("terminal OSC 8 local file URIs", () => {
     "vscode://file/tmp/docs",
   ])("rejects unsupported or unsafe target %s", (uri) => {
     expect(terminalFileUriPath(uri)).toBeNull();
+  });
+});
+
+describe("forward candidates", () => {
+  test("only loopback URLs are worth forwarding", () => {
+    expect(terminalForwardCandidate("http://localhost:5173/")?.port).toBe(5173);
+    expect(terminalForwardCandidate("http://127.0.0.1:3000")?.port).toBe(3000);
+    // Bound to every interface on the remote is still the remote's port.
+    expect(terminalForwardCandidate("http://0.0.0.0:8080/app")?.port).toBe(
+      8080,
+    );
+
+    // A routable host already works from here; forwarding it would be wrong.
+    expect(terminalForwardCandidate("https://example.com/app")).toBeNull();
+    expect(terminalForwardCandidate("http://192.168.1.10:3000")).toBeNull();
+    expect(terminalForwardCandidate("not a url")).toBeNull();
+  });
+
+  test("defaults the port from the scheme when none is written", () => {
+    expect(terminalForwardCandidate("http://localhost/")?.port).toBe(80);
+    expect(terminalForwardCandidate("https://localhost/")?.port).toBe(443);
+  });
+
+  test("an IPv6 loopback link is rewritten to localhost on the local port", () => {
+    const candidate = terminalForwardCandidate("http://[::1]:5173/ws?x=1#top");
+    expect(candidate?.port).toBe(5173);
+    expect(candidate?.rewrite(5180)).toBe("http://localhost:5180/ws?x=1#top");
+  });
+
+  test("rewrites to the local port while keeping path and query", () => {
+    const candidate = terminalForwardCandidate("http://localhost:3000/app?x=1");
+    expect(candidate?.rewrite(4123)).toBe("http://localhost:4123/app?x=1");
   });
 });

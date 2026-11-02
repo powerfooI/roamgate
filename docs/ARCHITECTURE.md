@@ -24,6 +24,12 @@ Browser RPC sends `{ id, method, params }` and receives `{ id, result }` or
 snapshot, and events during a refresh queue another refresh: this reconciles
 missed changes but is not a replayable event log.
 
+A request may add `lane: "background"` for work nobody is waiting on (PR/MR
+badges). The browser sends at most four such calls per connection at once,
+shares an identical call already in flight, and sends interactive calls at once
+whatever the background queue holds. The bridge runs a background request's SSH
+commands in the background lane (see [SSH transport](#ssh-transport)).
+
 ## Connection isolation
 
 `ConnectionManager` owns the shared profiles and one `ConnectionRuntime` per
@@ -170,6 +176,25 @@ edits or sending input. Unsent input may contain sensitive information and
 remains in this browser until cleared. If browser storage is unavailable, only
 in-memory reconnect recovery is available.
 
+### Worktree Git status
+
+`workspace.list` attaches each checkout's last known `worktree.git_status`
+without waiting on Git, except that the first list to see a checkout waits up
+to 300 ms for its first read; a slower read (such as a cold SSH login) leaves
+that list without a status and arrives as a push. Entries older
+than 20 seconds, or invalidated by Roamgate Git actions, auto-sync and finished
+agent turns, refresh in the background: one refresh per runtime at a time, with
+one batched SSH command on remote hosts and `GIT_OPTIONAL_LOCKS=0` so polling
+never takes the user's `index.lock`. A transport failure keeps the previous
+status until the next refresh 20 seconds later or an invalidation: SSH exiting
+non-zero, a process that cannot start, and a Git or SSH read that exceeds its
+timeout (8 seconds, longer for large remote batches) all count as one, so a hung
+Git never replaces a known status with an error. A checkout with no previous
+status shows the error instead. Stopping a runtime stops its refreshes.
+Changed checkouts arrive as a `workspace.git_status` event whose `data.statuses`
+holds `{ checkout_path, git_status }` entries; the browser patches matching
+workspaces in place and reapplies pushes that overlap an in-flight refresh.
+
 ### Last step capture limits and ownership
 
 Last step snapshots the checkout when the workspace goes from active to idle.
@@ -260,7 +285,13 @@ state; sends are never replayed.
 - **Scope:** no workspaces are allowed by default. Each turn captures concrete
   connection/workspace pairs (at most 512) and rechecks runtime leases around
   every read. Only the dedicated confirmation can enable high-permission mode
-  (`approval_mode: "auto"` with `workspace_scope: "all"`).
+  (`approval_mode: "auto"` with `workspace_scope: "all"`, "Full access"); its
+  turns also reach workspaces created after they started, which join the turn
+  (`extendScope`) when a tool names one or lists the scope. A workspace Ranger
+  creates (a `created` action result) joins the running turn at once and the
+  chat's later turns (`created_workspaces` in the chat's saved state), without
+  changing the settings' grant; tasks, which outlive the chat, count only the
+  grant. Like a grant, it is dropped once a complete listing no longer has it.
 - **Actions:** a proposal pins its runtime lease and target, and
   `action.confirm` accepts only the proposal ID. A receipt is saved before
   dispatch, one action runs at a time, and failed or uncertain actions are never
@@ -282,10 +313,20 @@ state; sends are never replayed.
   directory; one bridge process must own it. After a restart, a turn resumes
   only after its endpoints, Herdr boot IDs, and workspaces are re-verified;
   Claude Code turns instead stop without replay as described above.
-- **Tasks** live in `tasks.sqlite`; each state change commits before it is
+- **Tasks** live in `tasks.sqlite`, at `user_version` 3: later additions
+  (`tasks.all_workspaces`, the `run_notices` table) are made in place, so an
+  older bridge, which refuses other versions, still opens it after a rollback.
+  Each state change commits before it is
   published. One scheduled run executes at a time, overdue occurrences are
   combined, and runs re-verify identities and permissions. Run results emit an
   `assistant_notification` push; custom notices are deduplicated by event key.
+- **Task runs over fixed workspaces** leave out the workspaces closed since the
+  task was saved and name them in the run's notice (a workspace reopened under
+  a new id is named, not used); a run fails when none is left, or when one
+  still open is no longer allowed. After a connection's Herdr restarted (new
+  boot ID), an interrupted run does not resume; a new run reads its workspaces
+  again, keeps one whose ID still holds the same path and checkout under the
+  new boot ID, and skips and names one whose ID now holds another workspace.
 
 ## Task notifications
 
@@ -318,6 +359,53 @@ Destinations must be an OpenSSH alias or `user@host`, passed after `--`.
 Host-key checks stay on and authentication is non-interactive. Owned paths are
 removed only after the child process exits. Roamgate never installs remote
 software. See [connection setup](./DEPLOYMENT.md#multiple-and-remote-herdr-connections).
+
+Each Unix-host SSH profile runtime owns two OpenSSH connections. Connection A is
+the tunnel above and carries only Herdr's control and render sockets. Connection
+B is a command master (`ssh -M -S <runtime dir>/m.ctl -N`) started alongside the
+tunnel, kept across tunnel reconnects, and stopped before the runtime directory
+is removed. Stopping sends `-O stop`, so new commands log in on their own, and
+gives commands in flight over the master up to ten seconds before killing it.
+A master that exits after it was ready is started again ten seconds
+later, or at the next tunnel start if that comes first, each time it exits. A
+master that never became ready is not retried before the next tunnel start.
+`ROAMGATE_DISABLE_SSH_MASTER=1` turns connection B off; the legacy CLI
+connection and Windows-host profiles never have one, and the Windows stdio
+bridges keep one connection each outside the session limit.
+
+Host commands built by `sshCommandArgv` (Git, files, search, worktrees, hooks,
+uploads, the remote HOME probe) add `-S <socket>` while the master of a runtime
+reaching that destination listens. `-S` overrides the fixed `ControlPath=none`,
+which a later `-o ControlPath=` cannot, and `ControlMaster=no` keeps commands
+clients: no user `ssh_config` socket is ever used, and OpenSSH itself falls back
+to a cold login when the socket is missing, stale, or refuses a session. The
+masters are registered per runtime, so stopping one profile never stops another
+profile's master on the same host. The shared process helpers, file search
+and uploads allow eight concurrent sessions per destination, multiplexed or
+cold, below sshd's default `MaxSessions 10`. Further commands queue, at most 64
+per destination; the wait counts against the command's own timeout (60 seconds
+without one) and ends when an upload's request is aborted. A multiplexed
+command that exits 255 after its master died (`-O check` fails) may still be
+running remotely, so only read-only commands built with `sshReadCommandArgv`
+and run through the process helpers (Git status, file listing and reads, agent
+session reads, workspace path checks, the HOME probe) are rerun once cold. File search streams its
+output itself and is not rerun. Every other command, including worktree, hook,
+upload, write, delete, and Git actions, reports that failure instead of risking
+a second run. A 255 from a live master is the remote command's status.
+
+Commands run in one of two lanes. Interactive work, the default, is what the
+user waits on. Background work (the Git status refresh, and requests the
+browser marks background) holds at most five of the eight sessions, so three
+always stay free for the user, and waits behind every queued interactive
+command: a freed session goes to the oldest interactive waiter first. Its own
+queue holds at most 64 commands; past that a background command is shed at
+once. The RPC log treats that error as expected, a shed Git status read keeps
+the previous status like any transport failure, and the next round asks again.
+
+
+At startup, orphaned command masters are stopped only in private, user-owned
+runtime directories whose recorded Roamgate owner process is gone. A failed
+exit request retains the directory and socket for a later cleanup attempt.
 
 ## Distribution model
 

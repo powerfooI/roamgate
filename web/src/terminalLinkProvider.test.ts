@@ -945,3 +945,78 @@ describe("terminal touch link lookup", () => {
     expect(await failed).toBeNull();
   });
 });
+
+describe("http links offered to a handler", () => {
+  const clickEvent = () =>
+    ({
+      preventDefault() {},
+      ctrlKey: true,
+      metaKey: false,
+      shiftKey: false,
+      altKey: false,
+    }) as MouseEvent;
+
+  const captureOpens = async (
+    onHttpLink: (url: string) => boolean,
+  ): Promise<string[]> => {
+    const f = fixture(["serving http://localhost:5173/ now"], 40);
+    registerTerminalLinkProvider(
+      f.term,
+      () => {},
+      undefined,
+      () => false,
+      undefined,
+      onHttpLink,
+    );
+    const [link] = await f.links(1);
+    const opened: string[] = [];
+    // There is no window in this environment. The stub needs a listener too:
+    // once window exists, the shortcut module stops short-circuiting and
+    // subscribes to storage events.
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "window");
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        open: (url: string) => opened.push(url),
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      },
+    });
+    // Ctrl+Click only opens a link where that is the binding, so pin the
+    // preset rather than inherit the host platform's (macOS uses Meta+Click).
+    const previousPreset = getShortcutSnapshot().preferences.active;
+    try {
+      selectShortcutPreset("linux");
+      link!.activate(clickEvent(), link!.text);
+    } finally {
+      selectShortcutPreset(previousPreset);
+      if (previous) Object.defineProperty(globalThis, "window", previous);
+      else delete (globalThis as { window?: unknown }).window;
+    }
+    return opened;
+  };
+
+  test("a handler that takes the link stops it being opened", async () => {
+    const taken: string[] = [];
+    const opened = await captureOpens((url) => {
+      taken.push(url);
+      return true;
+    });
+    expect(taken).toEqual(["http://localhost:5173/"]);
+    expect(opened).toEqual([]);
+  });
+
+  test("declining opens the link as before", async () => {
+    expect(await captureOpens(() => false)).toEqual(["http://localhost:5173/"]);
+  });
+
+  test("a throwing handler still opens the link", async () => {
+    // A click that ends in nothing is worse than one that opens the wrong
+    // host, so the handler's failures must not swallow it.
+    expect(
+      await captureOpens(() => {
+        throw new Error("handler exploded");
+      }),
+    ).toEqual(["http://localhost:5173/"]);
+  });
+});

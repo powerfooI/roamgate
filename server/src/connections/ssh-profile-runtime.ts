@@ -1,9 +1,20 @@
-import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
+import {
+  SSH_RUNTIME_DIRECTORY_ROOT,
+  SSH_RUNTIME_OWNER_FILE,
+} from "../bridge/ssh-master";
 import {
   assertSshTunnelPlatformSupported,
   type SshTunnelConfig,
 } from "../bridge/ssh-tunnel";
+import { roamgateEnv } from "../config/environment";
 import type { SshConnectionProfile } from "./profiles";
 
 export type SshRuntimeConfigDependencies = {
@@ -11,7 +22,10 @@ export type SshRuntimeConfigDependencies = {
   chmod?: (path: string, mode: number) => void;
   stat?: (path: string) => { isDirectory(): boolean; mode: number };
   removeDirectory?: (path: string) => void;
+  /** Records this process as the directory's owner for the orphan sweep. */
+  writeOwner?: (directory: string) => void;
   platform?: string;
+  environment?: Record<string, string | undefined>;
 };
 
 export function createSshProfileRuntimeConfig(
@@ -21,7 +35,8 @@ export function createSshProfileRuntimeConfig(
   const platform = dependencies.platform ?? process.platform;
   assertSshTunnelPlatformSupported(platform);
   const directory =
-    dependencies.createDirectory?.() ?? mkdtempSync("/tmp/roamgate-ssh-");
+    dependencies.createDirectory?.() ??
+    mkdtempSync(join(SSH_RUNTIME_DIRECTORY_ROOT, "roamgate-ssh-"));
   const chmod = dependencies.chmod ?? chmodSync;
   const stat = dependencies.stat ?? statSync;
   const removeDirectory =
@@ -32,16 +47,26 @@ export function createSshProfileRuntimeConfig(
     const directoryStat = stat(directory);
     const socketPath = join(directory, "control.sock");
     const clientSocketPath = join(directory, "render.sock");
+    const masterControlPath = join(directory, "m.ctl");
     if (
       !directoryStat.isDirectory() ||
       (platform !== "win32" && (directoryStat.mode & 0o077) !== 0) ||
       Buffer.byteLength(socketPath) > 100 ||
-      Buffer.byteLength(clientSocketPath) > 100
+      Buffer.byteLength(clientSocketPath) > 100 ||
+      // The master first binds "<path>.<16 random chars>", then renames it.
+      Buffer.byteLength(masterControlPath) + 17 > 100
     ) {
       throw new Error(
         "SSH runtime directory must be a private directory with short socket paths",
       );
     }
+    (
+      dependencies.writeOwner ??
+      ((path: string) =>
+        writeFileSync(join(path, SSH_RUNTIME_OWNER_FILE), `${process.pid}\n`, {
+          mode: 0o600,
+        }))
+    )(directory);
     const remoteControlSocketPath =
       profile.remote_control_socket_path || undefined;
     const remoteClientSocketPath =
@@ -60,6 +85,10 @@ export function createSshProfileRuntimeConfig(
       remoteSocketPath: remoteControlSocketPath,
       remoteClientSocketPath: remoteClientSocketPath,
       ownedRuntimeDirectory: directory,
+      masterControlPath:
+        roamgateEnv("DISABLE_SSH_MASTER", dependencies.environment) === "1"
+          ? undefined
+          : masterControlPath,
     };
   } catch (error) {
     removeDirectory(directory);

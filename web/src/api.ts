@@ -9,6 +9,13 @@ import {
   type AssistantSnapshot,
   type AssistantTaskNotification,
 } from "../../shared/assistant";
+import {
+  type BackgroundLane,
+  backgroundCallKey,
+  createBackgroundLane,
+  type RpcCallOptions,
+  type RpcLane,
+} from "./rpcLanes";
 import { clearSavedTerminalComposerDrafts } from "./terminalComposer";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
@@ -274,6 +281,18 @@ export interface UiSettingPush {
   value: unknown;
 }
 
+/** One on-demand SSH port forward, as the server currently has it. */
+export interface ForwardRecord {
+  id: string;
+  connection_id: string;
+  direction: "local" | "remote";
+  remote_port: number;
+  local_port: number;
+  label?: string;
+  state: "starting" | "open" | "failed" | "closed";
+  error?: string;
+}
+
 export interface BridgeControlMsg {
   type: "pause_connection";
   reason?: string;
@@ -292,10 +311,12 @@ export interface ConnectionClient {
   readonly connectionId: string;
   readonly generation: number;
   readonly serverRuntimeGeneration: number | null;
+  /** `options.lane` "background" keeps the call out of the user's way. */
   call(
     method: string,
     params?: Record<string, unknown>,
     timeoutMs?: number | null,
+    options?: RpcCallOptions,
   ): Promise<any>;
   isCurrent(): boolean;
   acceptsServerGeneration(value: unknown): boolean;
@@ -412,6 +433,8 @@ export class Bridge {
   private ws: WebSocket | null = null;
   private seq = 0;
   private pending = new Map<string, Pending>();
+  /** Background calls of each connection, a few at a time. */
+  private backgroundLanes = new Map<string, BackgroundLane>();
   private eventHandlers = new Set<(e: HerdrEventMsg) => void>();
   private assistantHandlers = new Set<(snapshot: AssistantSnapshot) => void>();
   private assistantNotificationHandlers = new Set<
@@ -426,6 +449,7 @@ export class Bridge {
   >();
   private popupHandlers = new Set<(popup: PopupStatePush) => void>();
   private uiSettingsHandlers = new Set<(push: UiSettingPush) => void>();
+  private forwardsHandlers = new Set<(forwards: ForwardRecord[]) => void>();
   private statusHandlers = new Set<(s: ConnectionStatus) => void>();
   private controlHandlers = new Set<(c: BridgeControlMsg) => void>();
   private helloHandlers = new Set<(hello: BridgeHello) => void>();
@@ -517,37 +541,55 @@ export class Bridge {
     const acceptsServerGeneration = (value: unknown) =>
       !requiresRuntimeGeneration() ||
       (serverRuntimeGeneration !== null && value === serverRuntimeGeneration);
+    const send = (
+      method: string,
+      params: Record<string, unknown>,
+      timeoutMs: number | null,
+      lane: RpcLane,
+    ): Promise<any> => {
+      if (!this.helloAcceptedForSocket) {
+        return Promise.reject(new Error("bridge hello is unavailable"));
+      }
+      if (
+        generation !== this._clientGeneration ||
+        connectionId !== this._activeConnectionId
+      ) {
+        return Promise.reject(new Error("connection changed during request"));
+      }
+      if (
+        requiresRuntimeGeneration() &&
+        (serverRuntimeGeneration === null ||
+          this.runtimeGenerations.get(connectionId) !== serverRuntimeGeneration)
+      ) {
+        return Promise.reject(
+          new Error("connection runtime generation is unavailable"),
+        );
+      }
+      return this.callScoped(
+        connectionId,
+        generation,
+        serverRuntimeGeneration,
+        method,
+        params,
+        timeoutMs,
+        lane,
+      );
+    };
     return {
       connectionId,
       generation,
       serverRuntimeGeneration,
-      call: (method, params = {}, timeoutMs = RPC_TIMEOUT_MS) => {
-        if (!this.helloAcceptedForSocket) {
-          return Promise.reject(new Error("bridge hello is unavailable"));
-        }
-        if (
-          generation !== this._clientGeneration ||
-          connectionId !== this._activeConnectionId
-        ) {
-          return Promise.reject(new Error("connection changed during request"));
-        }
-        if (
-          requiresRuntimeGeneration() &&
-          (serverRuntimeGeneration === null ||
-            this.runtimeGenerations.get(connectionId) !==
-              serverRuntimeGeneration)
-        ) {
-          return Promise.reject(
-            new Error("connection runtime generation is unavailable"),
-          );
-        }
-        return this.callScoped(
-          connectionId,
-          generation,
-          serverRuntimeGeneration,
-          method,
-          params,
-          timeoutMs,
+      call: (method, params = {}, timeoutMs = RPC_TIMEOUT_MS, options = {}) => {
+        if (options.lane !== "background")
+          return send(method, params, timeoutMs, "interactive");
+        // Checked again when its turn comes: the connection may have changed.
+        return this.backgroundLane(connectionId).run(
+          backgroundCallKey(
+            `${generation}:${serverRuntimeGeneration}`,
+            method,
+            params,
+          ),
+          () => send(method, params, timeoutMs, "background"),
         );
       },
       isCurrent: () =>
@@ -775,6 +817,7 @@ export class Bridge {
     const hasTerminalClosed = owns("terminal_closed");
     const hasPopup = owns("popup");
     const hasUiSettings = owns("ui_settings");
+    const hasForwards = owns("forwards");
     const hasControl = owns("control");
     const hasAssistant = owns("assistant");
     const hasAssistantNotification = owns("assistant_notification");
@@ -787,6 +830,7 @@ export class Bridge {
       hasTerminalClosed,
       hasPopup,
       hasUiSettings,
+      hasForwards,
       hasControl,
       hasAssistant,
       hasAssistantNotification,
@@ -1019,6 +1063,16 @@ export class Bridge {
       return;
     }
 
+    if (hasForwards) {
+      // Machine-wide, like the preferences push: a forward opened in one tab
+      // is listed in every tab, whichever connection is active there.
+      if (Array.isArray(msg.forwards)) {
+        const forwards = msg.forwards as ForwardRecord[];
+        this.forwardsHandlers.forEach((handler) => handler(forwards));
+      }
+      return;
+    }
+
     if (hasUiSettings) {
       // Accepted regardless of the active Herdr connection: the preference
       // belongs to the Roamgate server that served this page.
@@ -1045,6 +1099,7 @@ export class Bridge {
     method: string,
     params: Record<string, unknown>,
     timeoutMs: number | null,
+    lane: RpcLane = "interactive",
   ): Promise<any> {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1078,6 +1133,7 @@ export class Bridge {
             id,
             method,
             params,
+            ...(lane === "background" ? { lane } : {}),
             ...(connectionId === null
               ? {}
               : {
@@ -1104,6 +1160,7 @@ export class Bridge {
     method: string,
     params: Record<string, unknown>,
     timeoutMs: number | null,
+    lane: RpcLane = "interactive",
   ): Promise<any> {
     if (isBridgeGlobalMethod(method)) {
       return Promise.reject(
@@ -1117,7 +1174,17 @@ export class Bridge {
       method,
       params,
       timeoutMs,
+      lane,
     );
+  }
+
+  private backgroundLane(scope: string): BackgroundLane {
+    let lane = this.backgroundLanes.get(scope);
+    if (!lane) {
+      lane = createBackgroundLane();
+      this.backgroundLanes.set(scope, lane);
+    }
+    return lane;
   }
 
   /**
@@ -1128,6 +1195,26 @@ export class Bridge {
     method: string,
     params: Record<string, unknown> = {},
     timeoutMs: number | null = RPC_TIMEOUT_MS,
+    options: RpcCallOptions = {},
+  ): Promise<any> {
+    if (options.lane !== "background")
+      return this.callNow(method, params, timeoutMs, "interactive");
+    if (!isBridgeGlobalMethod(method))
+      return this.connection(
+        this._activeConnectionId,
+        this.runtimeGenerations.get(this._activeConnectionId) ?? null,
+      ).call(method, params, timeoutMs, options);
+    return this.backgroundLane("\u0000bridge").run(
+      backgroundCallKey(String(this._clientGeneration), method, params),
+      () => this.callNow(method, params, timeoutMs, "background"),
+    );
+  }
+
+  private callNow(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs: number | null,
+    lane: RpcLane,
   ): Promise<any> {
     if (isBridgeGlobalMethod(method)) {
       return this.sendCall(
@@ -1137,6 +1224,7 @@ export class Bridge {
         method,
         params,
         timeoutMs,
+        lane,
       );
     }
     if (!this.helloAcceptedForSocket) {
@@ -1161,6 +1249,7 @@ export class Bridge {
       method,
       params,
       timeoutMs,
+      lane,
     );
   }
 
@@ -1202,6 +1291,11 @@ export class Bridge {
   onPopup(cb: (popup: PopupStatePush) => void): () => void {
     this.popupHandlers.add(cb);
     return () => this.popupHandlers.delete(cb);
+  }
+
+  onForwards(cb: (forwards: ForwardRecord[]) => void): () => void {
+    this.forwardsHandlers.add(cb);
+    return () => this.forwardsHandlers.delete(cb);
   }
 
   onUiSetting(cb: (push: UiSettingPush) => void): () => void {

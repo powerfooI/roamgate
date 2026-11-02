@@ -1,8 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, jest } from "bun:test";
 import {
   createTabAutoRenamer,
   isGenericTerminalTitle,
 } from "./tab-auto-rename";
+
+const renamers: ReturnType<typeof createTabAutoRenamer>[] = [];
+afterEach(() => {
+  for (const renamer of renamers.splice(0)) renamer.dispose();
+  jest.useRealTimers();
+});
 
 describe("isGenericTerminalTitle", () => {
   test("identifies shell prompts and shell binaries as generic", () => {
@@ -76,6 +82,8 @@ describe("createTabAutoRenamer", () => {
       debounceMs: options.debounceMs ?? 0,
     });
 
+    renamers.push(renamer);
+    renamer.start();
     return { renamer, calls, tabs, panes, agentTitles };
   };
 
@@ -186,6 +194,7 @@ describe("createTabAutoRenamer", () => {
   });
 
   test("debounces evaluation on pane.agent_detected event", async () => {
+    jest.useFakeTimers();
     const { renamer, calls, tabs } = setup({ debounceMs: 10 });
 
     renamer.handleHerdrEvent({
@@ -196,8 +205,8 @@ describe("createTabAutoRenamer", () => {
     // Before debounce timer fires
     expect(calls.filter((c) => c.method === "tab.rename")).toHaveLength(0);
 
-    // Wait for debounce timer
-    await new Promise((r) => setTimeout(r, 25));
+    jest.advanceTimersByTime(10);
+    await renamer.triggerEvaluation();
 
     const renameCalls = calls.filter((c) => c.method === "tab.rename");
     expect(renameCalls).toHaveLength(1);
@@ -205,6 +214,7 @@ describe("createTabAutoRenamer", () => {
   });
 
   test("triggers evaluation on pane.agent_status_changed event", async () => {
+    jest.useFakeTimers();
     const { renamer, calls, tabs } = setup({ debounceMs: 10 });
 
     renamer.handleHerdrEvent({
@@ -212,7 +222,8 @@ describe("createTabAutoRenamer", () => {
       data: { pane_id: "pane-1", agent_status: "idle" },
     });
 
-    await new Promise((r) => setTimeout(r, 25));
+    jest.advanceTimersByTime(10);
+    await renamer.triggerEvaluation();
 
     const renameCalls = calls.filter((c) => c.method === "tab.rename");
     expect(renameCalls).toHaveLength(1);
@@ -232,7 +243,7 @@ describe("createTabAutoRenamer", () => {
     const mockHerdr = {
       async call(method: string) {
         if (method === "tab.list")
-          return { tabs: [{ tab_id: "t1", label: "Old" }] };
+          return { tabs: [{ tab_id: "t1", label: "Tab 1", number: 1 }] };
         if (method === "pane.list") return { panes };
         return {};
       },
@@ -246,7 +257,151 @@ describe("createTabAutoRenamer", () => {
       debounceMs: 0,
     });
 
+    renamers.push(renamer);
     await renamer.triggerEvaluation();
     expect(receivedPane).toEqual(panes[0]);
   });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+function fixture(label = "Tab 1") {
+  const tabs = [{ tab_id: "t", label, number: 1 }];
+  const panes = [{ pane_id: "p", tab_id: "t", agent: "claude", focused: true }];
+  const renamed: string[] = [];
+  let enabled = true;
+  let fail = false;
+  let beforeSend: (() => void) | undefined;
+  const entered = deferred<void>();
+  const title = deferred<string>();
+  let lookups = 0;
+  const renamer = createTabAutoRenamer({
+    herdr: {
+      async call(method, params, _timeout, guard) {
+        if (method === "tab.list") return { tabs };
+        if (method === "pane.list") return { panes };
+        if (method === "tab.rename") {
+          beforeSend?.();
+          guard?.();
+          if (fail) throw new Error("socket lost");
+          tabs[0].label = String(params?.label);
+          renamed.push(tabs[0].label);
+          renamer.handleHerdrEvent({
+            event: "tab.renamed",
+            data: { ...tabs[0] },
+          });
+        }
+        return {};
+      },
+    },
+    getAgentTitleForPane: async () => {
+      lookups++;
+      entered.resolve();
+      return title.promise;
+    },
+    isEnabled: async () => enabled,
+  });
+  renamers.push(renamer);
+  return {
+    renamer,
+    tabs,
+    panes,
+    renamed,
+    title,
+    entered,
+    setEnabled: (v: boolean) => {
+      enabled = v;
+    },
+    setFail: (v: boolean) => {
+      fail = v;
+    },
+    onSend: (f: () => void) => {
+      beforeSend = f;
+    },
+    lookups: () => lookups,
+  };
+}
+
+test("preserves an existing custom label on startup/restart", async () => {
+  const f = fixture("Custom Work");
+  await f.renamer.triggerEvaluation();
+  expect(f.lookups()).toBe(0);
+  expect(f.renamed).toEqual([]);
+});
+for (const action of [
+  "manual",
+  "disable",
+  "dispose",
+  "settings",
+  "focus",
+  "external",
+  "closed",
+] as const) {
+  test(`cancels a title lookup after ${action}`, async () => {
+    const f = fixture();
+    const work = f.renamer.triggerEvaluation();
+    await f.entered.promise;
+    if (action === "manual") f.renamer.markManualRename("t");
+    if (action === "disable") f.setEnabled(false);
+    if (action === "settings") f.renamer.settingsChanged();
+    if (action === "dispose") f.renamer.dispose();
+    if (action === "focus") f.panes[0].pane_id = "other";
+    if (action === "external") f.tabs[0].label = "Custom Work";
+    if (action === "closed") f.tabs.splice(0);
+    f.title.resolve("Agent title");
+    await work;
+    expect(f.renamed).toEqual([]);
+  });
+}
+test("rechecks manual ownership immediately before a queued RPC is sent", async () => {
+  const f = fixture();
+  f.onSend(() => f.renamer.markManualRename("t"));
+  f.title.resolve("Agent title");
+  await f.renamer.triggerEvaluation();
+  expect(f.renamed).toEqual([]);
+});
+test("retries a failed rename with the same title", async () => {
+  const f = fixture();
+  f.title.resolve("Agent title");
+  f.setFail(true);
+  await f.renamer.triggerEvaluation();
+  f.setFail(false);
+  await f.renamer.triggerEvaluation();
+  expect(f.renamed).toEqual(["Agent title"]);
+});
+test("recognizes its own rename events and protects later edits from another client", async () => {
+  const f = fixture();
+  f.title.resolve("Agent title");
+  await f.renamer.triggerEvaluation();
+  expect(f.renamer.isManuallyRenamed("t")).toBe(false);
+  f.tabs[0].label = "Shared custom name";
+  f.renamer.handleHerdrEvent({
+    data: { type: "tab.renamed", tab: { ...f.tabs[0] } },
+  });
+  await f.renamer.triggerEvaluation();
+  expect(f.renamer.isManuallyRenamed("t")).toBe(true);
+  expect(f.renamed).toEqual(["Agent title"]);
+});
+test("keeps newly numbered default tabs eligible", async () => {
+  const f = fixture();
+  f.renamer.markManualRename("t", "Tab 1");
+  f.renamer.handleHerdrEvent({ event: "tab.renamed", data: { ...f.tabs[0] } });
+  f.title.resolve("Agent title");
+  await f.renamer.triggerEvaluation();
+  expect(f.renamed).toEqual(["Agent title"]);
+});
+test("serializes overlapping evaluations", async () => {
+  const f = fixture();
+  const first = f.renamer.triggerEvaluation();
+  await f.entered.promise;
+  const second = f.renamer.triggerEvaluation();
+  expect(f.lookups()).toBe(1);
+  f.title.resolve("Agent title");
+  await Promise.all([first, second]);
+  expect(f.renamed).toEqual(["Agent title"]);
 });

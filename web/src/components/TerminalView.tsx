@@ -21,6 +21,7 @@ import { useSystemBack } from "../systemBack";
 import {
   getShortcutSnapshot,
   shortcutMatches,
+  shortcutTitle,
   terminalLinkModifierMatches,
 } from "../shortcutPreferences";
 import {
@@ -36,6 +37,7 @@ import {
   Columns2,
   Keyboard,
   Maximize2,
+  MessagesSquare,
   Minimize2,
   Rows2,
   X,
@@ -145,7 +147,12 @@ import {
 } from "./TerminalFileLinkMenu";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
 import { directoryPreviewName } from "../filesystemPaths";
-import { sanitizeTerminalHttpUrl, terminalFileUriPath } from "../terminalLinks";
+import { canForwardPorts, localForwardFor } from "../portForwarding";
+import {
+  sanitizeTerminalHttpUrl,
+  terminalFileUriPath,
+  terminalForwardCandidate,
+} from "../terminalLinks";
 import {
   createTerminalPasteRunner,
   type TerminalPasteTextareaSnapshot,
@@ -177,6 +184,11 @@ import {
   terminalWheelScroll,
 } from "../terminalScroll";
 import { TerminalSelectionDragGuard } from "../terminalSelectionGuard";
+import {
+  createEchoProbe,
+  latencyDebugEnabled,
+  logLatency,
+} from "../latencyDebug";
 import { applyTerminalTheme } from "../terminalThemes";
 import { useTerminalOptionAsMeta } from "../terminalOptionKey";
 import {
@@ -184,6 +196,14 @@ import {
   agentStateKind,
   paneHasAgentHistory,
 } from "./agentSession";
+import { AgentHistoryDrawer } from "./AgentHistoryDrawer";
+import {
+  type AgentActivity,
+  type AgentPrompt,
+  parseAgentActivity,
+  parseAgentPrompt,
+} from "../agentPrompt";
+import { setPaneView, togglePaneView, usePaneView } from "../paneView";
 import { ConfirmDialog, MessageDialog } from "./ModalDialogs";
 import {
   readTerminalComposerShortcutsOpen,
@@ -328,6 +348,17 @@ export type TerminalWorkspaceFileRequest = {
   path: string;
 };
 
+/** The bottom screen of a terminal, as text, whatever is scrolled into view. */
+function terminalScreenLines(term: Terminal): string[] {
+  const buffer = term.buffer.active;
+  const lines: string[] = [];
+  for (let row = 0; row < term.rows; row++)
+    lines.push(
+      buffer.getLine(buffer.baseY + row)?.translateToString(true) ?? "",
+    );
+  return lines;
+}
+
 export function TerminalView({
   paneId,
   visible = true,
@@ -368,6 +399,7 @@ export function TerminalView({
       connectionGeneration: state.connectionGeneration,
       connectionPaused: state.connectionPaused,
       connections: state.connections,
+      forwards: state.forwards,
       layout: state.layout,
       panes: state.panes,
       selectedPaneId: state.selectedPaneId,
@@ -470,6 +502,14 @@ export function TerminalView({
   );
   const [localComposerOpen, setLocalComposerOpen] = useState(false);
   const [closePaneRequested, setClosePaneRequested] = useState(false);
+  // A loopback URL printed on an SSH connection belongs to the remote host, so
+  // opening it here reaches the wrong machine. Offer the forward instead.
+  const [forwardRequest, setForwardRequest] = useState<{
+    url: string;
+    port: number;
+    rewrite: (localPort: number) => string;
+    target: { connectionId: string; generation: number };
+  } | null>(null);
   const [localAgentHistoryOpen, setLocalAgentHistoryOpen] = useState(false);
   const containerRef = useCallback(
     (el: HTMLDivElement | null) => setContainer(el),
@@ -542,6 +582,138 @@ export function TerminalView({
     selectedPaneInLayout ?? s.layout?.focused_pane_id ?? null;
   const isActivePane = !!pane && (!paneId || pane.pane_id === activePaneId);
   const canShowAgentHistory = isActivePane && paneHasAgentHistory(pane);
+  /**
+   * Takes a loopback link so the user can forward it instead of opening an
+   * address that belongs to the remote host. Returns false for anything it
+   * does not take, including its own failures, so the caller opens the link
+   * as it always did.
+   */
+  const proposeForward = (url: string): boolean => {
+    try {
+      if (!forwardableRef.current) return false;
+      const candidate = terminalForwardCandidate(url);
+      if (!candidate) return false;
+      // Already forwarded: open it rather than asking again. The proposal is
+      // for ports that have no tunnel, not a toll on every click.
+      const existing = localForwardFor(
+        forwardsRef.current,
+        s.activeConnectionId,
+        candidate.port,
+      );
+      if (existing) {
+        window.open(
+          candidate.rewrite(existing.local_port),
+          "_blank",
+          "noopener,noreferrer",
+        );
+        return true;
+      }
+      setForwardRequest({
+        url,
+        port: candidate.port,
+        rewrite: candidate.rewrite,
+        target: {
+          connectionId: s.activeConnectionId,
+          generation: s.connectionGeneration,
+        },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  // Stable identity for the link provider: the terminal is built once, and a
+  // handler rebuilt each render would rebuild it with them.
+  const proposeForwardRef = useRef<(url: string) => boolean>(() => false);
+  proposeForwardRef.current = proposeForward;
+  const takeHttpLink = useCallback(
+    (url: string) => proposeForwardRef.current(url),
+    [],
+  );
+  const forwardConnection = s.connections.find(
+    (connection) => connection.id === s.activeConnectionId,
+  );
+  // Needs an SSH transport to forward over, and Roamgate on the machine the
+  // browser runs on: a forward binds wherever ssh runs.
+  // Read at click time from a ref: the provider's handler is installed once,
+  // when the terminal is created.
+  const forwardsRef = useRef(s.forwards);
+  forwardsRef.current = s.forwards;
+  const forwardableRef = useRef(false);
+  forwardableRef.current = canForwardPorts(forwardConnection?.type);
+  // An agent pane can show its conversation as a chat instead of its
+  // terminal, which keeps running underneath.
+  const chatAvailable = !!pane && paneHasAgentHistory(pane);
+  const chatShown =
+    usePaneView(s.activeConnectionId, pane?.pane_id) === "chat" &&
+    chatAvailable;
+  // Not working: blocked on a question, or one Herdr does not report yet (a
+  // new session's "trust this folder?", before Claude's hooks run).
+  const agentWaiting =
+    chatShown && pane?.agent_status.toLowerCase() !== "working";
+  const chatShownRef = useRef(chatShown);
+  chatShownRef.current = chatShown;
+  useEffect(() => {
+    if (chatShown) termRef.current?.textarea?.blur();
+  }, [chatShown]);
+  const agentWorking =
+    chatShown && pane?.agent_status.toLowerCase() === "working";
+  const [agentPrompt, setAgentPrompt] = useState<AgentPrompt | null>(null);
+  const [agentActivity, setAgentActivity] = useState<AgentActivity | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!agentWaiting && !agentWorking) {
+      setAgentPrompt(null);
+      setAgentActivity(null);
+      return;
+    }
+    // What the agent asks, and what it says it is doing, are only on its
+    // screen, and change as it goes.
+    const read = () => {
+      const term = termRef.current;
+      if (!term) return;
+      const screen = terminalScreenLines(term);
+      // A menu can be up while the agent still counts as working (its
+      // question before the hooks say it waits): read both then.
+      setAgentPrompt((current) => {
+        const buffer = term.buffer.active;
+        const next = parseAgentPrompt(screen, (row, column) => {
+          const cell = buffer.getLine(buffer.baseY + row)?.getCell(column);
+          return !!cell && !cell.isBgDefault();
+        });
+        return JSON.stringify(current) === JSON.stringify(next)
+          ? current
+          : next;
+      });
+      if (agentWorking)
+        setAgentActivity((current) => {
+          const next = parseAgentActivity(screen);
+          return current?.word === next?.word &&
+            current?.detail === next?.detail
+            ? current
+            : next;
+        });
+    };
+    read();
+    // Read again as soon as the screen changes (a key moved the menu's
+    // cursor), once a frame at most; the timer catches a terminal attached
+    // later.
+    let frame: number | null = null;
+    const written = termRef.current?.onWriteParsed(() => {
+      if (frame === null)
+        frame = requestAnimationFrame(() => {
+          frame = null;
+          read();
+        });
+    });
+    const timer = window.setInterval(read, 1000);
+    return () => {
+      window.clearInterval(timer);
+      written?.dispose();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [agentWaiting, agentWorking]);
   const canClosePane = !!pane && paneCanClose(s.panes, pane.pane_id);
   const paneZoomed =
     s.layout?.zoomed === true && s.layout.focused_pane_id === pane?.pane_id;
@@ -789,6 +961,7 @@ export function TerminalView({
   const focusTerminalSoon = useCallback(
     (reason?: "output") => {
       if (
+        chatShownRef.current ||
         !isActivePaneRef.current ||
         composerEditingRef.current ||
         touchSelectionRef.current?.active === true
@@ -825,6 +998,56 @@ export function TerminalView({
     },
     [connectionClient],
   );
+  // A pane shown as a chat takes the keyboard in its message box, on
+  // activation as a terminal would: not on a phone (the keyboard would
+  // pop up), nor away from another field or an open overlay.
+  const chatLayerRef = useRef<HTMLDivElement | null>(null);
+  // The pane's buttons float over the chat's header, which keeps clear of
+  // them: their width, as --pane-toolbar-width on the pane.
+  const paneToolbarRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const toolbar = paneToolbarRef.current;
+    const shell = toolbar?.parentElement;
+    if (!toolbar || !shell) return;
+    const observer = new ResizeObserver(() =>
+      shell.style.setProperty(
+        "--pane-toolbar-width",
+        `${toolbar.offsetWidth}px`,
+      ),
+    );
+    observer.observe(toolbar);
+    return () => observer.disconnect();
+  }, []);
+  const focusChatSoon = useCallback(() => {
+    if (!isActivePaneRef.current || shouldAvoidVirtualKeyboard()) return;
+    let tries = 0;
+    const attempt = () => {
+      if (
+        !connectionClient.isCurrent() ||
+        !isActivePaneRef.current ||
+        !chatShownRef.current
+      )
+        return;
+      const layer = chatLayerRef.current;
+      const active = document.activeElement;
+      const activeElement = active instanceof HTMLElement ? active : null;
+      if (!layer || layer.contains(activeElement)) return;
+      // Another pane's terminal or message box gives way; other fields not.
+      const fromPane = !!activeElement?.closest(".xterm, .terminal-chat-layer");
+      if (isEditableElement(active) && !fromPane) return;
+      if (terminalFocusBlockedByOverlay(activeElement, document)) return;
+      const box = layer.querySelector<HTMLElement>(
+        '.agent-history-composer textarea, .agent-history-composer [contenteditable="true"]',
+      );
+      // The box may still be loading.
+      if (!box) {
+        if ((tries += 1) < 20) window.setTimeout(attempt, 50);
+        return;
+      }
+      box.focus();
+    };
+    requestAnimationFrame(() => window.setTimeout(attempt, 0));
+  }, [connectionClient]);
   const focusEndpoint = useCallback(() => {
     focusTerminalEndpoint(connectionClient, paneTerminalIdRef.current);
   }, [connectionClient]);
@@ -880,8 +1103,10 @@ export function TerminalView({
     [terminalIdentity],
   );
   useEffect(() => {
-    if (isActivePane) focusTerminalSoon();
-  }, [focusTerminalSoon, isActivePane]);
+    if (!isActivePane) return;
+    if (chatShown) focusChatSoon();
+    else focusTerminalSoon();
+  }, [focusChatSoon, focusTerminalSoon, isActivePane, chatShown]);
   useEffect(() => watchTerminalOverlayPointer(document), []);
   useEffect(() => {
     if (!canShowAgentHistory && agentHistoryOpen) setAgentHistoryOpen(false);
@@ -916,6 +1141,25 @@ export function TerminalView({
     setAgentHistoryOpen,
   ]);
 
+  useEffect(() => {
+    if (!isActivePane || !chatAvailable || !pane) return;
+    const paneId = pane.pane_id;
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        e.defaultPrevented ||
+        !shortcutMatches(e, "pane.chat") ||
+        document.querySelector(".modal-backdrop, .command-popover")
+      )
+        return;
+      e.preventDefault();
+      e.stopPropagation();
+      togglePaneView(s.activeConnectionId, paneId);
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () =>
+      window.removeEventListener("keydown", onKey, { capture: true });
+  }, [chatAvailable, isActivePane, pane, s.activeConnectionId]);
+
   const blurTerminalInput = () => {
     termRef.current?.textarea?.blur();
   };
@@ -924,6 +1168,7 @@ export function TerminalView({
     const term = termRef.current;
     if (
       !term ||
+      chatShownRef.current ||
       composerEditingRef.current ||
       !connectionClient.isCurrent() ||
       !isActivePaneRef.current ||
@@ -1121,8 +1366,9 @@ export function TerminalView({
             return;
           }
           const url = sanitizeTerminalHttpUrl(text);
-          if (url) {
-            term.clearSelection();
+          if (!url) return;
+          term.clearSelection();
+          if (!takeHttpLink(url)) {
             window.open(url, "_blank", "noopener,noreferrer");
           }
         },
@@ -1222,6 +1468,9 @@ export function TerminalView({
           }) as Promise<TerminalResolvedLink>;
         },
       },
+      // Plain-text URLs are opened by the provider, not by the OSC hyperlink
+      // handler, so the forward proposal has to be offered from here too.
+      takeHttpLink,
     );
 
     const imeFallback = new TerminalImeFallbackTracker();
@@ -1261,6 +1510,7 @@ export function TerminalView({
       acceptsEndpointInput() &&
       isActivePaneRef.current &&
       (!shouldAvoidVirtualKeyboard() || inputActiveRef.current);
+    const echoProbe = latencyDebugEnabled ? createEchoProbe() : null;
 
     term.onData((data) => {
       invalidateLinks();
@@ -1291,6 +1541,7 @@ export function TerminalView({
       if (!terminalId) return;
       imeKeyEvent.recordXtermData(unsuppressedData);
       const bytes = new TextEncoder().encode(unsuppressedData);
+      echoProbe?.sent(unsuppressedData);
       sendBytes(connectionClient, bytes, terminalId).catch(() => {});
     });
 
@@ -1299,6 +1550,13 @@ export function TerminalView({
         () => term.hasSelection() || historySelection.active,
         (text, parsed, linksChanged) =>
           term.write(text, () => {
+            const echoMs = echoProbe?.presented() ?? null;
+            if (echoMs !== null) {
+              logLatency("terminal echo", {
+                terminal: desiredTerminalRef.current ?? undefined,
+                input_to_frame_ms: echoMs,
+              });
+            }
             parsed();
             if (!terminalEffectDisposed && linksChanged)
               term.refresh(0, term.rows - 1);
@@ -3019,6 +3277,7 @@ export function TerminalView({
     relayViewportFor,
     resolveTerminalFilePaths,
     scrollPage,
+    takeHttpLink,
     terminalIdentity,
   ]);
 
@@ -3168,6 +3427,11 @@ export function TerminalView({
                 return;
               }
               attachTimeoutCountRef.current += 1;
+              logLatency("attach watchdog fired", {
+                terminal: terminalId,
+                watchdog_ms: watchdogMs,
+                consecutive: attachTimeoutCountRef.current,
+              });
               attachedRef.current = null;
               attachingRef.current = null;
               void connectionClient
@@ -3763,17 +4027,45 @@ export function TerminalView({
           layout={s.layout}
           onPointerDown={preventPaneActionFocus}
         />
-        <div className="terminal-main">
+        <div className={`terminal-main${chatShown ? " is-chat" : ""}`}>
           <div
             ref={containerRef}
             className="terminal-view"
+            // Under a chat, the terminal must never take the keyboard: what
+            // is typed would go to the agent unseen.
+            inert={chatShown || undefined}
             tabIndex={-1}
             onFocus={(event) => {
               if (event.target === event.currentTarget) focusTerminalInput();
             }}
           />
+          {chatShown ? (
+            <div className="terminal-chat-layer" ref={chatLayerRef}>
+              <AgentHistoryDrawer
+                pane={pane}
+                open
+                embedded
+                paneChat={{
+                  prompt: agentPrompt,
+                  activity: agentActivity,
+                  active: isActivePane,
+                  onShowTerminal: () => {
+                    setPaneView(s.activeConnectionId, pane.pane_id, "terminal");
+                    focusTerminalSoon();
+                  },
+                  onKeys: (text) => void store.sendText(pane.pane_id, text),
+                  composerTarget:
+                    isMobileLayout() && isActivePane ? mobileInputTarget : null,
+                }}
+                onOpenChange={() => {}}
+              />
+            </div>
+          ) : null}
 
-          {!isMobileLayout() && touchHandles.length === 0 && isActivePane ? (
+          {!isMobileLayout() &&
+          touchHandles.length === 0 &&
+          isActivePane &&
+          !chatShown ? (
             <div
               className="terminal-mobile-input-actions"
               aria-label="Terminal input"
@@ -3838,6 +4130,7 @@ export function TerminalView({
         {visible &&
         touchHandles.length === 0 &&
         !composerShortcutsVisible &&
+        !chatShown &&
         showMobileKeys &&
         hasMobileShortcuts ? (
           <div
@@ -3913,14 +4206,35 @@ export function TerminalView({
             </div>
           </div>
         ) : null}
-        {isMobileLayout() && mobileInputTarget
-          ? isActivePane
-            ? createPortal(terminalComposer, mobileInputTarget)
-            : null
-          : composerOpen
-            ? terminalComposer
-            : null}
-        <div className="terminal-pane-toolbar" aria-label="Pane actions">
+        {chatShown
+          ? null
+          : isMobileLayout() && mobileInputTarget
+            ? isActivePane
+              ? createPortal(terminalComposer, mobileInputTarget)
+              : null
+            : composerOpen
+              ? terminalComposer
+              : null}
+        <div
+          ref={paneToolbarRef}
+          className={`terminal-pane-toolbar${chatShown ? " is-over-chat" : ""}`}
+          aria-label="Pane actions"
+        >
+          {/* Over a chat, its own top row shows the terminal. */}
+          {chatAvailable && !chatShown ? (
+            <button
+              type="button"
+              className="terminal-pane-action"
+              title={shortcutTitle("Show as a chat", "pane.chat")}
+              aria-label="Show as a chat"
+              onPointerDown={preventPaneActionFocus}
+              onClick={() =>
+                setPaneView(s.activeConnectionId, pane.pane_id, "chat")
+              }
+            >
+              <MessagesSquare size={14} />
+            </button>
+          ) : null}
           {s.endpointAvailability[pane.terminal_id] &&
           store.terminalScrollReason(pane.terminal_id) ? (
             <span
@@ -3998,13 +4312,48 @@ export function TerminalView({
           >
             <span>{terminalAttachError}</span>
           </div>
-        ) : terminalLoadingSpinner || pasteLoading ? (
+        ) : (terminalLoadingSpinner && !chatShown) || pasteLoading ? (
           <div className="terminal-loading" role="status" aria-live="polite">
             <span className="terminal-loading-dot" />
             <span>{pasteLoading ? "Pasting..." : "Loading terminal"}</span>
           </div>
         ) : null}
       </div>
+      <ConfirmDialog
+        open={!!forwardRequest}
+        title="Forward port"
+        message={
+          forwardRequest
+            ? `This address is on ${forwardConnection?.label ?? "the remote host"}, not this machine. Forward port ${forwardRequest.port} over SSH and open it here?`
+            : ""
+        }
+        confirmLabel="Forward"
+        onClose={() => setForwardRequest(null)}
+        onConfirm={() => {
+          const request = forwardRequest;
+          setForwardRequest(null);
+          if (!request) return;
+          void store
+            .openForward(request.port, { target: request.target })
+            .then((forward) => {
+              // Open what was actually bound: the local port differs from the
+              // remote's when that number is already taken here.
+              if (!forward) return;
+              window.open(
+                request.rewrite(forward.local_port),
+                "_blank",
+                "noopener,noreferrer",
+              );
+            })
+            .catch((error: unknown) => {
+              store.notify({
+                kind: "error",
+                message: "Port forwarding failed",
+                detail: error instanceof Error ? error.message : String(error),
+              });
+            });
+        }}
+      />
       <ConfirmDialog
         open={closePaneRequested}
         title="Close Pane"

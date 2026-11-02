@@ -145,9 +145,23 @@ export function registerTerminalLinkProvider(
       touch?: boolean,
     ) => Promise<TerminalResolvedLink | null>;
   },
+  /**
+   * Offered every http(s) link before it is opened; returning true means the
+   * caller has taken it (a port-forward proposal, say). Anything else opens
+   * the address as usual, so a handler that declines or throws can never
+   * leave the click doing nothing.
+   */
+  onHttpLink: (url: string) => boolean = () => false,
 ) {
   let disposed = false;
   let requestGeneration = 0;
+  const takeHttpLink = (url: string) => {
+    try {
+      return onHttpLink(url) === true;
+    } catch {
+      return false;
+    }
+  };
   type TargetLink = ILink & { target: TerminalTouchLink };
   const provideLinks = (
     bufferLineNumber: number,
@@ -230,7 +244,9 @@ export function registerTerminalLinkProvider(
             const url = sanitizeTerminalHttpUrl(raw);
             if (url) {
               term.clearSelection?.();
-              window.open(url, "_blank", "noopener,noreferrer");
+              if (!takeHttpLink(url)) {
+                window.open(url, "_blank", "noopener,noreferrer");
+              }
             }
           },
         });
@@ -500,7 +516,9 @@ export function registerTerminalLinkProvider(
               event.preventDefault();
               if (isCurrent() && terminalLinkModifierMatches(event)) {
                 term.clearSelection?.();
-                window.open(link.url!, "_blank", "noopener,noreferrer");
+                if (!takeHttpLink(link.url!)) {
+                  window.open(link.url!, "_blank", "noopener,noreferrer");
+                }
               }
             },
           });

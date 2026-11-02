@@ -9,6 +9,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AssistantActionKind } from "../../../shared/assistant";
+import {
+  type GuiSettings,
+  updateGuiSettings,
+  workspaceRepoSettingsKey,
+} from "../config/gui-settings";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
 import * as processUtils from "../utils/process-utils";
 import { createWorkspaceWorktree } from "../worktree/create";
@@ -18,6 +23,36 @@ const fixtureDirectory = realpathSync(
   mkdtempSync(join(tmpdir(), "ranger-actions-")),
 );
 afterAll(() => rmSync(fixtureDirectory, { recursive: true, force: true }));
+
+// The worktree command lives in this machine's settings.json; tests use their
+// own, without a command unless they set one.
+const settingsDirectory = mkdtempSync(join(tmpdir(), "assistant-settings-"));
+const previousSettingsPath = process.env.ROAMGATE_SETTINGS_PATH;
+process.env.ROAMGATE_SETTINGS_PATH = join(settingsDirectory, "settings.json");
+afterAll(() => {
+  if (previousSettingsPath === undefined)
+    delete process.env.ROAMGATE_SETTINGS_PATH;
+  else process.env.ROAMGATE_SETTINGS_PATH = previousSettingsPath;
+  rmSync(settingsDirectory, { recursive: true, force: true });
+});
+
+async function withWorktreeCommand(
+  command: string,
+  run: (setCommand: (command: string) => Promise<void>) => Promise<void>,
+) {
+  const setCommand = async (next: string | undefined) => {
+    await updateGuiSettings((settings) => ({
+      ...settings,
+      worktree_command: next,
+    }));
+  };
+  await setCommand(command);
+  try {
+    await run(setCommand);
+  } finally {
+    await setCommand(undefined);
+  }
+}
 
 const ref = { connection_id: "local", workspace_id: "w1" };
 function deferred<T>() {
@@ -446,6 +481,17 @@ describe("confirmed Ranger action targets", () => {
               };
             },
             beforeDispatch,
+            // Not this machine's settings: a configured worktree command
+            // there would replace worktree.create.
+            {
+              readSettings: async (): Promise<GuiSettings> => ({
+                version: 1,
+                repositories: {},
+                workspace_auto_sync: {},
+                custom: {},
+                ui: {},
+              }),
+            },
           ),
       );
       const original = f.call.getMockImplementation()!;
@@ -963,6 +1009,27 @@ describe("confirmed Ranger action targets", () => {
     expect(f.mutations).toEqual(["workspace.create"]);
   });
 
+  test("an unverified creation directory never grants the observed workspace", async () => {
+    const f = fixture();
+    const prepared = await f.prepare("create_workspace", { label: "New" });
+    const original = f.call.getMockImplementation()!;
+    f.call.mockImplementation(
+      async (method, params = {}, timeout, beforeSend) => {
+        const response = await original(method, params, timeout, beforeSend);
+        if (method === "workspace.create") {
+          for (const pane of f.panes)
+            if (pane.workspace_id === "w2")
+              pane.cwd = "/another-private-directory";
+        }
+        return response;
+      },
+    );
+    const result = await prepared.execute();
+    expect(result.status).toBe("uncertain");
+    expect(result).not.toHaveProperty("created");
+    expect(f.mutations).toEqual(["workspace.create"]);
+  });
+
   test("an unverified write is uncertain, sanitized, and is never replayed", async () => {
     const f = fixture();
     const prepared = await f.prepare("create_workspace", { label: "New" });
@@ -1007,10 +1074,90 @@ describe("confirmed Ranger action targets", () => {
       expected_setup_hook: "bun install",
       expected_hooks_enabled: true,
       expected_source_root: fixtureDirectory,
+      expected_worktree_command: null,
     });
     expect(
       f.call.mock.calls.some(([method]) => method === "worktree.create"),
     ).toBe(false);
+  });
+
+  test("worktree preview shows the location's path, and a changed location blocks dispatch", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "assistant-worktree-dir-"));
+    const previous = process.env.ROAMGATE_SETTINGS_PATH;
+    process.env.ROAMGATE_SETTINGS_PATH = join(dir, "settings.json");
+    const setDirectory = (directory: string | undefined) =>
+      updateGuiSettings((settings) => ({
+        ...settings,
+        repositories: Object.fromEntries(
+          Object.keys(settings.repositories).map((key) => [
+            key,
+            { ...settings.repositories[key], worktree_directory: directory },
+          ]),
+        ),
+      }));
+    try {
+      const f = fixture();
+      const unset = await f.prepare("create_worktree", {
+        branch: "feature/ranger",
+      });
+      expect(unset.preview.params.path).toBe(
+        "(Herdr's default worktree location)",
+      );
+      // Any repository key the fixture's workspace maps to gets a location.
+      await updateGuiSettings((settings) => ({
+        ...settings,
+        repositories: {
+          [workspaceRepoSettingsKey(
+            { cwd: fixtureDirectory },
+            undefined,
+            "local",
+          )!]: { worktree_directory: "/srv/trees" },
+        },
+      }));
+      const prepared = await f.prepare("create_worktree", {
+        branch: "feature/ranger",
+      });
+      expect(prepared.preview.params.path).toBe("/srv/trees/feature-ranger");
+      expect((await prepared.execute()).status).toBe("succeeded");
+      expect(f.createWorktree.mock.calls[0]?.[1]?.path).toBe(
+        "/srv/trees/feature-ranger",
+      );
+
+      const moved = await f.prepare("create_worktree", {
+        branch: "feature/ranger",
+      });
+      await setDirectory("/elsewhere");
+      expect((await moved.execute()).status).toBe("failed");
+      expect(f.createWorktree).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previous === undefined) delete process.env.ROAMGATE_SETTINGS_PATH;
+      else process.env.ROAMGATE_SETTINGS_PATH = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("worktree preview shows the worktree command and a changed command blocks dispatch", async () => {
+    await withWorktreeCommand("mk {path} {branch}", async (setCommand) => {
+      const f = fixture();
+      const prepared = await f.prepare("create_worktree", {
+        branch: "feature/ranger",
+      });
+      expect(prepared.preview.params.worktree_command).toBe(
+        "mk {path} {branch}",
+      );
+      await setCommand("other {path}");
+      const result = await prepared.execute();
+      expect(result.status).toBe("failed");
+      expect(f.createWorktree).not.toHaveBeenCalled();
+
+      const next = await f.prepare("create_worktree", {
+        branch: "feature/ranger",
+      });
+      expect((await next.execute()).status).toBe("succeeded");
+      expect(
+        f.createWorktree.mock.calls[0]?.[1]?.expected_worktree_command,
+      ).toBe("other {path}");
+    });
   });
 
   test("worktree source hook changes block dispatch and target hook guards report partial failure", async () => {

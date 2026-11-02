@@ -30,6 +30,22 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
 - The command menu searches workspaces, worktrees, files, tabs, panes, and
   agents, and opens typed file paths.
 - Desktop **Zen mode** hides app chrome so the terminal fills the window.
+- **Configuration > Integrations > Automatic tab renaming** names default tabs
+  from the focused agent's bound session title, or its own terminal title.
+  Existing custom labels are preserved. After a bridge restart, previously named
+  tabs are also preserved rather than adopted again. The setting is shared by
+  connections; turn it off to stop automatic updates.
+
+When a pane on an SSH connection prints a `localhost` URL, clicking it offers to
+**forward the port** over SSH (to the same port number when free) and opens the
+forwarded address. **Forward a port** in the command menu does the same. The
+connection switcher lists the ports your own processes listen on, on either
+side, and forwards either way: a remote port brought here, or a local one exposed
+to the remote so processes there, agents included, can reach it. Active forwards
+are listed with a stop button. Forwards bind loopback here and ask for loopback
+on the remote (a remote sshd with `GatewayPorts yes` binds every interface
+instead), close with their connection, and are offered only when Roamgate runs
+on the machine you browse from.
 
 Each browser keeps its own workspace and tab selection on endpoint connections;
 older (legacy) connections share navigation. Pane focus, layout, and terminal
@@ -137,8 +153,21 @@ Inspector state is scoped to each checkout; see
   conversation bubbles with rendered replies and collapsible tool-call blocks
   that follow new output, plus a message box that types into the agent's
   terminal and shares the pane's terminal composer draft. Paste images or use
-  **Add images** to choose them on desktop or mobile; uploaded image paths stay
-  in the draft until you send. Enter sends and Shift+Enter adds a line; on
+  **Add images** to choose them on desktop or mobile; the box shows each as
+  `[Image #N]` with a thumbnail above it (and a button to remove it) while the
+  draft keeps its uploaded path, which is what the agent gets. In the
+  conversation, an image sent that way shows as the image, loaded from the
+  pane's host through the file download, instead of its path; a click shows
+  it over the app fitted to the window (a click on it gives its own size;
+  Esc, the backdrop or the close button put it away), and Cmd, Ctrl or a
+  middle click opens it in a tab. In a Claude session, typing `/` lists the
+  commands that match what follows (Claude Code's own, then the session's
+  skills and custom commands, read from its transcript); a click, or the
+  arrows and Tab or Enter, fill in `/name`, Enter on a whole name sends it,
+  and Esc closes the list. **Vim keys in agent chats** in Configuration >
+  Behavior (off by default) makes chat message boxes Vim editors: insert mode
+  first, `:w` sends, PageUp/PageDown scroll the conversation, and on touch
+  screens an **Esc** button stands in for the missing key. Enter sends and Shift+Enter adds a line; on
   touch keyboards Enter adds a line and the Send
   button sends. On phones the box replaces the terminal composer dock while
   the chat is open. Sending to an agent that is working, blocked, or in an
@@ -146,6 +175,12 @@ Inspector state is scoped to each checkout; see
   anyway**. The timeline view adds User/Agent/Tool filters. Exports are always
   complete. **Session Inspector** adds metadata, a timeline, raw/ATIF
   transcripts, and export.
+  In a Claude session, messages sent while Claude works show where it took
+  them, and those still waiting in its queue show at the end marked
+  **Queued**. What Claude Code writes into the user's turn itself (system
+  reminders, task notifications, notes on images a tool read) is not shown as
+  the user's, and a compaction summary shows as one **Conversation
+  compacted** line that opens the summary.
   **Speak** beside an assistant message reads its full text using browser speech
   synthesis; **Stop**, another message, or closing/switching the chat cancels it.
   On desktop, Speak appears on hover or keyboard focus, like Copy; Stop remains
@@ -159,6 +194,38 @@ Inspector state is scoped to each checkout; see
   online services and may send message text to their provider. No microphone or
   server-side speech software is required. Browser support and voices vary;
   background and locked-screen playback are not guaranteed, including on iOS.
+- An agent pane can show its conversation **as a chat** instead of its
+  terminal, which keeps running underneath and does not take the keyboard:
+  the chat button in the pane's toolbar, Ctrl+Cmd+M (Ctrl+Alt+M elsewhere), or
+  on a phone **Chat in pane** in More options (the bottom bar's **Chat** opens
+  Agent History instead). The chat takes the whole pane, with one slim row for
+  the agent's icon, what a Claude session is about (its `/rename` name, else
+  the title Claude Code gives it, also shown as Agent History's heading), its
+  status, the pages the session published with Claude Code's Artifact tool
+  (a list to open or copy each link; each publish also links under the tool
+  calls that made it), search, **Stop** (Esc in the terminal) and the way back
+  to the terminal; on a phone that row stands for the top bar, which hides,
+  and the message box sits in the bottom bar, taking the whole width while
+  you write. Below the conversation, a working agent shows its own word for
+  what it does, read from its screen (Claude Code's "Sublimating... (1m 5s)"),
+  and an agent asking something shows its question with its choices as
+  buttons. The question takes the keys its terminal menu does: the arrows or
+  `j`/`k` (`h`/`l` between questions), 1 to 9, Tab, Enter, Esc and Space; the
+  choice the agent's cursor is on is marked. The message box steps aside
+  while only a choice is asked, and comes back for a "Type something." answer.
+  A menu shows as a question even before the agent's hooks report it blocked
+  (a new session asking to trust its folder). Each pane
+  remembers its view; **Open agents as a chat** in Configuration > Behavior
+  (off by default) opens agent panes as a chat until switched. Review
+  feedback sent to a pane shown as a chat is pre-filled in its message box.
+- A message sent from a chat's message box (in a pane or in Agent History)
+  shows at once at the end of the conversation, dimmed with **Sending...**,
+  then **On its way** once the pane took it, until the transcript's own entry
+  replaces it. One the pane refused, or that the transcript has not shown 90
+  seconds later, stays marked **Not delivered** with **Send again** and
+  **Discard**, also after switching the pane to its terminal and back; it is
+  still replaced if its entry shows up later. Answers typed into a question,
+  `/commands` and `!` lines are sent as before.
 - **Menu > Configuration > Integrations** installs, updates, or removes Herdr's
   bundled agent integrations (not the agents themselves). See
   [version lookup](docs/ARCHITECTURE.md#agent-integrations).
@@ -168,8 +235,16 @@ Inspector state is scoped to each checkout; see
   and configured roots, including `PI_CONFIG_DIR` (resolved relative to the
   user's home directory). Remote panes must report the transcript path because
   local profile discovery is never used over SSH. Transcripts must be readable
-  by the bridge. Over SSH, Roamgate reads the session path Herdr reports; it
-  never searches local files for a remote pane. Muse needs session logging
+  by the bridge. Over SSH, Roamgate reads the session path Herdr reports, or
+  finds a Claude, Codex or Pi transcript by its ID on the remote host; it never
+  searches local files for a remote Claude, Codex or Pi pane. A Claude session
+  that went on in a new transcript (a resume or `/clear` that Herdr still
+  reports under the old ID) is followed there. Session folders that are
+  symbolic links are followed. A Pi pane whose session Herdr does not report
+  (no Pi integration) shows the newest session Pi keeps for the pane's
+  directory, on this machine or the SSH host. This fallback cannot distinguish
+  two Pi panes in the same directory; install Herdr's Pi integration to bind
+  each pane to its own session. Muse needs session logging
   enabled (no `--no-session-log`). See
   [History synchronization](docs/HISTORY.md).
 
@@ -197,9 +272,15 @@ or its shortcut.
   (**Option+Enter** on macOS, or **Queue**) sends it once the answer finishes.
   Waiting messages show above the message box, where you can edit or remove
   queued ones. After **Stop** they wait until you choose **Send next**.
+- **Go to:** asked to go to or open a workspace or agent session, Ranger shows
+  it in the browser you asked from, switching connection when needed.
 - **Act:** Ranger can create workspaces, worktrees, tabs, and splits, and start,
   prompt, or close agents and panes. You confirm each action unless
   **High-permission mode** is on. Closing never deletes files or history.
+  A workspace or worktree Ranger creates is one it may use in that chat (and
+  that task run) without changing your workspace choice, which a scheduled
+  task over it still needs; with **Full access**, workspaces created while
+  Ranger answers are in reach too.
 - **Schedule:** the **Tasks** view runs a prompt once, daily, or every N minutes
   while the bridge is running, and can notify you when a run finishes or when
   Ranger decides something needs attention.
@@ -212,6 +293,9 @@ has the same [full authority](SECURITY.md#trust-model) as any Roamgate user.
 Open **Worktree Lifecycle** from a workspace menu or the command menu to:
 - Create a worktree from `origin`'s freshly fetched default branch without
   touching the current checkout. Creation stops if the remote is unavailable.
+  An optional [worktree command](docs/DEPLOYMENT.md#worktree-command), such
+  as `git recworktree add`, can create it instead of Herdr, and a remove
+  command, such as `git recworktree remove`, remove it.
 - See each worktree's path, branch status, uncommitted changes, and PR/MR badge.
 - Focus, pull, configure branch updates, or remove worktrees (with confirmation
   and hooks).

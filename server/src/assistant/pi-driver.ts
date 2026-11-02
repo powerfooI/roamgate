@@ -22,6 +22,7 @@ import { assertSafeDataPath } from "../config/data-paths";
 import type {
   ActionToolProposer,
   NotificationToolSender,
+  ShowToolHandler,
   TaskToolHandler,
   WorkspaceToolReader,
 } from "./tools";
@@ -110,6 +111,8 @@ export type AssistantDriver = {
     propose?: ActionToolProposer;
     task?: TaskToolHandler;
     notify?: NotificationToolSender;
+    /** Shows a workspace in the asking browser; absent without one. */
+    show?: ShowToolHandler;
     delta(text: string): void;
     message(text: string): void;
     tool(

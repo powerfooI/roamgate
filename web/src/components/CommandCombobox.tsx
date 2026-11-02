@@ -31,9 +31,11 @@ import {
   PanelTop,
   SplitSquareHorizontal,
   SplitSquareVertical,
+  Waypoints,
   X,
 } from "lucide-react";
 import { shallowEqual, store, useStoreSelector } from "../store";
+import { canForwardPorts } from "../portForwarding";
 import {
   terminalComposerCloseWarning,
   terminalComposerDraftPaneIds,
@@ -43,6 +45,7 @@ import { basename, shortId } from "../utils";
 import { luckyWorktreeBranchName } from "../luckyName";
 import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
 import { WorktreeHooksDialog } from "./WorktreeHooksDialog";
+import { WorktreeLocationDialog } from "./WorktreeLocationDialog";
 import { WorktreeOpenDialog } from "./WorktreeOpenDialog";
 import { AgentIcon } from "./AgentIcon";
 import {
@@ -61,7 +64,8 @@ import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
 type TextAction =
   | { type: "rename-workspace"; workspace: Workspace }
   | { type: "rename-tab"; tab: Tab }
-  | { type: "create-worktree"; workspace: Workspace };
+  | { type: "create-worktree"; workspace: Workspace }
+  | { type: "forward-port" };
 
 type ActionDefinition = {
   key: string;
@@ -247,6 +251,8 @@ export function CommandCombobox({
     (state) => ({
       activeConnectionId: state.activeConnectionId,
       connectionGeneration: state.connectionGeneration,
+      connections: state.connections,
+      forwards: state.forwards,
       layout: state.layout,
       panes: state.panes,
       selectedPaneId: state.selectedPaneId,
@@ -267,6 +273,9 @@ export function CommandCombobox({
   const [worktreeHooksWorkspaceId, setWorktreeHooksWorkspaceId] = useState<
     string | null
   >(null);
+  const [locationWorkspaceId, setLocationWorkspaceId] = useState<string | null>(
+    null,
+  );
   const [lifecycleWorkspaceId, setLifecycleWorkspaceId] = useState<
     string | null
   >(null);
@@ -375,6 +384,36 @@ export function CommandCombobox({
       store.renameTab(action.tab.tab_id, trimmed);
     } else if (action.type === "create-worktree") {
       store.createWorktree(action.workspace.workspace_id, trimmed);
+    } else if (action.type === "forward-port") {
+      const port = Number(trimmed);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        store.notify({
+          kind: "error",
+          message: "Invalid port",
+          detail: `${trimmed} is not a port between 1 and 65535.`,
+        });
+      } else {
+        void store
+          .openForward(port)
+          .then((forward) => {
+            if (!forward) return;
+            store.notify({
+              kind: "info",
+              message: `Forwarding port ${port}`,
+              detail:
+                forward.local_port === port
+                  ? `Reachable at http://localhost:${port}`
+                  : `Port ${port} was taken here, so it is at http://localhost:${forward.local_port}`,
+            });
+          })
+          .catch((error: unknown) =>
+            store.notify({
+              kind: "error",
+              message: "Port forwarding failed",
+              detail: error instanceof Error ? error.message : String(error),
+            }),
+          );
+      }
     }
     setTextAction(null);
   };
@@ -402,7 +441,15 @@ export function CommandCombobox({
               placeholder: "my-branch",
               submitLabel: "Create",
             }
-          : null;
+          : textAction?.type === "forward-port"
+            ? {
+                title: "Forward a Port",
+                label: "Remote port",
+                initialValue: "",
+                placeholder: "5173",
+                submitLabel: "Forward",
+              }
+            : null;
 
   const allWorkspaces = [...s.workspaces].sort((a, b) => a.number - b.number);
   const otherWorkspaces = focusedWorkspace
@@ -482,6 +529,19 @@ export function CommandCombobox({
       detail: workspaceName(focusedWorkspace),
       keywords: ["existing worktree", "open existing", "checkout", "branch"],
       run: () => setOpenWorktreeWorkspaceId(focusedWorkspace.workspace_id),
+    });
+    currentActions.push({
+      key: "current-worktree-location",
+      icon: <FolderOpen size={15} />,
+      title: "Worktree location",
+      detail: workspaceName(focusedWorkspace),
+      keywords: [
+        "worktree directory",
+        "worktree path",
+        "where worktrees are created",
+        "worktree folder",
+      ],
+      run: () => setLocationWorkspaceId(focusedWorkspace.workspace_id),
     });
   }
   if (focusedWorkspace?.worktree) {
@@ -785,6 +845,35 @@ export function CommandCombobox({
     });
   }
 
+  const forwardingOffered = canForwardPorts(
+    s.connections.find((connection) => connection.id === s.activeConnectionId)
+      ?.type,
+  );
+  const forwardActions: ActionDefinition[] = [];
+  if (forwardingOffered) {
+    forwardActions.push({
+      key: "forward-port",
+      icon: <Waypoints size={15} />,
+      title: "Forward a port",
+      detail: "Reach a port on this connection's host from here",
+      keywords: ["ssh", "tunnel", "port", "forward", "localhost"],
+      run: () => setTextAction({ type: "forward-port" }),
+    });
+  }
+  for (const forward of s.forwards) {
+    forwardActions.push({
+      key: `close-forward-${forward.id}`,
+      icon: <X size={15} />,
+      title: `Stop forwarding port ${forward.remote_port}`,
+      detail:
+        forward.state === "failed"
+          ? (forward.error ?? "failed")
+          : `localhost:${forward.local_port}`,
+      keywords: ["ssh", "tunnel", "port", "close", "stop"],
+      run: () => void store.closeForward(forward.id),
+    });
+  }
+
   const paneActions: ActionDefinition[] = activePane
     ? [
         {
@@ -949,6 +1038,7 @@ export function CommandCombobox({
     { heading: "Worktrees", actions: worktreeActions },
     { heading: "Tabs", actions: tabActions },
     { heading: "Panes", actions: paneActions },
+    { heading: "Ports", actions: forwardActions },
     { heading: "Agents", actions: agentActions },
     { heading: "Help", actions: helpActions },
   ].filter((group) => group.actions.length > 0);
@@ -1126,6 +1216,11 @@ export function CommandCombobox({
         open={!!worktreeHooksWorkspaceId}
         workspaceId={worktreeHooksWorkspaceId ?? undefined}
         onClose={() => setWorktreeHooksWorkspaceId(null)}
+      />
+      <WorktreeLocationDialog
+        open={!!locationWorkspaceId}
+        workspaceId={locationWorkspaceId}
+        onClose={() => setLocationWorkspaceId(null)}
       />
       <WorktreeLifecycleDialog
         open={!!lifecycleWorkspaceId}

@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 import type { AtifTrajectory, SessionFile } from "./session-types";
 import { isConversationStep } from "./session-messages";
 import { historyWindowEntries } from "./session-history-window";
+import { type PublishedArtifact, publishedArtifact } from "./session-artifacts";
+import type { HistoryImage } from "./session-images";
+export type { HistoryImage };
 
 export type HistoryEntry = {
   id: string;
@@ -12,6 +15,16 @@ export type HistoryEntry = {
   tool_name?: string;
   source_call_id?: string;
   is_error?: boolean;
+  // A message the user sent while the agent worked, still waiting in its
+  // queue. Once delivered it keeps its id and loses the flag.
+  queued?: boolean;
+  // The summary that replaced the earlier conversation when it was compacted.
+  compact_summary?: boolean;
+  // On an Artifact tool result: the page it published. Kept when the
+  // payload is redacted, so the chat can link to it.
+  artifact?: PublishedArtifact;
+  // On a user message: the images it carried, without their data.
+  images?: HistoryImage[];
   // Set on redacted wire entries: UTF-8 byte length of the withheld text,
   // fetchable via agent_history.entry when the user expands the card.
   text_bytes?: number;
@@ -44,9 +57,12 @@ export function historyEntriesFromTrajectory(
   const entries: HistoryEntry[] = [];
   const occurrences = new Map<string, number>();
   const names = new Map<string, string>();
+  const artifactCalls = new Map<string, Record<string, unknown>>();
   for (const step of trajectory.steps) {
     for (const call of step.tool_calls ?? []) {
       names.set(call.tool_call_id, call.function_name);
+      if (call.function_name === "Artifact")
+        artifactCalls.set(call.tool_call_id, call.arguments);
     }
   }
   const add = (entry: Omit<HistoryEntry, "id">) => {
@@ -71,6 +87,15 @@ export function historyEntriesFromTrajectory(
         role: step.source === "user" ? "user" : "assistant",
         text: step.message,
         sent_at,
+        ...(step.extra?.queued === true ? { queued: true } : {}),
+        ...(step.extra?.compact_summary === true
+          ? { compact_summary: true }
+          : {}),
+        ...(step.source === "user" && Array.isArray(step.extra?.images)
+          ? {
+              images: step.extra.images as HistoryImage[],
+            }
+          : {}),
       });
     }
     for (const call of step.tool_calls ?? []) {
@@ -95,6 +120,10 @@ export function historyEntriesFromTrajectory(
         text: result.content ?? step.message,
         is_error: result.extra?.is_error === true,
         sent_at,
+        ...artifactField(
+          artifactCalls.get(result.source_call_id ?? ""),
+          result.extra?.is_error === true ? "" : (result.content ?? ""),
+        ),
       });
     }
     if (typeof step.extra?.error_message === "string") {
@@ -108,6 +137,14 @@ export function historyEntriesFromTrajectory(
     }
   }
   return historyWindowEntries(entries, HISTORY_WINDOW_LIMIT);
+}
+
+function artifactField(
+  args: Record<string, unknown> | undefined,
+  output: string,
+) {
+  const artifact = args && publishedArtifact(args, output);
+  return artifact ? { artifact } : {};
 }
 
 // Short content hash of a tool payload, shared by redacted entries and

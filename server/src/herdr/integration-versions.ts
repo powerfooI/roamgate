@@ -1,4 +1,4 @@
-import { sshCommandArgv } from "../bridge/ssh-command";
+import { sshReadCommandArgv } from "../bridge/ssh-command";
 import { runProcessWithCodeTimeout, shQuote } from "../utils/process-utils";
 import { findHerdrBinary } from "./bootstrap";
 
@@ -84,7 +84,7 @@ export async function enrichIntegrationVersions(
       const command =
         'if command -v herdr >/dev/null 2>&1; then bin=herdr; else bin="$HOME/.local/bin/herdr"; fi; "$bin" --version && "$bin" integration status';
       const output = await run(
-        sshCommandArgv(options.sshHost, `bash -lc ${shQuote(command)}`),
+        sshReadCommandArgv(options.sshHost, `bash -lc ${shQuote(command)}`),
         CLI_TIMEOUT_MS,
       );
       if (output.code !== 0 || output.stdout.length > MAX_STATUS_LENGTH)

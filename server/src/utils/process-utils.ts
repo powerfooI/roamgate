@@ -1,3 +1,6 @@
+import { trackSshProcess } from "../bridge/ssh-metrics";
+import { runSshCommand } from "../bridge/ssh-sessions";
+
 export async function runProcess(
   argv: string[],
   input?: string,
@@ -19,15 +22,24 @@ export async function runProcessWithCode(
   argv: string[],
   input?: string,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
+  return runSshCommand(argv, (argv) => spawnWithCode(argv, input));
+}
+
+async function spawnWithCode(
+  argv: string[],
+  input?: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(argv, {
     stdin: input === undefined ? "ignore" : Buffer.from(input),
     stdout: "pipe",
     stderr: "pipe",
   });
+  const stderrText = new Response(proc.stderr).text();
+  trackSshProcess(argv, proc.exited, stderrText);
   const [code, stdout, stderr] = await Promise.all([
     proc.exited,
     new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
+    stderrText,
   ]);
   return { code, stdout, stderr };
 }
@@ -37,17 +49,32 @@ export async function runProcessWithCodeTimeout(
   timeoutMs: number,
   options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
+  return runSshCommand(
+    argv,
+    (argv, remainingMs) =>
+      spawnWithCodeTimeout(argv, remainingMs ?? timeoutMs, options),
+    { timeoutMs },
+  );
+}
+
+async function spawnWithCodeTimeout(
+  argv: string[],
+  timeoutMs: number,
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
+): Promise<{ code: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(argv, {
     ...options,
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
   });
+  const stderrText = new Response(proc.stderr).text();
+  trackSshProcess(argv, proc.exited, stderrText);
   let timer: ReturnType<typeof setTimeout> | null = null;
   const output = Promise.all([
     proc.exited,
     new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
+    stderrText,
   ]).then(([code, stdout, stderr]) => {
     if (timer) clearTimeout(timer);
     return { code, stdout, stderr };

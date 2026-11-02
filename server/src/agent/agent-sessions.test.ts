@@ -9,7 +9,10 @@ import {
   readAgentMessageHistory,
   readAgentSessionSummary,
 } from "./agent-sessions";
-import type { AgentSessionFileAccess } from "./session-file-access";
+import {
+  type AgentSessionFileAccess,
+  localAgentSessionFiles,
+} from "./session-file-access";
 import type { HerdrCall } from "./session-types";
 
 const tempDirectories: string[] = [];
@@ -101,7 +104,16 @@ function remotePiFiles(text: string): AgentSessionFileAccess {
     async readDownloadBody() {
       return bytes;
     },
+    async findPiSessionForCwd() {
+      return null;
+    },
     async findPiSessionById() {
+      return null;
+    },
+    async findClaudeSessionById() {
+      return null;
+    },
+    async findClaudeSuccessor() {
       return null;
     },
     async findCodexSessionById() {
@@ -515,5 +527,202 @@ describe("Pi agent sessions", () => {
       session_id: sessionId,
       agent: { name: "antigravity-cli" },
     });
+  });
+});
+
+describe("Claude session commands", () => {
+  test("agent_commands.get lists the session's skills from its transcript", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "roamgate-claude-commands-"),
+    );
+    tempDirectories.push(directory);
+    const path = join(directory, "session.jsonl");
+    await writeFile(
+      path,
+      `${[
+        { type: "user", message: { role: "user", content: "hello" } },
+        {
+          type: "attachment",
+          attachment: {
+            type: "skill_listing",
+            names: ["commit"],
+            content: "- commit: Write a commit message",
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")}\n`,
+    );
+    const herdrCall: HerdrCall = async () => ({
+      agent: {
+        agent: "claude",
+        workspace_id: "w1",
+        tab_id: "t1",
+        cwd: directory,
+        agent_session: { agent: "claude", kind: "path", value: path },
+      },
+    });
+    const handlers = createAgentSessionHandlers({
+      herdrCall,
+      files: localAgentSessionFiles,
+    });
+    expect(await handlers.readCommands({ pane_id: "p1" })).toEqual({
+      commands: [{ name: "commit", description: "Write a commit message" }],
+    });
+  });
+});
+
+describe("Claude session title", () => {
+  test("agent_session.get carries the /rename name, else Claude's title", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "roamgate-claude-title-"));
+    tempDirectories.push(directory);
+    const path = join(directory, "session.jsonl");
+    const write = (records: Record<string, unknown>[]) =>
+      writeFile(
+        path,
+        `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+      );
+    const herdrCall: HerdrCall = async () => ({
+      agent: {
+        agent: "claude",
+        workspace_id: "w1",
+        tab_id: "t1",
+        cwd: directory,
+        agent_session: { agent: "claude", kind: "path", value: path },
+      },
+    });
+    const user = { type: "user", message: { role: "user", content: "hi" } };
+    await write([user, { type: "ai-title", aiTitle: "Fix the login form" }]);
+    const first = createAgentSessionHandlers({
+      herdrCall,
+      files: localAgentSessionFiles,
+    });
+    expect((await first.readSummary({ pane_id: "p1" })).title).toBe(
+      "Fix the login form",
+    );
+    await write([
+      user,
+      { type: "ai-title", aiTitle: "Fix the login form" },
+      { type: "custom-title", customTitle: "login" },
+    ]);
+    const second = createAgentSessionHandlers({
+      herdrCall,
+      files: localAgentSessionFiles,
+    });
+    expect((await second.readSummary({ pane_id: "p1" })).title).toBe("login");
+  });
+});
+
+describe("Claude session artifacts", () => {
+  test("agent_artifacts.get lists the pages the session published", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "roamgate-claude-artifacts-"),
+    );
+    tempDirectories.push(directory);
+    const path = join(directory, "session.jsonl");
+    const call = (id: string, input: Record<string, unknown>) => ({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "tool_use", id, name: "Artifact", input }],
+      },
+    });
+    const result = (id: string, text: string) => ({
+      type: "user",
+      timestamp: "2026-10-30T10:00:00.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: id, content: text }],
+      },
+    });
+    await writeFile(
+      path,
+      `${[
+        call("t1", { file_path: "/tmp/report/index.html", title: "Report" }),
+        result(
+          "t1",
+          "Created a new Artifact at https://claude.ai/artifact/abc-1",
+        ),
+        call("t2", { file_path: "/tmp/evil.html" }),
+        result("t2", "Created a new Artifact at javascript:alert(1)"),
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")}\n`,
+    );
+    const handlers = createAgentSessionHandlers({
+      herdrCall: async () => ({
+        agent: {
+          agent: "claude",
+          workspace_id: "w1",
+          tab_id: "t1",
+          cwd: directory,
+          agent_session: { agent: "claude", kind: "path", value: path },
+        },
+      }),
+      files: localAgentSessionFiles,
+    });
+    expect(await handlers.readArtifacts({ pane_id: "p1" })).toEqual({
+      artifacts: [
+        {
+          url: "https://claude.ai/artifact/abc-1",
+          title: "Report",
+          published_at: "2026-10-30T10:00:00.000Z",
+        },
+      ],
+    });
+  });
+});
+
+describe("Claude session images", () => {
+  test("agent_history.entry gives the images a message carried", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "roamgate-claude-images-"));
+    tempDirectories.push(directory);
+    const path = join(directory, "session.jsonl");
+    const png = Buffer.from("png bytes").toString("base64");
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        type: "user",
+        timestamp: "2026-10-30T10:00:00.000Z",
+        message: {
+          role: "user",
+          content: [
+            { type: "text", text: "[Image #1] look" },
+            {
+              type: "image",
+              source: { type: "base64", media_type: "image/png", data: png },
+            },
+          ],
+        },
+      })}\n`,
+    );
+    const handlers = createAgentSessionHandlers({
+      herdrCall: async () => ({
+        agent: {
+          agent: "claude",
+          workspace_id: "w1",
+          tab_id: "t1",
+          cwd: directory,
+          agent_session: { agent: "claude", kind: "path", value: path },
+        },
+      }),
+      files: localAgentSessionFiles,
+    });
+    const history = await handlers.readHistory({
+      pane_id: "p1",
+      history_version: 2,
+    });
+    if (!("mode" in history) || history.mode !== "snapshot")
+      throw new Error("Expected history snapshot");
+    const [message] = history.entries;
+    // The history says there is an image, without its data.
+    expect(message!.images).toEqual([
+      { media_type: "image/png", bytes: 9, hash: expect.any(String) },
+    ]);
+    const entry = await handlers.readEntry({
+      pane_id: "p1",
+      entry_id: message!.id,
+    });
+    expect(entry.images).toEqual([{ ...message!.images![0]!, data: png }]);
   });
 });

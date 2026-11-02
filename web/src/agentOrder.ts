@@ -167,6 +167,15 @@ export function withAgentActivity(
       activity > 0
         ? { last_activity_at: activity }
         : {}),
+      // Done as Roamgate saw it, not as Herdr's focus did: an agent that
+      // finished in Herdr's focused Space is not Done there, though nobody
+      // looked at it (agent-seen.ts on the server).
+      ...(typeof agent.seen_at === "number" && Number.isFinite(agent.seen_at)
+        ? { seen_at: agent.seen_at }
+        : {}),
+      ...(sameCompletedState && typeof agent.seen_done === "boolean"
+        ? { agent_status: agent.seen_done ? "done" : "idle" }
+        : {}),
     };
   });
 }

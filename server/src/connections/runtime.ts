@@ -25,6 +25,8 @@ import {
 } from "../bridge/protocol-compat";
 import { roamgateEnv } from "../config/environment";
 import { createSettingsRpcHandler } from "../bridge/settings-rpc";
+import { createForwardRpcHandler } from "../bridge/forward-rpc";
+import type { SshForwards } from "../bridge/ssh-forward";
 import {
   readGuiSettings,
   terminalSurfaceCodecsEnabled,
@@ -35,6 +37,7 @@ import {
   type SshTunnelError,
 } from "../bridge/ssh-tunnel";
 import { dropCoalescedMessage } from "../bridge/websocket-send";
+import { annotateSshArgv } from "../bridge/ssh-metrics";
 import { createTerminalBridge } from "../bridge/terminal-bridge";
 import { createHerdrInfoHandler } from "../http/herdr-info";
 import { createImageUploadHandler } from "../http/image-upload";
@@ -45,9 +48,9 @@ import {
   silentLogger,
 } from "../utils/logger";
 import {
-  runProcess,
-  runProcessWithCode,
-  runProcessWithCodeTimeout,
+  runProcess as runProcessBase,
+  runProcessWithCode as runProcessWithCodeBase,
+  runProcessWithCodeTimeout as runProcessWithCodeTimeoutBase,
   shQuote,
 } from "../utils/process-utils";
 import { createWorkspaceAutoSync } from "../workspace/auto-sync";
@@ -57,7 +60,7 @@ import {
   type LastStepBaselineStore,
 } from "../workspace/git-diff";
 import { createLastStepTurnTracker } from "../workspace/last-step-turns";
-import { runBinaryProcessWithTimeout } from "../workspace/process";
+import { runBinaryProcessWithTimeout as runBinaryProcessWithTimeoutBase } from "../workspace/process";
 import { createStatusEnricher } from "../workspace/status";
 import { createWorktreeHookRunner } from "../worktree/worktree-hooks";
 import { createWorktreeParentStore } from "../worktree/parents";
@@ -66,18 +69,8 @@ import {
   createWorktreeRemovalRuntime,
 } from "../worktree/remove";
 import { createAgentStatusSubscriptionLoop } from "./agent-status-subscription";
-import {
-  antigravityHome,
-  findAntigravitySessionForCwd,
-} from "../agent/antigravity-session";
-import { existsSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
-import { sshCommandArgv } from "../bridge/ssh-command";
-import {
-  createTabAutoRenamer,
-  isGenericTerminalTitle,
-} from "./tab-auto-rename";
+import { createTabAutoRenamer } from "./tab-auto-rename";
+import { createAgentTabTitleReader } from "./agent-tab-title";
 import { sanitizeConnectionError } from "./manager";
 import { createEventSubscriptionLoop } from "./subscription-loop";
 import { type ConnectionIdentity, LEGACY_DEFAULT_CONNECTION } from "./types";
@@ -134,10 +127,14 @@ export function createLegacyConnectionRuntime(args: {
   taskNotificationSource?: TaskNotificationSource;
   onError?: (error: unknown, identity: ConnectionIdentity) => void;
   onTransportExit?: (error: SshTunnelError) => void;
+  /** Shared across connections: local ports are a single machine-wide space. */
+  forwards?: SshForwards;
   /** Test seam for deterministic shutdown coverage. */
   lastStepBaselines?: LastStepBaselineStore;
   resolveLastStepWorkspaceGitRoot?: (workspaceId: string) => Promise<string>;
   lastStepTransitionDebounceMs?: number;
+  /** Test seam for the background git status reads. */
+  runGitStatusProcess?: typeof runProcessWithCodeTimeoutBase;
 }) {
   const { config } = args;
   const remotePlatform = config.remotePlatform;
@@ -146,7 +143,25 @@ export function createLegacyConnectionRuntime(args: {
   const socketPath = config.socketPath;
   const clientSocketPath = config.clientSocketPath;
   const sshHost = () => config.sshHost;
-  const herdr = new HerdrClient(socketPath);
+  // Label this runtime's ssh children with its connection in the debug log.
+  const forConnection = (argv: string[]) =>
+    annotateSshArgv(argv, { connection: identity.id });
+  const runProcess: typeof runProcessBase = (argv, ...rest) =>
+    runProcessBase(forConnection(argv), ...rest);
+  const runProcessWithCode: typeof runProcessWithCodeBase = (argv, ...rest) =>
+    runProcessWithCodeBase(forConnection(argv), ...rest);
+  const runProcessWithCodeTimeout: typeof runProcessWithCodeTimeoutBase = (
+    argv,
+    ...rest
+  ) => runProcessWithCodeTimeoutBase(forConnection(argv), ...rest);
+  const runBinaryProcessWithTimeout: typeof runBinaryProcessWithTimeoutBase = (
+    argv,
+    ...rest
+  ) => runBinaryProcessWithTimeoutBase(forConnection(argv), ...rest);
+  const herdr = new HerdrClient(socketPath, {
+    logger: logger.child("herdr"),
+    connectionId: identity.id,
+  });
   const agentSessionFiles = createAgentSessionFileAccess({
     sshHost: config.sshHost,
     runBinaryProcessWithTimeout,
@@ -190,8 +205,24 @@ export function createLegacyConnectionRuntime(args: {
   const status = createStatusEnricher({
     connectionId: identity.id,
     sshHost,
-    runProcessWithCodeTimeout,
+    runProcessWithCodeTimeout:
+      args.runGitStatusProcess ?? runProcessWithCodeTimeout,
     shQuote,
+    onGitStatusChanged: (updates) => {
+      if (disposed) return;
+      args.onEvent(
+        {
+          event: "workspace.git_status",
+          data: { type: "workspace.git_status", statuses: updates },
+        },
+        identity,
+      );
+    },
+    onRefreshError: (error) =>
+      logger.warn("git status refresh failed", {
+        connection: identity.id,
+        error: sanitizeConnectionError(error),
+      }),
   });
   const workspaceAutoSync = createWorkspaceAutoSync({
     connectionId: identity.id,
@@ -251,6 +282,7 @@ export function createLegacyConnectionRuntime(args: {
       files.resolveWorkspaceGitRoot({ workspace_id: workspaceId }),
     workspaceAutoSyncIsRunning: workspaceAutoSync.isRunning,
     onWorkspaceAutoSyncSettingsChanged: workspaceAutoSync.settingsChanged,
+    onAgentAutoRenameSettingsChanged: () => tabAutoRenamer.settingsChanged(),
     onTerminalTransportSettingsChanged: (enabled) => {
       if (disposed) return;
       terminalBridge.refreshSurfaceCodecs();
@@ -265,6 +297,18 @@ export function createLegacyConnectionRuntime(args: {
     safeSend: args.safeSend,
     markRpcError: args.markRpcError,
   });
+  const handleForwardRpc = args.forwards
+    ? createForwardRpcHandler({
+        connectionId: identity.id,
+        connectionGeneration: args.connectionGeneration,
+        sshHost,
+        runProcess,
+        forwards: args.forwards,
+        safeSend: args.safeSend,
+        markRpcError: args.markRpcError,
+      })
+    : null;
+
   const terminalBridge = createTerminalBridge({
     connectionId: identity.id,
     broadcast: args.broadcast,
@@ -360,6 +404,8 @@ export function createLegacyConnectionRuntime(args: {
       });
     },
     completeWorkspaceStep: async (workspaceId) => {
+      // A finished agent turn is the likeliest moment for the tree to change.
+      status.invalidateWorkspaceGitStatus(workspaceId);
       try {
         await lastStepBaselines.completeWorkspace(workspaceId);
       } finally {
@@ -541,183 +587,18 @@ export function createLegacyConnectionRuntime(args: {
     },
   });
 
-  async function readHermesSqliteTitle(
-    sshHost?: string,
-  ): Promise<string | null> {
-    const pythonScript =
-      "import sqlite3, os\n" +
-      'db = os.path.expanduser("~/.hermes/state.db")\n' +
-      "if os.path.exists(db):\n" +
-      "    try:\n" +
-      "        conn = sqlite3.connect(db)\n" +
-      "        row = conn.execute(\"SELECT title FROM sessions WHERE title IS NOT NULL AND title != '' ORDER BY started_at DESC LIMIT 1\").fetchone()\n" +
-      "        if row and row[0]:\n" +
-      "            print(row[0].strip())\n" +
-      "    except Exception:\n" +
-      "        pass\n";
-    if (sshHost) {
-      try {
-        const res = await runBinaryProcessWithTimeout(
-          sshCommandArgv(sshHost, `python3 -c ${shQuote(pythonScript)}`),
-          3000,
-        );
-        if (res.code === 0) {
-          const out = res.stdout.toString("utf8").trim();
-          return out.length > 0 ? out : null;
-        }
-      } catch {}
-    } else {
-      try {
-        const dbPath = join(homedir(), ".hermes", "state.db");
-        if (existsSync(dbPath)) {
-          const { Database } = await import("bun:sqlite");
-          const db = new Database(dbPath, { readonly: true });
-          const row = db
-            .query(
-              "SELECT title FROM sessions WHERE title IS NOT NULL AND title != '' ORDER BY started_at DESC LIMIT 1",
-            )
-            .get() as { title?: string } | null;
-          db.close();
-          if (row?.title && typeof row.title === "string") {
-            const trimmed = row.title.trim();
-            return trimmed.length > 0 ? trimmed : null;
-          }
-        }
-      } catch {}
-    }
-    return null;
-  }
-
-  async function readAntigravityTitle(
-    cwd?: string,
-    sshHost?: string,
-  ): Promise<string | null> {
-    if (sshHost) {
-      const pythonScript =
-        "import os, glob, re\n" +
-        "home = os.path.expanduser('~/.gemini/antigravity-cli/annotations')\n" +
-        "files = glob.glob(os.path.join(home, '*.pbtxt'))\n" +
-        "if files:\n" +
-        "    files.sort(key=os.path.getmtime, reverse=True)\n" +
-        "    try:\n" +
-        "        with open(files[0], 'r', encoding='utf-8') as f:\n" +
-        '            m = re.search(r\'title:\\s*"([^"]+)"\', f.read())\n' +
-        "            if m:\n" +
-        "                print(m.group(1).strip())\n" +
-        "    except Exception:\n" +
-        "        pass\n";
-      try {
-        const res = await runBinaryProcessWithTimeout(
-          sshCommandArgv(sshHost, `python3 -c ${shQuote(pythonScript)}`),
-          3000,
-        );
-        if (res.code === 0) {
-          const out = res.stdout.toString("utf8").trim();
-          return out.length > 0 ? out : null;
-        }
-      } catch {}
-    } else {
-      try {
-        if (cwd) {
-          const desc = await findAntigravitySessionForCwd(cwd);
-          if (desc?.session.sessionId) {
-            const pbtxt = join(
-              antigravityHome(),
-              "annotations",
-              `${desc.session.sessionId}.pbtxt`,
-            );
-            if (existsSync(pbtxt)) {
-              const text = await Bun.file(pbtxt).text();
-              const match = text.match(/title:\s*"([^"]+)"/);
-              if (match?.[1]) {
-                const trimmed = match[1].trim();
-                if (trimmed) return trimmed;
-              }
-            }
-          }
-        }
-      } catch {}
-    }
-    return null;
-  }
-
   const tabAutoRenamer = createTabAutoRenamer({
     herdr,
-    getAgentTitleForPane: async (paneId, candidatePane) => {
-      // 1. Try reading summary title from agentSessions
-      try {
-        const summary = (await agentSessions.readSummary({
-          pane_id: paneId,
-        })) as {
-          title?: string | null;
-        };
-        if (summary?.title && typeof summary.title === "string") {
-          const trimmed = summary.title.trim();
-          if (trimmed) return trimmed;
-        }
-      } catch {}
-
-      // 2. If Hermes, check SQLite state.db
-      if (candidatePane?.agent === "hermes") {
-        try {
-          const hermesTitle = await readHermesSqliteTitle(config.sshHost);
-          if (hermesTitle) return hermesTitle;
-        } catch {}
-      }
-
-      // 3. If Antigravity (agy), check annotations
-      if (candidatePane?.agent === "agy") {
-        try {
-          const agyTitle = await readAntigravityTitle(
-            candidatePane.cwd,
-            config.sshHost,
-          );
-          if (agyTitle) return agyTitle;
-        } catch {}
-      }
-
-      // 4. Fallback to pane / agent terminal_title_stripped or terminal_title
-      try {
-        let stripped = candidatePane?.terminal_title_stripped;
-        let raw = candidatePane?.terminal_title;
-
-        if (!stripped && !raw) {
-          const agentInfo = (await herdr.call(
-            "agent.get",
-            { target: paneId },
-            5000,
-          )) as {
-            agent?: {
-              terminal_title_stripped?: string;
-              terminal_title?: string;
-            };
-          } | null;
-          stripped = agentInfo?.agent?.terminal_title_stripped;
-          raw = agentInfo?.agent?.terminal_title;
-        }
-
-        if (typeof stripped === "string") {
-          const trimmed = stripped.trim();
-          if (trimmed && !isGenericTerminalTitle(trimmed)) {
-            return trimmed;
-          }
-        }
-
-        if (typeof raw === "string") {
-          const cleaned = raw.replace(/^[\s✳*•]+/, "").trim();
-          if (cleaned && !isGenericTerminalTitle(cleaned)) {
-            return cleaned;
-          }
-        }
-      } catch {}
-
-      return null;
-    },
-    isEnabled: async () => {
-      const settings = await readGuiSettings().catch(() => null);
-      return settings?.auto_rename_agent_tabs !== false;
-    },
-    pollIntervalMs: 3000,
+    getAgentTitleForPane: createAgentTabTitleReader({
+      herdrCall: (method, params) => herdr.call(method, params, 5000),
+      readSummary: agentSessions.readSummary,
+      sshHost: config.sshHost,
+      remotePlatform,
+      run: runBinaryProcessWithTimeout,
+    }),
+    isEnabled: async () =>
+      (await readGuiSettings()).auto_rename_agent_tabs !== false,
+    pollIntervalMs: 30_000,
     log: (message) => logger.debug(message, { connection: identity.id }),
   });
 
@@ -825,6 +706,7 @@ export function createLegacyConnectionRuntime(args: {
     }
     subscriptionLoop.start();
     agentStatusSubscriptions.start();
+    tabAutoRenamer.start();
     herdrNotifications?.start();
   }
 
@@ -840,7 +722,12 @@ export function createLegacyConnectionRuntime(args: {
     taskEvents.stop();
     pendingTaskEvents.clear();
     herdrNotifications?.stop();
+    status.dispose();
     const autoSyncStop = workspaceAutoSync.stop();
+    // A forward outlives nothing: its ssh process rides the same credentials
+    // and host as the connection that asked for it. Listed as lost, not
+    // removed, so a reconnect does not make forwards vanish unexplained.
+    args.forwards?.loseConnection(identity.id);
     terminalBridge.dispose();
     const subscriptionStop = subscriptionLoop.stop();
     const agentStatusStop = agentStatusSubscriptions.stop();
@@ -873,6 +760,7 @@ export function createLegacyConnectionRuntime(args: {
     handleImageUpload,
     handleTerminalUpload,
     handleSettingsRpc,
+    handleForwardRpc,
     files,
     status,
     workspaceAutoSync,

@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { open, realpath } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
-import { sshCommandArgv } from "../bridge/ssh-command";
+import { sshReadCommandArgv } from "../bridge/ssh-command";
 import { assertInsideRoot, relativePreviewPath } from "./file-paths";
 import type { RunProcessWithCodeTimeout } from "./file-types";
 import { PREVIEW_TIMEOUT_MS } from "./file-constants";
@@ -49,7 +49,7 @@ printf '%s\\n' "$(printf '%s' "$rel" | base64 | tr -d '\\n')"
 head -c ${limit + 1} "$target_real" | base64 | tr -d '\\n'
 `;
     const result = await runProcessWithCodeTimeout(
-      sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
+      sshReadCommandArgv(host, `bash -lc ${shQuote(command)}`),
       PREVIEW_TIMEOUT_MS,
     );
     if (result.code === 15)

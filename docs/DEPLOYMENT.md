@@ -212,19 +212,20 @@ environment file. `roamgate --help` lists everything.
 | `--profile-dir <path>`                  | `ROAMGATE_PROFILE_DIR`         | `<data dir>/profiles`                             |
 | `--open`                                | `OPEN_BROWSER=1`               | Disabled                                          |
 
-| Other environment variable                             | Purpose                                      |
-| ------------------------------------------------------ | -------------------------------------------- |
-| `ROAMGATE_UPDATE_BASE_URL`                             | HTTPS update mirror directory                |
-| `ROAMGATE_DISABLE_UPDATE_CHECK=1`                      | Disable update checks                        |
-| `ROAMGATE_RESTART_SUPERVISOR=0\|1`                     | Override supervisor detection                |
-| `ROAMGATE_DISABLE_ENDPOINT=1`                          | Force legacy terminal mode                   |
-| `ROAMGATE_ALLOW_FILE_REVEAL=1`                         | Enable [host file reveal](#host-file-reveal) |
-| `ROAMGATE_UPLOAD_MAX_BYTES`                            | Max terminal upload size (default 100 MiB)   |
-| `ROAMGATE_UPLOAD_RETENTION_HOURS`                      | Upload retention (default 24)                |
-| `ROAMGATE_SETTINGS_PATH`                               | GUI settings file (one per bridge)           |
-| `ROAMGATE_CONNECTIONS_PATH`                            | Connection profiles file                     |
-| `ROAMGATE_ASSISTANT_DIR`                               | Ranger data directory                        |
-| `ROAMGATE_WEB_PUSH_PATH` / `ROAMGATE_WEB_PUSH_SUBJECT` | [Web Push](#web-push-notifications)          |
+| Other environment variable                             | Purpose                                                                                         |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `ROAMGATE_UPDATE_BASE_URL`                             | HTTPS update mirror directory                                                                   |
+| `ROAMGATE_DISABLE_UPDATE_CHECK=1`                      | Disable update checks                                                                           |
+| `ROAMGATE_RESTART_SUPERVISOR=0\|1`                     | Override supervisor detection                                                                   |
+| `ROAMGATE_DISABLE_ENDPOINT=1`                          | Force legacy terminal mode                                                                      |
+| `ROAMGATE_DISABLE_SSH_MASTER=1`                        | Give every SSH host command its own login; see [SSH transport](./ARCHITECTURE.md#ssh-transport) |
+| `ROAMGATE_ALLOW_FILE_REVEAL=1`                         | Enable [host file reveal](#host-file-reveal)                                                    |
+| `ROAMGATE_UPLOAD_MAX_BYTES`                            | Max terminal upload size (default 100 MiB)                                                      |
+| `ROAMGATE_UPLOAD_RETENTION_HOURS`                      | Upload retention (default 24)                                                                   |
+| `ROAMGATE_SETTINGS_PATH`                               | GUI settings file (one per bridge)                                                              |
+| `ROAMGATE_CONNECTIONS_PATH`                            | Connection profiles file                                                                        |
+| `ROAMGATE_ASSISTANT_DIR`                               | Ranger data directory                                                                           |
+| `ROAMGATE_WEB_PUSH_PATH` / `ROAMGATE_WEB_PUSH_SUBJECT` | [Web Push](#web-push-notifications)                                                             |
 
 Legacy `HERDR_GUI_*` names still work; the `ROAMGATE_*` name wins, even when
 empty.
@@ -373,6 +374,25 @@ Logs have one line per event. `info` covers lifecycle events and failures. Use
 include paths and IDs, but never URL tokens. `roamgate service logs -f` follows a
 managed service.
 
+### Latency samples
+
+At `debug`, the server logs one line per Herdr control call (`herdr call`:
+method, sizes, `total_ms`, `connect_ms`, `first_byte_ms` from request write to
+first response byte), per ssh child exit (`ssh process exited`: caller `tag`,
+`connection`, `master=true` for multiplexed commands, `host`, `code`, `total_ms`, live children, and
+`startup_failures` for sshd `kex_exchange_identification` drops), and per typed
+character echo (`terminal echo`: `input_to_surface_max_ms`,
+`surface_to_send_ms`). The echo sample runs to the pane's next surface, which
+other output can trigger first, so it is an upper bound; a character with no
+surface within 5 s is not sampled. Tags ride on the argv array itself, so an
+argv copied before it is spawned logs as `untagged`. Attach phases appear in `endpoint connected`.
+
+The browser keeps its samples off by default. Add `?debugLatency` to the page
+URL, or run `localStorage.setItem("roamgate:debugLatency", "1")` and reload,
+then show the console's Verbose level. Lines start with `[latency]`: `refresh`
+and `refresh call` per connection and method, `terminal echo` with
+`input_to_frame_ms`, and `attach watchdog fired`.
+
 ### Performance profiling
 
 Run a short CPU capture on a spare port, then reproduce the slow interaction in
@@ -418,7 +438,11 @@ with `--allow-unelevated-clients`.
 Profiles are stored in `~/.config/roamgate/connections.json`
 (`%APPDATA%\roamgate\connections.json`). `auto_connect` controls whether a
 profile connects at startup. Transient SSH failures retry; authentication and
-host-key failures do not. GUI preferences live in `settings.json` beside it.
+host-key failures do not. A Unix-host SSH profile holds two connections to its
+host: the terminal tunnel and a command master shared by file, Git, search, and
+upload commands; Roamgate keeps at most eight of these command sessions per
+host, within sshd's default `MaxSessions 10`. A Windows-host profile opens one
+connection per bridged socket client and has no command master. GUI preferences live in `settings.json` beside it.
 Give each bridge on the same account its own `ROAMGATE_SETTINGS_PATH` (an
 absolute, stable path; changing it requires logging in again).
 
@@ -441,6 +465,77 @@ tell apart. The suffix (up to 32 characters) is saved on the server and shared b
 all viewers. Set it before installing the PWA; already installed apps (especially
 on Android) may keep the old name until the browser updates the manifest or you
 reinstall.
+
+## Worktree location
+
+By default Herdr chooses where a new worktree is created. Set a repository's
+worktree location in the worktree dialog (**Worktree location**) to make every
+new worktree land in `<directory>/<branch>` instead, with `/` and other unsafe
+characters in the branch name replaced by `-`. The directory must be absolute.
+It is stored per repository as `worktree_directory` in `settings.json`; clear it
+to return to Herdr's default.
+
+## Worktree command
+
+To create worktrees with your own tool instead of Herdr, set a command in
+**Configuration > Instance** (the default) or in a repository's worktree
+dialog (**Worktree command**, which wins). For example:
+
+```sh
+git recworktree add {path} --branch {branch} --base {base}
+```
+
+Roamgate runs the command with `sh` (over SSH, `sh -c` whatever the login
+shell), from the source repository on the workspace's host, for up to five
+minutes. `{path}` (the new checkout), `{branch}`, `{base}` (the commit fetched
+from `origin`) and `{repo}` (the source repository) stand for the variables
+`ROAMGATE_WORKTREE_PATH`, `ROAMGATE_WORKTREE_BRANCH`, `ROAMGATE_WORKTREE_BASE`
+and `ROAMGATE_WORKTREE_REPO`, which Roamgate exports first: each placeholder
+becomes `"$ROAMGATE_WORKTREE_..."`, so a value is never read as shell syntax.
+Do not quote or escape placeholders yourself; commands with quoted or escaped
+placeholders are refused. Branch names must be valid for git and free of spaces and shell
+syntax characters (`$`, backquote, quotes, `\`, `;`, `|`, `&`, `<`, `>`,
+parentheses, braces, `!`).
+
+When a worktree location is set, the path is that directory plus the branch
+name with every run of characters other than letters, digits, `.`, `_` and
+`-` replaced by `-` (`feature/x` becomes `<location>/feature-x`). Otherwise it
+is Roamgate's reproduction of Herdr's default,
+`~/.herdr/worktrees/<repo>/<branch slug>`, with the branch lowercased and runs
+of other characters replaced by `-`; set a location if Herdr's
+`[worktrees] directory` is customized. Roamgate then opens the checkout in
+Herdr and runs the setup hook. A checkout Herdr already had open fails
+creation instead of running the setup hook again.
+
+Before running the command, Roamgate checks that its first program is
+installed on that host (`command -v`; for `git <subcommand>`, also that git
+knows the subcommand as a builtin, an installed `git-<subcommand>` or an
+alias). If it is not, or the host has no `sh`, Herdr creates the worktree as
+without a command and the result says so. Once the command runs, any non-zero
+exit, 127 included, fails creation with the command's output. It is stored as
+`worktree_command` at the top of `settings.json` and per repository; leave it
+empty to let Herdr create worktrees. A repository cannot opt out of a global
+default: leave the default empty and set the command per repository instead.
+
+A **remove command** works the same way for removal, set beside it:
+
+```sh
+git recworktree remove {path} {force}
+```
+
+`{path}` (the checkout) and `{repo}` (the source repository) stand for the
+same exported variables, and `{force}` is `--force` when you force the
+removal, otherwise nothing. Forcing a removal discards the checkout's
+uncommitted and untracked changes, and with `git recworktree` those of its
+nested checkouts too: put `{force}` only where your tool means that. The
+command runs from the source repository on the workspace's host, after the
+teardown hook; when it succeeds Herdr closes the workspace, as its own removal
+would, and the removed hook runs. Not installed on that host, Herdr removes
+the worktree and the result says so. A failure that leaves a stale checkout
+behind ("is not a working tree") gets the same recovery as Herdr's removal;
+any other failure stops the removal with the command's output. It is stored
+as `worktree_remove_command`, at the top of `settings.json` and per
+repository.
 
 ## Worktree hooks
 

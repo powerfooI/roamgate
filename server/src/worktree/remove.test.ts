@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +10,8 @@ import {
   isNotWorkingTreeRemoveError,
   parseCheckoutProcessIds,
   removeWorktreeWithRecovery,
+  renderWorktreeRemoveCommand,
+  runWorktreeRemoveCommand,
   type CheckoutState,
   type WorktreeRemovalRuntime,
 } from "./remove";
@@ -528,4 +531,232 @@ describe("worktree removal checkout inspection", () => {
       await rm(root, { recursive: true, force: true });
     }
   }, 10_000);
+});
+
+describe("worktree remove command", () => {
+  test("substitutes the checkout, its repository and --force when forced", () => {
+    expect(
+      renderWorktreeRemoveCommand("git recworktree remove {path} {force}", {
+        path: "/w/it's",
+        repo: "/src",
+        force: true,
+      }),
+    ).toBe(
+      `export ROAMGATE_WORKTREE_PATH='/w/it'\\''s'; export ROAMGATE_WORKTREE_REPO='/src'; cd "$ROAMGATE_WORKTREE_REPO" && git recworktree remove "$ROAMGATE_WORKTREE_PATH" --force`,
+    );
+    expect(
+      renderWorktreeRemoveCommand("tool rm {path} {force} --repo {repo}", {
+        path: "~/wt/a",
+        repo: "/src",
+        force: false,
+      }),
+    ).toBe(
+      `export ROAMGATE_WORKTREE_PATH="$HOME"/'wt/a'; export ROAMGATE_WORKTREE_REPO='/src'; cd "$ROAMGATE_WORKTREE_REPO" && tool rm "$ROAMGATE_WORKTREE_PATH"  --repo "$ROAMGATE_WORKTREE_REPO"`,
+    );
+  });
+
+  test("a hostile checkout path runs nothing, with a real sh", async () => {
+    const root = mkdtempSync(join(tmpdir(), "roamgate-remove-sh-"));
+    try {
+      const marker = join(root, "pwned");
+      const checkout = `${root}/a$(touch\${IFS}${marker})'$(touch\${IFS}${marker})'`;
+      const remove = (template: string) =>
+        runWorktreeRemoveCommand({
+          template,
+          checkoutPath: checkout,
+          sourceCheckoutPath: root,
+          force: false,
+          runProcess: runProcessWithCodeTimeout,
+        });
+      // Quoted placeholders would put the value back into shell syntax.
+      const outcomes: string[] = [];
+      for (const template of [
+        `printf '%s' "{path}" > out`,
+        `printf '%s' '{path}' > out`,
+      ])
+        outcomes.push(
+          await remove(template).then(
+            () => "ran",
+            (error: Error) => error.message,
+          ),
+        );
+      expect(existsSync(marker)).toBe(false);
+      expect(outcomes).toEqual([
+        "Remove the quotes around {path}: Roamgate quotes placeholders itself.",
+        "Remove the quotes around {path}: Roamgate quotes placeholders itself.",
+      ]);
+      expect(await remove(`printf '%s' {path} > out`)).toBeNull();
+      expect(readFileSync(join(root, "out"), "utf8")).toBe(checkout);
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("runs from the source repository, over SSH on a remote host", async () => {
+    const runs: string[][] = [];
+    const fallback = await runWorktreeRemoveCommand({
+      template: "git recworktree remove {path} {force}",
+      checkoutPath: "/w/a",
+      sourceCheckoutPath: "/src",
+      force: false,
+      host: "desktop",
+      runProcess: async (argv) => {
+        runs.push(argv);
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    expect(fallback).toBeNull();
+    expect(runs).toHaveLength(2);
+    expect(runs[0]!.at(-1)).toContain("command -v -- ");
+    expect(runs[1]![0]).toBe("ssh");
+    expect(runs[1]!.at(-1)).toBe(
+      `sh -c 'export ROAMGATE_WORKTREE_PATH='\\''/w/a'\\''; export ROAMGATE_WORKTREE_REPO='\\''/src'\\''; cd "$ROAMGATE_WORKTREE_REPO" && git recworktree remove "$ROAMGATE_WORKTREE_PATH" '`,
+    );
+  });
+
+  test("a command not installed on the host leaves the removal to Herdr, and says so", async () => {
+    const calls: string[] = [];
+    const runs: string[][] = [];
+    const outcome = await removeWorktreeWithRecovery({
+      call: async (method) => {
+        calls.push(method);
+        return { type: "worktree_removed" };
+      },
+      params: { workspace_id: "w2" },
+      checkoutPath: "/w/a",
+      runtime: runtime({ inspectCheckout: async () => "missing" }),
+      removeWithCommand: async () => {
+        const fallback = await runWorktreeRemoveCommand({
+          template: "git recworktree remove {path}",
+          checkoutPath: "/w/a",
+          sourceCheckoutPath: "/src",
+          force: false,
+          runProcess: async (argv) => {
+            runs.push(argv);
+            return { code: 127, stdout: "", stderr: "" };
+          },
+        });
+        return fallback
+          ? { fallback }
+          : { result: { type: "worktree_removed" } };
+      },
+    });
+    expect(runs).toHaveLength(1);
+    expect(calls).toEqual(["worktree.remove"]);
+    expect(outcome.result).toEqual({ type: "worktree_removed" });
+    expect(outcome.commandFallback).toBe(
+      "git recworktree is not installed on this machine.",
+    );
+  });
+
+  test("an exit 127 from inside an installed remove command is a failure", async () => {
+    let call = 0;
+    await expect(
+      runWorktreeRemoveCommand({
+        template: "git recworktree remove {path}",
+        checkoutPath: "/w/a",
+        sourceCheckoutPath: "/src",
+        force: false,
+        runProcess: async () =>
+          ++call === 1
+            ? { code: 0, stdout: "", stderr: "" }
+            : { code: 127, stdout: "", stderr: "hook: rmtool: not found" },
+      }),
+    ).rejects.toThrow(
+      "Worktree remove command failed (exit 127): hook: rmtool: not found",
+    );
+  });
+
+  test("no sh on this machine leaves the removal to Herdr", async () => {
+    const fallback = await runWorktreeRemoveCommand({
+      template: "git recworktree remove {path}",
+      checkoutPath: "C:/w/a",
+      sourceCheckoutPath: "C:/src",
+      force: false,
+      runProcess: async () => {
+        throw Object.assign(new Error("spawn sh ENOENT"), { code: "ENOENT" });
+      },
+    });
+    expect(fallback).toBe("sh is not available on this machine.");
+  });
+
+  test("the command's removal skips Herdr's, and a failure stops it", async () => {
+    const calls: string[] = [];
+    const call = async (method: string) => {
+      calls.push(method);
+      return {};
+    };
+    const outcome = await removeWorktreeWithRecovery({
+      call,
+      params: { workspace_id: "w2" },
+      checkoutPath: "/w/a",
+      runtime: runtime({ inspectCheckout: async () => "missing" }),
+      removeWithCommand: async () => ({
+        result: { type: "worktree_removed", path: "/w/a" },
+      }),
+    });
+    expect(calls).toEqual([]);
+    expect(outcome.result.path).toBe("/w/a");
+    expect(outcome.commandFallback).toBeUndefined();
+
+    let run = 0;
+    await expect(
+      runWorktreeRemoveCommand({
+        template: "git recworktree remove {path}",
+        checkoutPath: "/w/a",
+        sourceCheckoutPath: "/src",
+        force: false,
+        runProcess: async () =>
+          ++run === 1
+            ? { code: 0, stdout: "", stderr: "" }
+            : {
+                code: 1,
+                stdout: "",
+                stderr: "Error: worktree has uncommitted changes",
+              },
+      }),
+    ).rejects.toThrow(
+      "Worktree remove command failed (exit 1): Error: worktree has uncommitted changes",
+    );
+  });
+
+  test("a command failing on a stale checkout gets the same recovery as Herdr", async () => {
+    const calls: { method: string; params?: Record<string, unknown> }[] = [];
+    const outcome = await removeWorktreeWithRecovery({
+      call: async (method, params) => {
+        calls.push({ method, params });
+        return { type: "worktree_removed" };
+      },
+      params: { workspace_id: "w2" },
+      checkoutPath: "/w/a",
+      runtime: runtime({ inspectCheckout: async () => "missing" }),
+      removeWithCommand: async () => {
+        throw new Error(
+          "Worktree remove command failed (exit 128): fatal: '/w/a' is not a working tree",
+        );
+      },
+    });
+    expect(calls).toEqual([
+      {
+        method: "worktree.remove",
+        params: { workspace_id: "w2", force: true },
+      },
+    ]);
+    expect(outcome.result).toEqual({ type: "worktree_removed" });
+  });
+
+  test("warnings after the command's removal name the command, not Herdr", async () => {
+    const outcome = await removeWorktreeWithRecovery({
+      call: async () => ({}),
+      params: { workspace_id: "w2" },
+      checkoutPath: "/w/a",
+      runtime: runtime({ inspectCheckout: async () => "clean" }),
+      removeWithCommand: async () => ({ result: { type: "worktree_removed" } }),
+      log: () => {},
+    });
+    expect(outcome.cleanup?.warning).toBe(
+      "The worktree remove command reported success, but the checkout is still a clean working tree at /w/a",
+    );
+  });
 });

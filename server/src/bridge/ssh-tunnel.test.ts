@@ -477,3 +477,93 @@ describe("SSH tunnel readiness lifecycle", () => {
     expect(cancelledPolls).toBe(2);
   });
 });
+
+describe("SSH command master alongside the tunnel", () => {
+  function fakeMaster(stopError?: Error) {
+    const calls: string[] = [];
+    const master = {
+      ensure: async () => {
+        calls.push("ensure");
+        return true;
+      },
+      stop: async () => {
+        calls.push("stop");
+        if (stopError) throw stopError;
+      },
+      isRunning: () => true,
+    };
+    return { calls, master };
+  }
+
+  function managerWith(
+    master: ReturnType<typeof fakeMaster>["master"],
+    events: string[],
+    masterControlPath: string | null = "/tmp/private-m/m.ctl",
+  ) {
+    const created: Array<[string, string]> = [];
+    let exitTunnel = () => {};
+    const manager = createSshTunnelManager({
+      config: {
+        ...config(),
+        remoteSocketPath: "/remote/control.sock",
+        remoteClientSocketPath: "/remote/render.sock",
+        ownedRuntimeDirectory: "/tmp/private-m",
+        masterControlPath: masterControlPath ?? undefined,
+      },
+      runProcess: async () => ({ stdout: "/unused", stderr: "" }),
+      dependencies: {
+        exists: () => true,
+        remove: () => undefined,
+        removeDirectory: (path) => events.push(`rmdir ${path}`),
+        spawn: () => {
+          const exited = deferred<number>();
+          exitTunnel = () => exited.resolve(255);
+          events.push("tunnel");
+          return { exited: exited.promise, kill: () => exited.resolve(143) };
+        },
+        createMaster: (destination, controlPath) => {
+          created.push([destination, controlPath]);
+          return master;
+        },
+      },
+    });
+    return { manager, created, exitTunnel: () => exitTunnel() };
+  }
+
+  test("starts one master per runtime and keeps it across tunnel restarts", async () => {
+    const events: string[] = [];
+    const { calls, master } = fakeMaster();
+    const { manager, created } = managerWith(master, events);
+    expect(created).toEqual([["test-host", "/tmp/private-m/m.ctl"]]);
+
+    await manager.startAutoSshTunnel();
+    await manager.startAutoSshTunnel();
+    expect(calls).toEqual(["ensure", "ensure"]);
+    expect(events).toEqual(["tunnel", "tunnel"]);
+
+    await manager.cleanupAutoSshTunnel();
+    expect(calls).toEqual(["ensure", "ensure", "stop"]);
+    expect(events.at(-1)).toBe("rmdir /tmp/private-m");
+  });
+
+  test("preserves the runtime directory when the master cannot be stopped", async () => {
+    const events: string[] = [];
+    const { master } = fakeMaster(new Error("master did not exit"));
+    const { manager } = managerWith(master, events);
+    await manager.startAutoSshTunnel();
+    await expect(manager.cleanupAutoSshTunnel()).rejects.toThrow(
+      "master did not exit",
+    );
+    expect(events).not.toContain("rmdir /tmp/private-m");
+  });
+
+  test("runs without a master when the runtime has no control path", async () => {
+    const events: string[] = [];
+    const { calls, master } = fakeMaster();
+    const { manager, created } = managerWith(master, events, null);
+    await manager.startAutoSshTunnel();
+    await manager.cleanupAutoSshTunnel();
+    expect(created).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+});

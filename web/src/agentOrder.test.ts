@@ -244,6 +244,27 @@ const activityPane = {
 };
 
 describe("Herdr activity metadata", () => {
+  test("Done is Roamgate's when the server says what was seen", () => {
+    const status = (pane: string, agent: Record<string, unknown>) =>
+      withAgentActivity([{ ...activityPane, agent_status: pane }], {
+        agents: [{ ...activityPane, state_change_seq: 3, ...agent }],
+      })[0]?.agent_status;
+    // Herdr's focus made it idle, but nobody saw it finish.
+    expect(status("idle", { agent_status: "idle", seen_done: true })).toBe(
+      "done",
+    );
+    // Herdr says done, but it was seen in Roamgate.
+    expect(status("done", { agent_status: "done", seen_done: false })).toBe(
+      "idle",
+    );
+    // Never seen in Roamgate: Herdr's.
+    expect(status("done", { agent_status: "done" })).toBe("done");
+    // Not a finished agent: left alone.
+    expect(
+      status("working", { agent_status: "working", seen_done: true }),
+    ).toBe("working");
+  });
+
   test("reconstructs recency from fresh snapshots without mutating pane data", () => {
     const result = { agents: [{ ...activityPane, state_change_seq: 42 }] };
     expect(withAgentActivity([activityPane], result)[0]?.state_change_seq).toBe(

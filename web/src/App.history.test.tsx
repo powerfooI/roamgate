@@ -132,6 +132,8 @@ if (process.env.ROAMGATE_APP_HISTORY_TEST !== "1") {
       connectionId: "local",
       generation: 1,
       isCurrent: () => true,
+      // Agents coming on screen are marked seen.
+      call: async () => ({}),
     };
     mock.module("./useConnectionClient", () => ({
       useConnectionClient: () => client,
@@ -141,6 +143,7 @@ if (process.env.ROAMGATE_APP_HISTORY_TEST !== "1") {
     mock.module("./assistant", () => ({
       useAssistantState: () => ({ snapshot: null }),
       assistantActionExecuting: () => false,
+      onAssistantShow: () => () => {},
     }));
     for (const name of [
       "ConnectionSwitcher",

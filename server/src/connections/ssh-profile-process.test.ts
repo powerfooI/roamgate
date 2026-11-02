@@ -306,6 +306,8 @@ if (!args.includes("-L") && (args.at(-1) || "").includes("printf %s")) {
 if (!args.includes("-L") && (args.at(-1) || "").includes("roamgate-uploads-")) {
   process.exit(0);
 }
+// A refused command master: commands keep using their own logins.
+if (args.includes("-M")) process.exit(255);
 appendFileSync(join(stateDir, destination + ".attempts"), String(process.pid) + "\\n");
 if (destination === "auth-fail") {
   console.error("Permission denied (publickey).");

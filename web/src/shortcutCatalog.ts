@@ -34,6 +34,11 @@ const descriptions: [ShortcutId, string, string][] = [
   ["pane.splitRight", "Split the active pane right", "Tabs & panes"],
   ["pane.splitDown", "Split the active pane down", "Tabs & panes"],
   ["pane.zoom", "Zoom or restore the active pane", "Tabs & panes"],
+  [
+    "pane.chat",
+    "Show the active agent pane as a chat or as its terminal",
+    "Tabs & panes",
+  ],
   ...SHORTCUT_NUMBERS.map((n): [ShortcutId, string, string] => [
     `tab.${n}`,
     `Switch to tab ${n}`,

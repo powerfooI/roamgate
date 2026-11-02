@@ -559,3 +559,37 @@ test("UI settings sync globally while the selected Herdr connection is offline",
     await f.dispose();
   }
 }, 15000);
+
+test("a fresh socket receives the global forward registry before choosing any Herdr runtime", async () => {
+  if (process.platform === "win32") return;
+  const f = await fixture();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const login = await fetch(`${f.base}/api/login`, {
+      method: "POST",
+      body: JSON.stringify({ password: PASSWORD }),
+    });
+    const cookie = login.headers.get("set-cookie")!.split(";", 1)[0]!;
+    const socket = new BrowserSocket(`${f.base.replace("http:", "ws:")}/ws`, {
+      headers: { cookie },
+    });
+    f.browsers.push(socket);
+    const received = Promise.withResolvers<Record<string, unknown>>();
+    timer = setTimeout(
+      () => received.reject(new Error("Missing initial forward registry")),
+      5000,
+    );
+    let greeting: Record<string, unknown> | undefined;
+    socket.onmessage = (event) => {
+      const value = JSON.parse(String(event.data));
+      if (value.hello) greeting = value;
+      if (Array.isArray(value.forwards)) received.resolve(value);
+    };
+    const registry = await received.promise;
+    expect(greeting?.default_connection_id).toBe("offline");
+    expect(registry).toEqual({ forwards: [] });
+  } finally {
+    clearTimeout(timer);
+    await f.dispose();
+  }
+});

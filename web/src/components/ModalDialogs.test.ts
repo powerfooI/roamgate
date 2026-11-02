@@ -78,9 +78,12 @@ async function registerDomTests() {
   const luckyNames = await import("../luckyName");
   const { WorktreeOpenDialog } = await import("./WorktreeOpenDialog");
   const { WorktreeLifecycleDialog } = await import("./WorktreeLifecycleDialog");
-  const { useWorktreePullRequests, useWorkspacePullRequests } = await import(
-    "../useWorktreePullRequests"
-  );
+  const { WorktreeLocationDialog } = await import("./WorktreeLocationDialog");
+  const {
+    forgetPullRequestLookups,
+    useWorktreePullRequests,
+    useWorkspacePullRequests,
+  } = await import("../useWorktreePullRequests");
   const { bridge } = await import("../api");
   const { __storeTesting, store, useStoreSelector } = await import("../store");
   const { WorkspaceTree } = await import("./WorkspaceTree");
@@ -130,6 +133,7 @@ async function registerDomTests() {
   afterEach(async () => {
     if (root) await act(async () => root?.unmount());
     root = null;
+    forgetPullRequestLookups();
     document.body.replaceChildren();
     await browser.happyDOM.whenAsyncComplete();
   });
@@ -1040,6 +1044,66 @@ async function registerDomTests() {
       }
     },
   );
+
+  test("sidebar reviews shown again after another connection reuse a recent lookup", async () => {
+    const asked: Array<{ lane?: string }> = [];
+    const makeClient = (
+      connectionId: string,
+      generation: number,
+    ): ConnectionClient => ({
+      ...client,
+      connectionId,
+      generation,
+      call: async (_method, _params, _timeout, options) => {
+        asked.push({ lane: options?.lane });
+        return mergedStatus;
+      },
+    });
+    function Reviews({ client }: { client: ConnectionClient }) {
+      return h(
+        "pre",
+        null,
+        JSON.stringify(useWorkspacePullRequests(client, [sidebarWorkspace])),
+      );
+    }
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const render = (client: ConnectionClient) =>
+      act(async () => root!.render(h(Reviews, { client })));
+    const previousState = store.get();
+    const connection = (id: string) => ({
+      id,
+      label: id,
+      source: "local" as const,
+      is_default: id === "dialog-test",
+      state: "ready" as const,
+      generation: 1,
+    });
+    try {
+      __storeTesting.replaceState({
+        ...previousState,
+        connections: [
+          connection("dialog-test"),
+          connection("other-connection"),
+        ],
+      });
+      await render(makeClient("dialog-test", 1));
+      expect(asked).toEqual([{ lane: "background" }]);
+      // Another connection, then this one again: its badge is not asked twice.
+      await render(makeClient("other-connection", 2));
+      expect(asked).toHaveLength(2);
+      await render(makeClient("dialog-test", 3));
+      expect(asked).toHaveLength(2);
+      expect(container.textContent).toContain('"request"');
+      // A reconnect of the connection shown asks again.
+      await render(makeClient("dialog-test", 4));
+      expect(asked).toHaveLength(3);
+    } finally {
+      __storeTesting.replaceState(previousState);
+      roamgateLocalStorage.removeItem(PULL_REQUEST_CACHE_KEY);
+    }
+  });
 
   test.each(["workspace", "worktree"] as const)(
     "%s detached reviews require a new successful lookup after reconnect",
@@ -2581,4 +2645,82 @@ async function registerDomTests() {
       expect(calls).toHaveLength(beforeClose);
     });
   }
+  test.each(["callback", "connection"])(
+    "worktree location stays bound to its loading context: %s",
+    async (change) => {
+      const previous = store.get();
+      const pending = Promise.withResolvers<{
+        key: string;
+        worktree_directory: string;
+      }>();
+      let reads = 0;
+      const oldClient: ConnectionClient = {
+        ...client,
+        connectionId: "old",
+        call: async () => {
+          reads++;
+          return { key: "old-repo", worktree_directory: "/old/trees" };
+        },
+      };
+      const newClient: ConnectionClient = {
+        ...client,
+        connectionId: "new",
+        call: async () => pending.promise,
+      };
+      connection.mockImplementation((id) =>
+        id === "new" ? newClient : oldClient,
+      );
+      const container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+      const render = () =>
+        root!.render(
+          h(WorktreeLocationDialog, {
+            open: true,
+            workspaceId: "workspace",
+            onClose: () => {},
+          }),
+        );
+      try {
+        await act(async () => {
+          __storeTesting.replaceState({
+            ...previous,
+            activeConnectionId: "old",
+          });
+          render();
+        });
+        expect(document.querySelector<HTMLInputElement>("input")?.value).toBe(
+          "/old/trees",
+        );
+        if (change === "callback") {
+          await act(async () => render());
+          expect(reads).toBe(1);
+        } else {
+          await act(async () => {
+            __storeTesting.replaceState({
+              ...store.get(),
+              activeConnectionId: "new",
+              connectionGeneration: previous.connectionGeneration + 1,
+            });
+            render();
+          });
+          expect(document.querySelector("input")).toBeNull();
+          await act(async () => {
+            pending.resolve({
+              key: "new-repo",
+              worktree_directory: "/new/trees",
+            });
+          });
+          expect(document.querySelector<HTMLInputElement>("input")?.value).toBe(
+            "/new/trees",
+          );
+        }
+      } finally {
+        await act(async () => root?.unmount());
+        root = null;
+        __storeTesting.replaceState(previous);
+        connection.mockReturnValue(client);
+      }
+    },
+  );
 }

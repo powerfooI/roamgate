@@ -98,11 +98,42 @@ export function createAgentSessionHandlers(args: {
           "That history entry is no longer available; refresh the history and try again",
         );
       }
+      // A message's images, with their data while the session keeps it.
+      const images = entry.images?.map((image) => ({
+        ...image,
+        data: projection.images[image.hash]?.data,
+      }));
       return {
         entry_id: entry.id,
         text: entry.text,
         text_hash: historyTextHash(entry.text),
+        ...(images?.length && images.every((image) => image.data)
+          ? { images }
+          : {}),
       };
+    },
+    /** The skills and custom commands a Claude session offers as /name. */
+    readCommands: async (params: Record<string, unknown>) => {
+      const resolved = await resolveAgentSession(
+        params,
+        args.herdrCall,
+        args.files,
+        resolverContext,
+      );
+      if (!resolved.file) return { commands: [] };
+      const projection = await cache.get(resolved);
+      return { commands: projection.commands };
+    },
+    readArtifacts: async (params: Record<string, unknown>) => {
+      const resolved = await resolveAgentSession(
+        params,
+        args.herdrCall,
+        args.files,
+        resolverContext,
+      );
+      if (!resolved.file) return { artifacts: [] };
+      const projection = await cache.get(resolved);
+      return { artifacts: projection.artifacts };
     },
     readSummary: (params: Record<string, unknown>) =>
       readAgentSessionSummary(
@@ -156,7 +187,6 @@ export async function readAgentMessageHistory(
   const messages = projected.messages.slice(-MAX_MESSAGES_PER_AGENT);
   return {
     ...resolved,
-    title: projected.title ?? null,
     file: projected.file,
     updated_at: new Date(projected.file.mtimeMs).toISOString(),
     messages,
@@ -180,8 +210,8 @@ export async function readAgentSessionSummary(
     cache?.invalidate(resolved);
     return {
       ...resolved,
-      title: null,
       stats: { turns: 0, records: 0, token_usage: null },
+      title: null,
       text: null,
       truncated: false,
       trajectory: null,
@@ -218,13 +248,18 @@ export async function readAgentSessionSummary(
       );
     }
   }
-  const trajectory = includeTrajectory ? projected.trajectory : null;
+  const trajectory = !includeTrajectory
+    ? null
+    : cache
+      ? await cache.trajectory(resolved)
+      : (await readSessionProjection(resolved.agent, resolved.file, files))
+          .trajectory;
   return {
     ...resolved,
-    title: projected.title ?? null,
     file: projected.file,
     updated_at: new Date(projected.file.mtimeMs).toISOString(),
     stats,
+    title: projected.title,
     text,
     truncated,
     trajectory,
@@ -298,9 +333,10 @@ export async function downloadAgentSessionAtif(
       headers: { "content-type": "text/plain; charset=utf-8" },
     });
   }
-  const { trajectory } = cache
-    ? await cache.get(resolved)
-    : await readSessionProjection(resolved.agent, resolved.file, files);
+  const trajectory = cache
+    ? await cache.trajectory(resolved)
+    : (await readSessionProjection(resolved.agent, resolved.file, files))
+        .trajectory;
   return new Response(`${JSON.stringify(trajectory, null, 2)}\n`, {
     headers: {
       "content-type": "application/json; charset=utf-8",
