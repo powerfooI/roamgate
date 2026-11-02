@@ -454,7 +454,6 @@ export async function prepareAssistantAction(args: {
             status: "uncertain",
             detail:
               "A new workspace was observed, but its directory could not be verified. Inspect it before retrying.",
-            created: { connection_id: target.connection_id, workspace_id: id },
           };
         return {
           status: "succeeded",
