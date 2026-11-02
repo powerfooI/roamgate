@@ -2408,21 +2408,23 @@ export function createAssistantService(options: {
     return "closed";
   }
   /**
-   * The task targets on connections whose Herdr restarted since the task was
-   * saved, checked again for a new run: each is found again by its id, with
-   * the current server identity, when that id still holds the same
+   * The task targets on connections whose Herdr restarted since they were
+   * checked, checked again for a new run: each is found again by its id,
+   * with the current server identity, when that id still holds the same
    * workspace (path and checkout). One whose id now holds another workspace
    * is not used: Herdr offers no identity of its own that would find the
    * granted one elsewhere (workspaces outside a checkout all look alike).
-   * A connection that cannot be read now is left as saved, for validation
-   * to refuse or wait on as before.
+   * Each target is compared with the server of now, not only the first: a
+   * task keeps a skipped one under the identity it was checked with, so one
+   * connection's targets can carry two. A connection that cannot be read
+   * now is left as saved, for validation to refuse or wait on as before.
    */
   async function reidentify(targets: RecoveryTarget[], signal?: AbortSignal) {
     const refreshed = new Map<
       string,
       { target: RecoveryTarget; workspace: AssistantWorkspace }
     >();
-    const changed: RecoveryTarget[] = [];
+    const changed: { target: RecoveryTarget; why: string }[] = [];
     const restarted: string[] = [];
     if (!context.recoveryScope) return { refreshed, changed, restarted };
     const byConnection = new Map<string, RecoveryTarget[]>();
@@ -2431,41 +2433,71 @@ export function createAssistantService(options: {
         ...(byConnection.get(target.connection_id) ?? []),
         target,
       ]);
+    const check = async (stale: RecoveryTarget[]) => {
+      const captured = await context.captureScope(stale, signal);
+      const fresh = await context.recoveryScope!(captured, signal);
+      if (fresh.length !== stale.length)
+        throw new Error("Unchecked workspace identity");
+      return { captured, fresh };
+    };
     for (const [connectionId, saved] of byConnection) {
-      let fresh: RecoveryTarget[];
-      let captured: AssistantWorkspace[];
+      let label: string;
+      let stale: RecoveryTarget[];
       try {
         // One workspace tells the server identity; most runs stop there.
         const probe = await context.captureScope([saved[0]!], signal);
+        label = probe[0]?.connection_label || connectionId;
         const [current] = await context.recoveryScope(probe, signal);
         if (
           !current ||
-          current.herdr_boot_id === saved[0]!.herdr_boot_id ||
           current.endpoint_fingerprint !== saved[0]!.endpoint_fingerprint
         )
           continue;
-        captured = await context.captureScope(saved, signal);
-        fresh = await context.recoveryScope(captured, signal);
+        stale = saved.filter(
+          (target) => target.herdr_boot_id !== current.herdr_boot_id,
+        );
       } catch {
         signal?.throwIfAborted();
         continue;
       }
-      if (fresh.length !== saved.length) continue;
-      restarted.push(captured[0]?.connection_label || connectionId);
-      saved.forEach((target, index) => {
-        const found = fresh[index]!;
+      if (!stale.length) continue;
+      restarted.push(label);
+      const found = (
+        target: RecoveryTarget,
+        current: RecoveryTarget,
+        workspace: AssistantWorkspace,
+      ) => {
         if (
-          refKey(found) !== refKey(target) ||
-          found.workspace_identity !== target.workspace_identity ||
-          found.endpoint_fingerprint !== target.endpoint_fingerprint
+          refKey(current) !== refKey(target) ||
+          current.workspace_identity !== target.workspace_identity ||
+          current.endpoint_fingerprint !== target.endpoint_fingerprint
         )
-          changed.push(target);
-        else
-          refreshed.set(refKey(target), {
-            target: found,
-            workspace: captured[index]!,
+          changed.push({
+            target,
+            why: "its id now holds another workspace",
           });
-      });
+        else refreshed.set(refKey(target), { target: current, workspace });
+      };
+      try {
+        const { captured, fresh } = await check(stale);
+        stale.forEach((target, index) =>
+          found(target, fresh[index]!, captured[index]!),
+        );
+      } catch {
+        signal?.throwIfAborted();
+        // One that cannot be read must not keep the others from the run.
+        for (const target of stale)
+          try {
+            const { captured, fresh } = await check([target]);
+            found(target, fresh[0]!, captured[0]!);
+          } catch {
+            signal?.throwIfAborted();
+            changed.push({
+              target,
+              why: `could not be checked again after Herdr on ${label} restarted`,
+            });
+          }
+      }
     }
     return { refreshed, changed, restarted };
   }
@@ -2489,16 +2521,16 @@ export function createAssistantService(options: {
       skipped.push(
         `${savedName(prepared, target)} (${await goneReason(prepared, target, signal)})`,
       );
-    for (const target of changed)
-      skipped.push(
-        `${savedName(prepared, target)} (its id now holds another workspace)`,
-      );
+    for (const { target, why } of changed)
+      skipped.push(`${savedName(prepared, target)} (${why})`);
     signal?.throwIfAborted();
     if (skipped.length === prepared.targets.length)
       throw new AssistantUserError(
         `None of the task's workspaces is open any more: ${namedList(skipped)}. Edit the task to choose its workspaces again.`,
       );
-    const left = new Set([...gone, ...changed].map(refKey));
+    const left = new Set(
+      [...gone, ...changed.map(({ target }) => target)].map(refKey),
+    );
     const keep = <T extends AssistantWorkspaceRef>(refs: T[]) =>
       refs.filter((ref) => !left.has(refKey(ref)));
     const { mentions, ...input } = prepared.input;

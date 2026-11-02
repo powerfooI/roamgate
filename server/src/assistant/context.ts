@@ -776,8 +776,14 @@ export function createAssistantContext(args: {
       if (
         connections.has(target.connection_id) &&
         connections.get(target.connection_id) !== identity
-      )
-        throw new Error("Inconsistent Ranger recovery connection identity");
+      ) {
+        const label = args
+          .catalog()
+          .find((item) => item.id === target.connection_id)?.label;
+        throw new Error(
+          `Inconsistent Ranger recovery connection identity: the workspaces on ${limitedText(label) || target.connection_id} were checked on different Herdr servers`,
+        );
+      }
       connections.set(target.connection_id, identity);
     }
     return captureScope(expected, signal, expected);

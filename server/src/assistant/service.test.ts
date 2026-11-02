@@ -6637,7 +6637,12 @@ describe("a task over workspaces closed since it was saved", () => {
       }));
     const restored: string[][] = [];
     f.context.restoreScope = async (targets) => {
-      // As the real one: a target checked on another Herdr boot is refused.
+      // As the real one: one connection's targets share a server identity,
+      // and a target checked on another Herdr boot is refused.
+      if (new Set(targets.map((target) => target.herdr_boot_id)).size > 1)
+        throw new Error(
+          "Inconsistent Ranger recovery connection identity: the workspaces on Local were checked on different Herdr servers",
+        );
       if (targets.some((target) => target.herdr_boot_id !== state.boot))
         throw new AssistantServerRestartedError("Local");
       restored.push(targets.map((target) => target.workspace_id));
@@ -6778,6 +6783,35 @@ describe("a task over workspaces closed since it was saved", () => {
     expect(detail.runs[0]?.notice).toBe(
       "Herdr on Local restarted since the task was saved: its workspaces were checked again. Skipped a workspace no longer open: Local / Third (its id now holds another workspace). Edit the task to update its workspaces.",
     );
+    expect(restored.at(-1)).toEqual(["ws", "ws2"]);
+  });
+
+  test("the next run checks again an id skipped after Herdr restarted", async () => {
+    jest.useFakeTimers();
+    const { f, state, taskId, runNow, restored } = await threeWorkspaceTask();
+    // Herdr restarted and the id of Third now holds another workspace: the
+    // task keeps Third under the old server identity, the others under the
+    // new one.
+    state.boot = "restarted-server";
+    state.listed = [workspace, second, { ...third, label: "Elsewhere" }];
+    const skipped =
+      "Skipped a workspace no longer open: Local / Third (its id now holds another workspace). Edit the task to update its workspaces.";
+    expect(await runNow()).toBeUndefined();
+    let detail = await f.service.taskDetail({ task_id: taskId });
+    expect(detail.runs[0]?.notice).toContain(skipped);
+    // The next run, with the host up, checks Third again on its own rather
+    // than failing on the two server identities of one connection.
+    expect(await runNow()).toBeUndefined();
+    detail = await f.service.taskDetail({ task_id: taskId });
+    expect(detail.runs[0]?.status).toBe("succeeded");
+    expect(detail.runs[0]?.notice).toContain(skipped);
+    expect(restored.at(-1)).toEqual(["ws", "ws2"]);
+    // A scheduled run too.
+    jest.advanceTimersByTime(60 * 60_000);
+    await flushTasks();
+    detail = await f.service.taskDetail({ task_id: taskId });
+    expect(detail.runs[0]?.status).toBe("succeeded");
+    expect(detail.runs[0]?.notice).toContain(skipped);
     expect(restored.at(-1)).toEqual(["ws", "ws2"]);
   });
 
