@@ -507,12 +507,16 @@ export function createAssistantTasks(options: {
     signal?: AbortSignal,
   ): Promise<PreparedTask & { notice?: string }>;
   /**
-   * A task over fixed workspaces without those closed since it was saved,
-   * with what it skipped to show on the run, or nothing when none closed.
+   * A task over fixed workspaces without those closed since it was saved or
+   * on a connection down for now, with what it skipped to show on the run,
+   * or nothing when it skipped none. A run waits a bounded time for a
+   * connection down for now (wait); a check before it does not, and throws
+   * AssistantRecoveryNotReadyError when none of them can be reached yet.
    */
   narrow?(
     prepared: PreparedTask,
     signal?: AbortSignal,
+    wait?: boolean,
   ): Promise<(PreparedTask & { notice: string }) | undefined>;
   child(
     run: SavedTaskRun,
@@ -1136,6 +1140,7 @@ export function createAssistantTasks(options: {
     admissions.set(run.id, admission);
     if (!recover && !run.manual) unstartedAdmissions.add(run.id);
     let child: ScheduledChild | undefined;
+    let stage = "reading its saved run";
     try {
       change(() => {
         retryAt.delete(run.id);
@@ -1143,10 +1148,16 @@ export function createAssistantTasks(options: {
         run.started_at ??= now();
         run.error = null;
       });
-      if (!validPrepared(run)) throw new Error("Invalid task admission");
+      if (!validPrepared(run))
+        throw new AssistantUserError(
+          "Its saved workspaces or settings are invalid. Edit the task to choose them again.",
+        );
+      // Admission may wait on connections: stopping Ranger ends that too.
+      const admitting = AbortSignal.any([admission.signal, controller.signal]);
+      stage = "checking its workspaces";
       // A new run over all workspaces covers those Ranger may use now.
       if (!recover && run.input.all_workspaces && options.rescope) {
-        const rescoped = await options.rescope(seal(run), admission.signal);
+        const rescoped = await options.rescope(seal(run), admitting);
         const fresh = seal(rescoped);
         if (disposed || !["running", "waiting"].includes(run.status)) {
           if (busy === run.id) busy = undefined;
@@ -1165,7 +1176,7 @@ export function createAssistantTasks(options: {
         });
       } else if (!recover && !run.input.all_workspaces && options.narrow) {
         // A new run over fixed workspaces runs over those still open.
-        const narrowed = await options.narrow(seal(run), admission.signal);
+        const narrowed = await options.narrow(seal(run), admitting);
         if (disposed || !["running", "waiting"].includes(run.status)) {
           if (busy === run.id) busy = undefined;
           return;
@@ -1191,11 +1202,13 @@ export function createAssistantTasks(options: {
             }
           });
       }
+      stage = "checking its permissions, workspaces and model";
       await validate(run, admission.signal);
       if (disposed || !["running", "waiting"].includes(run.status)) {
         if (busy === run.id) busy = undefined;
         return;
       }
+      stage = "starting its run";
       child = options.child(
         structuredClone(run as SavedTaskRun),
         runDirectory(entry.task.id, run.id),
@@ -1233,12 +1246,13 @@ export function createAssistantTasks(options: {
         change(() => {
           run.status = "failed";
           // Say why when it is safe to: a scope or model no longer allowed.
+          // Other errors may carry transport details: name the step instead.
           run.error =
             recover && error instanceof AssistantServerRestartedError
               ? `This run could not safely resume: Herdr on ${error.connection} restarted since it started. Start a fresh run instead.`
               : error instanceof AssistantUserError
-                ? `The task could not safely start or resume: ${error.message}`
-                : "The task could not safely start or resume. Check its original workspace permissions, identity and model.";
+                ? `The task could not safely ${recover ? "resume" : "start"}: ${error.message}`
+                : `The task could not safely ${recover ? "resume" : "start"}: an unexpected error while ${stage}. Run it again; if it keeps failing, edit the task to choose its workspaces and model again.`;
           run.finished_at = now();
           compact(run);
         });
@@ -1672,12 +1686,22 @@ export function createAssistantTasks(options: {
         // and permission checks. Their saved workspace identities may be gone.
         // Fixed ones run over the workspaces still open (narrow in launch).
         if (!sealed.input.all_workspaces || !options.rescope)
-          await check(
-            entry.task.id,
-            (!sealed.input.all_workspaces &&
-              (await options.narrow?.(sealed))) ||
-              sealed,
-          );
+          try {
+            await check(
+              entry.task.id,
+              (!sealed.input.all_workspaces &&
+                (await options.narrow?.(sealed, undefined, false))) ||
+                sealed,
+            );
+          } catch (error) {
+            // None of its connections is up yet: the run waits for them,
+            // then checks what it can reach before it starts.
+            if (
+              method !== "run_now" ||
+              !(error instanceof AssistantRecoveryNotReadyError)
+            )
+              throw error;
+          }
         entry = find(id);
         if (entry.task.status === "cancelled")
           throw new Error("This task was cancelled.");

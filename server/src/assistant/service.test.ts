@@ -35,6 +35,7 @@ import {
   boundAssistantThinking,
   createAssistantService,
   sameAssistantConfig,
+  TASK_CONNECTION_WAIT_MS,
 } from "./service";
 import type { PreparedAssistantAction } from "./actions";
 import { createClaudeCodeDriver } from "./claude-driver";
@@ -173,7 +174,7 @@ function stableTaskIdentity(context: AssistantContext) {
     }));
 }
 async function flushTasks() {
-  for (let index = 0; index < 60; index++) await Promise.resolve();
+  for (let index = 0; index < 100; index++) await Promise.resolve();
 }
 
 function permissionAction(
@@ -7227,8 +7228,329 @@ describe("a task over workspaces closed since it was saved", () => {
     const detail = await f.service.taskDetail({ task_id: taskId });
     expect(detail.runs[0]?.status).toBe("failed");
     expect(detail.runs[0]?.error).toBe(
-      "The task could not safely start or resume: The original task permission is unavailable for Local / Third (no longer allowed).",
+      "The task could not safely start: The original task permission is unavailable for Local / Third (no longer allowed).",
     );
     expect(restored).toEqual([]);
+  });
+});
+
+describe("a task over a connection down for now", () => {
+  const desktop = (workspace_id: string, label: string) => ({
+    ...workspace,
+    connection_id: "desktop",
+    connection_label: "Desktop",
+    workspace_id,
+    label,
+  });
+  const all = [workspace, desktop("d1", "Build"), desktop("d2", "Docs")];
+  async function twoConnectionTask(
+    options: { failChild?: boolean; failCatalog?: () => boolean } = {},
+  ) {
+    const f = setup(
+      options.failCatalog
+        ? {
+            catalog: async () => {
+              if (options.failCatalog!())
+                throw new Error("token sk-SECRET expired");
+              return structuredClone(catalog);
+            },
+          }
+        : {},
+      () => ({
+        ...f.driver,
+        catalog: async () => structuredClone(catalog),
+        run: async (input) => {
+          input.message("Checked");
+          return [{ persisted: true }];
+        },
+      }),
+    );
+    const state = {
+      boot: { local: "local-server", desktop: "desktop-server" } as Record<
+        string,
+        string
+      >,
+      connections: new Map([
+        [
+          "local",
+          { label: "Local", state: "ready" } as {
+            label: string;
+            state: string;
+            error?: string;
+          },
+        ],
+        ["desktop", { label: "Desktop", state: "ready" }],
+      ]),
+      restoreError: undefined as Error | undefined,
+      // The run's own restore, after its check, fails as a connection lost
+      // meanwhile would.
+      failChild: "no" as "no" | "armed" | "next",
+    };
+    const listeners = new Set<() => void>();
+    const ready = (id: string) => state.connections.get(id)?.state === "ready";
+    const setConnection = (id: string, state_: string, error?: string) => {
+      state.connections.set(id, {
+        label: id === "local" ? "Local" : "Desktop",
+        state: state_,
+        ...(error ? { error } : {}),
+      });
+      for (const listener of listeners) listener();
+    };
+    f.context.connectionState = (id) => state.connections.get(id);
+    f.context.watchConnections = (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    };
+    f.context.catalog = async () => ({
+      workspaces: all.filter((item) => ready(item.connection_id)),
+      errors: [],
+      connection_ids: ["local", "desktop"],
+      complete_connection_ids: ["local", "desktop"].filter(ready),
+    });
+    f.context.captureScope = async (scope) => {
+      return scope.map((ref) => {
+        if (!ready(ref.connection_id))
+          throw new Error(`Connection ${ref.connection_id} is not ready`);
+        const found = all.find(
+          (item) =>
+            item.connection_id === ref.connection_id &&
+            item.workspace_id === ref.workspace_id,
+        );
+        if (!found) throw new Error("Unknown workspace");
+        return structuredClone(found);
+      });
+    };
+    f.context.recoveryScope = async (captured) =>
+      captured.map((ref) => ({
+        connection_id: ref.connection_id,
+        workspace_id: ref.workspace_id,
+        endpoint_fingerprint: "a".repeat(64),
+        workspace_identity: createHash("sha256")
+          .update(ref.label)
+          .digest("hex"),
+        herdr_boot_id: state.boot[ref.connection_id]!,
+      }));
+    const restored: string[][] = [];
+    f.context.restoreScope = async (targets) => {
+      if (state.restoreError) throw state.restoreError;
+      if (state.failChild === "next")
+        throw new Error("Connection Desktop is not ready");
+      if (state.failChild === "armed") state.failChild = "next";
+      for (const target of targets) {
+        if (!ready(target.connection_id))
+          throw new AssistantRecoveryNotReadyError(
+            `Connection ${target.connection_id} is not ready`,
+          );
+        // As the real one: one connection's targets share a server identity.
+        if (target.herdr_boot_id !== state.boot[target.connection_id])
+          throw new Error("Inconsistent Ranger recovery connection identity");
+      }
+      restored.push(targets.map((target) => target.workspace_id));
+      return targets.map((target) =>
+        structuredClone(
+          all.find(
+            (item) =>
+              item.connection_id === target.connection_id &&
+              item.workspace_id === target.workspace_id,
+          )!,
+        ),
+      );
+    };
+    const scope = all.map(({ connection_id, workspace_id }) => ({
+      connection_id,
+      workspace_id,
+    }));
+    await f.service.handle("configure", {
+      config: { ...configured, allowed_workspaces: scope },
+    });
+    // As the user's: High, so a workspace closed for a run stays allowed.
+    await f.service.handle("configure_approval", {
+      approval_mode: "auto",
+      workspace_scope: "all",
+    });
+    const created = await f.service.handle("task.create", {
+      request_id: randomUUID(),
+      title: "Check",
+      prompt: "Check",
+      scope,
+      schedule: { type: "interval", minutes: 60 },
+    });
+    await f.service.resume();
+    restored.length = 0;
+    const taskId = created.tasks![0]!.id;
+    const runNow = async () => {
+      restored.length = 0;
+      const outcome = await f.service
+        .handle("task.run_now", { task_id: taskId })
+        .then(
+          () => undefined,
+          (error: Error) => error.message,
+        );
+      jest.advanceTimersByTime(0);
+      await flushTasks();
+      return outcome;
+    };
+    const latest = async () =>
+      (await f.service.taskDetail({ task_id: taskId })).runs[0];
+    return { f, state, taskId, runNow, restored, setConnection, latest };
+  }
+  const sshDown =
+    "ssh exited 255: ssh: connect to host desktop port 22: Operation timed out";
+
+  test("waits for it, then runs without its workspaces and says why", async () => {
+    jest.useFakeTimers();
+    const { runNow, restored, setConnection, latest } =
+      await twoConnectionTask();
+    setConnection("desktop", "reconnecting", sshDown);
+    expect(await runNow()).toBeUndefined();
+    // Still waiting for it: neither failed nor run. Run now only checked
+    // what it can reach.
+    expect((await latest())?.status).toBe("running");
+    expect(restored).toEqual([["ws"]]);
+    jest.advanceTimersByTime(TASK_CONNECTION_WAIT_MS - 1_000);
+    await flushTasks();
+    expect((await latest())?.status).toBe("running");
+    jest.advanceTimersByTime(1_000);
+    await flushTasks();
+    const run = await latest();
+    expect(run?.status).toBe("succeeded");
+    expect(run?.notice).toBe(
+      `Desktop unreachable: 2 workspaces skipped (connection: reconnecting, ${sshDown}).`,
+    );
+    expect(restored.at(-1)).toEqual(["ws"]);
+  });
+
+  test("a scheduled run covers it when it comes back within the wait", async () => {
+    jest.useFakeTimers();
+    const { restored, setConnection, latest } = await twoConnectionTask();
+    setConnection("desktop", "error", sshDown);
+    jest.advanceTimersByTime(60 * 60_000);
+    await flushTasks();
+    expect((await latest())?.status).toBe("running");
+    jest.advanceTimersByTime(90_000);
+    setConnection("desktop", "connecting");
+    await flushTasks();
+    expect(restored).toEqual([]);
+    setConnection("desktop", "ready");
+    await flushTasks();
+    const run = await latest();
+    expect(run?.status).toBe("succeeded");
+    expect(run?.notice).toBeUndefined();
+    expect(restored.at(-1)).toEqual(["ws", "d1", "d2"]);
+  });
+
+  test("one the user disconnected is skipped without waiting", async () => {
+    jest.useFakeTimers();
+    const { runNow, restored, setConnection, latest } =
+      await twoConnectionTask();
+    setConnection("desktop", "disconnected");
+    expect(await runNow()).toBeUndefined();
+    const run = await latest();
+    expect(run?.status).toBe("succeeded");
+    expect(run?.notice).toBe(
+      "Desktop unreachable: 2 workspaces skipped (connection: disconnected).",
+    );
+    expect(restored.at(-1)).toEqual(["ws"]);
+  });
+
+  test("fails, naming the connections, when none can be reached", async () => {
+    jest.useFakeTimers();
+    const { runNow, restored, setConnection, latest } =
+      await twoConnectionTask();
+    setConnection("desktop", "reconnecting", sshDown);
+    setConnection("local", "connecting");
+    // Run now does not refuse it: the run waits for them first.
+    expect(await runNow()).toBeUndefined();
+    expect((await latest())?.status).toBe("running");
+    jest.advanceTimersByTime(TASK_CONNECTION_WAIT_MS);
+    await flushTasks();
+    const run = await latest();
+    expect(run?.status).toBe("failed");
+    expect(run?.error).toBe(
+      `The task could not safely start: None of the task's workspaces can be reached: Local unreachable: a workspace skipped (connection: connecting); Desktop unreachable: 2 workspaces skipped (connection: reconnecting, ${sshDown}).`,
+    );
+    expect(restored).toEqual([]);
+  });
+
+  test("checks a workspace kept under an older Herdr again with the others", async () => {
+    jest.useFakeTimers();
+    const { f, state, taskId, runNow, restored, setConnection, latest } =
+      await twoConnectionTask();
+    // The Desktop Herdr restarted and the id of Docs now holds another
+    // workspace: the task keeps it under the old server identity, Build
+    // under the new one.
+    state.boot.desktop = "desktop-restarted";
+    all[2] = { ...all[2]!, label: "Elsewhere" };
+    const skipped =
+      "Skipped a workspace no longer open: Desktop / Docs (its id now holds another workspace). Edit the task to update its workspaces.";
+    expect(await runNow()).toBeUndefined();
+    expect((await latest())?.notice).toBe(
+      `Herdr on Desktop restarted since the task was saved: its workspaces were checked again. ${skipped}`,
+    );
+    const boots = new Set(
+      (await f.service.taskDetail({ task_id: taskId })).task.workspaces.map(
+        (ref) => ref.workspace_id,
+      ),
+    );
+    expect(boots).toEqual(new Set(["ws", "d1", "d2"]));
+    // The next run checks Docs again on its own, rather than failing on the
+    // two server identities of one connection.
+    expect(await runNow()).toBeUndefined();
+    let run = await latest();
+    expect(run?.status).toBe("succeeded");
+    expect(run?.notice).toContain(skipped);
+    expect(restored.at(-1)).toEqual(["ws", "d1"]);
+    // And with Desktop down, as on the morning it failed.
+    setConnection("desktop", "error", sshDown);
+    expect(await runNow()).toBeUndefined();
+    jest.advanceTimersByTime(TASK_CONNECTION_WAIT_MS);
+    await flushTasks();
+    run = await latest();
+    expect(run?.status).toBe("succeeded");
+    expect(run?.notice).toBe(
+      `Desktop unreachable: 2 workspaces skipped (connection: error, ${sshDown}).`,
+    );
+    expect(restored.at(-1)).toEqual(["ws"]);
+  });
+
+  test("names what failed instead of a generic message", async () => {
+    jest.useFakeTimers();
+    let failCatalog = false;
+    const { f, state, runNow, latest } = await twoConnectionTask({
+      failCatalog: () => failCatalog,
+    });
+    // A workspace check: the workspace context's own message.
+    state.restoreError = new Error(
+      "Ranger recovery endpoint changed: connection Desktop now points elsewhere",
+    );
+    expect(await runNow()).toBe(
+      "The task's workspaces could not be checked: Ranger recovery endpoint changed: connection Desktop now points elsewhere.",
+    );
+    jest.advanceTimersByTime(60 * 60_000);
+    await flushTasks();
+    expect((await latest())?.error).toBe(
+      "The task could not safely start: The task's workspaces could not be checked: Ranger recovery endpoint changed: connection Desktop now points elsewhere.",
+    );
+    state.restoreError = undefined;
+    // The model provider: named, without what it said.
+    failCatalog = true;
+    jest.advanceTimersByTime(60 * 60_000);
+    await flushTasks();
+    let run = await latest();
+    expect(run?.error).toBe(
+      "The task could not safely start: The models of test could not be listed. Check its sign-in in Ranger's settings.",
+    );
+    expect(run?.error).not.toContain("SECRET");
+    failCatalog = false;
+    // The run's own start.
+    state.failChild = "armed";
+    jest.advanceTimersByTime(60 * 60_000);
+    await flushTasks();
+    run = await latest();
+    expect(run?.status).toBe("failed");
+    expect(run?.error).toBe(
+      "The task could not safely start: Ranger could not start the run: The workspace scope or provider connection is unavailable.",
+    );
+    expect(f.service.peek().error).toBeNull();
   });
 });

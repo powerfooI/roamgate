@@ -701,7 +701,7 @@ function fixture(
       notify?.(notification);
     },
     validate: async (_prepared, signal) => {
-      if (deny) throw new Error("Original identity replaced");
+      if (deny) throw new AssistantUserError("Original identity replaced");
       await validation?.(signal, _prepared);
     },
     ...(rescope ? { rescope } : {}),
@@ -2809,19 +2809,22 @@ test("a run that cannot start says why when it safely can", async () => {
   expect(f.manager.detail(task.id).runs[0]!).toMatchObject({
     status: "failed",
     error:
-      "The task could not safely start or resume: No workspace Ranger may use is available for this task.",
+      "The task could not safely start: No workspace Ranger may use is available for this task.",
   });
 
-  // Other failures can carry transport details: they stay masked.
+  // Other failures can carry transport details: they stay masked, but the
+  // run says at which step it failed.
   failure = new Error("connect ENOENT /run/user/1000/herdr.sock");
   await f.manager.control("run_now", task.id);
   jest.advanceTimersByTime(0);
   await flush();
-  expect(f.manager.detail(task.id).runs[0]!).toMatchObject({
+  const masked = f.manager.detail(task.id).runs[0]!;
+  expect(masked).toMatchObject({
     status: "failed",
     error:
-      "The task could not safely start or resume. Check its original workspace permissions, identity and model.",
+      "The task could not safely start: an unexpected error while checking its workspaces. Run it again; if it keeps failing, edit the task to choose its workspaces and model again.",
   });
+  expect(masked.error).not.toContain("herdr.sock");
 });
 
 test("a run cannot resume after its Herdr restarted and says to start a fresh one", async () => {
