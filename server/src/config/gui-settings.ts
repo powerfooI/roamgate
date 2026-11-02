@@ -39,6 +39,7 @@ export type GuiWorkspaceAutoSyncSettings = {
 export type GuiSettings = {
   version: 1;
   title_suffix?: string;
+  auto_rename_agent_tabs?: boolean;
   /** Default worktree command for repositories without their own. */
   worktree_command?: string;
   /** Default worktree removal command for repositories without their own. */
@@ -97,6 +98,7 @@ function defaultGuiSettings(): GuiSettings {
   return {
     version: 1,
     title_suffix: "",
+    auto_rename_agent_tabs: true,
     repositories: {},
     workspace_auto_sync: {},
     terminal_transport: {},
@@ -223,6 +225,10 @@ function normalizeGuiSettings(raw: unknown): GuiSettings {
   return {
     version: 1,
     title_suffix: storedTitleSuffix(obj.title_suffix),
+    auto_rename_agent_tabs:
+      typeof obj.auto_rename_agent_tabs === "boolean"
+        ? obj.auto_rename_agent_tabs
+        : true,
     worktree_command: normalizeWorktreeCommand(obj.worktree_command),
     worktree_remove_command: normalizeWorktreeCommand(
       obj.worktree_remove_command,

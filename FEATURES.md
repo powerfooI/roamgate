@@ -30,6 +30,11 @@ A Web/PWA client for a running [Herdr](https://herdr.dev) server.
 - The command menu searches workspaces, worktrees, files, tabs, panes, and
   agents, and opens typed file paths.
 - Desktop **Zen mode** hides app chrome so the terminal fills the window.
+- **Configuration > Integrations > Automatic tab renaming** names default tabs
+  from the focused agent's bound session title, or its own terminal title.
+  Existing custom labels are preserved. After a bridge restart, previously named
+  tabs are also preserved rather than adopted again. The setting is shared by
+  connections; turn it off to stop automatic updates.
 
 When a pane on an SSH connection prints a `localhost` URL, clicking it offers to
 **forward the port** over SSH (to the same port number when free) and opens the
