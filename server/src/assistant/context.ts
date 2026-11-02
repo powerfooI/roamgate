@@ -23,6 +23,7 @@ import {
   readAssistantPaneOccupant,
   type AssistantWorktreeCreator,
 } from "./actions";
+import { AssistantUserError } from "./errors";
 import {
   ASSISTANT_DEFAULT_TERMINAL_LINES,
   ASSISTANT_MAX_TERMINAL_LINES,
@@ -48,6 +49,19 @@ export type RecoveryTarget = AssistantWorkspaceRef & {
 };
 
 export class AssistantRecoveryNotReadyError extends Error {}
+
+/**
+ * A connection's Herdr restarted (its boot identity changed) since a task's
+ * workspaces were checked: what was checked then may not hold any more, so
+ * an interrupted run cannot resume over it. A new run checks them again.
+ */
+export class AssistantServerRestartedError extends AssistantUserError {
+  constructor(readonly connection: string) {
+    super(
+      `Herdr on ${connection} restarted since the task's workspaces were checked (its server identity changed).`,
+    );
+  }
+}
 
 function workspaceIdentity(workspace: Record<string, unknown>): string {
   const worktree = isRecord(workspace.worktree) ? workspace.worktree : {};
@@ -630,7 +644,9 @@ export function createAssistantContext(args: {
           }
           const bootId = await pending;
           if (!bootId || bootId !== expected.herdr_boot_id)
-            throw new Error("Ranger recovery server identity changed");
+            throw new AssistantServerRestartedError(
+              limitedText(connection.label) || connectionId,
+            );
         }
         const item = await workspace(lease, workspaceId, readSignal);
         const identity = workspaceIdentity(item);
@@ -803,8 +819,14 @@ export function createAssistantContext(args: {
       if (
         connections.has(target.connection_id) &&
         connections.get(target.connection_id) !== identity
-      )
-        throw new Error("Inconsistent Ranger recovery connection identity");
+      ) {
+        const label = args
+          .catalog()
+          .find((item) => item.id === target.connection_id)?.label;
+        throw new Error(
+          `Inconsistent Ranger recovery connection identity: the workspaces on ${limitedText(label) || target.connection_id} were checked on different Herdr servers`,
+        );
+      }
       connections.set(target.connection_id, identity);
     }
     return captureScope(expected, signal, expected);

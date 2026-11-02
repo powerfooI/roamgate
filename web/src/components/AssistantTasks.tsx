@@ -1129,6 +1129,25 @@ export function AssistantTasks({
                       {selectedRun.error}
                     </p>
                   ) : null}
+                  {/* The last run failed (say, it could not resume after its
+                      Herdr restarted): a fresh one checks the workspaces
+                      again. */}
+                  {task &&
+                  selectedRun.status === "failed" &&
+                  task.last_run?.id === selectedRun.id &&
+                  task.status !== "cancelled" &&
+                  !liveRun(task.current_run?.status) ? (
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={busy || !connected}
+                      onClick={() =>
+                        void mutate("run_now", { task_id: task.id })
+                      }
+                    >
+                      Start a fresh run
+                    </button>
+                  ) : null}
                   {selectedRun.messages.map((message) => (
                     <section
                       className={`assistant-message is-${message.role}`}
