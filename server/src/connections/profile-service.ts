@@ -121,6 +121,12 @@ export class ConnectionProbeError extends Error {
 export type ConnectionRetryOptions = {
   baseDelayMs?: number;
   maxDelayMs?: number;
+  /**
+   * Consecutive failed attempts before supervision gives up. Unlimited by
+   * default: a connection the user has not disconnected or removed keeps
+   * retrying at the capped backoff, so it recovers on its own after an outage
+   * of any length.
+   */
   maxAttempts?: number;
   stableResetMs?: number;
   random?: () => number;
@@ -246,7 +252,10 @@ export class ConnectionProfileService<
       this.retryBaseDelayMs,
       args.retry?.maxDelayMs ?? 30_000,
     );
-    this.retryMaxAttempts = Math.max(1, args.retry?.maxAttempts ?? 6);
+    this.retryMaxAttempts = Math.max(
+      1,
+      args.retry?.maxAttempts ?? Number.POSITIVE_INFINITY,
+    );
     this.retryStableResetMs = Math.max(1, args.retry?.stableResetMs ?? 30_000);
     this.retryRandom = args.retry?.random ?? Math.random;
     this.retrySchedule =
@@ -290,6 +299,21 @@ export class ConnectionProfileService<
   runtimeFailed(connectionId: string, error: unknown): void {
     this.scheduleRetry(connectionId, error);
     void this.args.manager.retireFailedRuntime(connectionId);
+  }
+
+  /**
+   * Run every pending SSH retry now and restart its backoff, for when the
+   * network has just changed and a peer that was unreachable may be back.
+   */
+  retryNow(): void {
+    if (this.supervisionStopped) return;
+    for (const [connectionId, state] of this.retryStates) {
+      if (!state.enabled || !state.retryTimer) continue;
+      state.retryTimer.cancel();
+      state.retryTimer = null;
+      state.attempt = 0;
+      void this.runScheduledRetry(connectionId, state, state.token);
+    }
   }
 
   stopSupervision(): void {
@@ -752,7 +776,7 @@ export class ConnectionProfileService<
 
     const windowMs = Math.min(
       this.retryMaxDelayMs,
-      this.retryBaseDelayMs * 2 ** state.attempt,
+      this.retryBaseDelayMs * 2 ** Math.min(state.attempt, 30),
     );
     const random = Math.max(0, Math.min(1, this.retryRandom()));
     const delayMs = Math.floor(windowMs / 2 + random * (windowMs / 2));
