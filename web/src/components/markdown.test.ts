@@ -34,11 +34,10 @@ function hrefs(html: string): (string | null)[] {
 }
 
 /** What a browser would run: the href without what it ignores. */
-function runsScript(href: string | null) {
-  return (
-    href !== null &&
-    new URL(href, "https://roamgate.invalid/").protocol === "javascript:"
-  );
+function hasUnsafeScheme(href: string | null) {
+  if (href === null) return false;
+  const protocol = new URL(href, "https://roamgate.invalid/").protocol;
+  return !["http:", "https:", "mailto:"].includes(protocol);
 }
 
 test("a scheme split by a tab or a line break is not a relative link", () => {
@@ -46,11 +45,13 @@ test("a scheme split by a tab or a line break is not a relative link", () => {
     '<a href="java&#9;script:x">a</a>',
     '<a href="java&#10;script:x">a</a>',
     '<a href="&#1;javascript:x">a</a>',
+    '<a href="data:text/html,x">a</a>',
+    '<a href="vbscript:x">a</a>',
     "[y](java&#9;script:alert(2))",
   ]) {
     const found = hrefs(renderMarkdown(html));
     expect(found.length).toBe(1);
-    expect(found.some(runsScript)).toBe(false);
+    expect(found.some(hasUnsafeScheme)).toBe(false);
   }
   expect(isSafeMarkdownUrl("java\tscript:x")).toBe(false);
   expect(isSafeMarkdownUrl("java\nscript:x")).toBe(false);
