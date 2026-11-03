@@ -7,6 +7,10 @@ import { rename, rm, writeFile } from "node:fs/promises";
 import { LEGACY_DEFAULT_CONNECTION_ID } from "../connections/types";
 import { serverLogger } from "../utils/logger";
 import { sourceCheckoutPath as workspaceSourceCheckoutPath } from "../workspace/utils";
+import {
+  normalizeIntegrationSettings,
+  type GuiIntegrationSettings,
+} from "../integrations/jira/settings";
 
 export type GuiRepoSettings = {
   worktree_hooks_enabled?: boolean;
@@ -56,6 +60,8 @@ export type GuiSettings = {
    * user carries the same interface across every browser they open.
    */
   ui: Record<string, unknown>;
+  /** Non-secret issue-tracker settings; tokens live in a private credential file. */
+  integrations?: GuiIntegrationSettings;
 };
 
 /** Namespaces are addressed by RPC, so keep them to unmistakable identifiers. */
@@ -184,6 +190,7 @@ function normalizeGuiSettings(raw: unknown): GuiSettings {
           : undefined,
     };
   }
+  const integrations = normalizeIntegrationSettings(obj.integrations);
   const workspaceAutoSync =
     obj.workspace_auto_sync && typeof obj.workspace_auto_sync === "object"
       ? obj.workspace_auto_sync
@@ -266,6 +273,9 @@ function normalizeGuiSettings(raw: unknown): GuiSettings {
             ),
           )
         : {},
+    // Omitted until configured, so settings files stay unchanged for users
+    // without an issue tracker.
+    ...(integrations.jira ? { integrations } : {}),
   };
 }
 
