@@ -104,8 +104,21 @@ import { serveStatic } from "./http/static-files";
 import { handleInstanceSettings } from "./http/instance-settings";
 import {
   readGuiSettings,
+  updateGuiSettings,
   worktreeRemoveCommandFor,
 } from "./config/gui-settings";
+import {
+  createAgentTaskService,
+  syncBackComment,
+} from "./agent-tasks/service";
+import { openAgentTaskStorage } from "./agent-tasks/storage";
+import { handleJiraOAuthCallback } from "./integrations/jira/callback";
+import { createJiraCredentialStore } from "./integrations/jira/credentials";
+import { createOAuthStateStore } from "./integrations/jira/oauth";
+import {
+  JIRA_OAUTH_CALLBACK_PATH,
+  createJiraService,
+} from "./integrations/jira/service";
 import {
   TERMINAL_UPLOAD_TIMEOUT_MS,
   terminalUploadRequestBodyLimit,
@@ -555,6 +568,55 @@ function getAssistantService() {
   return assistantServiceTask;
 }
 
+// Jira and agent tasks are bridge-global, like Ranger: they do not depend on
+// a selected Herdr connection. Tokens never leave the bridge.
+const jiraService = createJiraService({
+  readSettings: async () => (await readGuiSettings()).integrations?.jira,
+  updateSettings: async (update) =>
+    (
+      await updateGuiSettings((current) => {
+        const jira = update(current.integrations?.jira);
+        const { integrations: _previous, ...rest } = current;
+        return jira ? { ...rest, integrations: { jira } } : rest;
+      })
+    ).integrations?.jira,
+  credentials: createJiraCredentialStore(),
+  states: createOAuthStateStore(),
+  fetch: (input, init) => fetch(input, init),
+  clientVersion: APP_VERSION,
+});
+
+function openAgentTasks() {
+  try {
+    return createAgentTaskService({
+      storage: openAgentTaskStorage(),
+      publish: (snapshot) => {
+        const payload = JSON.stringify({ agent_tasks: snapshot });
+        for (const ws of clients)
+          safeSend(ws, payload, "agent-tasks", "agent-tasks");
+      },
+      syncBack: async (task) => {
+        const settings = (await readGuiSettings()).integrations?.jira;
+        if (!settings?.enabled || !task.jira_key)
+          throw new Error("The Jira integration is disabled.");
+        await jiraService.syncBack(
+          task.jira_key,
+          syncBackComment(task),
+          settings.sync_back_status,
+        );
+      },
+    });
+  } catch (error) {
+    logger.warn("agent tasks unavailable", {
+      error: sanitizeConnectionError(error),
+    });
+    return null;
+  }
+}
+// Opened at startup so task notifications reach running tasks even before a
+// browser asks for the list.
+const agentTaskService = openAgentTasks();
+
 function resumeAssistantIfLoaded() {
   void assistantServiceTask
     ?.then((service) => service.resume())
@@ -613,6 +675,12 @@ function runtimeFactoryForProfile(
         markRpcError,
         taskNotificationSource: config.taskNotificationSource,
         onTaskEvent: (event) => {
+          if (context.isCurrent())
+            agentTaskService?.onTaskEvent({
+              connectionId: identity.id,
+              paneId: event.paneId,
+              kind: event.kind,
+            });
           const connections = connectionProfiles.list();
           webPush.notify(
             {
@@ -927,6 +995,30 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       sendReply({ id, result }, "assistant-rpc");
     } catch (error) {
       sendError("assistant-rpc-error", error);
+    }
+    return;
+  }
+  if (method.startsWith("bridge.jira.")) {
+    try {
+      sendReply(
+        { id, result: await jiraService.handle(method, params ?? {}) },
+        "jira-rpc",
+      );
+    } catch (error) {
+      sendError("jira-rpc-error", error);
+    }
+    return;
+  }
+  if (method.startsWith("bridge.tasks.")) {
+    try {
+      if (!agentTaskService)
+        throw new Error("Tasks are unavailable; check the server log.");
+      sendReply(
+        { id, result: await agentTaskService.handle(method, params ?? {}) },
+        "agent-tasks-rpc",
+      );
+    } catch (error) {
+      sendError("agent-tasks-rpc-error", error);
     }
     return;
   }
@@ -1804,6 +1896,9 @@ function main() {
           if (url.pathname === "/api/instance-settings") {
             return handleInstanceSettings(req);
           }
+          if (url.pathname === JIRA_OAUTH_CALLBACK_PATH) {
+            return handleJiraOAuthCallback(req, jiraService);
+          }
           if (url.pathname === "/api/health") {
             return Response.json({
               ok: true,
@@ -1883,6 +1978,8 @@ function main() {
                   file_reveal: canRevealFiles(ws.remoteAddress),
                   connection_runtime_generation: true,
                   embedded_assistant: true,
+                  agent_tasks: agentTaskService !== null,
+                  jira_integration: true,
                   herdr_task_notifications:
                     config.taskNotificationSource === "herdr",
                 },
