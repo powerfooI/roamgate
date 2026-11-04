@@ -328,6 +328,63 @@ state; sends are never replayed.
   again, keeps one whose ID still holds the same path and checkout under the
   new boot ID, and skips and names one whose ID now holds another workspace.
 
+## Issue trackers (Jira)
+
+Jira is bridge-global like Ranger and never depends on a selected Herdr
+connection. The browser calls `bridge.jira.*` over the authenticated WebSocket
+(`config.get`, `config.update`, `config.remove`, `oauth.start`, `test`,
+`projects`, `statuses`, `search`, `issue`); the bridge alone talks to
+Atlassian.
+- **Settings:** non-secret fields (enabled, panel visibility, site URL, cloud
+  ID, default project and JQL, sync-back status, presets, last check) live
+  under `integrations.jira` in the GUI settings file. RPC replies never carry
+  tokens.
+- **Credentials:** access and refresh tokens and the OAuth client ID live in an
+  owner-only (`0600`) file, `jira-credentials.json` in the data directory
+  (`ROAMGATE_JIRA_CREDENTIALS_PATH`), replaced atomically. Remove deletes it.
+- **OAuth:** as in Kandev, Atlassian's remote MCP server is the authorization
+  server. `oauth.start` takes the page's bare origin, discovers the endpoints,
+  registers a public client dynamically and returns an authorize URL with a
+  PKCE S256 challenge and a single-use state kept in memory for 10 minutes
+  (at most 16 pending). Atlassian redirects to `GET
+  /api/integrations/jira/oauth/callback`, which sits behind the normal
+  authentication gate; it consumes the state, exchanges the code with the
+  stored verifier, resolves the cloud ID of the configured site and saves the
+  tokens. A missing, expired or reused state, or a site the account cannot
+  access, saves nothing. The page it returns has a `default-src 'none'` CSP.
+- **API:** that token only works through Atlassian's MCP server, so Jira calls
+  are MCP tool calls over Streamable HTTP (JSON or SSE replies, one session
+  per credential set). A token within a minute of expiry is refreshed first;
+  a 401 refreshes once and retries once. Refreshes are single-flight and the
+  rotated pair is saved before use.
+- **Search:** structured filters become JQL on the bridge (quoted and
+  escaped); raw JQL mode runs as written. Jira Cloud pages by token with no
+  total, so the panel shows a range and page number.
+
+## Agent tasks
+
+Agent tasks are separate from Ranger's scheduled tasks. They live in
+`agent-tasks.sqlite` in the data directory (`ROAMGATE_AGENT_TASKS_PATH`),
+`user_version` 1; the bridge refuses other versions. `bridge.tasks.*`
+(`list`, `create`, `update`, `link_session`, `set_status`, `delete`) commits each
+change before publishing a revisioned `{ agent_tasks: snapshot }` push to every
+browser; browsers drop snapshots older than the one they hold and refetch on
+reconnect.
+- **Statuses:** `draft` and `queued` can be edited and started; `link_session`
+  records the tab, pane and terminal and moves the task to `running`. A
+  task notification (see below) for that connection and pane moves it to
+  `needs_review`. `done` is set only by the user; reopening returns it to
+  `queued` without its session.
+- **Start now** runs in the browser, because launch commands are browser
+  preferences: it creates a tab in the chosen workspace, types the agent's
+  launch command, polls `agent.get` until Herdr reports the agent ready (60
+  seconds at most), then sends the prompt once. A failure keeps the task
+  queued with the error; the prompt is never sent twice.
+- **Sync back:** the first time a task with sync-back becomes `done`, the
+  bridge comments on its issue and applies the transition whose target status
+  matches the configured one. The result is saved on the task and never
+  retried, so reopening and finishing again does not comment twice.
+
 ## Task notifications
 
 With the default `herdr` source, each runtime keeps one passive endpoint shell
@@ -430,5 +487,9 @@ push and settings endpoints also reject cross-site requests:
 | Updates                | `x-roamgate-update: 1` (legacy `x-herdr-gui-update: 1` is accepted; the new header wins) |
 | Web Push subscriptions | `x-roamgate-push: 1`, JSON body                                                          |
 | Instance settings      | `x-roamgate-settings`, JSON body                                                         |
+
+The Jira OAuth callback is a top-level `GET` navigation from Atlassian, so it
+cannot carry a marker header; it relies on the session and its single-use
+state instead.
 
 Login bodies are limited to 16 KiB (`413`). Headers never replace login.

@@ -288,6 +288,41 @@ or its shortcut.
 Conversations are saved on the bridge and shared across your devices. Ranger
 has the same [full authority](SECURITY.md#trust-model) as any Roamgate user.
 
+## Jira and Agent Tasks
+
+Connect Jira in **Menu › Configuration › Integrations › Issue trackers**.
+**Configure ›** opens the Jira page: enter your Atlassian Cloud site URL, choose
+**Connect with Atlassian** (OAuth 2.0 with PKCE; no Atlassian app to create),
+and set a default project, a default issue query (JQL), the status synced
+tasks move to, and task presets. A preset is a label, icon, hint and prompt
+template; `{{issue.key}}`, `{{issue.summary}}`, `{{issue.description}}`,
+`{{issue.url}}`, `{{issue.type}}`, `{{issue.status}}`, `{{issue.priority}}` and
+`{{issue.assignee}}` are filled from the issue. Tokens stay on the Roamgate
+server. Linear and GitHub Issues are listed but not available yet.
+
+With Jira enabled and **Show issue panels in the sidebar** on (desktop only):
+
+- **Jira** in the top bar or tab strip docks an issues panel beside the
+  terminal; the expand button makes it fill the workspace. Filter by text or
+  key, project, type, status, assignee and sort, save views, or switch to raw
+  JQL. Results come 25 at a time with **Prev** and **Next**. Each issue links to
+  Jira and offers **＋ Task**; issues with open tasks show the task's status
+  and **Open task** instead.
+- **Tasks** in the top bar shows or hides the Tasks panel between Workspaces
+  and Agents; its badge counts queued, running and needs-review tasks. Filter
+  by **Open**, **Running** or **Done**, and use a task's menu to start it, open
+  its agent session, mark it done, reopen, edit or delete it.
+- **New task** starts from a Jira issue or blank: title, preset, an editable
+  prompt, workspace, agent, and **Queue for later** or **Start now**. Start now
+  opens a tab in the workspace, runs your launch command for that agent (the
+  same one the composer's agent launcher uses) and sends the prompt once the
+  agent is ready. A running task moves to **Needs review** when its agent
+  finishes or asks for input.
+- **Sync back to Jira** comments on the issue and moves it to the configured
+  status the first time the task is marked done.
+
+Tasks are saved on the server and survive reloads and restarts.
+
 ## Git Worktree Lifecycle
 
 Open **Worktree Lifecycle** from a workspace menu or the command menu to:

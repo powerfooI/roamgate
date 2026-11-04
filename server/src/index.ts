@@ -576,8 +576,7 @@ const jiraService = createJiraService({
     (
       await updateGuiSettings((current) => {
         const jira = update(current.integrations?.jira);
-        const { integrations: _previous, ...rest } = current;
-        return jira ? { ...rest, integrations: { jira } } : rest;
+        return { ...current, integrations: jira ? { jira } : undefined };
       })
     ).integrations?.jira,
   credentials: createJiraCredentialStore(),

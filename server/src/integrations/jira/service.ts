@@ -161,7 +161,7 @@ export function createJiraService(options: JiraServiceOptions) {
             current
               ? {
                   ...current,
-                  auth_error: error.message,
+                  auth_error: error.message.slice(0, 1000),
                   auth_checked_at: new Date(now()).toISOString(),
                 }
               : current,
@@ -264,7 +264,7 @@ export function createJiraService(options: JiraServiceOptions) {
           ? {
               ...current,
               auth_checked_at: new Date(now()).toISOString(),
-              auth_error: (error as Error).message,
+              auth_error: ((error as Error).message || "Connection failed").slice(0, 1000),
             }
           : current,
       );

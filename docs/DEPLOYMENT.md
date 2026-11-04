@@ -225,6 +225,8 @@ environment file. `roamgate --help` lists everything.
 | `ROAMGATE_SETTINGS_PATH`                               | GUI settings file (one per bridge)                                                              |
 | `ROAMGATE_CONNECTIONS_PATH`                            | Connection profiles file                                                                        |
 | `ROAMGATE_ASSISTANT_DIR`                               | Ranger data directory                                                                           |
+| `ROAMGATE_JIRA_CREDENTIALS_PATH`                       | Jira OAuth credential file (default `jira-credentials.json` in the data directory)              |
+| `ROAMGATE_AGENT_TASKS_PATH`                            | Agent task database (default `agent-tasks.sqlite` in the data directory)                        |
 | `ROAMGATE_WEB_PUSH_PATH` / `ROAMGATE_WEB_PUSH_SUBJECT` | [Web Push](#web-push-notifications)                                                             |
 
 Legacy `HERDR_GUI_*` names still work; the `ROAMGATE_*` name wins, even when
