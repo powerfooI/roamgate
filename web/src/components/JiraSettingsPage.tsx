@@ -167,23 +167,26 @@ export function JiraSettingsPage({ onBack }: { onBack: () => void }) {
         setSiteError("Enter your Atlassian site URL first.");
         return;
       }
-      // Save the site first so the bridge signs in to the site shown here.
-      if (validSite !== jira.site_url)
-        await updateJiraConfig({ site_url: validSite });
-      // Open the window synchronously-ish to keep popup blockers happy.
+      // Open the window before any await: browsers allow pop-ups only while
+      // the click's user activation lasts.
       const opened = window.open("about:blank", "_blank");
+      if (!opened)
+        throw new Error(
+          "Your browser blocked the Atlassian sign-in window. Allow pop-ups for Roamgate and try again.",
+        );
       try {
+        // Save the site first so the bridge signs in to the site shown here.
+        if (validSite !== jira.site_url)
+          await updateJiraConfig({ site_url: validSite });
         const { authorize_url } = await callJira<{ authorize_url: string }>(
           "oauth.start",
           { origin: window.location.origin },
         );
-        if (opened) {
-          opened.opener = null;
-          opened.location.href = authorize_url;
-        } else window.open(authorize_url, "_blank", "noopener,noreferrer");
+        opened.opener = null;
+        opened.location.href = authorize_url;
         setWaitingForSignIn(true);
       } catch (cause) {
-        opened?.close();
+        opened.close();
         throw cause;
       }
     });
