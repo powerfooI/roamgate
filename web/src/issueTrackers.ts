@@ -9,7 +9,10 @@ import type {
   JiraConfigView,
   JiraIssue,
 } from "../../shared/jira";
-import { bridge, type ConnectionStatus } from "./api";
+import { bridge, type ConnectionClient, type ConnectionStatus } from "./api";
+import { parseAgentIntegrations } from "./agentIntegrations";
+import { startAgentTask } from "./agentTaskStart";
+import { store } from "./store";
 
 // Jira and agent tasks are bridge-global: one subscription shared by the top
 // bar, sidebar, panels and dialogs, refetched on reconnect, never replayed.
@@ -215,4 +218,58 @@ export function selectTask(id: string | null) {
 /** Asks the shell to open Configuration › Integrations › Jira (AC42). */
 export function requestJiraSettings() {
   publish({ jiraSettingsRequested: state.jiraSettingsRequested + 1 });
+}
+
+const startingTasks = new Set<string>();
+
+/**
+ * Starts a draft or queued task in the active connection (AC58). A failure
+ * leaves it queued with the error on its row and in a toast (AC59).
+ */
+export async function runAgentTask(
+  task: AgentTask,
+  client: ConnectionClient,
+): Promise<boolean> {
+  if (startingTasks.has(task.id)) return false;
+  startingTasks.add(task.id);
+  try {
+    if (!task.workspace_id || !task.agent)
+      throw new Error("Choose a workspace and an agent before starting.");
+    if (task.connection_id && task.connection_id !== client.connectionId)
+      throw new Error(
+        "This task belongs to another server. Switch to it to start the task.",
+      );
+    const integrations = parseAgentIntegrations(
+      await client.call("integration.list"),
+    );
+    const integration = integrations.find((item) => item.target === task.agent);
+    const session = await startAgentTask(
+      { client, createTab: (workspaceId) => store.createTab(workspaceId) },
+      {
+        workspaceId: task.workspace_id,
+        agent: task.agent,
+        agentCommand: integration?.command ?? task.agent,
+        prompt: task.prompt,
+      },
+    );
+    await callTasks("link_session", {
+      id: task.id,
+      connection_id: client.connectionId,
+      workspace_id: task.workspace_id,
+      agent: task.agent,
+      session,
+    });
+    return true;
+  } catch (error) {
+    const message = (error as Error).message || "The agent did not start.";
+    await callTasks("set_status", {
+      id: task.id,
+      status: "queued",
+      error: message,
+    }).catch(() => undefined);
+    store.notify({ kind: "error", message: "Task could not start", detail: message });
+    return false;
+  } finally {
+    startingTasks.delete(task.id);
+  }
 }

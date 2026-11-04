@@ -1,0 +1,49 @@
+.topbar-jira-mark,
+.tabbar-jira-mark,
+.jira-panel-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--blue);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.tabbar-jira-mark {
+  width: 14px;
+  height: 14px;
+  font-size: 9px;
+}
+
+.jira-panel-mark {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.issue-tracker-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topbar-task-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

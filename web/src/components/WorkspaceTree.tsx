@@ -19,6 +19,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import type { ContextMenuState } from "./ContextMenu";
 import { ThemedSelect } from "./ThemedSelect";
@@ -274,8 +275,11 @@ export function WorkspaceTree({
   onBrowseFilesForAgent,
   onReviewChangesForAgent,
   onViewAgentHistory,
+  middlePanel = null,
 }: {
   agentsFirst?: boolean;
+  /** Rendered between the workspace and agent panels (the Tasks panel). */
+  middlePanel?: ReactNode;
   onCreateWorkspace: (allServers: boolean) => void;
   onSelect?: (workspace: Workspace) => void;
   onBrowseFiles?: (workspace: Workspace) => void;
@@ -1006,6 +1010,7 @@ export function WorkspaceTree({
   return (
     <>
       {agentsFirst ? agentsPanel : workspacePanel}
+      {middlePanel}
       {agentsFirst ? workspacePanel : agentsPanel}
       <Suspense fallback={null}>
         {(menu || menuMounted) && (

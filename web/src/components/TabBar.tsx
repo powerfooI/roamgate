@@ -73,6 +73,8 @@ export function TabBar({
   annotationCount = 0,
   onToggleInspector,
   onToggleAnnotations,
+  jiraOpen = false,
+  onToggleJira,
 }: {
   mobile?: boolean;
   inspectorOpen?: boolean;
@@ -80,6 +82,9 @@ export function TabBar({
   annotationCount?: number;
   onToggleInspector?: () => void;
   onToggleAnnotations?: () => void;
+  jiraOpen?: boolean;
+  /** Present only while the Jira panel is available (AC28). */
+  onToggleJira?: () => void;
 }) {
   useShortcutPreferences();
   const s = useStoreSelector(
@@ -405,6 +410,20 @@ export function TabBar({
                 <span className="tabbar-change-count">{annotationCount}</span>
               ) : null}
             </button>
+            {onToggleJira ? (
+              <button
+                type="button"
+                className={jiraOpen ? "is-active" : ""}
+                aria-expanded={jiraOpen}
+                title={jiraOpen ? "Close Jira issues" : "Open Jira issues"}
+                onClick={onToggleJira}
+              >
+                <span className="tabbar-jira-mark" aria-hidden="true">
+                  J
+                </span>
+                <span>Jira</span>
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}

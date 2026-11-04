@@ -1,0 +1,375 @@
+.jira-panel {
+  flex: 0 0 clamp(380px, 46%, 760px);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--viewer-border, var(--border));
+  border-radius: 10px;
+  background: var(--viewer-panel-bg, var(--panel));
+  box-shadow: var(--shadow-lg);
+  font-size: 12px;
+}
+
+/* Pop out: the panel fills the workspace area (AC31). */
+.workspace-surfaces.is-jira-expanded > .workspace-stage {
+  display: none;
+}
+
+.workspace-surfaces.is-jira-expanded > .jira-panel {
+  flex: 1 1 auto;
+}
+
+.workspace-surfaces.has-jira {
+  flex-wrap: nowrap;
+}
+
+.jira-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.jira-panel-head h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 14px;
+}
+
+.jira-panel-site,
+.jira-panel-count {
+  color: var(--muted);
+}
+
+.jira-panel-spacer {
+  flex: 1;
+}
+
+.jira-panel .jira-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 7px;
+  color: var(--muted);
+}
+
+.jira-panel .jira-icon-button:hover {
+  color: var(--text);
+}
+
+.jira-panel button {
+  min-height: 28px;
+  font-size: 12px;
+}
+
+.jira-jql-toggle,
+.jira-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+}
+
+.jira-panel .jira-jql-toggle.is-active,
+.jira-panel .jira-filter.is-set,
+.jira-assignee.is-set .themed-select-trigger {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.jira-jql-editor {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px 0;
+}
+
+.jira-jql-editor textarea {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.jira-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.jira-filters[aria-disabled="true"] {
+  opacity: 0.55;
+}
+
+.jira-search {
+  display: flex;
+  flex: 1 1 180px;
+  align-items: center;
+  gap: 6px;
+  min-width: 140px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--muted);
+}
+
+.jira-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.jira-filter-select {
+  max-width: 190px;
+}
+
+.jira-assignee {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.jira-panel .jira-filter-clear {
+  width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.jira-multiselect,
+.jira-views {
+  display: grid;
+  gap: 2px;
+  min-width: 200px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 6px;
+  font-size: 12px;
+}
+
+.jira-multiselect label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.jira-multiselect label:hover {
+  background: var(--border-soft);
+}
+
+.jira-multiselect-empty {
+  margin: 4px 6px;
+  color: var(--muted);
+}
+
+.jira-multiselect-clear,
+.jira-views-save {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.jira-view-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.jira-view-row > button:first-child {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+}
+
+.jira-view-row > button:first-child:hover {
+  background: var(--border-soft);
+}
+
+.jira-view-row small {
+  color: var(--muted);
+}
+
+.jira-panel-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  overflow-wrap: anywhere;
+}
+
+.jira-panel-error span {
+  flex: 1 1 200px;
+}
+
+.jira-issue-list {
+  list-style: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+}
+
+.jira-issue-list[aria-busy="true"] {
+  opacity: 0.7;
+}
+
+.jira-issue-empty {
+  padding: 16px 12px;
+  color: var(--muted);
+}
+
+.jira-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.jira-issue.is-linked {
+  background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.jira-issue-main {
+  display: grid;
+  flex: 1;
+  gap: 5px;
+  min-width: 0;
+}
+
+.jira-issue-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.jira-issue-meta code {
+  color: var(--muted);
+}
+
+.jira-issue-meta [data-type="bug"] {
+  color: var(--danger-text);
+}
+
+.jira-issue-summary {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.jira-issue-task-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  color: var(--accent);
+}
+
+.jira-status-pill {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.jira-status-pill[data-category="indeterminate"] {
+  border-color: var(--blue);
+  color: var(--info-text);
+}
+
+.jira-status-pill[data-category="done"] {
+  border-color: var(--success-text);
+  color: var(--success-text);
+}
+
+.jira-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.jira-issue-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.jira-issue-actions a.jira-icon-button {
+  border: 1px solid var(--border);
+}
+
+.jira-panel .jira-add-task {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.jira-panel-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--muted);
+}
+
+.jira-panel-footer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}

@@ -120,6 +120,16 @@ import "./components/MobileTabSheet.css";
 import { requestClosePane, requestCloseTab, TabBar } from "./components/TabBar";
 import type { TerminalWorkspaceFileRequest } from "./components/TerminalView";
 import { WorkspaceTree } from "./components/WorkspaceTree";
+import { IssueTrackerTopbar } from "./components/IssueTrackerTopbar";
+import { JiraIssuesPanel } from "./components/JiraIssuesPanel";
+import { NewTaskDialog } from "./components/NewTaskDialog";
+import { TasksPanel } from "./components/TasksPanel";
+import {
+  closeNewTask,
+  jiraPanelAvailable,
+  toggleJiraPanel,
+  useIssueTrackers,
+} from "./issueTrackers";
 import { CreateWorkspaceDialog } from "./components/CreateWorkspaceDialog";
 import { AGENT_LIST_SCOPE_STORAGE_KEY } from "./workspaceAgentLayout";
 import { isIosDevice } from "./downloadFile";
@@ -1493,6 +1503,10 @@ export default function App() {
     update: updateAnnotationDraft,
   } = useReviewAnnotationDraft(resourceUiKey);
   const [annotationsOpen, setAnnotationsOpen] = useState(false);
+  // Jira and Tasks are desktop-only in this release (AC64).
+  const issueTrackers = useIssueTrackers();
+  const jiraAvailable = !mobile && jiraPanelAvailable(issueTrackers.jira);
+  const jiraDocked = jiraAvailable && issueTrackers.jiraPanelOpen;
   useEffect(() => {
     if (annotationsOpen) setAssistantOpen(false);
   }, [annotationsOpen]);
@@ -4094,6 +4108,7 @@ export default function App() {
           )}
           <div className="topbar-command-group">
             {!mobile ? assistantEntry : null}
+            {!mobile ? <IssueTrackerTopbar /> : null}
             <CommandCombobox
               key={`${resourceUiKey}:commands`}
               onCreateWorkspace={() =>
@@ -4428,6 +4443,7 @@ export default function App() {
           <div className="sidebar-content">
             <WorkspaceTree
               onCreateWorkspace={setCreateWorkspaceScope}
+              middlePanel={mobile ? null : <TasksPanel />}
               agentsFirst={
                 (mobile
                   ? layoutPreferences.mobileSidebarOrder
@@ -4468,9 +4484,11 @@ export default function App() {
             annotationCount={annotations.length}
             onToggleInspector={toggleWorkspaceInspector}
             onToggleAnnotations={toggleAnnotations}
+            jiraOpen={jiraDocked}
+            onToggleJira={jiraAvailable ? toggleJiraPanel : undefined}
           />
           <div
-            className={`workspace-surfaces ${annotationsDocked ? "has-annotations" : ""} ${assistantDocked ? "has-assistant" : ""}`}
+            className={`workspace-surfaces ${annotationsDocked ? "has-annotations" : ""} ${assistantDocked ? "has-assistant" : ""} ${jiraDocked ? "has-jira" : ""} ${jiraDocked && issueTrackers.jiraPanelExpanded ? "is-jira-expanded" : ""}`}
           >
             <div
               ref={inspectorStageRef}
@@ -4607,6 +4625,7 @@ export default function App() {
                 </div>
               ) : null}
             </div>
+            {jiraDocked ? <JiraIssuesPanel /> : null}
             <AnnotationPanel
               key={annotationStorageKey}
               open={annotationsOpen && !!annotationScope}
@@ -4713,6 +4732,13 @@ export default function App() {
         terminalFontFamily={terminalFontFamily}
         terminalFontScale={terminalFontScale}
       />
+      {issueTrackers.newTask && !mobile ? (
+        <NewTaskDialog
+          key={issueTrackers.newTask.issue?.key ?? "blank"}
+          request={issueTrackers.newTask}
+          onClose={closeNewTask}
+        />
+      ) : null}
       {paneJumpOpen ? (
         <PaneJumpOverlay
           entries={paneJumpOptions}
