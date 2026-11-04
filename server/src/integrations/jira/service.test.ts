@@ -114,6 +114,34 @@ describe("config RPCs", () => {
     expect(settings()?.default_jql).toBe(configured.default_jql);
   });
 
+  test("changing the site URL signs out of the old site (AC9, AC28)", async () => {
+    const { service, store, settings } = setup(configured);
+    const view = (await service.handle("bridge.jira.config.update", {
+      site_url: "https://other.atlassian.net",
+    })) as any;
+    expect(store.read()).toBeNull();
+    expect(settings()?.cloud_id).toBeUndefined();
+    expect(view.auth.state).toBe("not_configured");
+  });
+
+  test("saving the same site URL keeps the sign-in", async () => {
+    const { service, store } = setup(configured);
+    const view = (await service.handle("bridge.jira.config.update", {
+      site_url: "https://acme.atlassian.net/",
+      default_jql: "project = SDS",
+    })) as any;
+    expect(store.read()).not.toBeNull();
+    expect(view.auth.state).toBe("authenticated");
+  });
+
+  test("credentials for another site never count as signed in", async () => {
+    const { service } = setup(configured, {
+      creds: { ...credentials, site_url: "https://old.atlassian.net" },
+    });
+    const view = (await service.handle("bridge.jira.config.get", {})) as any;
+    expect(view.auth.state).toBe("not_configured");
+  });
+
   test("remove deletes config and credentials (AC26)", async () => {
     const { service, store, settings } = setup(configured);
     const view = (await service.handle("bridge.jira.config.remove", {})) as any;

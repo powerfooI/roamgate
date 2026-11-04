@@ -134,18 +134,26 @@ export function createJiraService(options: JiraServiceOptions) {
     if (!options.api) api = null;
   }
 
-  async function view(): Promise<JiraConfigView> {
-    return jiraConfigView(
-      await options.readSettings(),
-      options.credentials.read() !== null,
+  /** Credentials count only for the site they were issued for. */
+  function hasCredentialsFor(settings: JiraSettings | undefined): boolean {
+    const credentials = options.credentials.read();
+    return (
+      !!credentials &&
+      !!settings?.site_url &&
+      credentials.site_url === settings.site_url
     );
+  }
+
+  async function view(): Promise<JiraConfigView> {
+    const settings = await options.readSettings();
+    return jiraConfigView(settings, hasCredentialsFor(settings));
   }
 
   async function connected(): Promise<
     JiraSettings & { site_url: string; cloud_id: string }
   > {
     const settings = await options.readSettings();
-    if (!settings?.site_url || !options.credentials.read()) throw notConfigured();
+    if (!settings?.site_url || !hasCredentialsFor(settings)) throw notConfigured();
     if (!settings.cloud_id) throw jiraAuthError();
     return settings as JiraSettings & { site_url: string; cloud_id: string };
   }
@@ -245,7 +253,7 @@ export function createJiraService(options: JiraServiceOptions) {
 
   async function testConnection(): Promise<JiraConfigView> {
     const settings = await options.readSettings();
-    if (!settings?.site_url || !options.credentials.read()) throw notConfigured();
+    if (!settings?.site_url || !hasCredentialsFor(settings)) throw notConfigured();
     try {
       const user = await client().userInfo();
       await options.updateSettings((current) =>
@@ -338,15 +346,20 @@ export function createJiraService(options: JiraServiceOptions) {
     switch (method) {
       case "bridge.jira.config.get":
         return view();
-      case "bridge.jira.config.update":
-        await options.updateSettings((current) =>
+      case "bridge.jira.config.update": {
+        const saved = await options.updateSettings((current) =>
           applyJiraConfigUpdate(
             current ?? defaultJiraSettings(),
             params as JiraConfigUpdate,
           ),
         );
+        // A different site needs a fresh sign-in: drop the old site's tokens.
+        const credentials = options.credentials.read();
+        if (credentials && credentials.site_url !== saved?.site_url)
+          options.credentials.remove();
         resetClient();
         return view();
+      }
       case "bridge.jira.config.remove":
         options.credentials.remove();
         await options.updateSettings(() => undefined);
