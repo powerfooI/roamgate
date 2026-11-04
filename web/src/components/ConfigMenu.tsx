@@ -26,6 +26,7 @@ import { useLayoutPreferences } from "../layoutPreferences";
 import { shortcutLabel, useShortcutPreferences } from "../shortcutPreferences";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
+import { useIssueTrackers } from "../issueTrackers";
 import type {
   ConfigurationProps,
   ConfigurationTab,
@@ -89,6 +90,18 @@ export function ConfigMenu({
   const [expanded, setExpanded] = useState(false);
   const [configurationTab, setConfigurationTab] =
     useState<ConfigurationTab | null>(null);
+  const [integrationsView, setIntegrationsView] = useState<"list" | "jira">(
+    "list",
+  );
+  // Panels ask for the Jira settings when sign-in is needed (AC42).
+  const { jiraSettingsRequested } = useIssueTrackers();
+  const handledJiraRequest = useRef(jiraSettingsRequested);
+  useEffect(() => {
+    if (jiraSettingsRequested === handledJiraRequest.current) return;
+    handledJiraRequest.current = jiraSettingsRequested;
+    setIntegrationsView("jira");
+    setConfigurationTab("Integrations");
+  }, [jiraSettingsRequested]);
   const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(false);
   const [health, setHealth] = useState<{
     socket?: string;
@@ -109,6 +122,7 @@ export function ConfigMenu({
   };
   const closeConfiguration = useCallback(() => {
     setConfigurationTab(null);
+    setIntegrationsView("list");
     window.requestAnimationFrame(() => triggerRef.current?.focus());
   }, []);
 
@@ -437,6 +451,7 @@ export function ConfigMenu({
               <ConfigurationDialog
                 {...configuration}
                 initialTab={configurationTab}
+                initialIntegrationsView={integrationsView}
                 onClose={closeConfiguration}
               />
             </Suspense>,

@@ -17,6 +17,10 @@ import {
   type RpcLane,
 } from "./rpcLanes";
 import { clearSavedTerminalComposerDrafts } from "./terminalComposer";
+import {
+  isAgentTaskSnapshot,
+  type AgentTaskSnapshot,
+} from "../../shared/agentTasks";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
@@ -404,6 +408,7 @@ function isBridgeHello(value: unknown): value is BridgeHello {
     "terminal_clipboard",
     "assistant",
     "assistant_notification",
+    "agent_tasks",
   ]) {
     if (Object.prototype.hasOwnProperty.call(message, field)) return false;
   }
@@ -437,6 +442,7 @@ export class Bridge {
   private backgroundLanes = new Map<string, BackgroundLane>();
   private eventHandlers = new Set<(e: HerdrEventMsg) => void>();
   private assistantHandlers = new Set<(snapshot: AssistantSnapshot) => void>();
+  private agentTaskHandlers = new Set<(snapshot: AgentTaskSnapshot) => void>();
   private assistantNotificationHandlers = new Set<
     (notification: AssistantTaskNotification) => void
   >();
@@ -821,6 +827,7 @@ export class Bridge {
     const hasControl = owns("control");
     const hasAssistant = owns("assistant");
     const hasAssistantNotification = owns("assistant_notification");
+    const hasAgentTasks = owns("agent_tasks");
     const kindCount = [
       hasHello,
       hasReply,
@@ -834,6 +841,7 @@ export class Bridge {
       hasControl,
       hasAssistant,
       hasAssistantNotification,
+      hasAgentTasks,
     ].filter(Boolean).length;
     if (kindCount !== 1) return;
 
@@ -866,6 +874,18 @@ export class Bridge {
       )
         return;
       this.assistantHandlers.forEach((handler) => handler(msg.assistant));
+      return;
+    }
+
+    if (hasAgentTasks) {
+      // Bridge-global like Ranger: never scoped to a Herdr connection.
+      if (
+        owns("connection_id") ||
+        owns("connection_generation") ||
+        !isAgentTaskSnapshot(msg.agent_tasks)
+      )
+        return;
+      this.agentTaskHandlers.forEach((handler) => handler(msg.agent_tasks));
       return;
     }
 
@@ -1267,6 +1287,11 @@ export class Bridge {
   onAssistant(cb: (snapshot: AssistantSnapshot) => void): () => void {
     this.assistantHandlers.add(cb);
     return () => this.assistantHandlers.delete(cb);
+  }
+
+  onAgentTasks(cb: (snapshot: AgentTaskSnapshot) => void): () => void {
+    this.agentTaskHandlers.add(cb);
+    return () => this.agentTaskHandlers.delete(cb);
   }
 
   onAssistantNotification(

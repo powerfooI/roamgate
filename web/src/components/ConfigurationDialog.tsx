@@ -50,6 +50,8 @@ import {
   useConnectionClient,
 } from "../useConnectionClient";
 import { AgentIntegrationsSettings } from "./AgentIntegrationsSettings";
+import { IssueTrackersSettings } from "./IssueTrackersSettings";
+import { JiraSettingsPage } from "./JiraSettingsPage";
 import { AgentAutoRenameSettings } from "./AgentAutoRenameSettings";
 import { AutoSyncRepositoriesDialog } from "./AutoSyncRepositoriesDialog";
 import { CloseButton } from "./CloseButton";
@@ -120,10 +122,12 @@ type Detail = "terminal" | "layout" | "keyboard" | "mobile" | "sync";
 export function ConfigurationDialog({
   onClose,
   initialTab = "Appearance",
+  initialIntegrationsView = "list",
   ...props
 }: ConfigurationProps & {
   onClose: () => void;
   initialTab?: ConfigurationTab;
+  initialIntegrationsView?: "list" | "jira";
 }) {
   const { theme, accentColor, uiScale } = props;
   const s = useStoreSelector(
@@ -147,6 +151,11 @@ export function ConfigurationDialog({
   const applePlatform = detectShortcutPlatform() === "mac";
   const connectionClient = useConnectionClient();
   const [tab, setTab] = useState<ConfigurationTab>(initialTab);
+  // The Jira page replaces the Integrations list inside this dialog (AC10).
+  const [integrationsView, setIntegrationsView] = useState<"list" | "jira">(
+    initialIntegrationsView,
+  );
+  const jiraPage = tab === "Integrations" && integrationsView === "jira";
   const defaultPaneView = useDefaultPaneView();
   const composerVim = useComposerVimKeys();
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -741,7 +750,9 @@ export function ConfigurationDialog({
               aria-labelledby="configuration-tab-Integrations"
               hidden={tab !== "Integrations"}
             >
-              {tab === "Integrations" ? (
+              {jiraPage ? (
+                <JiraSettingsPage onBack={() => setIntegrationsView("list")} />
+              ) : tab === "Integrations" ? (
                 <>
                   <AgentAutoRenameSettings
                     key={`auto-rename-${connectionClientScopeKey(
@@ -757,11 +768,14 @@ export function ConfigurationDialog({
                     connectionLabel={s.connectionLabel}
                     sshDestination={s.sshDestination}
                   />
+                  <IssueTrackersSettings
+                    onConfigureJira={() => setIntegrationsView("jira")}
+                  />
                 </>
               ) : null}
             </section>
           </div>
-          <div className="modal-actions">
+          <div className="modal-actions" hidden={jiraPage}>
             <span className="muted">
               {tab === "Integrations"
                 ? "Changes require confirmation."

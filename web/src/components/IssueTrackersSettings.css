@@ -1,0 +1,122 @@
+.issue-trackers-settings {
+  display: grid;
+  gap: 10px;
+  padding: 16px 0 4px;
+}
+
+.issue-trackers-heading {
+  display: grid;
+  gap: 3px;
+  padding: 0 4px;
+  font-size: 13px;
+}
+
+.issue-trackers-heading span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.issue-trackers-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.issue-trackers-list li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+}
+
+.issue-trackers-list li + li {
+  border-top: 1px solid var(--border-soft);
+}
+
+.issue-tracker-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--border-soft);
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.issue-tracker-mark[data-kind="jira"] {
+  background: var(--blue);
+  color: #fff;
+}
+
+.issue-trackers-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.issue-trackers-copy > strong {
+  color: var(--text-strong);
+}
+
+.issue-trackers-status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.issue-trackers-status[data-tone="success"] {
+  color: var(--success-text);
+}
+
+.issue-trackers-status[data-tone="error"] {
+  color: var(--danger-text);
+}
+
+.issue-trackers-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.issue-trackers-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.issue-trackers-actions > button:not(.settings-switch) {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.issue-trackers-list li[data-placeholder="true"] .issue-trackers-actions {
+  opacity: 0.6;
+}
+
+.configuration-modal .issue-trackers-panels {
+  grid-template-columns: minmax(0, 1fr) auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.configuration-modal .issue-trackers-panels > .config-item-copy {
+  grid-column: 1;
+}

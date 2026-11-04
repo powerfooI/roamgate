@@ -1,0 +1,244 @@
+.jira-settings-page {
+  display: grid;
+  gap: 16px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.jira-settings-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  font-size: 14px;
+}
+
+.jira-settings-breadcrumb .settings-switch {
+  margin-left: auto;
+}
+
+.jira-settings-page .jira-settings-crumb {
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.jira-settings-page .jira-settings-crumb:hover {
+  color: var(--text);
+}
+
+.jira-connection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+}
+
+.jira-connection[data-state="authenticated"] {
+  border-color: color-mix(in srgb, var(--success-text) 45%, transparent);
+  background: var(--success-soft);
+}
+
+.jira-connection[data-state="error"] {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.jira-connection-copy {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.jira-connection[data-state="authenticated"] .jira-connection-copy > strong,
+.jira-connection[data-state="authenticated"] .jira-connection-copy > svg {
+  color: var(--success-text);
+}
+
+.jira-connection[data-state="error"] .jira-connection-copy > strong,
+.jira-connection[data-state="error"] .jira-connection-copy > svg {
+  color: var(--danger-text);
+}
+
+.jira-connection-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.jira-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 14px;
+}
+
+.jira-field {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.jira-field > span {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.jira-field input,
+.jira-field select,
+.jira-field textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+.jira-field small {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.jira-field .jira-field-error {
+  color: var(--danger-text);
+}
+
+.jira-field-wide {
+  grid-column: 1 / -1;
+}
+
+.jira-mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.jira-presets {
+  display: grid;
+  gap: 10px;
+}
+
+.jira-presets-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.jira-presets-heading > div {
+  display: grid;
+  gap: 3px;
+  font-size: 13px;
+}
+
+.jira-presets-heading span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.jira-presets-heading button,
+.jira-preset-list button,
+.jira-connection-actions button,
+.jira-preset-editor-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.jira-preset-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.jira-preset-list li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.jira-preset-list li + li {
+  border-top: 1px solid var(--border-soft);
+}
+
+.jira-preset-icon {
+  color: var(--accent);
+}
+
+.jira-preset-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.jira-preset-copy strong {
+  color: var(--text-strong);
+}
+
+.jira-preset-copy span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.jira-preset-editor {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+}
+
+.jira-preset-editor-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.jira-settings-page .jira-danger-link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--danger-text);
+}
+
+.jira-settings-page .jira-primary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.jira-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jira-settings-spacer {
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .jira-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The Jira page brings its own footer; hide the dialog's Done row. */
+.configuration-modal .modal-actions[hidden] {
+  display: none;
+}
