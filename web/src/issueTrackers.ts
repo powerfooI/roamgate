@@ -13,6 +13,13 @@ import type {
 import { bridge, type ConnectionClient, type ConnectionStatus } from "./api";
 import { parseAgentIntegrations } from "./agentIntegrations";
 import { startAgentTask } from "./agentTaskStart";
+import { roamgateLocalStorage } from "./browserStorage";
+import {
+  readJiraDock,
+  withJiraDockSize,
+  writeJiraDock,
+  type JiraDockPreferences,
+} from "./jiraDock";
 import { store } from "./store";
 
 // Jira and agent tasks are bridge-global: one subscription shared by the top
@@ -31,6 +38,8 @@ export type IssueTrackerState = {
   /** UI state shared across the shell. */
   jiraPanelOpen: boolean;
   jiraPanelExpanded: boolean;
+  /** Right or bottom dock and its sizes, kept in this browser (AC29). */
+  jiraDock: JiraDockPreferences;
   tasksPanelOpen: boolean;
   selectedTaskId: string | null;
   newTask: NewTaskRequest | null;
@@ -47,6 +56,7 @@ let state: IssueTrackerState = {
   tasksError: null,
   jiraPanelOpen: false,
   jiraPanelExpanded: false,
+  jiraDock: readJiraDock(roamgateLocalStorage),
   tasksPanelOpen: true,
   selectedTaskId: null,
   newTask: null,
@@ -199,6 +209,17 @@ export function toggleJiraPanel() {
 }
 export function setJiraPanelExpanded(expanded: boolean) {
   publish({ jiraPanelExpanded: expanded, jiraPanelOpen: true });
+}
+export function setJiraDock(dock: JiraDockPreferences["dock"]) {
+  const jiraDock = { ...state.jiraDock, dock };
+  writeJiraDock(roamgateLocalStorage, jiraDock);
+  publish({ jiraDock });
+}
+/** Live resize; pass `persist` once the drag or key press ends. */
+export function setJiraDockSize(size: number, persist = false) {
+  const jiraDock = withJiraDockSize(state.jiraDock, size);
+  if (persist) writeJiraDock(roamgateLocalStorage, jiraDock);
+  publish({ jiraDock });
 }
 export function toggleTasksPanel() {
   publish({ tasksPanelOpen: !state.tasksPanelOpen });

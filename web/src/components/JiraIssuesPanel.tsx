@@ -7,6 +7,8 @@ import {
   Code,
   Maximize2,
   Minimize2,
+  PanelBottom,
+  PanelRight,
   Plus,
   RefreshCw,
   Search,
@@ -34,11 +36,18 @@ import {
   openNewTask,
   requestJiraSettings,
   revealTask,
+  setJiraDock,
+  setJiraDockSize,
   setJiraPanelExpanded,
   setJiraPanelOpen,
   useIssueTrackers,
 } from "../issueTrackers";
 import { initialJiraQuery, relativeAge } from "../issueTrackerFormat";
+import {
+  JIRA_DOCK_KEYBOARD_STEP,
+  clampJiraDockSize,
+  jiraDockSize,
+} from "../jiraDock";
 import {
   addSavedView,
   loadSavedViews,
@@ -136,9 +145,99 @@ function MultiSelect({
   );
 }
 
+/**
+ * Drag or arrow-key resizer between the terminal and the docked panel, like
+ * the Inspector's (AC29). Measures the workspace surfaces it sits in.
+ */
+function JiraPanelResizer({
+  dock,
+  size,
+}: {
+  dock: "right" | "bottom";
+  size: number;
+}) {
+  const frame = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (frame.current !== null) cancelAnimationFrame(frame.current);
+    },
+    [],
+  );
+  const bounds = (element: HTMLElement) =>
+    element.parentElement?.getBoundingClientRect() ?? { width: 0, height: 0 };
+
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const { width, height } = bounds(event.currentTarget);
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startSize = clampJiraDockSize(dock, size, width, height);
+    let finalSize = startSize;
+    const onMove = (move: PointerEvent) => {
+      finalSize = clampJiraDockSize(
+        dock,
+        startSize +
+          (dock === "right" ? startX - move.clientX : startY - move.clientY),
+        width,
+        height,
+      );
+      if (frame.current !== null) return;
+      frame.current = requestAnimationFrame(() => {
+        frame.current = null;
+        setJiraDockSize(finalSize);
+      });
+    };
+    const finish = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      if (frame.current !== null) {
+        cancelAnimationFrame(frame.current);
+        frame.current = null;
+      }
+      setJiraDockSize(finalSize, true);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+  };
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const increase = dock === "right" ? event.key === "ArrowLeft" : event.key === "ArrowUp";
+    const decrease = dock === "right" ? event.key === "ArrowRight" : event.key === "ArrowDown";
+    if (!increase && !decrease) return;
+    event.preventDefault();
+    const { width, height } = bounds(event.currentTarget);
+    setJiraDockSize(
+      clampJiraDockSize(
+        dock,
+        clampJiraDockSize(dock, size, width, height) +
+          (increase ? JIRA_DOCK_KEYBOARD_STEP : -JIRA_DOCK_KEYBOARD_STEP),
+        width,
+        height,
+      ),
+      true,
+    );
+  };
+
+  return (
+    <div
+      className={`jira-panel-resizer jira-panel-resizer-${dock}`}
+      role="separator"
+      aria-label={`Resize ${dock} Jira issues`}
+      aria-orientation={dock === "right" ? "vertical" : "horizontal"}
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onKeyDown={onKeyDown}
+    />
+  );
+}
+
 /** Jira issues panel docked beside the terminal (AC28–AC42). */
 export function JiraIssuesPanel() {
-  const { jira, tasks, jiraPanelExpanded } = useIssueTrackers();
+  const { jira, tasks, jiraPanelExpanded, jiraDock } = useIssueTrackers();
+  const dockSize = jiraDockSize(jiraDock);
   // Seed once per site or default change, not on every config push (AC32).
   const siteUrl = jira?.site_url ?? null;
   const defaultProject = jira?.default_project ?? null;
@@ -293,297 +392,330 @@ export function JiraIssuesPanel() {
   };
 
   return (
-    <aside
-      className={`jira-panel ${jiraPanelExpanded ? "is-expanded" : ""}`}
-      aria-label="Jira issues"
-    >
-      <div className="jira-panel-head">
-        <span className="jira-panel-mark" aria-hidden="true">
-          J
-        </span>
-        <h2>Jira issues</h2>
-        {siteName ? <span className="jira-panel-site">· {siteName}</span> : null}
-        <span className="jira-panel-spacer" />
-        <span className="jira-panel-count" aria-live="polite">
-          {loading ? "Loading..." : `${issues.length} issues`}
-        </span>
-        <button
-          type="button"
-          className="jira-icon-button"
-          aria-label="Refresh issues"
-          title="Refresh issues"
-          disabled={loading}
-          onClick={() => void load()}
-        >
-          <RefreshCw size={14} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className={`jira-jql-toggle ${jqlMode ? "is-active" : ""}`}
-          aria-pressed={jqlMode}
-          title={jqlMode ? "Use filters" : "Write raw JQL"}
-          onClick={() => {
-            setPage(firstPage);
-            if (!jqlMode) setJqlDraft(result?.jql ?? jql);
-            setJqlMode(!jqlMode);
-          }}
-        >
-          <Code size={13} aria-hidden="true" /> JQL
-        </button>
-        <button
-          type="button"
-          className="jira-icon-button"
-          aria-label={jiraPanelExpanded ? "Dock Jira issues" : "Expand Jira issues"}
-          title={jiraPanelExpanded ? "Dock beside the terminal" : "Pop out to fill the workspace"}
-          onClick={() => setJiraPanelExpanded(!jiraPanelExpanded)}
-        >
-          {jiraPanelExpanded ? (
-            <Minimize2 size={14} aria-hidden="true" />
-          ) : (
-            <Maximize2 size={14} aria-hidden="true" />
-          )}
-        </button>
-        <CloseButton label="Close Jira issues" onClick={() => setJiraPanelOpen(false)} />
-      </div>
-
-      {jqlMode ? (
-        <form
-          className="jira-jql-editor"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setPage(firstPage);
-            setJql(jqlDraft.trim());
-          }}
-        >
-          <textarea
-            aria-label="JQL query"
-            rows={2}
-            spellCheck={false}
-            value={jqlDraft}
-            placeholder='project = "SDS" AND status = "In Progress"'
-            onChange={(event) => setJqlDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                event.preventDefault();
-                setPage(firstPage);
-                setJql(jqlDraft.trim());
-              }
-            }}
-          />
-          <button type="submit" disabled={!jqlDraft.trim()}>
-            Run
-          </button>
-        </form>
+    <>
+      {!jiraPanelExpanded ? (
+        <JiraPanelResizer dock={jiraDock.dock} size={dockSize} />
       ) : null}
+      <aside
+        className={`jira-panel jira-panel-dock-${jiraDock.dock} ${jiraPanelExpanded ? "is-expanded" : ""}`}
+        aria-label="Jira issues"
+        style={
+          jiraPanelExpanded
+            ? undefined
+            : jiraDock.dock === "right"
+              ? { width: dockSize }
+              : { height: dockSize }
+        }
+      >
+        <div className="jira-panel-head">
+          <span className="jira-panel-mark" aria-hidden="true">
+            J
+          </span>
+          <h2>Jira issues</h2>
+          {siteName ? <span className="jira-panel-site">· {siteName}</span> : null}
+          <span className="jira-panel-spacer" />
+          <span className="jira-panel-count" aria-live="polite">
+            {loading ? "Loading..." : `${issues.length} issues`}
+          </span>
+          <button
+            type="button"
+            className="jira-icon-button"
+            aria-label="Refresh issues"
+            title="Refresh issues"
+            disabled={loading}
+            onClick={() => void load()}
+          >
+            <RefreshCw size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={`jira-jql-toggle ${jqlMode ? "is-active" : ""}`}
+            aria-pressed={jqlMode}
+            title={jqlMode ? "Use filters" : "Write raw JQL"}
+            onClick={() => {
+              setPage(firstPage);
+              if (!jqlMode) setJqlDraft(result?.jql ?? jql);
+              setJqlMode(!jqlMode);
+            }}
+          >
+            <Code size={13} aria-hidden="true" /> JQL
+          </button>
+          {!jiraPanelExpanded ? (
+            <button
+              type="button"
+              className="jira-icon-button"
+              title={jiraDock.dock === "right" ? "Dock at bottom" : "Dock at right"}
+              aria-label={
+                jiraDock.dock === "right"
+                  ? "Dock Jira issues at bottom"
+                  : "Dock Jira issues at right"
+              }
+              onClick={() =>
+                setJiraDock(jiraDock.dock === "right" ? "bottom" : "right")
+              }
+            >
+              {jiraDock.dock === "right" ? (
+                <PanelBottom size={14} aria-hidden="true" />
+              ) : (
+                <PanelRight size={14} aria-hidden="true" />
+              )}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="jira-icon-button"
+            aria-label={jiraPanelExpanded ? "Dock Jira issues" : "Expand Jira issues"}
+            title={jiraPanelExpanded ? "Dock beside the terminal" : "Pop out to fill the workspace"}
+            onClick={() => setJiraPanelExpanded(!jiraPanelExpanded)}
+          >
+            {jiraPanelExpanded ? (
+              <Minimize2 size={14} aria-hidden="true" />
+            ) : (
+              <Maximize2 size={14} aria-hidden="true" />
+            )}
+          </button>
+          <CloseButton label="Close Jira issues" onClick={() => setJiraPanelOpen(false)} />
+        </div>
 
-      <div className="jira-filters" aria-disabled={jqlMode}>
-        <label className="jira-search">
-          <Search size={13} aria-hidden="true" />
-          <input
-            aria-label="Search key or text"
-            placeholder="Search key or text..."
-            value={text}
-            disabled={jqlMode}
-            onChange={(event) => setText(event.target.value)}
-          />
-        </label>
-        <ThemedSelect
-          className="jira-filter-select"
-          aria-label="Project"
-          value={filters.project ?? ""}
-          disabled={jqlMode}
-          options={[
-            { value: "", label: "All projects" },
-            ...projects.map((project) => ({
-              value: project.key,
-              label: project.key,
-              detail: project.name,
-              keywords: [project.name],
-            })),
-          ]}
-          searchPlaceholder="Search projects"
-          emptyText="No projects"
-          onChange={(value) =>
-            patchFilters({ project: value || undefined, statuses: undefined })
-          }
-        />
-        <MultiSelect
-          label="Type"
-          options={typeOptions}
-          value={filters.types ?? []}
-          disabled={jqlMode}
-          onChange={(types) => patchFilters({ types: types.length ? types : undefined })}
-        />
-        <MultiSelect
-          label="Status"
-          options={statusOptions}
-          value={filters.statuses ?? []}
-          disabled={jqlMode}
-          onChange={(value) =>
-            patchFilters({ statuses: value.length ? value : undefined })
-          }
-        />
-        <div className={`jira-assignee ${filters.assignee && filters.assignee !== "any" ? "is-set" : ""}`}>
+        {jqlMode ? (
+          <form
+            className="jira-jql-editor"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setPage(firstPage);
+              setJql(jqlDraft.trim());
+            }}
+          >
+            <textarea
+              aria-label="JQL query"
+              rows={2}
+              spellCheck={false}
+              value={jqlDraft}
+              placeholder='project = "SDS" AND status = "In Progress"'
+              onChange={(event) => setJqlDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault();
+                  setPage(firstPage);
+                  setJql(jqlDraft.trim());
+                }
+              }}
+            />
+            <button type="submit" disabled={!jqlDraft.trim()}>
+              Run
+            </button>
+          </form>
+        ) : null}
+
+        <div className="jira-filters" aria-disabled={jqlMode}>
+          <label className="jira-search">
+            <Search size={13} aria-hidden="true" />
+            <input
+              aria-label="Search key or text"
+              placeholder="Search key or text..."
+              value={text}
+              disabled={jqlMode}
+              onChange={(event) => setText(event.target.value)}
+            />
+          </label>
           <ThemedSelect
             className="jira-filter-select"
-            aria-label="Assignee"
-            value={filters.assignee ?? "any"}
+            aria-label="Project"
+            value={filters.project ?? ""}
             disabled={jqlMode}
             options={[
-              { value: "me", label: "Assignee: Me" },
-              { value: "unassigned", label: "Assignee: Unassigned" },
-              { value: "any", label: "Assignee: Anyone" },
+              { value: "", label: "All projects" },
+              ...projects.map((project) => ({
+                value: project.key,
+                label: project.key,
+                detail: project.name,
+                keywords: [project.name],
+              })),
             ]}
+            searchPlaceholder="Search projects"
+            emptyText="No projects"
             onChange={(value) =>
-              patchFilters({ assignee: value as JiraFilters["assignee"] })
+              patchFilters({ project: value || undefined, statuses: undefined })
             }
           />
-          {filters.assignee && filters.assignee !== "any" && !jqlMode ? (
-            <button
-              type="button"
-              className="jira-filter-clear"
-              aria-label="Clear assignee filter"
-              onClick={() => patchFilters({ assignee: "any" })}
-            >
-              ×
-            </button>
-          ) : null}
-        </div>
-        <ThemedSelect
-          className="jira-filter-select"
-          aria-label="Sort by"
-          icon={<ArrowDownWideNarrow size={13} aria-hidden="true" />}
-          value={sort.field}
-          disabled={jqlMode}
-          options={Object.entries(SORT_LABELS).map(([value, label]) => ({
-            value,
-            label,
-          }))}
-          onChange={(value) =>
-            patchFilters({ sort: { ...sort, field: value as JiraSortField } })
-          }
-        />
-        <button
-          type="button"
-          className="jira-filter"
-          disabled={jqlMode}
-          aria-label={`Sort ${sort.dir === "desc" ? "descending" : "ascending"}`}
-          title="Toggle sort direction"
-          onClick={() =>
-            patchFilters({
-              sort: { ...sort, dir: sort.dir === "desc" ? "asc" : "desc" },
-            })
-          }
-        >
-          {sort.dir === "desc" ? "↓" : "↑"}
-        </button>
-        <Popover>
-          <PopoverTrigger asChild>
-            <button type="button" className="jira-filter" aria-label="Saved views">
-              <Star size={13} aria-hidden="true" /> Views
-              {views.length ? <strong>{views.length}</strong> : null}
-            </button>
-          </PopoverTrigger>
-          <PopoverContent className="jira-views" align="end" aria-label="Saved views">
-            <button
-              type="button"
-              className="jira-views-save"
-              onClick={() => setNaming(true)}
-            >
-              <Plus size={13} aria-hidden="true" /> Save view
-            </button>
-            {views.length === 0 ? (
-              <p className="jira-multiselect-empty">No saved views yet.</p>
+          <MultiSelect
+            label="Type"
+            options={typeOptions}
+            value={filters.types ?? []}
+            disabled={jqlMode}
+            onChange={(types) => patchFilters({ types: types.length ? types : undefined })}
+          />
+          <MultiSelect
+            label="Status"
+            options={statusOptions}
+            value={filters.statuses ?? []}
+            disabled={jqlMode}
+            onChange={(value) =>
+              patchFilters({ statuses: value.length ? value : undefined })
+            }
+          />
+          <div className={`jira-assignee ${filters.assignee && filters.assignee !== "any" ? "is-set" : ""}`}>
+            <ThemedSelect
+              className="jira-filter-select"
+              aria-label="Assignee"
+              value={filters.assignee ?? "any"}
+              disabled={jqlMode}
+              options={[
+                { value: "me", label: "Assignee: Me" },
+                { value: "unassigned", label: "Assignee: Unassigned" },
+                { value: "any", label: "Assignee: Anyone" },
+              ]}
+              onChange={(value) =>
+                patchFilters({ assignee: value as JiraFilters["assignee"] })
+              }
+            />
+            {filters.assignee && filters.assignee !== "any" && !jqlMode ? (
+              <button
+                type="button"
+                className="jira-filter-clear"
+                aria-label="Clear assignee filter"
+                onClick={() => patchFilters({ assignee: "any" })}
+              >
+                ×
+              </button>
             ) : null}
-            {views.map((view) => (
-              <div key={view.id} className="jira-view-row">
-                <button type="button" onClick={() => applyView(view)}>
-                  {view.name}
-                  <small>{view.jql !== undefined ? "JQL" : "Filters"}</small>
-                </button>
-                <button
-                  type="button"
-                  className="jira-icon-button"
-                  aria-label={`Delete view ${view.name}`}
-                  onClick={() => void saveViews(removeSavedView(views, view.id))}
-                >
-                  <Trash2 size={13} aria-hidden="true" />
-                </button>
-              </div>
-            ))}
-          </PopoverContent>
-        </Popover>
-      </div>
-
-      {error ? (
-        <div className="jira-panel-error" role="alert">
-          <span>{error}</span>
-          <button type="button" onClick={() => void load()}>
-            Retry
+          </div>
+          <ThemedSelect
+            className="jira-filter-select"
+            aria-label="Sort by"
+            icon={<ArrowDownWideNarrow size={13} aria-hidden="true" />}
+            value={sort.field}
+            disabled={jqlMode}
+            options={Object.entries(SORT_LABELS).map(([value, label]) => ({
+              value,
+              label,
+            }))}
+            onChange={(value) =>
+              patchFilters({ sort: { ...sort, field: value as JiraSortField } })
+            }
+          />
+          <button
+            type="button"
+            className="jira-filter"
+            disabled={jqlMode}
+            aria-label={`Sort ${sort.dir === "desc" ? "descending" : "ascending"}`}
+            title="Toggle sort direction"
+            onClick={() =>
+              patchFilters({
+                sort: { ...sort, dir: sort.dir === "desc" ? "asc" : "desc" },
+              })
+            }
+          >
+            {sort.dir === "desc" ? "↓" : "↑"}
           </button>
-          {isJiraAuthError(error) ? (
-            <button type="button" onClick={requestJiraSettings}>
-              Open Jira settings
-            </button>
-          ) : null}
+          <Popover>
+            <PopoverTrigger asChild>
+              <button type="button" className="jira-filter" aria-label="Saved views">
+                <Star size={13} aria-hidden="true" /> Views
+                {views.length ? <strong>{views.length}</strong> : null}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="jira-views" align="end" aria-label="Saved views">
+              <button
+                type="button"
+                className="jira-views-save"
+                onClick={() => setNaming(true)}
+              >
+                <Plus size={13} aria-hidden="true" /> Save view
+              </button>
+              {views.length === 0 ? (
+                <p className="jira-multiselect-empty">No saved views yet.</p>
+              ) : null}
+              {views.map((view) => (
+                <div key={view.id} className="jira-view-row">
+                  <button type="button" onClick={() => applyView(view)}>
+                    {view.name}
+                    <small>{view.jql !== undefined ? "JQL" : "Filters"}</small>
+                  </button>
+                  <button
+                    type="button"
+                    className="jira-icon-button"
+                    aria-label={`Delete view ${view.name}`}
+                    onClick={() => void saveViews(removeSavedView(views, view.id))}
+                  >
+                    <Trash2 size={13} aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </PopoverContent>
+          </Popover>
         </div>
-      ) : null}
 
-      <ul className="jira-issue-list" aria-busy={loading}>
-        {!loading && !error && issues.length === 0 ? (
-          <li className="jira-issue-empty">No issues match.</li>
+        {error ? (
+          <div className="jira-panel-error" role="alert">
+            <span>{error}</span>
+            <button type="button" onClick={() => void load()}>
+              Retry
+            </button>
+            {isJiraAuthError(error) ? (
+              <button type="button" onClick={requestJiraSettings}>
+                Open Jira settings
+              </button>
+            ) : null}
+          </div>
         ) : null}
-        {issues.map((issue) => (
-          <IssueRow key={issue.key} issue={issue} linked={openTasksForIssue(tasks, issue.key)} />
-        ))}
-      </ul>
 
-      <div className="jira-panel-footer">
-        <span>{pageRange(page.index, issues.length)}</span>
-        <span className="jira-panel-spacer" />
-        <button
-          type="button"
-          disabled={page.index === 0 || loading}
-          onClick={() => setPage(previousPage(page))}
-        >
-          <ChevronLeft size={13} aria-hidden="true" /> Prev
-        </button>
-        <span>Page {page.index + 1}</span>
-        <button
-          type="button"
-          disabled={!result?.next_page_token || loading}
-          onClick={() =>
-            result?.next_page_token &&
-            setPage(nextPage(page, result.next_page_token))
-          }
-        >
-          Next <ChevronRight size={13} aria-hidden="true" />
-        </button>
-      </div>
+        <ul className="jira-issue-list" aria-busy={loading}>
+          {!loading && !error && issues.length === 0 ? (
+            <li className="jira-issue-empty">No issues match.</li>
+          ) : null}
+          {issues.map((issue) => (
+            <IssueRow key={issue.key} issue={issue} linked={openTasksForIssue(tasks, issue.key)} />
+          ))}
+        </ul>
 
-      <TextInputDialog
-        open={naming}
-        title="Save view"
-        label="View name"
-        placeholder="My open bugs"
-        submitLabel="Save"
-        onClose={() => setNaming(false)}
-        onSubmit={(name) => {
-          setNaming(false);
-          try {
-            void saveViews(
-              addSavedView(
-                views,
-                name,
-                jqlMode ? { jql: jql || jqlDraft } : { filters },
-              ),
-            );
-          } catch (cause) {
-            setError((cause as Error).message);
-          }
-        }}
-      />
-    </aside>
+        <div className="jira-panel-footer">
+          <span>{pageRange(page.index, issues.length)}</span>
+          <span className="jira-panel-spacer" />
+          <button
+            type="button"
+            disabled={page.index === 0 || loading}
+            onClick={() => setPage(previousPage(page))}
+          >
+            <ChevronLeft size={13} aria-hidden="true" /> Prev
+          </button>
+          <span>Page {page.index + 1}</span>
+          <button
+            type="button"
+            disabled={!result?.next_page_token || loading}
+            onClick={() =>
+              result?.next_page_token &&
+              setPage(nextPage(page, result.next_page_token))
+            }
+          >
+            Next <ChevronRight size={13} aria-hidden="true" />
+          </button>
+        </div>
+
+        <TextInputDialog
+          open={naming}
+          title="Save view"
+          label="View name"
+          placeholder="My open bugs"
+          submitLabel="Save"
+          onClose={() => setNaming(false)}
+          onSubmit={(name) => {
+            setNaming(false);
+            try {
+              void saveViews(
+                addSavedView(
+                  views,
+                  name,
+                  jqlMode ? { jql: jql || jqlDraft } : { filters },
+                ),
+              );
+            } catch (cause) {
+              setError((cause as Error).message);
+            }
+          }}
+        />
+      </aside>
+    </>
   );
 }
 

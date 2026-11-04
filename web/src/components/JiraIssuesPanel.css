@@ -1,5 +1,6 @@
 .jira-panel {
-  flex: 0 0 clamp(380px, 46%, 760px);
+  /* Width (right dock) or height (bottom dock) comes from the resizer (AC29). */
+  flex: 0 0 auto;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -10,6 +11,57 @@
   background: var(--viewer-panel-bg, var(--panel));
   box-shadow: var(--shadow-lg);
   font-size: 12px;
+}
+
+.jira-panel-dock-right {
+  max-width: calc(100% - 487px);
+}
+
+.jira-panel-dock-bottom {
+  max-height: calc(100% - 247px);
+}
+
+/* Bottom dock stacks the terminal above the panel. */
+.workspace-surfaces.has-jira.jira-dock-bottom:not(.is-jira-expanded) {
+  flex-direction: column;
+}
+
+.workspace-surfaces.jira-dock-bottom:not(.is-jira-expanded) > .workspace-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.workspace-surfaces.jira-dock-bottom:not(.is-jira-expanded) > .jira-panel {
+  width: 100%;
+}
+
+/* Same look and feel as the Inspector's resizer; the surfaces' gap gives it room. */
+.jira-panel-resizer {
+  position: relative;
+  z-index: 5;
+  flex: 0 0 7px;
+  margin: -4px;
+  border-radius: 4px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.jira-panel-resizer-right {
+  cursor: col-resize;
+}
+
+.jira-panel-resizer-bottom {
+  cursor: row-resize;
+}
+
+.jira-panel-resizer:hover,
+.jira-panel-resizer:focus-visible {
+  outline: none;
+  background: var(--accent-hover);
+}
+
+.workspace-surfaces.is-jira-expanded > .jira-panel-resizer {
+  display: none;
 }
 
 /* Pop out: the panel fills the workspace area (AC31). */

@@ -357,6 +357,10 @@ Atlassian.
   per credential set). A token within a minute of expiry is refreshed first;
   a 401 refreshes once and retries once. Refreshes are single-flight and the
   rotated pair is saved before use.
+- **Panel:** the issues panel docks beside the terminal, at the right or the
+  bottom, with an Inspector-style resizer; the dock and a size per dock are
+  browser preferences (`jiraPanelDock.v1`). Pop-out hides the terminal stage
+  so the panel fills the workspace.
 - **Search:** structured filters become JQL on the bridge (quoted and
   escaped); raw JQL mode runs as written. Jira Cloud pages by token with no
   total, so the panel shows a range and page number.

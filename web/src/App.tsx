@@ -4488,7 +4488,7 @@ export default function App() {
             onToggleJira={jiraAvailable ? toggleJiraPanel : undefined}
           />
           <div
-            className={`workspace-surfaces ${annotationsDocked ? "has-annotations" : ""} ${assistantDocked ? "has-assistant" : ""} ${jiraDocked ? "has-jira" : ""} ${jiraDocked && issueTrackers.jiraPanelExpanded ? "is-jira-expanded" : ""}`}
+            className={`workspace-surfaces ${annotationsDocked ? "has-annotations" : ""} ${assistantDocked ? "has-assistant" : ""} ${jiraDocked ? `has-jira jira-dock-${issueTrackers.jiraDock.dock}` : ""} ${jiraDocked && issueTrackers.jiraPanelExpanded ? "is-jira-expanded" : ""}`}
           >
             <div
               ref={inspectorStageRef}
