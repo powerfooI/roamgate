@@ -378,8 +378,9 @@ reconnect.
 - **Start now** runs in the browser, because launch commands are browser
   preferences: it creates a tab in the chosen workspace, types the agent's
   launch command, polls `agent.get` until Herdr reports the agent ready (60
-  seconds at most), then sends the prompt once. A failure keeps the task
-  queued with the error; the prompt is never sent twice.
+  seconds at most), links the session to the task, then sends the prompt
+  once. A failure before the link keeps the task queued with the error; after
+  the link the task stays running, so the prompt is never sent twice.
 - **Sync back:** the first time a task with sync-back becomes `done`, the
   bridge comments on its issue and applies the transition whose target status
   matches the configured one. The result is saved on the task and never

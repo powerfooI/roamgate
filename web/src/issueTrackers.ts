@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import {
   activeAgentTaskCount,
   type AgentTask,
+  type AgentTaskSession,
   type AgentTaskSnapshot,
 } from "../../shared/agentTasks";
 import type {
@@ -232,6 +233,17 @@ export async function runAgentTask(
 ): Promise<boolean> {
   if (startingTasks.has(task.id)) return false;
   startingTasks.add(task.id);
+  let linked = false;
+  const link = async (session: AgentTaskSession) => {
+    await callTasks("link_session", {
+      id: task.id,
+      connection_id: client.connectionId,
+      workspace_id: task.workspace_id,
+      agent: task.agent,
+      session,
+    });
+    linked = true;
+  };
   try {
     if (!task.workspace_id || !task.agent)
       throw new Error("Choose a workspace and an agent before starting.");
@@ -243,8 +255,8 @@ export async function runAgentTask(
       await client.call("integration.list"),
     );
     const integration = integrations.find((item) => item.target === task.agent);
-    const session = await startAgentTask(
-      { client, createTab: (workspaceId) => store.createTab(workspaceId) },
+    await startAgentTask(
+      { client, createTab: (workspaceId) => store.createTab(workspaceId), link },
       {
         workspaceId: task.workspace_id,
         agent: task.agent,
@@ -252,21 +264,17 @@ export async function runAgentTask(
         prompt: task.prompt,
       },
     );
-    await callTasks("link_session", {
-      id: task.id,
-      connection_id: client.connectionId,
-      workspace_id: task.workspace_id,
-      agent: task.agent,
-      session,
-    });
     return true;
   } catch (error) {
     const message = (error as Error).message || "The agent did not start.";
-    await callTasks("set_status", {
-      id: task.id,
-      status: "queued",
-      error: message,
-    }).catch(() => undefined);
+    // Once linked the task is running with its tab: never re-queue it, so a
+    // later Start can't open a second session and send the prompt again.
+    if (!linked)
+      await callTasks("set_status", {
+        id: task.id,
+        status: "queued",
+        error: message,
+      }).catch(() => undefined);
     store.notify({ kind: "error", message: "Task could not start", detail: message });
     return false;
   } finally {

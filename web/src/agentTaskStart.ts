@@ -13,6 +13,11 @@ export type StartAgentTaskDeps = {
   client: Pick<ConnectionClient, "call" | "connectionId" | "isCurrent">;
   /** Creates a tab in the workspace; resolves to Herdr's tab.create reply. */
   createTab(workspaceId: string): Promise<unknown>;
+  /**
+   * Records the session on the task. Runs once the agent is ready and before
+   * the prompt is sent, so a failed link can never lead to a second send.
+   */
+  link?(session: AgentTaskSession): Promise<void>;
   wait?: (ms: number) => Promise<void>;
   now?: () => number;
 };
@@ -63,7 +68,8 @@ export function agentReady(live: unknown, agent: string): boolean {
  * "Start now" (AC58): a new tab in the workspace, the user's launch command
  * for the agent (the same one the composer's agent launcher runs), then the
  * prompt as the agent's first message once Herdr sees the agent ready. The
- * prompt is sent at most once; a timeout throws before sending it (AC59).
+ * session is linked before the prompt goes out, and the prompt is sent at
+ * most once; a timeout or a failed link throws before sending it (AC59).
  */
 export async function startAgentTask(
   deps: StartAgentTaskDeps,
@@ -104,6 +110,7 @@ export async function startAgentTask(
       );
     await wait(POLL_MS);
   }
+  await deps.link?.(session);
   await sendTerminalComposerText(deps.client, session.pane_id, input.prompt, true);
   return session;
 }

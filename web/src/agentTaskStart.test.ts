@@ -126,3 +126,54 @@ test("agentReady matches Ranger's readiness check", () => {
   expect(agentReady({ agent: "codex", agent_status: "idle" }, "claude")).toBe(false);
   expect(agentReady(undefined, "claude")).toBe(false);
 });
+
+test("links the session before sending the prompt (AC58)", async () => {
+  storage();
+  const { client, calls } = fakeClient([
+    { agent: "claude", agent_status: "idle" },
+  ]);
+  const order: string[] = [];
+  await startAgentTask(
+    {
+      client: {
+        ...client,
+        async call(method: string, params: any = {}) {
+          if (method === "pane.send_input") order.push(`send:${params.text}`);
+          return client.call(method, params);
+        },
+      },
+      createTab: async () => created,
+      link: async (session) => {
+        order.push(`link:${session.pane_id}`);
+      },
+      wait: async () => undefined,
+    },
+    { workspaceId: "w1", agent: "claude", agentCommand: "claude", prompt: "p" },
+  );
+  expect(order).toEqual(["send:claude", "link:pane-9", "send:p"]);
+  expect(calls.filter((call) => call.method === "pane.send_input")).toHaveLength(2);
+});
+
+test("a failed link never sends the prompt (AC59)", async () => {
+  storage();
+  const { client, calls } = fakeClient([
+    { agent: "claude", agent_status: "idle" },
+  ]);
+  await expect(
+    startAgentTask(
+      {
+        client,
+        createTab: async () => created,
+        link: async () => {
+          throw new Error("bridge unavailable");
+        },
+        wait: async () => undefined,
+      },
+      { workspaceId: "w1", agent: "claude", agentCommand: "claude", prompt: "p" },
+    ),
+  ).rejects.toThrow("bridge unavailable");
+  const inputs = calls
+    .filter((call) => call.method === "pane.send_input")
+    .map((call) => call.params.text);
+  expect(inputs).toEqual(["claude"]);
+});
