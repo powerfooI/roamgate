@@ -775,11 +775,14 @@ function reloadWhenUpdatedServerIsReady(
 
 export function terminalNavigationLoading(s: State): boolean {
   return (
-    s.status === "connected" &&
     !s.connectionPaused &&
     !s.error &&
-    (!!s.pendingFocusWorkspaceId ||
-      (!s.layout && s.panes.some((pane) => pane.pane_id === s.selectedPaneId)))
+    (s.status === "connecting" ||
+      (s.status === "connected" &&
+        (!s.lastRefresh ||
+          !!s.pendingFocusWorkspaceId ||
+          (!s.layout &&
+            s.panes.some((pane) => pane.pane_id === s.selectedPaneId)))))
   );
 }
 

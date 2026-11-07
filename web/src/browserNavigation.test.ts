@@ -206,6 +206,7 @@ function browserState(): State {
       topology.panes,
     ),
     layout: navigationLayout(topology.panes[0], topology.panes),
+    lastRefresh: 1,
   };
   return {
     ...store.get(),
@@ -792,6 +793,23 @@ describe("store browser-local navigation", () => {
       expect(empty).toContain("Select a workspace");
       expect(empty).not.toContain("Loading terminal");
     });
+  });
+
+  test("initial connection and first workspace refresh stay in loading state", () => {
+    expect(
+      terminalNavigationLoading({ ...browserState(), status: "connecting" }),
+    ).toBe(true);
+    const firstRefresh = {
+      ...browserState(),
+      layout: null,
+      panes: [],
+      selectedPaneId: null,
+      lastRefresh: 0,
+    };
+    expect(terminalNavigationLoading(firstRefresh)).toBe(true);
+    expect(terminalNavigationLoading({ ...firstRefresh, lastRefresh: 1 })).toBe(
+      false,
+    );
   });
 
   test("empty, removed, paused, disconnected and failed targets do not spin", () => {
