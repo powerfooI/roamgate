@@ -1093,6 +1093,38 @@ describe("assistant approved context", () => {
     ).rejects.toThrow("changed workspace");
   });
 
+  test("large history reads retain the newest messages within the text budget", async () => {
+    const f = fixture();
+    const captured = await f.context.captureScope([first]);
+    const sentAt = (index: number) =>
+      new Date(Date.UTC(2026, 10, 9, 0, index)).toISOString();
+    f.readHistory.mockResolvedValueOnce({
+      pane_id: "w1:p1",
+      workspace_id: "w1",
+      agent: "claude",
+      status: "ok",
+      updated_at: sentAt(79),
+      messages: Array.from({ length: 80 }, (_, index) => ({
+        role: index % 2 ? "assistant" : "user",
+        sent_at: sentAt(index),
+        text: `${index === 79 ? "LATEST: the MR was merged. " : ""}${"x".repeat(700)}`,
+      })),
+    });
+    const result = await f.context.read("history", captured, {
+      ...first,
+      pane_id: "w1:p1",
+    });
+    expect(result.text.length).toBeLessThanOrEqual(32_000);
+    const output = JSON.parse(result.text)[0];
+    expect(output.messages.at(-1)).toMatchObject({ sent_at: sentAt(79) });
+    expect(output.messages.at(-1).text).toStartWith(
+      "LATEST: the MR was merged.",
+    );
+    expect(output.messages[0].sent_at > sentAt(0)).toBe(true);
+    expect(output.truncated).toBe(true);
+    expect(output.warning).toContain("partial evidence");
+  });
+
   test("diff validates paths and the public tool forwards working-tree change kinds", async () => {
     const f = fixture();
     const captured = await f.context.captureScope([first]);

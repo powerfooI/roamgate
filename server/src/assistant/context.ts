@@ -1143,6 +1143,24 @@ export function createAssistantContext(args: {
       }
       terminal.text = text.slice(text.length - low);
       serialized = JSON.stringify(output);
+    } else if (kind === "history" && serialized.length > MAX_TEXT) {
+      // Messages run oldest first: drop the oldest so the newest fit, rather
+      // than cutting the serialized text and losing the latest turns.
+      const history = output[0]!;
+      history.truncated = true;
+      history.warning = INCOMPLETE_NOTICE;
+      const messages = history.messages as unknown[];
+      let low = 0;
+      let high = messages.length;
+      while (low < high) {
+        const count = Math.ceil((low + high) / 2);
+        history.messages = messages.slice(messages.length - count);
+        if (JSON.stringify(output).length <= MAX_TEXT) low = count;
+        else high = count - 1;
+      }
+      // At least the newest message, cut below if even it is too long.
+      history.messages = messages.slice(messages.length - Math.max(1, low));
+      serialized = JSON.stringify(output);
     }
     return {
       text:
