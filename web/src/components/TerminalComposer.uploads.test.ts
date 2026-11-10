@@ -510,7 +510,14 @@ async function registerDomTests() {
     await h.paste();
     await act(async () => {
       h.uploads[0].resolve("/A.png");
-      await Promise.resolve();
+      // The upload settles a few microtasks later; React commits after act.
+      for (
+        let tick = 0;
+        tick < 20 &&
+        drafts.readTerminalComposerDraft(h.key) === "left SELECT right";
+        tick++
+      )
+        await Promise.resolve();
       expect(drafts.readTerminalComposerDraft(h.key)).toBe(
         "left /A.png  right",
       );
@@ -616,7 +623,48 @@ async function registerDomTests() {
     expect(drafts.terminalComposerUploadCount(h.key)).toBe(1);
     await act(async () => h.uploads[1].resolve("/B.png"));
     expect(drafts.readTerminalComposerDraft(h.key)).toBe("left /B.png  right");
-    expect(h.errors).toEqual(["Upload failed"]);
+    expect(h.errors).toEqual(["a.png did not upload: Upload failed"]);
+  });
+
+  test("several files upload three at a time, with progress, in picked order, keeping the others when one fails", async () => {
+    const h = await mount("", 0, 0);
+    await act(async () => {
+      const event = new browser.Event("paste", {
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(event, "clipboardData", {
+        value: {
+          files: ["a", "b", "c", "d", "e"].map(
+            (name) =>
+              new browser.File(["x"], `${name}.txt`, { type: "text/plain" }),
+          ),
+        },
+      });
+      h.textarea().dispatchEvent(event as unknown as Event);
+    });
+    const progress = () =>
+      container.querySelector(".terminal-composer-upload")?.textContent ?? null;
+    expect(h.uploads).toHaveLength(3);
+    expect(progress()).toBe("Uploading 0/5");
+    await act(async () => h.uploads[2].resolve("/C"));
+    expect(h.uploads).toHaveLength(4);
+    expect(progress()).toBe("Uploading 1/5");
+    await act(async () => h.uploads[0].resolve("/A"));
+    await act(async () => h.uploads[3].reject(new Error("Upload too large")));
+    expect(progress()).toBe("Uploading 3/5");
+    expect(
+      container
+        .querySelector('[role="progressbar"]')
+        ?.getAttribute("aria-valuenow"),
+    ).toBe("3");
+    await act(async () => h.uploads[4].resolve("/E"));
+    expect(drafts.terminalComposerUploadCount(h.key)).toBe(1);
+    await act(async () => h.uploads[1].resolve("/B"));
+    expect(drafts.readTerminalComposerDraft(h.key)).toBe("/A /B /C /E  ");
+    expect(h.errors).toEqual(["d.txt did not upload: Upload too large"]);
+    expect(drafts.terminalComposerUploadCount(h.key)).toBe(0);
+    expect(progress()).toBeNull();
   });
 
   test("inverse UI scale min-height and empty placeholders do not falsely expand or retain inline height across mode switches", async () => {

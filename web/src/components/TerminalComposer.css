@@ -84,6 +84,13 @@
     margin-left: auto;
   }
 
+  /* "Uploading 3/8" with its bar, between the tools and Insert / Send. */
+  .terminal-composer-upload {
+    flex: 1 1 64px;
+    min-width: 48px;
+    max-width: 200px;
+  }
+
   .terminal-composer-hint {
     flex: 1 1 auto;
     min-width: 0;
