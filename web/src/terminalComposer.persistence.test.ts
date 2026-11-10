@@ -596,3 +596,27 @@ test("fresh topology clears only removed drafts from its own destination", async
     "other draft",
   );
 });
+
+test("activating a scope reads each stored key once, however many drafts are saved", async () => {
+  const { local, session } = storage();
+  const saved = 200;
+  for (let index = 0; index < saved; index++) {
+    local.setItem(
+      `roamgate:terminalComposerDraft:v1:["","other-host",${index}]`,
+      "",
+    );
+  }
+  const drafts = await freshDrafts();
+  let keyReads = 0;
+  for (const raw of [local, session]) {
+    const key = raw.key.bind(raw);
+    raw.key = (index) => {
+      keyReads++;
+      return key(index);
+    };
+  }
+  activate(drafts);
+  // An index loop over the namespaced store rescans every key on each step,
+  // which costs 2 * saved ** 2 reads and stalls the page as drafts accumulate.
+  expect(keyReads).toBeLessThanOrEqual(2 * saved);
+});
