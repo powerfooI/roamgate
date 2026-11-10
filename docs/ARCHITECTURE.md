@@ -151,7 +151,9 @@ snapshots do not prove which agent made a change.
 Git resource keys combine `worktree.gui_settings_key` with the normalized
 checkout path, per connection. Workspaces on the same checkout may share caches.
 Actions remember their originating checkout and never fall back to a sibling.
-Terminals stay mounted while the Inspector changes.
+Terminals stay mounted while the Inspector changes. Whether the Inspector is
+shown belongs to the workspace (`inspectorShown.v1`, per browser, connection and
+workspace); its view, dock and expansion stay the checkout's.
 
 Browser preferences live in namespaced `localStorage` and sync across tabs on the
 same origin. Navigation, open files, live draft edits, and focus stay per tab.

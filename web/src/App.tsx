@@ -121,6 +121,7 @@ import { requestClosePane, requestCloseTab, TabBar } from "./components/TabBar";
 import type { TerminalWorkspaceFileRequest } from "./components/TerminalView";
 import { WorkspaceTree } from "./components/WorkspaceTree";
 import { CreateWorkspaceDialog } from "./components/CreateWorkspaceDialog";
+import { inspectorWasShown, rememberInspectorShown } from "./inspectorShown";
 import { AGENT_LIST_SCOPE_STORAGE_KEY } from "./workspaceAgentLayout";
 import { isIosDevice } from "./downloadFile";
 import { lazyWithReload } from "./lazyWithReload";
@@ -1752,9 +1753,29 @@ export default function App() {
   );
 
   const commitInspectorState = useCallback(
-    (next: WorkspaceInspectorState | null) => {
+    (
+      next: WorkspaceInspectorState | null,
+      // false when put away by a switch to a workspace that has it hidden:
+      // the one left keeps it shown.
+      remember = true,
+    ) => {
+      const previous = inspectorStateRef.current;
       inspectorStateRef.current = next;
       setInspectorState(next);
+      // Shown or hidden by the user: in that workspace only.
+      if (
+        remember &&
+        next &&
+        (previous?.open !== next.open ||
+          previous.scope.connectionId !== next.scope.connectionId ||
+          previous.scope.workspaceId !== next.scope.workspaceId)
+      )
+        rememberInspectorShown(
+          roamgateLocalStorage,
+          next.scope.connectionId,
+          next.scope.workspaceId,
+          next.open,
+        );
     },
     [],
   );
@@ -1763,12 +1784,8 @@ export default function App() {
       update: (
         current: WorkspaceInspectorState | null,
       ) => WorkspaceInspectorState | null,
-    ) => {
-      const next = update(inspectorStateRef.current);
-      inspectorStateRef.current = next;
-      setInspectorState(next);
-    },
-    [],
+    ) => commitInspectorState(update(inspectorStateRef.current)),
+    [commitInspectorState],
   );
   const activateTerminalSurface = useCallback(() => {
     setMobileMoreOpen(false);
@@ -2468,11 +2485,28 @@ export default function App() {
   const keepInspectorForWorkspace = useCallback(
     (workspaceId: string, originPane?: Pane) => {
       const current = inspectorStateRef.current;
-      if (!current?.open && !mobile) {
+      const snapshot = store.get();
+      const target = snapshot.workspaces.find(
+        (candidate) => candidate.workspace_id === workspaceId,
+      );
+      // Each workspace has its inspector shown or hidden as it was left
+      // there, in its own view.
+      if (
+        !mobile &&
+        (!target ||
+          !inspectorWasShown(
+            roamgateLocalStorage,
+            connectionClient.connectionId,
+            workspaceId,
+          ))
+      ) {
+        if (current?.open) {
+          inspectorReturnFocusRef.current = null;
+          commitInspectorState({ ...current, open: false }, false);
+        }
         activateTerminalSurface();
         return;
       }
-      const snapshot = store.get();
       const explicitPane = originPane
         ? snapshot.panes.find(
             (candidate) => candidate.pane_id === originPane.pane_id,
@@ -2490,12 +2524,18 @@ export default function App() {
         activateSessionSurface(routedPane ?? null);
         return;
       }
-      if (!current) return;
       const historyPane = paneHasAgentHistory(routedPane)
         ? routedPane
         : workspacePanes.find(paneHasAgentHistory);
+      const shownView =
+        !mobile && target
+          ? readInspectorPreferences(
+              roamgateLocalStorage,
+              resourceScopeForWorkspace(connectionClient.connectionId, target),
+            ).view
+          : (current?.view ?? "files");
       const view =
-        current.view === "history" && !historyPane ? "files" : current.view;
+        shownView === "history" && !historyPane ? "files" : shownView;
       openInspector(view, workspaceId, {
         focusInspector: false,
         originPaneId:
@@ -2503,7 +2543,14 @@ export default function App() {
           (view === "history" ? historyPane?.pane_id : undefined),
       });
     },
-    [activateSessionSurface, activateTerminalSurface, mobile, openInspector],
+    [
+      activateSessionSurface,
+      activateTerminalSurface,
+      commitInspectorState,
+      connectionClient.connectionId,
+      mobile,
+      openInspector,
+    ],
   );
   const toggleFileExplorer = useCallback(() => {
     const snapshot = store.get();
@@ -3076,20 +3123,38 @@ export default function App() {
       }),
     );
   }, [annotationScope, annotationWorkspace, commitAnnotations, s.panes]);
+  // The workspace the inspector last followed a switch to: a switch shows
+  // or hides it as that workspace had it, a reload brings it back.
+  const inspectorFollowedRef = useRef<string | null>(null);
   useLayoutEffect(() => {
+    if (!focusedWorkspace || s.pendingFocusWorkspaceId) return;
+    const followed = `${connectionClient.connectionId}\n${focusedWorkspace.workspace_id}`;
+    const switched = inspectorFollowedRef.current !== followed;
+    inspectorFollowedRef.current = followed;
     const current = inspectorStateRef.current;
-    if (!current?.open || !focusedWorkspace || s.pendingFocusWorkspaceId) {
+    if (current?.open) {
+      const routedWorkspace = resolveWorkspaceForScope(
+        current.scope,
+        s.workspaces,
+      );
+      if (routedWorkspace?.workspace_id === focusedWorkspace.workspace_id)
+        return;
+    } else if (
+      mobile ||
+      !switched ||
+      !inspectorWasShown(
+        roamgateLocalStorage,
+        connectionClient.connectionId,
+        focusedWorkspace.workspace_id,
+      )
+    )
       return;
-    }
-    const routedWorkspace = resolveWorkspaceForScope(
-      current.scope,
-      s.workspaces,
-    );
-    if (routedWorkspace?.workspace_id === focusedWorkspace.workspace_id) return;
     keepInspectorForWorkspace(focusedWorkspace.workspace_id);
   }, [
+    connectionClient.connectionId,
     focusedWorkspace,
     keepInspectorForWorkspace,
+    mobile,
     s.pendingFocusWorkspaceId,
     s.workspaces,
   ]);

@@ -92,6 +92,10 @@ Herdr 0.9.1+ resolves URLs that wrap across lines. See
 Open **Files**, **Changes**, **Commits**, or **Agent History** from the
 Inspector button, shortcuts, or workspace/agent menus.
 
+- Showing or hiding the Inspector applies to the current workspace only, in
+  this browser. Switching workspaces shows each one's Inspector as it was left
+  there, in that checkout's view, and a reload brings it back. A workspace
+  where it was never shown keeps it hidden. On phones it is unchanged.
 - Dock right or bottom, resize, or expand. Narrow layouts use drill-down views.
 - Single-click opens a temporary preview tab; double-click keeps it. Open files
   are restored per connection and checkout.
