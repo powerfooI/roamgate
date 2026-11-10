@@ -620,3 +620,32 @@ test("activating a scope reads each stored key once, however many drafts are sav
   // which costs 2 * saved ** 2 reads and stalls the page as drafts accumulate.
   expect(keyReads).toBeLessThanOrEqual(2 * saved);
 });
+
+test("logout clears every stored draft while reading each stored key once", async () => {
+  const { local, session } = storage();
+  const saved = 200;
+  const draftKey = (index: number) =>
+    `roamgate:terminalComposerDraft:v1:["","other-host",${index}]`;
+  for (const raw of [local, session]) {
+    for (let index = 0; index < saved; index++) {
+      raw.setItem(draftKey(index), "secret");
+    }
+  }
+  const drafts = await freshDrafts();
+  let keyReads = 0;
+  for (const raw of [local, session]) {
+    const key = raw.key.bind(raw);
+    raw.key = (index) => {
+      keyReads++;
+      return key(index);
+    };
+  }
+  drafts.clearSavedTerminalComposerDrafts();
+  for (const raw of [local, session]) {
+    for (let index = 0; index < saved; index++) {
+      expect(raw.getItem(draftKey(index))).toBe("");
+    }
+  }
+  // One pass per store. An index loop costs 2 * saved ** 2 reads per store.
+  expect(keyReads).toBeLessThanOrEqual(2 * saved);
+});
