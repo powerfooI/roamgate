@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   activateTerminalComposerDraftScope,
   appendToPaneComposerDraft,
@@ -20,14 +20,18 @@ import {
   terminalComposerDraftKey,
   terminalComposerDraftPaneIds,
   terminalComposerInsertAtCaret,
-  sendTerminalComposerText,
-  uploadedPathPieces,
-  terminalComposerRequest,
+  TerminalComposerSubmitKeyError,
   terminalComposerSubmissionPending,
   terminalComposerUploadCount,
   writeTerminalComposerDraft,
   writeTerminalComposerSelection,
 } from "./terminalComposer";
+import {
+  sendTerminalComposerText,
+  terminalComposerRequest,
+  uploadedPathPieces,
+} from "./terminalComposerSend";
+import { roamgateLocalStorage } from "./browserStorage";
 
 describe("terminal composer drafts", () => {
   test("scopes drafts by connection, generation, and pane", () => {
@@ -183,6 +187,34 @@ describe("terminal composer drafts", () => {
     clearTerminalComposerDraft(key);
   });
 
+  test("retains only newer draft text if the modified submit key fails after paste", async () => {
+    const key = terminalComposerDraftKey("submit-helper", 1, "p1");
+    const read = spyOn(roamgateLocalStorage, "getItem").mockImplementation(
+      (name) => (name === "terminalSubmitKey" ? "meta-enter" : null),
+    );
+    const client = {
+      call: async (method: string) => {
+        if (method === "pane.send_keys") {
+          writeTerminalComposerDraft(key, "new text");
+          throw new Error("connection lost");
+        }
+      },
+    } as Parameters<typeof sendTerminalComposerText>[0];
+    try {
+      writeTerminalComposerDraft(key, "pasted");
+      await expect(
+        submitTerminalComposerDraft(key, "pasted", (text) =>
+          sendTerminalComposerText(client, "p1", text, true),
+        ),
+      ).rejects.toBeInstanceOf(TerminalComposerSubmitKeyError);
+      expect(readTerminalComposerDraft(key)).toBe("new text");
+      expect(terminalComposerSubmissionPending(key)).toBe(false);
+    } finally {
+      read.mockRestore();
+      clearTerminalComposerDraft(key);
+    }
+  });
+
   test("tracks uploads across composer remounts", () => {
     const key = terminalComposerDraftKey("upload-pending", 1, "p1");
     const observed: number[] = [];
@@ -305,6 +337,105 @@ describe("terminal composer request", () => {
   test("normalizes newlines like terminal paste", () => {
     const request = terminalComposerRequest("p3", "one\r\ntwo\nthree", true);
     expect(request.params.text).toBe("one\rtwo\rthree");
+  });
+
+  test("sends the selected modified key after text, including image-only messages", async () => {
+    const read = spyOn(roamgateLocalStorage, "getItem");
+    const calls: unknown[] = [];
+    const client = {
+      call: async (method: string, params: unknown) => {
+        calls.push([method, params]);
+      },
+    } as Parameters<typeof sendTerminalComposerText>[0];
+    try {
+      for (const [key, expectedKey] of [
+        ["shift-enter", "shift+enter"],
+        ["alt-enter", "alt+enter"],
+        ["ctrl-enter", "ctrl+enter"],
+        ["meta-enter", "super+enter"],
+      ]) {
+        read.mockImplementation((name) =>
+          name === "terminalSubmitKey" ? key : null,
+        );
+        calls.length = 0;
+        await sendTerminalComposerText(client, "p3", "one\ntwo", true);
+        expect(calls).toEqual([
+          ["pane.send_input", { pane_id: "p3", text: "one\rtwo", keys: [] }],
+          ["pane.send_keys", { pane_id: "p3", keys: [expectedKey] }],
+        ]);
+      }
+      calls.length = 0;
+      const path = "/tmp/roamgate-uploads-501/upload-abc/img-1.png";
+      await sendTerminalComposerText(client, "p3", path, true, async () => {
+        calls.push("wait");
+      });
+      expect(calls).toEqual([
+        ["pane.send_input", { pane_id: "p3", text: path, keys: [] }],
+        "wait",
+        ["pane.send_keys", { pane_id: "p3", keys: ["super+enter"] }],
+      ]);
+      calls.length = 0;
+      await sendTerminalComposerText(client, "p3", "draft", false);
+      expect(calls).toEqual([
+        ["pane.send_input", { pane_id: "p3", text: "draft", keys: [] }],
+      ]);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  test("preserves the submit key error after text reaches the pane", async () => {
+    const read = spyOn(roamgateLocalStorage, "getItem").mockImplementation(
+      (name) => (name === "terminalSubmitKey" ? "meta-enter" : null),
+    );
+    const failure = new Error("pane unavailable");
+    const calls: unknown[] = [];
+    const client = {
+      call: async (method: string, params: unknown) => {
+        calls.push([method, params]);
+        if (method === "pane.send_keys") throw failure;
+      },
+    } as Parameters<typeof sendTerminalComposerText>[0];
+    try {
+      const error = await sendTerminalComposerText(
+        client,
+        "p3",
+        "hello",
+        true,
+      ).then(
+        () => null,
+        (reason: unknown) => reason,
+      );
+      expect(error).toBeInstanceOf(TerminalComposerSubmitKeyError);
+      expect((error as TerminalComposerSubmitKeyError).cause).toBe(failure);
+      expect(calls).toEqual([
+        ["pane.send_input", { pane_id: "p3", text: "hello", keys: [] }],
+        ["pane.send_keys", { pane_id: "p3", keys: ["super+enter"] }],
+      ]);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  test("does not send a modified key if the paste fails", async () => {
+    const read = spyOn(roamgateLocalStorage, "getItem").mockImplementation(
+      (name) => (name === "terminalSubmitKey" ? "meta-enter" : null),
+    );
+    const calls: string[] = [];
+    const client = {
+      call: async (method: string) => {
+        calls.push(method);
+        throw new Error("paste failed");
+      },
+    } as Parameters<typeof sendTerminalComposerText>[0];
+    try {
+      await expect(
+        sendTerminalComposerText(client, "p3", "hello", true),
+      ).rejects.toThrow("paste failed");
+      expect(calls).toEqual(["pane.send_input"]);
+    } finally {
+      read.mockRestore();
+    }
   });
 
   test("an uploaded image gets time to attach before Enter", async () => {
