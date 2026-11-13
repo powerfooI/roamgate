@@ -33,9 +33,10 @@ import { copyTextWithFeedback } from "../copyText";
 import { useConnectionClient } from "../useConnectionClient";
 import {
   readTerminalComposerDraft,
-  sendTerminalComposerText,
+  TerminalComposerSubmitKeyError,
   terminalComposerDraftKey,
 } from "../terminalComposer";
+import { sendTerminalComposerText } from "../terminalComposerSend";
 import { uploadTerminalImage } from "../terminalImageUpload";
 import type { AgentActivity, AgentPrompt } from "../agentPrompt";
 import { AgentArtifactsMenu } from "./AgentArtifactsMenu";
@@ -1046,6 +1047,12 @@ export function AgentHistoryDrawer({
         await sendMessage(text);
         update({ state: "sent", sentAtMs: Date.now() });
       } catch (error) {
+        if (error instanceof TerminalComposerSubmitKeyError) {
+          updateOutbox(key, (current) =>
+            current.filter((each) => each.id !== message.id),
+          );
+          throw error;
+        }
         // Kept in the chat, marked, rather than put back in the box.
         update({
           state: "failed",
@@ -1069,14 +1076,27 @@ export function AgentHistoryDrawer({
   useEffect(() => {
     if (retryConfirmation?.context !== retryContext) setRetryConfirmation(null);
   }, [retryConfirmation, retryContext]);
+  const notifyComposerError = useCallback((detail: string) => {
+    store.notify({ kind: "error", message: "Message input failed", detail });
+  }, []);
+  const resendMessage = useCallback(
+    (message: OutboxMessage) => {
+      void sendFromBox(message.text, message.id).catch((error) =>
+        notifyComposerError(
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    },
+    [notifyComposerError, sendFromBox],
+  );
   const retryWarning = agentPromptWarning(pane.agent, pane.agent_status);
   const retrySend = useCallback(
     (message: OutboxMessage) => {
       if (retryWarning)
         setRetryConfirmation({ message, context: retryContext });
-      else void sendFromBox(message.text, message.id);
+      else resendMessage(message);
     },
-    [retryWarning, retryContext, sendFromBox],
+    [retryWarning, retryContext, resendMessage],
   );
   const discardSend = useCallback(
     (message: OutboxMessage) =>
@@ -1085,9 +1105,6 @@ export function AgentHistoryDrawer({
       ),
     [outboxKey],
   );
-  const notifyComposerError = useCallback((detail: string) => {
-    store.notify({ kind: "error", message: "Message input failed", detail });
-  }, []);
   const composerDraftKey = terminalComposerDraftKey(
     activeConnectionId,
     connectionGeneration,
@@ -1848,7 +1865,7 @@ export function AgentHistoryDrawer({
               each.id === retryConfirmation.message.id &&
               each.state === "failed",
           );
-          if (message) void sendFromBox(message.text, message.id);
+          if (message) resendMessage(message);
           setRetryConfirmation(null);
         }}
       />

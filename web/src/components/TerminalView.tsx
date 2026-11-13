@@ -85,8 +85,8 @@ import {
   terminalComposerCloseWarning,
   terminalComposerDraftKey,
   terminalComposerDraftPaneIds,
-  sendTerminalComposerText,
 } from "../terminalComposer";
+import { sendTerminalComposerText } from "../terminalComposerSend";
 import {
   registerTerminalConnectionDisposer,
   type TerminalConnectionIdentity,
