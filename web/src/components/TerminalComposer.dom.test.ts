@@ -417,10 +417,7 @@ if (process.env.ROAMGATE_COMPOSER_DOM_TEST !== "1") {
       });
       expect(rpcCalls).toEqual([
         ["pane.send_input", { pane_id: "pane-one", text: "hello", keys: [] }],
-        [
-          "pane.send_keys",
-          { pane_id: "pane-one", keys: ["super+enter"] },
-        ],
+        ["pane.send_keys", { pane_id: "pane-one", keys: ["super+enter"] }],
       ]);
     } finally {
       await act(() => root.unmount());
