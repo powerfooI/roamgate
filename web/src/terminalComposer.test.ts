@@ -397,8 +397,15 @@ describe("terminal composer request", () => {
       },
     } as Parameters<typeof sendTerminalComposerText>[0];
     try {
-      const error = await sendTerminalComposerText(client, "p3", "hello", true)
-        .then(() => null, (reason: unknown) => reason);
+      const error = await sendTerminalComposerText(
+        client,
+        "p3",
+        "hello",
+        true,
+      ).then(
+        () => null,
+        (reason: unknown) => reason,
+      );
       expect(error).toBeInstanceOf(TerminalComposerSubmitKeyError);
       expect((error as TerminalComposerSubmitKeyError).cause).toBe(failure);
       expect(calls).toEqual([
