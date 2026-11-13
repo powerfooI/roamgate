@@ -27,9 +27,15 @@ import {
   UI_SCALE_MIN,
   UI_SCALE_STEP,
 } from "../appearance";
+import { subscribeLocalStorage } from "../browserStorage";
 import { lazyWithReload } from "../lazyWithReload";
 import { setDefaultPaneView, useDefaultPaneView } from "../paneView";
 import { setComposerVimKeys, useComposerVimKeys } from "../composerVim";
+import {
+  normalizeTerminalSubmitKey,
+  setTerminalSubmitKey,
+  terminalSubmitKey,
+} from "../terminalSubmitKey";
 import {
   mobileTerminalShortcutCount,
   type MobileTerminalShortcutRows,
@@ -58,6 +64,7 @@ import { ConfigurationLoadingDialog } from "./ConfigurationLoadingDialog";
 import { InstanceNameSettings } from "./InstanceNameSettings";
 import { SpeechSettings } from "./SpeechSettings";
 import { WorktreeCommandSettings } from "./WorktreeCommandSettings";
+import { ThemedSelect } from "./ThemedSelect";
 import { MobileSheetHandle } from "./MobileSheetHandle";
 import "./ConfigMenu.css";
 import "./ConfigurationDialog.css";
@@ -149,6 +156,15 @@ export function ConfigurationDialog({
   const [tab, setTab] = useState<ConfigurationTab>(initialTab);
   const defaultPaneView = useDefaultPaneView();
   const composerVim = useComposerVimKeys();
+  const [submitKey, setSubmitKey] = useState(terminalSubmitKey);
+  useEffect(
+    () =>
+      subscribeLocalStorage((key) => {
+        if (key === null || key === "terminalSubmitKey")
+          setSubmitKey(terminalSubmitKey());
+      }),
+    [],
+  );
   const [detail, setDetail] = useState<Detail | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
@@ -540,6 +556,33 @@ export function ConfigurationDialog({
                 >
                   <span />
                 </button>
+              </div>
+              <div className="config-preference-row">
+                <span className="config-item-icon">
+                  <Keyboard size={15} />
+                </span>
+                <div className="config-item-copy">
+                  <strong>Terminal submit key</strong>
+                  <span>
+                    Key sent after a message to a terminal or agent chat
+                  </span>
+                </div>
+                <ThemedSelect
+                  aria-label="Terminal submit key"
+                  value={submitKey}
+                  options={[
+                    { value: "enter", label: "Enter" },
+                    { value: "shift-enter", label: "Shift+Enter" },
+                    { value: "alt-enter", label: "Alt+Enter" },
+                    { value: "ctrl-enter", label: "Ctrl+Enter" },
+                    { value: "meta-enter", label: "Cmd/Super+Enter" },
+                  ]}
+                  onChange={(value) => {
+                    const key = normalizeTerminalSubmitKey(value);
+                    setTerminalSubmitKey(key);
+                    setSubmitKey(key);
+                  }}
+                />
               </div>
               <div className="config-preference-row">
                 <span className="config-item-icon">

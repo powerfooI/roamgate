@@ -44,6 +44,10 @@ if (process.env.ROAMGATE_COMPOSER_DOM_TEST !== "1") {
     const { createRoot } = await import("react-dom/client");
     const { TerminalComposer } = await import("./TerminalComposer");
     const drafts = await import("../terminalComposer");
+    // Load after installing this isolated DOM and its storage globals.
+    const { sendTerminalComposerText } = await import(
+      "../terminalComposerSend"
+    );
     const key = "one-tap-dom";
     const container = document.createElement("div");
     document.body.append(container);
@@ -52,6 +56,8 @@ if (process.env.ROAMGATE_COMPOSER_DOM_TEST !== "1") {
     let finish: (() => void) | undefined;
     let fail = false;
     let mode: "composer" | "direct" = "composer";
+    let exerciseTerminalSend = false;
+    const rpcCalls: Array<[string, unknown]> = [];
     let accessoriesVisible = true;
     const props = {
       draftKey: key,
@@ -64,6 +70,19 @@ if (process.env.ROAMGATE_COMPOSER_DOM_TEST !== "1") {
       onClose() {},
       onSubmit: async (text: string, enter: boolean) => {
         calls.push([text, enter]);
+        if (exerciseTerminalSend) {
+          await sendTerminalComposerText(
+            {
+              call: async (method: string, params: unknown) => {
+                rpcCalls.push([method, params]);
+              },
+            } as Parameters<typeof sendTerminalComposerText>[0],
+            "pane-one",
+            text,
+            enter,
+          );
+          return;
+        }
         if (fail) throw new Error("Disconnected");
         await new Promise<void>((resolve) => {
           finish = resolve;
@@ -389,6 +408,20 @@ if (process.env.ROAMGATE_COMPOSER_DOM_TEST !== "1") {
       });
       expect(calls[calls.length - 1]).toEqual(["hello", true]);
       await settle();
+      exerciseTerminalSend = true;
+      browser.localStorage.setItem("roamgate:terminalSubmitKey", "meta-enter");
+      await seed();
+      await act(async () => {
+        click(button(true), 0);
+        await Promise.resolve();
+      });
+      expect(rpcCalls).toEqual([
+        ["pane.send_input", { pane_id: "pane-one", text: "hello", keys: [] }],
+        [
+          "pane.send_keys",
+          { pane_id: "pane-one", keys: ["super+enter"] },
+        ],
+      ]);
     } finally {
       await act(() => root.unmount());
       container.remove();

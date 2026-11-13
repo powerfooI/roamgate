@@ -167,9 +167,18 @@ Inspector state is scoped to each checkout; see
   and Esc closes the list. **Vim keys in agent chats** in Configuration >
   Behavior (off by default) makes chat message boxes Vim editors: insert mode
   first, `:w` sends, PageUp/PageDown scroll the conversation, and on touch
-  screens an **Esc** button stands in for the missing key. Enter sends and Shift+Enter adds a line; on
-  touch keyboards Enter adds a line and the Send
-  button sends. On phones the box replaces the terminal composer dock while
+  screens an **Esc** button stands in for the missing key. Enter sends and
+  Shift+Enter adds a line; on touch keyboards Enter adds a line and the Send
+  button sends. **Configuration > Behavior > Terminal submit key** controls
+  the key sent to the terminal after a chat or terminal composer message:
+  Enter (default), Shift+Enter, Alt+Enter, Ctrl+Enter, or Cmd/Super+Enter.
+  This does not change the browser's compose shortcuts or multiline editing.
+  Modified keys require Herdr's `pane.send_keys` API, terminal application
+  support, and matching bindings. Herdr encodes the key for the pane's
+  keyboard mode; endpoint terminal mode is not required. For oh-my-pi, bind
+  `super+enter` to `tui.input.submit`.
+  The preference is stored in this browser. On phones the box replaces the
+  terminal composer dock while
   the chat is open. Sending to an agent that is working, blocked, or in an
   unknown state first shows where the text will land and needs **Send
   anyway**. The timeline view adds User/Agent/Tool filters. Exports are always
@@ -380,7 +389,8 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
   dictation, images, and multiline input. Tapping it raises the keyboard and
   reveals **Attachment**, **Keyboard shortcuts**, and **Commands**, in that
   order. Tools expand above the same field, without a separate Composer dock.
-  **Insert** adds text without Enter; **Send** adds Enter. The terminal button
+  **Insert** adds text without a submit key; **Send** adds the configured
+  terminal submit key. The terminal button
   beside Message activates **Direct** (keys go straight to the terminal).
   File and image uploads in Direct paste their paths into the terminal without
   Enter; in Message they insert into the draft. If the original Direct target
