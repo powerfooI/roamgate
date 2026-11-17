@@ -33,6 +33,9 @@ import {
 } from "./terminalComposerSend";
 import { roamgateLocalStorage } from "./browserStorage";
 
+// A pane running oh-my-pi, the agent the stored choices name.
+const omp = (paneId: string) => ({ paneId, agent: "omp" });
+
 describe("terminal composer drafts", () => {
   test("scopes drafts by connection, generation, and pane", () => {
     const first = terminalComposerDraftKey("conn-a", 1, "pane-1");
@@ -190,7 +193,8 @@ describe("terminal composer drafts", () => {
   test("retains only newer draft text if the modified submit key fails after paste", async () => {
     const key = terminalComposerDraftKey("submit-helper", 1, "p1");
     const read = spyOn(roamgateLocalStorage, "getItem").mockImplementation(
-      (name) => (name === "terminalSubmitKey" ? "meta-enter" : null),
+      (name) =>
+        name === "terminalSubmitKeys.v1" ? '{"omp":"meta-enter"}' : null,
     );
     const client = {
       call: async (method: string) => {
@@ -204,7 +208,7 @@ describe("terminal composer drafts", () => {
       writeTerminalComposerDraft(key, "pasted");
       await expect(
         submitTerminalComposerDraft(key, "pasted", (text) =>
-          sendTerminalComposerText(client, "p1", text, true),
+          sendTerminalComposerText(client, omp("p1"), text, true),
         ),
       ).rejects.toBeInstanceOf(TerminalComposerSubmitKeyError);
       expect(readTerminalComposerDraft(key)).toBe("new text");
@@ -355,10 +359,12 @@ describe("terminal composer request", () => {
         ["meta-enter", "super+enter"],
       ]) {
         read.mockImplementation((name) =>
-          name === "terminalSubmitKey" ? key : null,
+          name === "terminalSubmitKeys.v1"
+            ? JSON.stringify({ omp: key })
+            : null,
         );
         calls.length = 0;
-        await sendTerminalComposerText(client, "p3", "one\ntwo", true);
+        await sendTerminalComposerText(client, omp("p3"), "one\ntwo", true);
         expect(calls).toEqual([
           ["pane.send_input", { pane_id: "p3", text: "one\rtwo", keys: [] }],
           ["pane.send_keys", { pane_id: "p3", keys: [expectedKey] }],
@@ -366,18 +372,34 @@ describe("terminal composer request", () => {
       }
       calls.length = 0;
       const path = "/tmp/roamgate-uploads-501/upload-abc/img-1.png";
-      await sendTerminalComposerText(client, "p3", path, true, async () => {
-        calls.push("wait");
-      });
+      await sendTerminalComposerText(
+        client,
+        omp("p3"),
+        path,
+        true,
+        async () => {
+          calls.push("wait");
+        },
+      );
       expect(calls).toEqual([
         ["pane.send_input", { pane_id: "p3", text: path, keys: [] }],
         "wait",
         ["pane.send_keys", { pane_id: "p3", keys: ["super+enter"] }],
       ]);
       calls.length = 0;
-      await sendTerminalComposerText(client, "p3", "draft", false);
+      await sendTerminalComposerText(client, omp("p3"), "draft", false);
+      // Panes without an agent, and other agents, keep Enter.
+      await sendTerminalComposerText(client, { paneId: "p3" }, "ls", true);
+      await sendTerminalComposerText(
+        client,
+        { paneId: "p3", agent: "claude" },
+        "hi",
+        true,
+      );
       expect(calls).toEqual([
         ["pane.send_input", { pane_id: "p3", text: "draft", keys: [] }],
+        ["pane.send_input", { pane_id: "p3", text: "ls", keys: ["enter"] }],
+        ["pane.send_input", { pane_id: "p3", text: "hi", keys: ["enter"] }],
       ]);
     } finally {
       read.mockRestore();
@@ -386,7 +408,8 @@ describe("terminal composer request", () => {
 
   test("preserves the submit key error after text reaches the pane", async () => {
     const read = spyOn(roamgateLocalStorage, "getItem").mockImplementation(
-      (name) => (name === "terminalSubmitKey" ? "meta-enter" : null),
+      (name) =>
+        name === "terminalSubmitKeys.v1" ? '{"omp":"meta-enter"}' : null,
     );
     const failure = new Error("pane unavailable");
     const calls: unknown[] = [];
@@ -399,7 +422,7 @@ describe("terminal composer request", () => {
     try {
       const error = await sendTerminalComposerText(
         client,
-        "p3",
+        omp("p3"),
         "hello",
         true,
       ).then(
@@ -419,7 +442,8 @@ describe("terminal composer request", () => {
 
   test("does not send a modified key if the paste fails", async () => {
     const read = spyOn(roamgateLocalStorage, "getItem").mockImplementation(
-      (name) => (name === "terminalSubmitKey" ? "meta-enter" : null),
+      (name) =>
+        name === "terminalSubmitKeys.v1" ? '{"omp":"meta-enter"}' : null,
     );
     const calls: string[] = [];
     const client = {
@@ -430,7 +454,7 @@ describe("terminal composer request", () => {
     } as Parameters<typeof sendTerminalComposerText>[0];
     try {
       await expect(
-        sendTerminalComposerText(client, "p3", "hello", true),
+        sendTerminalComposerText(client, omp("p3"), "hello", true),
       ).rejects.toThrow("paste failed");
       expect(calls).toEqual(["pane.send_input"]);
     } finally {
@@ -449,7 +473,7 @@ describe("terminal composer request", () => {
     const path = "/tmp/roamgate-uploads-501/upload-abc/img-1.png";
     await sendTerminalComposerText(
       client,
-      "p3",
+      { paneId: "p3" },
       `${path} look`,
       true,
       async (ms) => {
@@ -467,9 +491,15 @@ describe("terminal composer request", () => {
 
     // An image alone still gets its pause before Enter.
     calls.length = 0;
-    await sendTerminalComposerText(client, "p3", path, true, async () => {
-      calls.push("wait");
-    });
+    await sendTerminalComposerText(
+      client,
+      { paneId: "p3" },
+      path,
+      true,
+      async () => {
+        calls.push("wait");
+      },
+    );
     expect(calls).toEqual([
       ["pane.send_input", { pane_id: "p3", text: path, keys: [] }],
       "wait",
@@ -478,12 +508,18 @@ describe("terminal composer request", () => {
 
     // Plain text, or an image only typed in, goes in one request.
     calls.length = 0;
-    await sendTerminalComposerText(client, "p3", "ls", true, async () => {
-      calls.push("wait");
-    });
     await sendTerminalComposerText(
       client,
-      "p3",
+      { paneId: "p3" },
+      "ls",
+      true,
+      async () => {
+        calls.push("wait");
+      },
+    );
+    await sendTerminalComposerText(
+      client,
+      { paneId: "p3" },
       `${path} `,
       false,
       async () => {
@@ -541,7 +577,7 @@ describe("uploaded image paths in composer text", () => {
     } as Parameters<typeof sendTerminalComposerText>[0];
     await sendTerminalComposerText(
       client,
-      "p3",
+      { paneId: "p3" },
       `compare ${quoted} with ${path}`,
       true,
       async () => {
@@ -562,7 +598,7 @@ describe("uploaded image paths in composer text", () => {
     calls.length = 0;
     await sendTerminalComposerText(
       client,
-      "p3",
+      { paneId: "p3" },
       `see ${path}`,
       false,
       async () => {

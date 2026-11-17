@@ -956,7 +956,7 @@ export function AgentHistoryDrawer({
       );
       await sendTerminalComposerText(
         connectionClient,
-        pane.pane_id,
+        { paneId: pane.pane_id, agent: pane.agent },
         text,
         answering?.checked === undefined,
       );
@@ -976,7 +976,7 @@ export function AgentHistoryDrawer({
       };
       refresh(1000);
     },
-    [connectionClient, loadHistory, pane.pane_id, paneChat?.prompt],
+    [connectionClient, loadHistory, pane.agent, pane.pane_id, paneChat?.prompt],
   );
   // Messages sent from the box that the transcript does not show yet
   // (chatOutbox): shown on their way, then replaced by their entries. Kept
@@ -1048,9 +1048,8 @@ export function AgentHistoryDrawer({
         update({ state: "sent", sentAtMs: Date.now() });
       } catch (error) {
         if (error instanceof TerminalComposerSubmitKeyError) {
-          updateOutbox(key, (current) =>
-            current.filter((each) => each.id !== message.id),
-          );
+          // The text is in the terminal: kept as sent, never sent again.
+          update({ state: "sent", sentAtMs: Date.now() });
           throw error;
         }
         // Kept in the chat, marked, rather than put back in the box.

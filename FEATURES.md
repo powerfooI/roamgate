@@ -91,6 +91,7 @@ Herdr 0.9.1+ resolves URLs that wrap across lines. See
 
 Open **Files**, **Changes**, **Commits**, or **Agent History** from the
 Inspector button, shortcuts, or workspace/agent menus.
+
 - Dock right or bottom, resize, or expand. Narrow layouts use drill-down views.
 - Single-click opens a temporary preview tab; double-click keeps it. Open files
   are restored per connection and checkout.
@@ -169,17 +170,9 @@ Inspector state is scoped to each checkout; see
   first, `:w` sends, PageUp/PageDown scroll the conversation, and on touch
   screens an **Esc** button stands in for the missing key. Enter sends and
   Shift+Enter adds a line; on touch keyboards Enter adds a line and the Send
-  button sends. **Configuration > Behavior > Terminal submit key** controls
-  the key sent to the terminal after a chat or terminal composer message:
-  Enter (default), Shift+Enter, Alt+Enter, Ctrl+Enter, or Cmd/Super+Enter.
-  This does not change the browser's compose shortcuts or multiline editing.
-  Modified keys require Herdr's `pane.send_keys` API, terminal application
-  support, and matching bindings. Herdr encodes the key for the pane's
-  keyboard mode; endpoint terminal mode is not required. For oh-my-pi, bind
-  `super+enter` to `tui.input.submit`.
-  The preference is stored in this browser. On phones the box replaces the
-  terminal composer dock while
-  the chat is open. Sending to an agent that is working, blocked, or in an
+  button sends. Messages are submitted in the terminal with the agent's
+  submit key (see **Agent submit keys** below). On phones the box replaces the terminal composer dock while the
+  chat is open. Sending to an agent that is working, blocked, or in an
   unknown state first shows where the text will land and needs **Send
   anyway**. The timeline view adds User/Agent/Tool filters. Exports are always
   complete. **Session Inspector** adds metadata, a timeline, raw/ATIF
@@ -262,6 +255,7 @@ Inspector state is scoped to each checkout; see
 Ranger is an **experimental** assistant that answers questions about your
 workspaces and can manage them. Open it from the topbar, the mobile **⋮** menu,
 or its shortcut.
+
 - **Setup:** connect a model provider in **Settings** (or pick Claude Code,
   which uses the bridge's `claude` sign-in) and choose which
   workspaces Ranger may access (none by default). See
@@ -300,6 +294,7 @@ has the same [full authority](SECURITY.md#trust-model) as any Roamgate user.
 ## Git Worktree Lifecycle
 
 Open **Worktree Lifecycle** from a workspace menu or the command menu to:
+
 - Create a worktree from `origin`'s freshly fetched default branch without
   touching the current checkout. Creation stops if the remote is unavailable.
   An optional [worktree command](docs/DEPLOYMENT.md#worktree-command), such
@@ -342,6 +337,7 @@ conflicts are aborted, and nothing is ever pushed.
 ## Review Annotations
 
 Open **Annotations** independently of the Inspector.
+
 1. Comment on diff lines, source lines, rendered Markdown, or selected terminal
    text.
 2. Edit and reorder comments, then copy them or pre-fill an agent's input.
@@ -389,9 +385,9 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
   dictation, images, and multiline input. Tapping it raises the keyboard and
   reveals **Attachment**, **Keyboard shortcuts**, and **Commands**, in that
   order. Tools expand above the same field, without a separate Composer dock.
-  **Insert** adds text without a submit key; **Send** adds the configured
-  terminal submit key. The terminal button
-  beside Message activates **Direct** (keys go straight to the terminal).
+  **Insert** adds text without submitting it; **Send** submits it with the
+  agent's submit key (Enter by default). The terminal button beside Message
+  activates **Direct** (keys go straight to the terminal).
   File and image uploads in Direct paste their paths into the terminal without
   Enter; in Message they insert into the draft. If the original Direct target
   changes during an upload, its paths stay in that pane's draft with a warning.
@@ -416,6 +412,12 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
   executable, even when its default command is not detected on the server.
   Commands are saved in this browser per connection and agent; **Reset** restores
   the detected command. Agent status reporting uses its existing Herdr integration.
+- **Agent submit keys**: **Configuration > Integrations** sets each agent's
+  **Submit key** (Enter, Shift+Enter, Alt+Enter, Ctrl+Enter or
+  Cmd/Super+Enter), the key composer and chat messages to it end with,
+  kept in this browser. Shells and other agents keep Enter. A modified key
+  only submits if the agent binds it (oh-my-pi: `super+enter` to
+  `tui.input.submit`).
 - The **Commands** button in the input toolbar offers slash commands for
   Claude Code, Codex, Pi, Kimi Code, Grok Build, and Antigravity CLI.
 - Install as a PWA for an app-style window; see
