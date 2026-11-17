@@ -327,6 +327,12 @@ const RPC_TIMEOUT_MS = 30000;
 const CONNECT_TIMEOUT_MS = 8000;
 const HEARTBEAT_INTERVAL_MS = 10000;
 const HEARTBEAT_TIMEOUT_MS = 6000;
+/**
+ * How late a heartbeat deadline may fire before it says more about the page
+ * than about the socket: a timer that ran this much past its deadline was
+ * held back by a busy (or frozen) main thread, which delays the pong too.
+ */
+const HEARTBEAT_TIMER_SLACK_MS = 1000;
 const MAX_WS_BUFFERED_BYTES = 4 * 1024 * 1024;
 
 export function isBridgeGlobalMethod(method: string): boolean {
@@ -457,6 +463,9 @@ export class Bridge {
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatInFlight = false;
+  private heartbeatDeadline: ReturnType<typeof setTimeout> | null = null;
+  /** Messages handled so far; a heartbeat window compares two readings. */
+  private inboundCount = 0;
   private reconnectEnabled = true;
   private _status: ConnectionStatus = "disconnected";
   private _activeConnectionId = LEGACY_DEFAULT_CONNECTION_ID;
@@ -645,6 +654,7 @@ export class Bridge {
     };
     ws.onmessage = (ev) => {
       if (this.ws !== ws) return;
+      this.inboundCount++;
       this.onMessage(ev.data);
     };
     ws.onerror = () => {
@@ -699,23 +709,60 @@ export class Bridge {
   private runHeartbeatProbe() {
     if (this.heartbeatInFlight) return;
     this.heartbeatInFlight = true;
-    this.call("bridge.ping", {}, HEARTBEAT_TIMEOUT_MS).then(
+    // The ping has no RPC timeout of its own: the deadline below decides
+    // when silence means a dead socket, and only a real teardown (which
+    // rejects every pending call) or the pong ends the probe.
+    this.call("bridge.ping", {}, null).then(
       () => {
-        this.heartbeatInFlight = false;
+        this.endHeartbeatProbe();
       },
       () => {
-        this.heartbeatInFlight = false;
-        // A rejected ping can also arrive because the socket was already
-        // torn down (rejectPending during handleDisconnect). Only a live
-        // connection may be force-reconnected; otherwise the extra
-        // handleDisconnect would advance the client generation a second
-        // time without a status transition, silently desyncing every
-        // generation-scoped client captured at the first transition.
-        if (this._status === "connected") {
-          this.forceReconnect("bridge heartbeat timed out");
-        }
+        this.endHeartbeatProbe();
       },
     );
+    this.armHeartbeatDeadline();
+  }
+
+  /**
+   * A probe only proves the socket dead when a whole window passed with
+   * nothing at all from it while the page was able to notice. A long render
+   * keeps queued messages, the pong among them, from being handled in time:
+   * the deadline then either fires late (the page was busy) or messages kept
+   * arriving during the window (the socket is alive, the page is behind).
+   * Either way the probe waits one more window instead of tearing down a
+   * live connection, which would remount everything and block the page again.
+   */
+  private armHeartbeatDeadline() {
+    if (this.heartbeatDeadline) clearTimeout(this.heartbeatDeadline);
+    const windowStart = performance.now();
+    const inboundAtStart = this.inboundCount;
+    this.heartbeatDeadline = setTimeout(() => {
+      this.heartbeatDeadline = null;
+      if (!this.heartbeatInFlight) return;
+      const firedLate =
+        performance.now() - windowStart >
+        HEARTBEAT_TIMEOUT_MS + HEARTBEAT_TIMER_SLACK_MS;
+      if (firedLate || this.inboundCount !== inboundAtStart) {
+        this.armHeartbeatDeadline();
+        return;
+      }
+      // A probe can also outlive its socket (rejectPending during
+      // handleDisconnect ends it, but guard anyway). Only a live connection
+      // may be force-reconnected; otherwise the extra handleDisconnect would
+      // advance the client generation a second time without a status
+      // transition, silently desyncing every generation-scoped client
+      // captured at the first transition.
+      if (this._status === "connected") {
+        this.forceReconnect("bridge heartbeat timed out");
+      }
+    }, HEARTBEAT_TIMEOUT_MS);
+  }
+
+  private endHeartbeatProbe() {
+    this.heartbeatInFlight = false;
+    if (!this.heartbeatDeadline) return;
+    clearTimeout(this.heartbeatDeadline);
+    this.heartbeatDeadline = null;
   }
 
   /**
@@ -736,10 +783,10 @@ export class Bridge {
   }
 
   private stopHeartbeat() {
+    this.endHeartbeatProbe();
     if (!this.heartbeatTimer) return;
     clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = null;
-    this.heartbeatInFlight = false;
   }
 
   private clearConnectTimer() {

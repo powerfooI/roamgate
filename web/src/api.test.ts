@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, test } from "bun:test";
 import type {
   AssistantSnapshot,
   AssistantTaskNotification,
@@ -1573,5 +1573,130 @@ describe("bridge connection lifecycle", () => {
     } as MessageEvent);
     await Bun.sleep(5);
     expect(bridge.status).toBe("connected");
+  });
+
+  describe("heartbeat", () => {
+    class PingedWebSocket extends HangingWebSocket {
+      static instances: PingedWebSocket[] = [];
+      sent: string[] = [];
+      closeReasons: string[] = [];
+
+      constructor() {
+        super();
+        PingedWebSocket.instances.push(this);
+        queueMicrotask(() => {
+          this.readyState = PingedWebSocket.OPEN;
+          this.onopen?.();
+        });
+      }
+
+      send(raw = "") {
+        this.sent.push(raw);
+      }
+
+      close(_code?: number, reason = "") {
+        this.closeReasons.push(reason);
+        super.close();
+      }
+
+      pings() {
+        return this.sent
+          .map((raw) => JSON.parse(raw))
+          .filter((msg) => msg.method === "bridge.ping");
+      }
+
+      deliver(msg: unknown) {
+        this.onmessage?.({ data: JSON.stringify(msg) } as MessageEvent);
+      }
+    }
+
+    async function flushMicrotasks() {
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    }
+
+    async function advance(ms: number) {
+      jest.advanceTimersByTime(ms);
+      await flushMicrotasks();
+    }
+
+    const realNow = performance.now.bind(performance);
+    let pageStall = 0;
+
+    async function connectedBridge() {
+      PingedWebSocket.instances = [];
+      installBrowserGlobals(PingedWebSocket as unknown as typeof WebSocket);
+      jest.useFakeTimers();
+      pageStall = 0;
+      performance.now = () => realNow() + pageStall;
+      const bridge = createTestBridge(50);
+      bridge.connect();
+      await Promise.resolve();
+      const socket = PingedWebSocket.instances[0];
+      sendHello(socket);
+      expect(bridge.status).toBe("connected");
+      jest.advanceTimersByTime(10_000);
+      expect(socket.pings().length).toBe(1);
+      return { bridge, socket };
+    }
+
+    afterEach(() => {
+      performance.now = realNow;
+      jest.useRealTimers();
+    });
+
+    test("tears down a socket that stays silent for a whole window", async () => {
+      const { bridge, socket } = await connectedBridge();
+
+      await advance(6_000);
+
+      expect(socket.closeReasons).toEqual(["bridge heartbeat timed out"]);
+      expect(bridge.status).toBe("disconnected");
+    });
+
+    test("keeps a socket that delivers other messages while the pong is queued", async () => {
+      const { bridge, socket } = await connectedBridge();
+
+      // The page is busy rendering what earlier messages brought; the pong
+      // waits behind them, but every handled message proves the socket alive.
+      await advance(3_000);
+      socket.deliver({ event: "pane.output", data: {} });
+      await advance(3_000);
+
+      expect(socket.closeReasons).toEqual([]);
+      expect(bridge.status).toBe("connected");
+
+      socket.deliver({ id: socket.pings()[0].id, result: { ok: true } });
+      await flushMicrotasks();
+      await advance(4_000);
+      expect(socket.closeReasons).toEqual([]);
+      expect(socket.pings().length).toBe(2);
+    });
+
+    test("waits another window when the deadline fires late on a busy page", async () => {
+      const { bridge, socket } = await connectedBridge();
+
+      // A long task held the main thread: the deadline runs 9 s late.
+      pageStall = 9_000;
+      await advance(6_000);
+      expect(socket.closeReasons).toEqual([]);
+      expect(bridge.status).toBe("connected");
+
+      // Still nothing in a window the page could watch: the socket is dead.
+      await advance(6_000);
+      expect(socket.closeReasons).toEqual(["bridge heartbeat timed out"]);
+      expect(bridge.status).toBe("disconnected");
+    });
+
+    test("a probe on resume still detects a dead socket within one window", async () => {
+      const { bridge, socket } = await connectedBridge();
+      socket.deliver({ id: socket.pings()[0].id, result: { ok: true } });
+      await flushMicrotasks();
+
+      bridge.probeConnectionNow();
+      expect(socket.pings().length).toBe(2);
+      await advance(6_000);
+
+      expect(socket.closeReasons).toEqual(["bridge heartbeat timed out"]);
+    });
   });
 });
