@@ -43,6 +43,7 @@ import {
 } from "./agentHistoryView";
 import { formatBytes } from "./agentSession";
 import { MarkdownPreview } from "./markdown";
+import { useForgeSlotsContext } from "../forgeSlots";
 import {
   attachedImagePieces,
   type MessagePiece,
@@ -214,7 +215,7 @@ const ChatBubble = memo(function ChatBubble({
 type MessageImage = Extract<MessagePiece, { image: string }>;
 
 /** A message of the user's, with the images it sent shown, not their paths. */
-function UserText({
+export function UserText({
   text,
   imageUrl,
   images,
@@ -224,6 +225,8 @@ function UserText({
   images?: readonly string[];
 }) {
   const [shown, setShown] = useState<MessageImage | null>(null);
+  // Merge and pull requests it names, as chips.
+  const forge = useForgeSlotsContext();
   const pieces = (
     images?.length
       ? attachedImagePieces(text, images)
@@ -234,7 +237,8 @@ function UserText({
       ? [{ text: piece.image }]
       : [piece],
   );
-  if (!pieces.some((piece) => "image" in piece)) return <p>{text}</p>;
+  if (!pieces.some((piece) => "image" in piece))
+    return <p>{forge?.renderText(text) ?? text}</p>;
   const nameOf = (path: string) => path.split(/[\\/]/).pop() ?? path;
   const urlOf = (piece: MessageImage) => piece.url ?? imageUrl!(piece.image);
   return (
@@ -272,7 +276,7 @@ function UserText({
             <img src={urlOf(piece)} alt={nameOf(piece.image)} loading="lazy" />
           </a>
         ) : (
-          <p key={index}>{piece.text}</p>
+          <p key={index}>{forge?.renderText(piece.text) ?? piece.text}</p>
         ),
       )}
       {shown ? (

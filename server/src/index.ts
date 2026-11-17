@@ -121,6 +121,7 @@ import {
   serverLogger,
 } from "./utils/logger";
 import { runProcessWithCodeTimeout, shQuote } from "./utils/process-utils";
+import { createForgeCache, parseForgeRefParam } from "./workspace/forge";
 import { rpcLogLevel } from "./utils/rpc-logging";
 import { createWorkspaceWorktree } from "./worktree/create";
 import { inspectWorkspacePath } from "./workspace/path";
@@ -193,6 +194,8 @@ const cpuProfile = config.profile
 const agentSeen = createAgentSeenStore();
 // Seen marks hold for one Herdr server process: its boot id, per connection.
 const herdrBoots = createHerdrBootCache();
+/** Merge and pull requests the chats show, shared by every browser. */
+const forgeCache = createForgeCache();
 const webPush = createWebPushService({
   warn: (message) => logger.warn(message),
 });
@@ -1024,7 +1027,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
   const connection = route.runtime;
   if (
     connection.remotePlatform === "windows" &&
-    /^(?:file\.|git\.|worktree\.|agent_history\.|agent_session\.|agent_commands\.|agent_artifacts\.|settings\.(?:workspace_auto_sync|worktree_hooks)\.)/.test(
+    /^(?:file\.|git\.|forge\.|worktree\.|agent_history\.|agent_session\.|agent_commands\.|agent_artifacts\.|settings\.(?:workspace_auto_sync|worktree_hooks)\.)/.test(
       method,
     )
   ) {
@@ -1277,6 +1280,34 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       sendReply({ id, result }, "git-diff-summary");
     } catch (e) {
       sendError("git-diff-summary-error", e);
+    }
+    return;
+  }
+  if (method === "forge.status" || method === "forge.session") {
+    // Read only: a chat's chips, its header and its list of requests, from
+    // the workspace's checkout. What they say never goes to an agent.
+    try {
+      const { root } = await connection.files.resolveWorkspaceGitRoot(
+        params ?? {},
+        method,
+      );
+      const context = {
+        root,
+        host: sshHost(),
+        shQuote,
+        runProcessWithCodeTimeout,
+      };
+      let result: unknown;
+      if (method === "forge.status") {
+        const ref = parseForgeRefParam(params?.ref);
+        if (!ref) throw new Error("invalid merge or pull request reference");
+        result = await forgeCache.status(context, ref, {
+          fresh: params?.fresh === true,
+        });
+      } else result = await forgeCache.session(context);
+      sendReply({ id, result }, "forge");
+    } catch (e) {
+      sendError("forge-error", e);
     }
     return;
   }

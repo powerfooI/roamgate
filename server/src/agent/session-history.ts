@@ -25,6 +25,10 @@ export type HistoryEntry = {
   artifact?: PublishedArtifact;
   // On a user message: the images it carried, without their data.
   images?: HistoryImage[];
+  // On the result of a command that opened a merge or pull request (`glab
+  // mr create`, `gh pr create`): its URL as the command printed it. Kept
+  // when the payload is redacted, so the chat can list it.
+  created_request?: string;
   // Set on redacted wire entries: UTF-8 byte length of the withheld text,
   // fetchable via agent_history.entry when the user expands the card.
   text_bytes?: number;
@@ -58,11 +62,14 @@ export function historyEntriesFromTrajectory(
   const occurrences = new Map<string, number>();
   const names = new Map<string, string>();
   const artifactCalls = new Map<string, Record<string, unknown>>();
+  const createCalls = new Set<string>();
   for (const step of trajectory.steps) {
     for (const call of step.tool_calls ?? []) {
       names.set(call.tool_call_id, call.function_name);
       if (call.function_name === "Artifact")
         artifactCalls.set(call.tool_call_id, call.arguments);
+      if (createsRequest(call.arguments?.command))
+        createCalls.add(call.tool_call_id);
     }
   }
   const add = (entry: Omit<HistoryEntry, "id">) => {
@@ -124,6 +131,12 @@ export function historyEntriesFromTrajectory(
           artifactCalls.get(result.source_call_id ?? ""),
           result.extra?.is_error === true ? "" : (result.content ?? ""),
         ),
+        ...createdRequestField(
+          createCalls.has(result.source_call_id ?? "") &&
+            result.extra?.is_error !== true
+            ? (result.content ?? "")
+            : "",
+        ),
       });
     }
     if (typeof step.extra?.error_message === "string") {
@@ -137,6 +150,25 @@ export function historyEntriesFromTrajectory(
     }
   }
   return historyWindowEntries(entries, HISTORY_WINDOW_LIMIT);
+}
+
+/** A shell command that opens a merge or pull request. */
+export function createsRequest(command: unknown): boolean {
+  return (
+    typeof command === "string" &&
+    /\b(?:glab\s+mr\s+create|gh\s+pr\s+create)\b/.test(command)
+  );
+}
+
+const REQUEST_URL =
+  /https:\/\/[^\s"'<>()]+?\/(?:-\/merge_requests|pull)\/\d{1,9}\b/;
+
+/** The request URL `glab mr create` or `gh pr create` printed. */
+export function createdRequestField(
+  output: string,
+): Pick<HistoryEntry, "created_request"> {
+  const url = output ? REQUEST_URL.exec(output.slice(0, 200_000))?.[0] : null;
+  return url ? { created_request: url } : {};
 }
 
 function artifactField(

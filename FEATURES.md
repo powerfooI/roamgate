@@ -226,6 +226,21 @@ Inspector state is scoped to each checkout; see
   **Discard**, also after switching the pane to its terminal and back; it is
   still replaced if its entry shows up later. Answers typed into a question,
   `/commands` and `!` lines are sent as before.
+- In agent chats, GitLab merge requests and GitHub pull requests become live
+  chips: `!123` and `#123` (read against the workspace's repository: its
+  `upstream` remote, else `origin`, or the parent of a fork),
+  `group/project!123`, `owner/repo#123`, and their web URLs, in your messages
+  and the agent's, never inside code. A chip shows the number, state (open,
+  draft, merged, closed), pipeline or checks, approvals and unresolved
+  threads; hovering it shows the title, author, branches, failed jobs and when
+  it last changed. A click opens its page. The chat's header shows the request
+  of the workspace's branch, found as the sidebar's PR/MR badge finds it. The
+  request button next to it lists every request of the conversation by
+  repository: the branch's, those the agent created (`glab mr create`,
+  `gh pr create`) and those it named. Statuses are read through glab and gh
+  on the checkout's host, only while shown, and a running pipeline is
+  followed until it ends. A host glab or gh is not signed in to shows "not
+  signed in".
 - **Menu > Configuration > Integrations** installs, updates, or removes Herdr's
   bundled agent integrations (not the agents themselves). See
   [version lookup](docs/ARCHITECTURE.md#agent-integrations).

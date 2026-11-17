@@ -39,6 +39,10 @@ import {
 import { uploadTerminalImage } from "../terminalImageUpload";
 import type { AgentActivity, AgentPrompt } from "../agentPrompt";
 import { AgentArtifactsMenu } from "./AgentArtifactsMenu";
+import { branchRequests, conversationRequests } from "../forgeRefs";
+import { useForgeSession } from "../forgeStore";
+import { type ForgeChat, ForgeChatProvider } from "./ForgeChip";
+import { ForgeHeaderChips, ForgeRequestsMenu } from "./ForgeRequests";
 import { useAgentArtifacts } from "../agentArtifacts";
 import { useAgentCommands } from "../claudeCommands";
 import type { Pane } from "../types";
@@ -441,6 +445,34 @@ export function AgentHistoryDrawer({
   );
 
   const messages = useMemo(() => history?.messages ?? [], [history?.messages]);
+  // Merge and pull requests: the workspace's branch's (the header), every
+  // request the conversation names or created (the list), and chips in its
+  // messages.
+  const forgeSession = useForgeSession(
+    connectionClient,
+    { workspaceId: pane.workspace_id },
+    open,
+  );
+  const forgeDefault = forgeSession?.defaultProject ?? null;
+  const forgeDefaultKey = forgeDefault ? JSON.stringify(forgeDefault) : "";
+  const forgeChat = useMemo<ForgeChat>(
+    () => ({
+      client: connectionClient,
+      workspaceId: pane.workspace_id,
+      defaultProject: forgeDefault,
+    }),
+    // Keyed by its value: a refreshed session does not redraw every chip.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [connectionClient, pane.workspace_id, forgeDefaultKey],
+  );
+  const forgeGroups = useMemo(
+    () => conversationRequests(messages, forgeSession),
+    [messages, forgeSession],
+  );
+  const forgeBranches = useMemo(
+    () => branchRequests(forgeSession),
+    [forgeSession],
+  );
   // The images the user's messages carried (Claude Code keeps a pasted image
   // in the message): their data comes with the entry, fetched once.
   const fetchEntryImages = useCallback(
@@ -1520,8 +1552,10 @@ export function AgentHistoryDrawer({
     </div>
   );
 
+  // The chat's chips, its header's and its list of requests share one
+  // context: where to ask, and what `!12` means here.
   return (
-    <>
+    <ForgeChatProvider chat={forgeChat}>
       <aside
         ref={drawerRef}
         className={`agent-history-drawer ${open ? "is-open" : ""} ${
@@ -1623,6 +1657,7 @@ export function AgentHistoryDrawer({
               </div>
             </div>
           )}
+          <ForgeHeaderChips branches={forgeBranches} />
           <span
             className={`agent-history-status is-${pane.agent_status.toLowerCase()}`}
           >
@@ -1632,6 +1667,7 @@ export function AgentHistoryDrawer({
             {paneChat ? (
               <>
                 <AgentArtifactsMenu artifacts={artifacts} />
+                <ForgeRequestsMenu groups={forgeGroups} />
                 <button
                   type="button"
                   className="agent-history-icon"
@@ -1669,6 +1705,7 @@ export function AgentHistoryDrawer({
             ) : (
               <>
                 {!mobile ? chatViewToggle : null}
+                <ForgeRequestsMenu groups={forgeGroups} />
                 <button
                   type="button"
                   className="agent-history-icon"
@@ -1867,7 +1904,7 @@ export function AgentHistoryDrawer({
         error={previewError}
         onClose={closeSessionPreview}
       />
-    </>
+    </ForgeChatProvider>
   );
 }
 
