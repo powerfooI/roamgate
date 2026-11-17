@@ -1,8 +1,14 @@
 const PREFIX = "roamgate:";
 const DELETED_PREFIX = "roamgate:deleted:";
 
+/**
+ * `length` and `key()` rebuild the key list on every call, so an index loop
+ * rescans the whole store on each step. Enumerate with `keys()` instead.
+ */
+export type RoamgateStorage = Storage & { keys(): string[] };
+
 /** Keep legacy originals; deletion markers prevent removed values reappearing. */
-export function roamgateStorage(storage: Storage): Storage {
+export function roamgateStorage(storage: Storage): RoamgateStorage {
   const keys = () => [
     ...new Set(
       Array.from({ length: storage.length }, (_, index) => storage.key(index))
@@ -16,6 +22,7 @@ export function roamgateStorage(storage: Storage): Storage {
     ),
   ];
   return {
+    keys,
     get length() {
       return keys().length;
     },
@@ -50,9 +57,14 @@ export function roamgateStorage(storage: Storage): Storage {
   };
 }
 
-function browserStorage(kind: "localStorage" | "sessionStorage"): Storage {
+function browserStorage(
+  kind: "localStorage" | "sessionStorage",
+): RoamgateStorage {
   const get = () => roamgateStorage(globalThis[kind]);
   return {
+    keys() {
+      return get().keys();
+    },
     get length() {
       return get().length;
     },

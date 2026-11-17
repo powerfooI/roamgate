@@ -1,5 +1,6 @@
 import type { ConnectionClient, ConnectionSummary } from "./api";
 import {
+  type RoamgateStorage,
   roamgateLocalStorage,
   roamgateSessionStorage,
   subscribeLocalStorage,
@@ -40,16 +41,15 @@ const submissionListeners = new Map<
 const pendingUploads = new Map<string, number>();
 const uploadListeners = new Map<string, Set<TerminalComposerUploadListener>>();
 
-function clearStoredDrafts(storage: Storage, keepEpoch?: string): void {
+function clearStoredDrafts(storage: RoamgateStorage, keepEpoch?: string): void {
   const keepPrefix =
     keepEpoch === undefined
       ? null
       : `${DRAFT_STORAGE_PREFIX}${JSON.stringify([keepEpoch]).slice(0, -1)},`;
   try {
-    for (let i = 0; i < storage.length; i++) {
-      const key = storage.key(i);
+    for (const key of storage.keys()) {
       if (
-        key?.startsWith(DRAFT_STORAGE_PREFIX) &&
+        key.startsWith(DRAFT_STORAGE_PREFIX) &&
         (keepPrefix === null || !key.startsWith(keepPrefix))
       )
         storage.setItem(key, "");
@@ -448,10 +448,7 @@ export function activateTerminalComposerDraftScope(
     const storedKeys = new Set(savedDrafts.keys());
     for (const storage of [roamgateSessionStorage, roamgateLocalStorage]) {
       try {
-        for (let i = 0; i < storage.length; i++) {
-          const key = storage.key(i);
-          if (key) storedKeys.add(key);
-        }
+        for (const key of storage.keys()) storedKeys.add(key);
       } catch {
         // Live draft retirement still works when storage access is denied.
       }

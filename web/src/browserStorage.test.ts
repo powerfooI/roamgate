@@ -86,6 +86,23 @@ test("enumeration keeps legacy connection migration working without duplicate ke
   expect(raw.getItem("diffViewerSelected:one")).toBe("saved");
 });
 
+test("keys() lists each stored name once in a single pass over the store", () => {
+  const raw = memoryStorage({
+    theme: "dark",
+    "roamgate:theme": "light",
+    "roamgate:accent": "blue",
+    "roamgate:deleted:removed": "1",
+  });
+  let keyReads = 0;
+  const key = raw.key.bind(raw);
+  raw.key = (index) => {
+    keyReads++;
+    return key(index);
+  };
+  expect(roamgateStorage(raw).keys()).toEqual(["theme", "accent"]);
+  expect(keyReads).toBe(raw.length);
+});
+
 test("local subscriptions normalize keys, reread effective values and ignore session events", () => {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   const previousStorage = Object.getOwnPropertyDescriptor(
