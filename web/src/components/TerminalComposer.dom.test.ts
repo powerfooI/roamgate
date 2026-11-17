@@ -77,7 +77,7 @@ if (process.env.ROAMGATE_COMPOSER_DOM_TEST !== "1") {
                 rpcCalls.push([method, params]);
               },
             } as Parameters<typeof sendTerminalComposerText>[0],
-            "pane-one",
+            { paneId: "pane-one", agent: "omp" },
             text,
             enter,
           );
@@ -409,7 +409,10 @@ if (process.env.ROAMGATE_COMPOSER_DOM_TEST !== "1") {
       expect(calls[calls.length - 1]).toEqual(["hello", true]);
       await settle();
       exerciseTerminalSend = true;
-      browser.localStorage.setItem("roamgate:terminalSubmitKey", "meta-enter");
+      browser.localStorage.setItem(
+        "roamgate:terminalSubmitKeys.v1",
+        JSON.stringify({ omp: "meta-enter" }),
+      );
       await seed();
       await act(async () => {
         click(button(true), 0);

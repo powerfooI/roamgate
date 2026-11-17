@@ -1,7 +1,7 @@
 import type { ConnectionClient } from "./api";
 import { TerminalComposerSubmitKeyError } from "./terminalComposer";
 import { prepareTerminalPasteText } from "./terminalPaste";
-import { terminalSubmitKey } from "./terminalSubmitKey";
+import { terminalSubmitHerdrKey, terminalSubmitKey } from "./terminalSubmitKey";
 
 /**
  * Builds the mode-aware pane input request for a composer submission. The
@@ -56,8 +56,14 @@ export function uploadedPathPieces(
   return pieces;
 }
 
+/** The pane a composer message goes to, and the agent running in it. */
+export type TerminalComposerTarget = { paneId: string; agent?: string };
+
 /**
- * Types composer text into a pane, optionally followed by the configured key.
+ * Types composer text into a pane, optionally followed by the submit key
+ * chosen for its agent (Enter by default and for panes without an agent).
+ * Enter goes with the text; a modified key follows on its own, and when it
+ * fails a `TerminalComposerSubmitKeyError` says the text is already typed.
  *
  * Claude Code only turns a paste into an image attachment when the paste is
  * the image path alone; within a sentence the path stays text. So when the
@@ -67,26 +73,22 @@ export function uploadedPathPieces(
  */
 export async function sendTerminalComposerText(
   client: Pick<ConnectionClient, "call">,
-  paneId: string,
+  { paneId, agent }: TerminalComposerTarget,
   text: string,
   submit: boolean,
   wait: (ms: number) => Promise<void> = (ms) =>
     new Promise((resolve) => setTimeout(resolve, ms)),
 ): Promise<void> {
-  const submitKey = terminalSubmitKey();
-  const modifiedSubmit = submit && submitKey !== "enter";
+  const submitKey = submit ? terminalSubmitKey(agent) : "enter";
+  const modifiedKey =
+    submitKey === "enter" ? null : terminalSubmitHerdrKey(submitKey);
+  const enter = submit && !modifiedKey;
   const sendModifiedSubmit = async () => {
-    if (!submit || submitKey === "enter") return;
+    if (!modifiedKey) return;
     try {
-      const keys = {
-        "shift-enter": "shift+enter",
-        "alt-enter": "alt+enter",
-        "ctrl-enter": "ctrl+enter",
-        "meta-enter": "super+enter",
-      } as const;
       await client.call("pane.send_keys", {
         pane_id: paneId,
-        keys: [keys[submitKey]],
+        keys: [modifiedKey],
       });
     } catch (error) {
       throw new TerminalComposerSubmitKeyError(error);
@@ -95,11 +97,7 @@ export async function sendTerminalComposerText(
   const pieces = uploadedPathPieces(text);
   const imageOnly = pieces.every((piece) => piece.path || !piece.text.trim());
   if (!pieces.some((piece) => piece.path) || (!submit && imageOnly)) {
-    const request = terminalComposerRequest(
-      paneId,
-      text,
-      submit && !modifiedSubmit,
-    );
+    const request = terminalComposerRequest(paneId, text, enter);
     await client.call(request.method, request.params);
     await sendModifiedSubmit();
     return;
@@ -107,18 +105,14 @@ export async function sendTerminalComposerText(
   for (const [index, piece] of pieces.entries()) {
     const last = index === pieces.length - 1;
     if (!piece.path) {
-      const typed = terminalComposerRequest(
-        paneId,
-        piece.text,
-        last && submit && !modifiedSubmit,
-      );
+      const typed = terminalComposerRequest(paneId, piece.text, last && enter);
       await client.call(typed.method, typed.params);
       continue;
     }
     const typed = terminalComposerRequest(paneId, piece.text, false);
     await client.call(typed.method, typed.params);
     await wait(IMAGE_SETTLE_MS);
-    if (last && submit && !modifiedSubmit) {
+    if (last && enter) {
       const enter = terminalComposerRequest(paneId, "", true);
       await client.call(enter.method, enter.params);
     }

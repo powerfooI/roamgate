@@ -110,6 +110,13 @@
   color: var(--accent);
 }
 
+.agent-integrations-submit-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
 .agent-integrations-actions {
   display: flex;
   align-items: center;

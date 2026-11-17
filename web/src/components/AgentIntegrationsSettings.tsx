@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Info, RefreshCw, Trash2 } from "lucide-react";
+import {
+  normalizeTerminalSubmitKey,
+  setTerminalSubmitKey,
+  TERMINAL_SUBMIT_KEYS,
+  useTerminalSubmitKey,
+} from "../terminalSubmitKey";
 import { AgentIcon } from "./AgentIcon";
+import { ThemedSelect } from "./ThemedSelect";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import {
   connectionClientScopeKey,
@@ -17,6 +24,31 @@ export {
   parseAgentIntegrations,
   type AgentIntegration,
 } from "../agentIntegrations";
+
+const SUBMIT_KEY_OPTIONS = TERMINAL_SUBMIT_KEYS.map(({ value, label }) => ({
+  value,
+  label,
+}));
+
+// The key composer and chat messages end with in this agent's panes, kept in
+// this browser: a modified key only submits where the agent binds it.
+function AgentSubmitKey({ agent, label }: { agent: string; label: string }) {
+  const value = useTerminalSubmitKey(agent);
+  return (
+    <span className="agent-integrations-submit-key">
+      Submit key
+      <ThemedSelect
+        aria-label={`${label} submit key`}
+        title="Key sent after composer and chat messages to this agent"
+        value={value}
+        options={SUBMIT_KEY_OPTIONS}
+        onChange={(next) =>
+          setTerminalSubmitKey(agent, normalizeTerminalSubmitKey(next))
+        }
+      />
+    </span>
+  );
+}
 
 type IntegrationChangeOutcome = { messages: string[]; error: string | null };
 
@@ -259,6 +291,7 @@ export function AgentIntegrationsSettings({
                   : stateLabels[item.state]}
               </span>
             </div>
+            <AgentSubmitKey agent={item.target} label={item.label} />
             {!item.available && item.state !== "not_installed" ? (
               <span
                 className="agent-integrations-missing"

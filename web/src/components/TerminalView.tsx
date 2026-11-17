@@ -3590,9 +3590,13 @@ export function TerminalView({
   const submitTerminalComposer = async (text: string, submit: boolean) => {
     const targetPaneId = paneIdRef.current;
     if (!targetPaneId) throw new Error("No active pane");
+    // The agent running there now, not when the draft was started.
+    const agent = store
+      .get()
+      .panes.find((candidate) => candidate.pane_id === targetPaneId)?.agent;
     await sendTerminalComposerText(
       connectionClient,
-      targetPaneId,
+      { paneId: targetPaneId, agent },
       text,
       submit,
     );
