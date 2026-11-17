@@ -580,3 +580,89 @@ test("worktree commands are set globally and per repository, and cleared when em
     "rm-worktree {path}",
   );
 });
+
+test("worktree settings of a workspace Herdr reports no repository for are its repository's", async () => {
+  const messages: any[] = [];
+  const probes: string[][] = [];
+  let repositories: GuiSettings["repositories"] = {};
+  const handler = createSettingsRpcHandler({
+    connectionId: "alpha",
+    readSettings: async () => ({
+      version: 1,
+      repositories,
+      workspace_auto_sync: {},
+      custom: {},
+      ui: {},
+      worktree_command: "global {path}",
+    }),
+    herdr: {
+      call: async () => ({
+        workspace: {
+          cwd: "/repo.worktrees/review",
+          worktree: { checkout_path: "/repo.worktrees/review" },
+        },
+      }),
+    } as unknown as HerdrClient,
+    sshHost: () => undefined,
+    readWorktreeHooks: async () => null,
+    runProcess: async (argv) => {
+      probes.push(argv);
+      return { code: 0, stdout: "/repo/.git\n", stderr: "" };
+    },
+    resolveWorkspaceGitRoot: async () => ({
+      workspace: {},
+      root: "/repo.worktrees/review",
+    }),
+    workspaceAutoSyncIsRunning: () => false,
+    onWorkspaceAutoSyncSettingsChanged: () => {},
+    safeSend: (_ws, payload) => {
+      messages.push(JSON.parse(payload));
+      return true;
+    },
+    markRpcError: () => {},
+  });
+  const get = async (method: string) => {
+    await handler({} as ServerWebSocket<unknown>, "settings", method, {
+      workspace_id: "workspace",
+    });
+    return messages.at(-1).result;
+  };
+  const repoKey = "connection:alpha:local:/repo/.git";
+  const checkoutKey = "connection:alpha:local:/repo.worktrees/review";
+
+  // Nothing saved yet: the dialogs save under the repository.
+  expect((await get("settings.worktree_directory.get")).key).toBe(repoKey);
+  expect(probes.at(-1)?.at(-1)).toContain(
+    "git -C '/repo.worktrees/review' rev-parse --path-format=absolute --git-common-dir",
+  );
+
+  repositories = {
+    [repoKey]: {
+      worktree_directory: "/trees",
+      worktree_command: "mk {path}",
+      worktree_hooks_enabled: false,
+    },
+  };
+  expect(await get("settings.worktree_directory.get")).toMatchObject({
+    key: repoKey,
+    worktree_directory: "/trees",
+  });
+  expect(await get("settings.worktree_hooks.get")).toMatchObject({
+    key: repoKey,
+    enabled: false,
+    worktree_directory: "/trees",
+    worktree_command: "mk {path}",
+    default_worktree_command: "global {path}",
+  });
+
+  // Settings saved under the checkout path before keep showing.
+  repositories = { [checkoutKey]: { worktree_directory: "/legacy" } };
+  expect(await get("settings.worktree_directory.get")).toMatchObject({
+    key: checkoutKey,
+    worktree_directory: "/legacy",
+  });
+  expect(await get("settings.worktree_hooks.get")).toMatchObject({
+    key: checkoutKey,
+    worktree_directory: "/legacy",
+  });
+});

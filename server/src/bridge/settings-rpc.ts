@@ -17,16 +17,15 @@ import {
   readGuiSettings,
   normalizeWorktreeCommand,
   normalizeWorktreeDirectory,
-  repoWorktreeDirectory,
-  repoWorktreeHooksEnabled,
   terminalSurfaceCodecsEnabled,
   uiSettingKeyIsValid,
   uiSettingValueError,
   updateGuiSettings,
   workspaceAutoSyncSettingsKey,
-  workspaceRepoSettingsKey,
   WORKTREE_COMMAND_MAX_LENGTH,
 } from "../config/gui-settings";
+import { resolveRepoSettingsKey } from "../worktree/create";
+import type { RunProcessWithCodeTimeout } from "../workspace/file-types";
 import { worktreeCommandTemplateError } from "../worktree/command-template";
 import {
   checkoutPath as workspaceCheckoutPath,
@@ -56,6 +55,7 @@ export function createSettingsRpcHandler(args: {
   herdr: HerdrClient;
   sshHost: () => string | undefined;
   readWorktreeHooks: ReadWorktreeHooks;
+  runProcess?: RunProcessWithCodeTimeout;
   resolveWorkspaceGitRoot: (workspaceId: string) => Promise<{
     workspace: any;
     root: string;
@@ -86,25 +86,41 @@ export function createSettingsRpcHandler(args: {
         )
       : JSON.stringify(message);
 
-  function repoSettingsKey(workspace: any): string | null {
-    return workspaceRepoSettingsKey(
+  // The key worktree creation uses: git names the repository when Herdr
+  // does not, so the dialogs show and save what creation applies.
+  async function repoSettingsKey(
+    workspaceId: string,
+    workspace: any,
+  ): Promise<string | null> {
+    const reported =
+      typeof workspace?.worktree?.repo_key === "string" &&
+      workspace.worktree.repo_key;
+    const root = reported
+      ? null
+      : await args
+          .resolveWorkspaceGitRoot(workspaceId)
+          .then((result) => result.root)
+          .catch(() => null);
+    const { key } = await resolveRepoSettingsKey({
       workspace,
-      args.sshHost(),
-      args.connectionId,
-    );
+      root,
+      host: args.sshHost(),
+      connectionId: args.connectionId,
+      settings: await readSettings(),
+      ...(args.runProcess ? { runProcess: args.runProcess } : {}),
+    });
+    return key;
   }
 
-  async function worktreeCommandReply(key: string | null) {
+  async function repoSettingsReply(key: string | null) {
     const settings = await readSettings();
+    const repo = key ? settings.repositories[key] : undefined;
     return {
-      worktree_command:
-        (key ? settings.repositories[key]?.worktree_command : undefined) ??
-        null,
+      enabled: repo?.worktree_hooks_enabled !== false,
+      worktree_directory: repo?.worktree_directory ?? null,
+      worktree_command: repo?.worktree_command ?? null,
       default_worktree_command: settings.worktree_command ?? null,
-      worktree_remove_command:
-        (key
-          ? settings.repositories[key]?.worktree_remove_command
-          : undefined) ?? null,
+      worktree_remove_command: repo?.worktree_remove_command ?? null,
       default_worktree_remove_command: settings.worktree_remove_command ?? null,
     };
   }
@@ -214,11 +230,17 @@ export function createSettingsRpcHandler(args: {
         const workspaceResult = await args.herdr.call("workspace.get", {
           workspace_id: workspaceId,
         });
-        const key = repoSettingsKey(workspaceResult?.workspace);
+        const key = await repoSettingsKey(
+          workspaceId,
+          workspaceResult?.workspace,
+        );
         return reply({
           workspace_id: workspaceId,
           key,
-          worktree_directory: (await repoWorktreeDirectory(key)) ?? null,
+          worktree_directory:
+            (key
+              ? (await readSettings()).repositories[key]?.worktree_directory
+              : undefined) ?? null,
         });
       }
       if (method === "settings.worktree_hooks.get") {
@@ -242,7 +264,7 @@ export function createSettingsRpcHandler(args: {
             error: "workspace has no worktree metadata",
           });
         }
-        const key = repoSettingsKey(workspace);
+        const key = await repoSettingsKey(workspaceId, workspace);
         const checkoutPath = workspaceCheckoutPath(workspace);
         const sourceCheckoutPath = workspaceSourceCheckoutPath(workspace);
         let loaded: Awaited<ReturnType<ReadWorktreeHooks>> = null;
@@ -266,9 +288,7 @@ export function createSettingsRpcHandler(args: {
         return reply({
           workspace_id: workspaceId,
           key,
-          enabled: await repoWorktreeHooksEnabled(key),
-          worktree_directory: (await repoWorktreeDirectory(key)) ?? null,
-          ...(await worktreeCommandReply(key)),
+          ...(await repoSettingsReply(key)),
           repo_name: workspace.worktree.repo_name,
           repo_root: workspace.worktree.repo_root,
           checkout_path: checkoutPath,

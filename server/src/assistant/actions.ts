@@ -7,19 +7,16 @@ import type {
   AssistantWorkspaceRef,
 } from "../../../shared/assistant";
 import { isRecord } from "../agent/session-utils";
-import {
-  readGuiSettings,
-  repoWorktreeDirectory,
-  repoWorktreeHooksEnabled,
-  workspaceRepoSettingsKey,
-  worktreeCommandFor,
-} from "../config/gui-settings";
+import { readGuiSettings, worktreeCommandFor } from "../config/gui-settings";
 import { validateConnectionId } from "../connections/protocol";
 import type { LegacyConnectionRuntime } from "../connections/runtime";
 import { assertUnixHost } from "../connections/unix-only";
 import { inspectWorkspacePath } from "../workspace/path";
 import { checkoutPath } from "../workspace/utils";
-import { worktreeCheckoutPath } from "../worktree/create";
+import {
+  resolveRepoSettingsKey,
+  worktreeCheckoutPath,
+} from "../worktree/create";
 import { surfaceAssistantUserError } from "./errors";
 
 export type AssistantActionPreview = Omit<
@@ -324,17 +321,24 @@ export async function prepareAssistantAction(args: {
       (typeof command !== "string" || command.length > 20_000)
     )
       throw new Error("Cannot preview this setup hook");
-    const key = workspaceRepoSettingsKey(
-      source,
-      runtime.sshHost(),
-      target.connection_id,
+    // The repository key worktree creation will use, so that its guards
+    // compare against the settings creation applies.
+    const settings = await read(() => readGuiSettings());
+    const { key } = await read(() =>
+      resolveRepoSettingsKey({
+        workspace: source,
+        root,
+        host: runtime.sshHost(),
+        connectionId: target.connection_id,
+        settings,
+      }),
     );
-    const enabled = await read(() => repoWorktreeHooksEnabled(key));
+    const repo = key ? settings.repositories[key] : undefined;
+    const enabled = repo?.worktree_hooks_enabled !== false;
     // The repository's worktree location decides the new checkout's path,
     // and the configured command, if any, creates it instead of Herdr.
-    const directory = (await read(() => repoWorktreeDirectory(key))) ?? null;
-    const worktreeCommand =
-      worktreeCommandFor(await read(() => readGuiSettings()), key) ?? null;
+    const directory = repo?.worktree_directory ?? null;
+    const worktreeCommand = worktreeCommandFor(settings, key) ?? null;
     return { command, enabled, directory, worktreeCommand };
   }
 
