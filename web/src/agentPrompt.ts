@@ -208,6 +208,15 @@ function parsePrompt(screen: readonly string[]): AgentPrompt {
       const moves = index - at;
       option.input = (moves > 0 ? DOWN : UP).repeat(Math.abs(moves));
     }
+    // Claude Code's "Yes, and don't ask again for: curl *" is a text field
+    // once the cursor is on it: a number typed there goes into the pattern.
+    // Every choice is then reached with the arrows and Enter.
+    if (at >= 0 && EDITABLE_CHOICE.test(options[at]!.label))
+      for (const [index, option] of options.entries()) {
+        if (option.freeText) continue;
+        const moves = index - at;
+        option.input = `${(moves > 0 ? DOWN : UP).repeat(Math.abs(moves))}\r`;
+      }
     // Several answers: their "Submit" line comes right after the choice it
     // was found under.
     let submit: string | undefined;
@@ -242,6 +251,8 @@ function parsePrompt(screen: readonly string[]): AgentPrompt {
 }
 
 const CONFIRM_HINT = /Enter to (?:confirm|select|continue)/i;
+/** A choice whose text can be edited in place, as a rule to allow. */
+const EDITABLE_CHOICE = /\bdon['’]t ask again for:/i;
 const CURSOR = /^(\s*)[❯›>▶](\s+)(\S.*)$/;
 const DOWN = "\x1b[B";
 const UP = "\x1b[A";

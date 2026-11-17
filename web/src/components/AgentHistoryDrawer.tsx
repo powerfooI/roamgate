@@ -1146,7 +1146,13 @@ export function AgentHistoryDrawer({
     event.preventDefault();
     event.stopPropagation();
     if (input === "box") focusChatBox();
-    else paneChat.onKeys(input);
+    else
+      paneChat.onKeys(
+        // A number answers as its choice does: on an editable rule, the
+        // arrows and Enter rather than the digit itself.
+        paneChat.prompt?.options.find((option) => option.key === input)
+          ?.input ?? input,
+      );
   };
   // The message box is hidden while a question only takes a choice; an
   // answer of one's own ("Type something.") is written in it.
@@ -1175,9 +1181,18 @@ export function AgentHistoryDrawer({
         requestAnimationFrame(() =>
           promptRef.current?.focus({ preventScroll: true }),
         );
-    } else if (!active || active === document.body)
+    } else if ((!active || active === document.body) && !mobile)
+      // Not on a phone: the box's focus brings its keyboard up over the
+      // chat, after an answer tapped on the card.
       requestAnimationFrame(focusChatBox);
-  }, [promptShown, promptTyping, composerDraftKey, focusChatBox, paneActive]);
+  }, [
+    promptShown,
+    promptTyping,
+    composerDraftKey,
+    focusChatBox,
+    paneActive,
+    mobile,
+  ]);
   // With nothing focused (the hidden box had the keys, say), they still go
   // to the question.
   const onPromptKeyRef = useRef(onPromptKey);
