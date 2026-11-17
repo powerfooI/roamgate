@@ -134,6 +134,10 @@ Click any screenshot to open the full-resolution image.
 
 See [deployment](./docs/DEPLOYMENT.md) for configuration, services, and updates.
 
+## One-Click Deploy
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Roamgate/)
+
 ## Install as a PWA
 
 **Recommended for daily use:** a separate app window without browser tabs or
