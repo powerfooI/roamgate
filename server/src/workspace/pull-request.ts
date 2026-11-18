@@ -38,9 +38,16 @@ export function parseReviewRemote(
   }
 }
 
+/**
+ * A failure whose message names the step that failed. It only holds text
+ * this module writes (commands, API paths, HTTP status codes), never CLI
+ * output, which can contain credentials.
+ */
+class StatusError extends Error {}
+
 function object(value: unknown): Record<string, any> {
   if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new Error("Invalid provider response");
+    throw new StatusError("invalid provider response");
   return value as Record<string, any>;
 }
 function text(value: unknown, fallback = "Unknown"): string {
@@ -48,13 +55,15 @@ function text(value: unknown, fallback = "Unknown"): string {
 }
 function number(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) <= 0)
-    throw new Error("Invalid provider identifier");
+    throw new StatusError("invalid provider identifier");
   return value as number;
 }
-function list(value: unknown): any[] {
-  if (!Array.isArray(value)) throw new Error("Invalid provider list");
+function list(value: unknown, step: string): any[] {
+  if (!Array.isArray(value))
+    throw new StatusError(`${step} did not return a list`);
   // Never silently choose from a truncated result set.
-  if (value.length >= 100) throw new Error("Too many matches");
+  if (value.length >= 100)
+    throw new StatusError(`${step} returned 100 or more requests`);
   return value;
 }
 function webUrl(host: string, value: unknown): string {
@@ -65,8 +74,27 @@ function webUrl(host: string, value: unknown): string {
     url.username ||
     url.password
   )
-    throw new Error("Invalid provider URL");
+    throw new StatusError("invalid provider URL");
   return url.href;
+}
+
+/** Host names listed one per line, as `gh` and `glab auth status` print them. */
+function hostLines(output: string): Set<string> {
+  return new Set(
+    output
+      .split(/\r?\n/)
+      .map((line) => line.trim().toLowerCase())
+      .filter((line) =>
+        /^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)+(?::\d+)?$/.test(line),
+      ),
+  );
+}
+
+/** A command as an error message names it: `glab api <path>` for API calls. */
+function describeStep(argv: string[]): string {
+  const step =
+    argv[1] === "api" ? `${argv[0]} api ${argv.at(-1)}` : argv.join(" ");
+  return step.length > 200 ? `${step.slice(0, 200)}...` : step;
 }
 
 export function githubChecks(value: unknown): string {
@@ -116,16 +144,17 @@ export async function readPullRequestStatus(
   const deadline = Date.now() + 55_000;
   async function run(argv: string[]) {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error("Request timed out");
+    if (remaining <= 0)
+      throw new StatusError(`timed out before ${describeStep(argv)}`);
     const timeout = Math.min(15_000, remaining);
-    if (context.host) {
-      const command = `cd ${context.shQuote(context.root)} && GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 NO_COLOR=1 ${argv.map(context.shQuote).join(" ")}`;
-      return context.runProcessWithCodeTimeout(
-        sshCommandArgv(context.host, command),
-        timeout,
-      );
-    }
     try {
+      if (context.host) {
+        const command = `cd ${context.shQuote(context.root)} && GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 NO_COLOR=1 ${argv.map(context.shQuote).join(" ")}`;
+        return await context.runProcessWithCodeTimeout(
+          sshCommandArgv(context.host, command),
+          timeout,
+        );
+      }
       return await context.runProcessWithCodeTimeout(argv, timeout, {
         cwd: context.root,
         env: {
@@ -137,15 +166,32 @@ export async function readPullRequestStatus(
       });
     } catch (error) {
       // Native spawning reports a missing executable by throwing, unlike SSH's shell.
-      if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      if (!context.host && (error as NodeJS.ErrnoException).code === "ENOENT")
         return { code: 127, stdout: "", stderr: "" };
-      throw error;
+      throw new StatusError(
+        /timed out/i.test(String((error as Error)?.message))
+          ? `${describeStep(argv)} timed out`
+          : `${describeStep(argv)} could not run`,
+      );
     }
   }
   async function json(argv: string[]) {
+    const step = describeStep(argv);
     const output = await run(argv);
-    if (output.code !== 0) throw new Error("Provider request failed");
-    return JSON.parse(output.stdout);
+    if (output.code !== 0) {
+      // Only the HTTP status is taken from the CLI's diagnostics.
+      const status = /\(HTTP (\d{3})\)/.exec(output.stderr)?.[1];
+      throw new StatusError(
+        status
+          ? `${step} returned HTTP ${status}`
+          : `${step} failed with exit code ${output.code}`,
+      );
+    }
+    try {
+      return JSON.parse(output.stdout);
+    } catch {
+      throw new StatusError(`${step} returned invalid JSON`);
+    }
   }
   function finish(state: PullRequestStatus["state"], message?: string) {
     return { ...result, state, message, refreshedAt: new Date().toISOString() };
@@ -166,7 +212,8 @@ export async function readPullRequestStatus(
     ]);
     if (branch.code === 0)
       return { name: branch.stdout.trim(), rebasing: false };
-    if (branch.code !== 1) throw new Error("Cannot read branch");
+    if (branch.code !== 1)
+      throw new StatusError("git symbolic-ref HEAD failed");
     // --git-path resolves linked worktrees' private rebase state.
     const paths = await run([
       "git",
@@ -176,7 +223,8 @@ export async function readPullRequestStatus(
       "--git-path",
       "rebase-apply/head-name",
     ]);
-    if (paths.code !== 0) throw new Error("Cannot read rebase state");
+    if (paths.code !== 0)
+      throw new StatusError("git rev-parse --git-path failed");
     for (const path of paths.stdout.split(/\r?\n/).filter(Boolean)) {
       const ref = (await readGitFile(path))?.trim();
       if (!ref) continue;
@@ -246,7 +294,7 @@ export async function readPullRequestStatus(
         "The branch changed. Refresh workspace status and try again.",
       );
     const remotes = await run(["git", "remote", "-v"]);
-    if (remotes.code !== 0) throw new Error("Cannot read remotes");
+    if (remotes.code !== 0) throw new StatusError("git remote -v failed");
     for (const line of remotes.stdout.split(/\r?\n/)) {
       const match = line.match(/^(\S+)\s+(.+)\s+\(fetch\)$/);
       if (!match) continue;
@@ -255,102 +303,265 @@ export async function readPullRequestStatus(
     }
     if (!result.remotes.length)
       return finish("unsupported", "No supported network remote found.");
-    const selected =
-      typeof params.remote === "string"
-        ? result.remotes.find((r) => r.name === params.remote)
-        : (result.remotes.find((r) => r.name === "origin") ??
-          (result.remotes.length === 1 ? result.remotes[0] : undefined));
+    const remoteNamed = (name: string | undefined) =>
+      name === undefined
+        ? undefined
+        : result.remotes.find((remote) => remote.name === name);
+
+    // Ask CLIs only about their configured hosts; never probe an arbitrary
+    // remote with a token intended for another host.
+    type Listing = { hosts: Set<string> | null; error?: string };
+    const listing = (read: () => Promise<Set<string>>) => {
+      let pending: Promise<Listing> | undefined;
+      return () =>
+        (pending ??= read().then(
+          (hosts): Listing => ({ hosts }),
+          (error): Listing => ({
+            hosts: null,
+            error:
+              error instanceof StatusError ? error.message : "it could not run",
+          }),
+        ));
+    };
+    const ghHosts = listing(async () => {
+      const output = await run([
+        "gh",
+        "auth",
+        "status",
+        "--json",
+        "hosts",
+        "--jq",
+        ".hosts | keys[]",
+      ]);
+      return hostLines(output.stdout);
+    });
+    // `glab auth status` calls every configured instance's API, which can
+    // take longer than a request may wait, so glab's own configuration is
+    // asked first, without a network call.
+    const glabLogins = new Map<string, Promise<boolean>>();
+    const glabLogin = (host: string) => {
+      let login = glabLogins.get(host);
+      if (!login) {
+        // A token from the environment (or one for no host in particular,
+        // which a made-up host gets) is not a login for this host. Only the
+        // host is printed, never the token.
+        const script = `token() { (unset GITLAB_TOKEN GITLAB_ACCESS_TOKEN OAUTH_TOKEN; GLAB_NO_PROMPT=1 glab config get token --host "$1" 2>/dev/null); }; t=$(token "$1"); [ -n "$t" ] && [ "$t" != "$(token roamgate.invalid)" ] && printf '%s\\n' "$1"; exit 0`;
+        login = run(["sh", "-c", script, "sh", host]).then(
+          (output) => output.code === 0 && output.stdout.trim() === host,
+          () => false,
+        );
+        glabLogins.set(host, login);
+      }
+      return login;
+    };
+    const glabHosts = listing(async () => {
+      let output = await run(["glab", "auth", "status", "--all"]);
+      // Older glab (1.67, for one) has no --all and lists every host
+      // without it.
+      if (
+        output.code !== 0 &&
+        /unknown flag:? '?--all/i.test(`${output.stdout}\n${output.stderr}`)
+      )
+        output = await run(["glab", "auth", "status"]);
+      return hostLines(`${output.stdout}\n${output.stderr}`);
+    });
+    type Forge = { provider: ReviewProvider; apiHost: string };
+    // GitLab instances often serve SSH on ssh.<host>; such a remote uses the
+    // API of <host> when that one is a known or configured instance.
+    async function forgeFor(host: string): Promise<Forge | "ambiguous" | null> {
+      const hosts = host.startsWith("ssh.") ? [host, host.slice(4)] : [host];
+      for (const apiHost of hosts) {
+        if (apiHost === "github.com") return { provider: "github", apiHost };
+        if (apiHost === "gitlab.com") return { provider: "gitlab", apiHost };
+      }
+      const gh = await ghHosts();
+      const find = async (
+        gitlabHas: (apiHost: string) => boolean | Promise<boolean>,
+      ) => {
+        for (const apiHost of hosts) {
+          const github = gh.hosts?.has(apiHost) ?? false;
+          const gitlab = await gitlabHas(apiHost);
+          if (github && gitlab) return "ambiguous" as const;
+          if (github) return { provider: "github" as const, apiHost };
+          if (gitlab) return { provider: "gitlab" as const, apiHost };
+        }
+        return null;
+      };
+      const configured = await find(glabLogin);
+      if (configured) return configured;
+      const glab = await glabHosts();
+      const listed = await find((apiHost) => glab.hosts?.has(apiHost) ?? false);
+      if (listed) return listed;
+      const failure = gh.error ?? glab.error;
+      if (failure)
+        throw new StatusError(
+          `could not list the hosts configured in gh and glab for ${host}: ${failure}`,
+        );
+      return null;
+    }
+
+    const branchRef = `refs/heads/${result.branch}`;
+    const [refs, config] = await Promise.all([
+      run([
+        "git",
+        "for-each-ref",
+        "--format=%(refname)%00%(upstream:remotename)%00%(upstream:remoteref)%00%(symref)",
+        branchRef,
+        `refs/remotes/*/${result.branch}`,
+        "refs/remotes/*/HEAD",
+      ]),
+      run([
+        "git",
+        "config",
+        "--get-regexp",
+        "^(branch\\..*\\.pushremote|remote\\.pushdefault)$",
+      ]),
+    ]);
+    if (refs.code !== 0) throw new StatusError("git for-each-ref failed");
+    // 1: none of these keys is set.
+    if (config.code !== 0 && config.code !== 1)
+      throw new StatusError("git config --get-regexp failed");
+    let upstream: { remote: string; ref: string } | undefined;
+    const pushed: ReviewRemote[] = [];
+    const remoteHeads = new Map<string, string>();
+    for (const line of refs.stdout.split(/\r?\n/)) {
+      const [ref = "", upstreamRemote = "", upstreamRef = "", symref = ""] =
+        line.split("\0");
+      if (ref === branchRef) {
+        upstream = { remote: upstreamRemote, ref: upstreamRef };
+        continue;
+      }
+      for (const remote of result.remotes) {
+        const prefix = `refs/remotes/${remote.name}/`;
+        if (ref === `${prefix}${result.branch}`) pushed.push(remote);
+        else if (ref === `${prefix}HEAD` && symref.startsWith(prefix))
+          remoteHeads.set(remote.name, symref.slice(prefix.length));
+      }
+    }
+    const settings = new Map<string, string>();
+    for (const line of config.stdout.split(/\r?\n/)) {
+      const space = line.indexOf(" ");
+      if (space > 0) settings.set(line.slice(0, space), line.slice(space + 1));
+    }
+    const tracked = remoteNamed(upstream?.remote);
+
+    // The source is where the branch is pushed, chosen as `git push` does:
+    // its push remote, then the default push remote, then a remote that has
+    // the branch, then the remote it tracks. A fork workflow tracks the
+    // upstream's main and pushes to a personal fork.
+    let selected: ReviewRemote | undefined;
+    if (typeof params.remote === "string")
+      selected = remoteNamed(params.remote);
+    else {
+      selected =
+        remoteNamed(settings.get(`branch.${result.branch}.pushremote`)) ??
+        remoteNamed(settings.get("remote.pushdefault"));
+      if (!selected && pushed.length) {
+        const usable: ReviewRemote[] = [];
+        for (const remote of pushed) {
+          const forge = await forgeFor(remote.host).catch(() => null);
+          if (forge && forge !== "ambiguous") usable.push(remote);
+        }
+        const candidates = usable.length ? usable : pushed;
+        selected =
+          candidates.length === 1
+            ? candidates[0]
+            : (candidates.find((remote) => remote === tracked) ??
+              candidates.find((remote) => remote.name === "origin"));
+        if (!selected)
+          return finish(
+            "select_remote",
+            "Several remotes have this branch. Select the source repository remote.",
+          );
+      }
+      selected ??=
+        tracked ??
+        remoteNamed("origin") ??
+        (result.remotes.length === 1 ? result.remotes[0] : undefined);
+    }
     if (!selected)
       return finish(
         "select_remote",
         "Select the source repository remote to resolve this branch.",
       );
     result.remote = selected.name;
-    const branchRef = `refs/heads/${result.branch}`;
-    const tracking = await run([
-      "git",
-      "for-each-ref",
-      "--format=%(refname)%00%(upstream:remotename)%00%(upstream:remoteref)",
-      branchRef,
-    ]);
-    if (tracking.code !== 0) throw new Error("Cannot read upstream branch");
-    const upstream = tracking.stdout
-      .split(/\r?\n/)
-      .map((line) => line.split("\0"))
-      .find(([ref]) => ref === branchRef);
-    // A checkout may use a local alias (e.g. pr-299). Only its selected
-    // remote's upstream identifies the provider-side source branch.
+    // A checkout may use a local alias (e.g. pr-299). Only the source
+    // remote's upstream names the provider-side branch, and not when it is
+    // the default branch the local one was started from.
+    const upstreamBranch =
+      tracked === selected && upstream?.ref.startsWith("refs/heads/")
+        ? upstream.ref.slice("refs/heads/".length)
+        : undefined;
     const sourceBranch =
-      upstream?.[1] === selected.name && upstream[2]?.startsWith("refs/heads/")
-        ? upstream[2].slice("refs/heads/".length)
+      upstreamBranch &&
+      (upstreamBranch === result.branch ||
+        !["main", "master", remoteHeads.get(selected.name)].includes(
+          upstreamBranch,
+        ))
+        ? upstreamBranch
         : result.branch;
-    let provider: ReviewProvider | undefined =
-      selected.host === "github.com"
-        ? "github"
-        : selected.host === "gitlab.com"
-          ? "gitlab"
-          : undefined;
-    if (!provider) {
-      // Ask CLIs only about their configured hosts; never probe an arbitrary
-      // remote with a token intended for another host.
-      const [gh, glab] = await Promise.allSettled([
-        run([
-          "gh",
-          "auth",
-          "status",
-          "--json",
-          "hosts",
-          "--jq",
-          ".hosts | keys[]",
-        ]),
-        run(["glab", "auth", "status", "--all"]),
-      ]);
-      const github =
-        gh.status === "fulfilled" &&
-        gh.value.stdout.split(/\r?\n/).includes(selected.host);
-      const gitlab =
-        glab.status === "fulfilled" &&
-        `${glab.value.stdout}\n${glab.value.stderr}`
-          .split(/\r?\n/)
-          .some((line) => line.trim() === selected.host);
-      if (github && gitlab)
-        return finish(
+    const forge = await forgeFor(selected.host);
+    if (forge === "ambiguous")
+      return finish(
+        "unsupported",
+        "This host is configured in both gh and glab; provider is ambiguous.",
+      );
+    if (!forge)
+      return {
+        ...finish(
           "unsupported",
-          "This host is configured in both gh and glab; provider is ambiguous.",
-        );
-      provider = github ? "github" : gitlab ? "gitlab" : undefined;
-      if (!provider && (gh.status === "rejected" || glab.status === "rejected"))
-        throw new Error("Host discovery failed");
-      if (!provider)
-        return {
-          ...finish(
-            "unsupported",
-            "Unsupported or unconfigured host. Configure this instance in gh or glab on the checkout host.",
-          ),
-          retryable: true,
-        };
-    }
+          `Unsupported or unconfigured host ${selected.host}. Configure this instance in gh or glab on the checkout host.`,
+        ),
+        retryable: true,
+      };
+    const { provider, apiHost } = forge;
     result.provider = provider;
+    // The tracked remote's project is a target too, when it is on the same
+    // instance: a fork's requests usually go there.
+    let trackedTarget: string | undefined;
+    if (tracked && tracked !== selected) {
+      const target = await forgeFor(tracked.host).catch(() => null);
+      if (
+        target &&
+        target !== "ambiguous" &&
+        target.provider === provider &&
+        target.apiHost === apiHost
+      )
+        trackedTarget = tracked.repository;
+    }
     const cli = provider === "github" ? "gh" : "glab";
     const version = await run([cli, "--version"]);
     if (version.code === 127)
       return finish("missing_cli", `Install ${cli} on the checkout host.`);
-    if (version.code !== 0) throw new Error("Cannot run CLI");
+    if (version.code !== 0)
+      throw new StatusError(
+        `${cli} --version failed with exit code ${version.code}`,
+      );
     const auth = await run([
       cli,
       "auth",
       "status",
       "--hostname",
-      selected.host,
+      apiHost,
       ...(provider === "github" ? ["--active"] : []),
     ]);
     if (auth.code !== 0)
       return finish(
         "unauthenticated",
-        `${cli} authentication is unavailable or could not be verified for ${selected.host}. Check it on the checkout host.`,
+        `${cli} authentication is unavailable or could not be verified for ${apiHost}. Check it on the checkout host.`,
       );
-    const api = (path: string) =>
-      json([cli, "api", "--hostname", selected.host, "--method", "GET", path]);
+    const apiArgv = (path: string) => [
+      cli,
+      "api",
+      "--hostname",
+      apiHost,
+      "--method",
+      "GET",
+      path,
+    ];
+    const api = (path: string) => json(apiArgv(path));
+    const apiList = async (path: string) =>
+      list(await api(path), describeStep(apiArgv(path)));
     const matches: PullRequest[] = [];
     const createdAt = new Map<string, number>();
     if (provider === "github") {
@@ -361,13 +572,17 @@ export async function readPullRequestStatus(
       const repositories = [sourceRepository];
       if (repo.fork && repo.parent?.full_name)
         repositories.push(text(repo.parent.full_name));
-      for (const repository of new Set(repositories)) {
+      if (trackedTarget) repositories.push(trackedTarget);
+      const seen = new Set<string>();
+      for (const repository of repositories) {
+        if (seen.has(repository.toLowerCase())) continue;
+        seen.add(repository.toLowerCase());
         const query = new URLSearchParams({
           state: "all",
           head: `${sourceRepository.split("/")[0]}:${sourceBranch}`,
           per_page: "100",
         });
-        const pulls = list(await api(`repos/${repository}/pulls?${query}`));
+        const pulls = await apiList(`repos/${repository}/pulls?${query}`);
         for (const raw of pulls) {
           const pr = object(raw);
           if (
@@ -390,7 +605,7 @@ export async function readPullRequestStatus(
             target: text(pr.base?.label),
             state: pr.merged_at ? "merged" : text(pr.state),
             draft: pr.draft === true,
-            url: webUrl(selected.host, pr.html_url),
+            url: webUrl(apiHost, pr.html_url),
           });
         }
       }
@@ -399,9 +614,19 @@ export async function readPullRequestStatus(
         await api(`projects/${encodeURIComponent(selected.repository)}`),
       );
       const sourceId = number(repo.id);
-      const projects = [sourceId];
-      if (repo.forked_from_project?.id)
-        projects.push(number(repo.forked_from_project.id));
+      const projects = [String(sourceId)];
+      const parent = repo.forked_from_project;
+      if (parent?.id) projects.push(String(number(parent.id)));
+      // The fork's parent already covers the tracked project.
+      const covered = [
+        selected.repository,
+        repo.path_with_namespace,
+        parent?.path_with_namespace,
+      ]
+        .filter((path) => typeof path === "string")
+        .map((path: string) => path.toLowerCase());
+      if (trackedTarget && !covered.includes(trackedTarget.toLowerCase()))
+        projects.push(encodeURIComponent(trackedTarget));
       for (const project of new Set(projects)) {
         const query = new URLSearchParams({
           scope: "all",
@@ -409,8 +634,8 @@ export async function readPullRequestStatus(
           source_branch: sourceBranch,
           per_page: "100",
         });
-        for (const raw of list(
-          await api(`projects/${project}/merge_requests?${query}`),
+        for (const raw of await apiList(
+          `projects/${project}/merge_requests?${query}`,
         )) {
           const mr = object(raw);
           if (
@@ -432,7 +657,7 @@ export async function readPullRequestStatus(
             target: text(mr.target_branch),
             state: text(mr.state),
             draft: mr.draft === true || mr.work_in_progress === true,
-            url: webUrl(selected.host, mr.web_url),
+            url: webUrl(apiHost, mr.web_url),
           });
         }
       }
@@ -451,7 +676,7 @@ export async function readPullRequestStatus(
       if (
         uniqueMatches.some((match) => !Number.isFinite(createdAt.get(match.id)))
       )
-        throw new Error("Invalid provider creation time");
+        throw new StatusError("invalid provider creation time");
       uniqueMatches.sort(
         (a, b) =>
           createdAt.get(b.id)! - createdAt.get(a.id)! ||
@@ -480,7 +705,7 @@ export async function readPullRequestStatus(
           "view",
           id,
           "--repo",
-          `${selected.host}/${repository}`,
+          `${apiHost}/${repository}`,
           "--json",
           field,
         ]);
@@ -530,14 +755,16 @@ export async function readPullRequestStatus(
       );
     }
     return finish("ready");
-  } catch {
+  } catch (error) {
     delete result.request;
     // Branch-change guards above are authoritative; only this catch-all
     // failure may be retried while the browser keeps its last-known status.
+    // Only messages written here are shown; other errors may quote output.
+    const reason = error instanceof StatusError ? `: ${error.message}` : "";
     return {
       ...finish(
         "error",
-        "Could not read PR/MR status. Check repository access, CLI version and network connectivity on the checkout host, then refresh.",
+        `Could not read PR/MR status${reason}. Check repository access, CLI version and network connectivity on the checkout host, then refresh.`,
       ),
       retryable: true,
     };
