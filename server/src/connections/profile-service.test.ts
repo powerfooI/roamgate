@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, test } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import * as net from "node:net";
 import { tmpdir } from "node:os";
@@ -972,6 +972,157 @@ describe("connection profile service", () => {
     timers[0].callback();
     await waitUntil(() => timers.length === 2);
     expect(timers.map(({ delayMs }) => delayMs)).toEqual([50, 100]);
+    service.stopSupervision();
+  });
+
+  test("keeps retrying an SSH connection through a long outage and connects once ssh works again", async () => {
+    const store = await persistedStore({
+      version: 2,
+      default_connection_id: "remote",
+      profiles: [ssh("remote", true)],
+    });
+    const bootstrap = loadConnectionProfileBootstrap({
+      store,
+      legacyProfile: legacy,
+      explicitLegacyOverride: false,
+    });
+    const manager = new ConnectionManager<FakeRuntime>("remote");
+    let sshDown = true;
+    let attempts = 0;
+    const lateMasterExits: Array<() => void> = [];
+    const outage = () =>
+      new Error(
+        "ssh exited 255: ssh: connect to host example.com port 22: Operation timed out",
+      );
+    jest.useFakeTimers();
+    try {
+      const service = new ConnectionProfileService({
+        manager,
+        store,
+        bootstrap,
+        createRuntime: (profile) => (context) => {
+          const runtime: FakeRuntime = {
+            identity: connectionIdentityForProfile(profile),
+            context,
+            stops: 0,
+            async startTransport() {
+              attempts += 1;
+              if (!sshDown) return;
+              // The home probe fails first; the ssh master exits right
+              // after, once its runtime is no longer current.
+              lateMasterExits.push(() => {
+                if (!context.isCurrent()) return;
+                const error = outage();
+                context.reportError(error, {
+                  reconnecting: service.willRetry(profile.id, error),
+                });
+                service.runtimeFailed(profile.id, error);
+              });
+              throw outage();
+            },
+            startBackground() {},
+            async stop() {
+              runtime.stops += 1;
+            },
+          };
+          return runtime;
+        },
+        retry: { baseDelayMs: 1000, maxDelayMs: 30_000, random: () => 1 },
+      });
+      const flush = async () => {
+        for (let i = 0; i < 50; i += 1) await Promise.resolve();
+        for (const exit of lateMasterExits.splice(0)) exit();
+        for (let i = 0; i < 50; i += 1) await Promise.resolve();
+      };
+
+      await service.startConfigured();
+      await flush();
+      expect(attempts).toBe(1);
+      expect(manager.status("remote").state).toBe("reconnecting");
+
+      const advance = async (ms: number) => {
+        for (let elapsed = 0; elapsed < ms; elapsed += 1000) {
+          jest.advanceTimersByTime(1000);
+          await flush();
+        }
+      };
+
+      // Twenty minutes of outage: far more failures than any attempt budget.
+      await advance(20 * 60_000);
+      const afterTwentyMinutes = attempts;
+      expect(afterTwentyMinutes).toBeGreaterThan(30);
+      expect(manager.status("remote").state).toBe("reconnecting");
+      await advance(10 * 60_000);
+      // The backoff is capped at 30 s rather than growing without bound.
+      expect(attempts - afterTwentyMinutes).toBe(20);
+      expect(manager.status("remote").state).toBe("reconnecting");
+
+      sshDown = false;
+      await advance(30_000);
+      expect(attempts - afterTwentyMinutes).toBe(21);
+      expect(manager.status("remote").state).toBe("ready");
+      service.stopSupervision();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("runs a waiting SSH retry at once when asked, as after a network change", async () => {
+    const store = await persistedStore({
+      version: 2,
+      default_connection_id: "remote",
+      profiles: [ssh("remote", true)],
+    });
+    const bootstrap = loadConnectionProfileBootstrap({
+      store,
+      legacyProfile: legacy,
+      explicitLegacyOverride: false,
+    });
+    const manager = new ConnectionManager<FakeRuntime>("remote");
+    let sshDown = true;
+    let attempts = 0;
+    const timers: Array<{
+      callback: () => void;
+      delayMs: number;
+      cancelled: boolean;
+    }> = [];
+    const service = new ConnectionProfileService({
+      manager,
+      store,
+      bootstrap,
+      createRuntime: (profile) => (context) => ({
+        identity: connectionIdentityForProfile(profile),
+        context,
+        stops: 0,
+        async startTransport() {
+          attempts += 1;
+          if (sshDown) throw new Error("ssh exited 255: Operation timed out");
+        },
+        startBackground() {},
+        async stop() {},
+      }),
+      retry: {
+        baseDelayMs: 30_000,
+        random: () => 1,
+        schedule: (callback, delayMs) => {
+          const timer = { callback, delayMs, cancelled: false };
+          timers.push(timer);
+          return { cancel: () => (timer.cancelled = true) };
+        },
+      },
+    });
+    await service.startConfigured();
+    expect(timers).toHaveLength(1);
+    expect(attempts).toBe(1);
+
+    sshDown = false;
+    service.retryNow();
+    expect(timers[0].cancelled).toBeTrue();
+    await waitUntil(() => manager.status("remote").state === "ready");
+    expect(attempts).toBe(2);
+    // Nothing is waiting any more, so another call does nothing.
+    service.retryNow();
+    expect(attempts).toBe(2);
     service.stopSupervision();
   });
 

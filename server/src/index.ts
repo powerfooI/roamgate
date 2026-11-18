@@ -55,6 +55,7 @@ import {
   type ConnectionRuntimeContext,
   sanitizeConnectionError,
 } from "./connections/manager";
+import { watchNetworkChanges } from "./connections/network-watch";
 import {
   ConnectionProfileService,
   connectionIdentityForProfile,
@@ -689,6 +690,12 @@ const connectionProfiles = new ConnectionProfileService({
   store: connectionProfileStore,
   bootstrap: connectionBootstrap,
   createRuntime: runtimeFactoryForProfile,
+});
+// A pending SSH retry may wait up to its capped backoff. When the host's
+// network changes, a peer that was unreachable may be back: try now.
+const stopNetworkWatch = watchNetworkChanges(() => {
+  logger.debug("network changed; retrying waiting connections");
+  connectionProfiles.retryNow();
 });
 
 function notifyBrowserClientCount() {
@@ -2066,6 +2073,7 @@ function stopManagerOnce(): Promise<void> {
   // Seen marks are written in batches: keep the last ones.
   agentSeen.flush();
   webPush.stop();
+  stopNetworkWatch();
   connectionProfiles.stopSupervision();
   managerStopTask ??= (async () => {
     // Pause the harness before taking away the runtimes its reads depend on.
