@@ -366,14 +366,13 @@
     min-width: 0;
   }
 
-  /* A chat is the phone's zen: its own slim row stands for the top bar, so
-     the conversation gets the screen between it and the bottom bar. The top
-     bar comes back with the terminal. */
-  .app:has(.terminal-chat-layer) .topbar {
+  /* Zen mode: no top bar; the way out is in the More options menu. */
+  .app.phone-zen .topbar {
     display: none;
   }
 
-  .terminal-chat-layer .agent-history-drawer-head {
+  /* In Zen mode a chat's own slim row is the top of the screen. */
+  .app.phone-zen .terminal-chat-layer .agent-history-drawer-head {
     padding-top: calc(4px + env(safe-area-inset-top, 0px));
   }
 
