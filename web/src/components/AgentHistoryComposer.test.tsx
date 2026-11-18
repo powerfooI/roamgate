@@ -61,6 +61,7 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
       async (file) => `/tmp/${file.name}`,
     );
     let stateSeq = 0;
+    let recall: (() => void) | undefined;
     const render = (status: string, sameState = false) =>
       React.act(async () =>
         root.render(
@@ -72,6 +73,7 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
             onSend={send}
             onUploadImage={upload}
             onError={error}
+            onRecallQueued={recall}
           />,
         ),
       );
@@ -130,6 +132,22 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
       expect(send.mock.calls[0]?.[0]).toBe("hello");
       expect(readTerminalComposerDraft(draftKey)).toBe("");
       expect(input().value).toBe("");
+
+      // With messages queued, Up in the empty box takes them back; with text
+      // in the box, or nothing queued, Up is the box's own.
+      const recalled = mock(() => {});
+      recall = recalled;
+      await render("idle", true);
+      await key("ArrowUp");
+      expect(recalled).toHaveBeenCalledTimes(1);
+      await fill("draft");
+      await key("ArrowUp");
+      expect(recalled).toHaveBeenCalledTimes(1);
+      await fill("");
+      recall = undefined;
+      await render("idle", true);
+      await key("ArrowUp");
+      expect(recalled).toHaveBeenCalledTimes(1);
 
       // Codex reports "unknown" while it sits at its prompt.
       await render("unknown");

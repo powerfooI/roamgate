@@ -116,6 +116,29 @@ test("queued messages are marked and a compaction summary is one line", () => {
   expect(markup.match(/>Queued</g)).toHaveLength(1);
 });
 
+test("a queued message can be taken back or edited when the chat allows it", () => {
+  const entries = [
+    entry("1", "user", { text: "waiting", queued: true }),
+    entry("2", "user", { text: "landed" }),
+  ];
+  const render = (handlers: object) =>
+    renderToStaticMarkup(
+      createElement(AgentHistoryChat, {
+        items: groupHistoryChatItems(entries),
+        listRef: createRef<HTMLDivElement>(),
+        contentRef: createRef<HTMLDivElement>(),
+        onOpen() {},
+        ...handlers,
+      }),
+    );
+  const markup = render({ onRemoveQueued() {}, onEditQueued() {} });
+  expect(markup.match(/Take this message out of the queue/g)).toHaveLength(1);
+  expect(markup.match(/Edit this queued message/g)).toHaveLength(1);
+  const plain = render({});
+  expect(plain).not.toContain("Take this message out of the queue");
+  expect(plain).not.toContain("Edit this queued message");
+});
+
 test("messages not in the transcript yet follow the conversation, in order", () => {
   const outbox: OutboxMessage[] = [
     {

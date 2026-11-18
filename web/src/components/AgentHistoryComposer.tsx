@@ -78,6 +78,7 @@ export function AgentHistoryComposer({
   commands = [],
   vimKeys: vimKeysProp,
   onError,
+  onRecallQueued,
 }: {
   draftKey: string;
   agent?: string;
@@ -91,6 +92,11 @@ export function AgentHistoryComposer({
   /** Vim keys in the box; Configuration's setting by default. */
   vimKeys?: boolean;
   onError: (message: string) => void;
+  /**
+   * With messages queued, Up in the empty box takes them back into it to
+   * edit, as Up does in Claude Code's own prompt.
+   */
+  onRecallQueued?: () => void;
 }) {
   useShortcutPreferences();
   const { mobile } = useLayoutPreferences();
@@ -447,6 +453,14 @@ export function AgentHistoryComposer({
               label={`Message ${name || "agent"}`}
               placeholder={name ? `Message ${name}...` : "Message..."}
               enterSends={!enterAddsLine}
+              onUpWhenEmpty={
+                onRecallQueued
+                  ? () => {
+                      onRecallQueued();
+                      return true;
+                    }
+                  : undefined
+              }
               onChange={(value, start, end) => {
                 const draft = shown.toDraft(value);
                 const next = attachmentDisplay(draft);
@@ -542,6 +556,17 @@ export function AgentHistoryComposer({
               }, 0);
             }}
             onKeyDown={(event) => {
+              if (
+                event.key === "ArrowUp" &&
+                !shown.text &&
+                onRecallQueued &&
+                !event.shiftKey &&
+                !event.altKey
+              ) {
+                event.preventDefault();
+                onRecallQueued();
+                return;
+              }
               if (
                 event.nativeEvent.isComposing ||
                 composingRef.current ||
