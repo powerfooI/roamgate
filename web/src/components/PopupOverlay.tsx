@@ -281,7 +281,10 @@ export function PopupOverlay({
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
-      if (!store.get().popup && client.isCurrent()) {
+      // Closed, or asked to: the overlay is gone either way.
+      const gone = () =>
+        !store.get().popup || store.get().popupMoving === "closing";
+      if (gone() && client.isCurrent()) {
         const previous = previousFocusRef.current;
         previousFocusRef.current = null;
         // A pane shown as a chat gets the keys back in its message box,
@@ -289,7 +292,7 @@ export function PopupOverlay({
         const input = activeTerminalInput(document);
         if (input?.closest(".agent-history-composer"))
           requestAnimationFrame(() => {
-            if (!store.get().popup) input.focus({ preventScroll: true });
+            if (gone()) input.focus({ preventScroll: true });
           });
         else if (previous?.isConnected) previous.focus();
       }

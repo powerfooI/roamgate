@@ -287,7 +287,18 @@ function PopupOverlay({
   // Gate the dynamic import on popup presence, not just its content, so a
   // session that never opens one never fetches xterm.js for it.
   const hasPopup = useStoreSelector((s) => s.popup !== null);
-  if (!hasPopup) return null;
+  const moving = useStoreSelector((s) => s.popupMoving);
+  // Fetched once the page is idle, so the first popup does not wait for it.
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => void import("./components/PopupOverlay").catch(() => {}),
+      5000,
+    );
+    return () => window.clearTimeout(timer);
+  }, []);
+  // Asked to close: gone at once; asked to open: its frame, at once.
+  if (moving === "closing") return null;
+  if (!hasPopup) return moving === "opening" ? <PopupOpening /> : null;
   return (
     <Suspense fallback={null}>
       <LazyPopupOverlay
@@ -296,6 +307,18 @@ function PopupOverlay({
         terminalFontScale={terminalFontScale}
       />
     </Suspense>
+  );
+}
+
+/** The popup's frame while Herdr opens it, before its terminal comes. */
+function PopupOpening() {
+  return (
+    <div className="popup-overlay-backdrop is-opening" role="status">
+      <div className="popup-overlay-body">
+        <span className="terminal-loading-dot" />
+        Opening…
+      </div>
+    </div>
   );
 }
 

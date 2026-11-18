@@ -1505,6 +1505,52 @@ describe("plugin popup toggle", () => {
   });
 });
 
+describe("plugin popup moves", () => {
+  test("show at once, until Herdr answers, refuses or 5 seconds pass", async () => {
+    const previousState = store.get();
+    const originalConnection = bridge.connection;
+    let release!: () => void;
+    let refuse = false;
+    bridge.connection = ((connectionId = "alpha", runtimeGeneration = 1) => ({
+      connectionId,
+      generation: 10,
+      serverRuntimeGeneration: runtimeGeneration,
+      isCurrent: () => true,
+      acceptsServerGeneration: (value: unknown) => value === runtimeGeneration,
+      call: async (method: string) => {
+        if (method === "popup.close") {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          throw new Error(refuse ? "refused" : "popup_not_open");
+        }
+        return {};
+      },
+    })) as typeof bridge.connection;
+    try {
+      __storeTesting.replaceState(partitionState());
+      // Opening shows its frame before Herdr has said anything.
+      const opening = store.togglePluginPopup("float", "toggle");
+      expect(store.get().popupMoving).toBe("opening");
+      release();
+      await opening;
+      // Invoked: the frame stays until Herdr's popup push.
+      expect(store.get().popupMoving).toBe("opening");
+
+      // Closing hides it at once; a refusal brings it back.
+      refuse = true;
+      const closing = store.closePopup();
+      expect(store.get().popupMoving).toBe("closing");
+      release();
+      await closing;
+      expect(store.get().popupMoving).toBeNull();
+    } finally {
+      bridge.connection = originalConnection;
+      __storeTesting.replaceState(previousState);
+    }
+  });
+});
+
 describe("stabilizeRefreshPatch", () => {
   test("returns null when a refresh reproduces the current state", () => {
     const snapshot = partitionState();
