@@ -63,11 +63,11 @@ async function withMarkdownDom<T>(render: () => T): Promise<T> {
   }
 }
 
-test("chat renders user text plainly, assistant markdown, and collapsed tool blocks", async () => {
+test("chat renders plain user text as typed, assistant markdown, and collapsed tool blocks", async () => {
   const markup = await withMarkdownDom(() =>
     renderChat(
       [
-        entry("1", "user", { text: "**not bold**" }),
+        entry("1", "user", { text: "src/**/*.ts and 2 * 3" }),
         entry("2", "tool", { tool_name: "bash", text: "", text_bytes: 12 }),
         entry("3", "tool", {
           kind: "tool_result",
@@ -80,7 +80,7 @@ test("chat renders user text plainly, assistant markdown, and collapsed tool blo
       2,
     ),
   );
-  expect(markup).toContain("<p>**not bold**</p>");
+  expect(markup).toContain("<p>src/**/*.ts and 2 * 3</p>");
   expect(markup).toContain("<strong>bold</strong>");
   // Tool blocks start collapsed: a summary row only, no entry list.
   expect(markup).toContain('aria-expanded="false"');

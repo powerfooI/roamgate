@@ -160,11 +160,14 @@ Inspector state is scoped to each checkout; see
   pane's host through the file download, instead of its path; a click shows
   it over the app fitted to the window (a click on it gives its own size;
   Esc, the backdrop or the close button put it away), and Cmd, Ctrl or a
-  middle click opens it in a tab. In a Claude session, typing `/` lists the
-  commands that match what follows (Claude Code's own, then the session's
-  skills and custom commands, read from its transcript); a click, or the
-  arrows and Tab or Enter, fill in `/name`, Enter on a whole name sends it,
-  and Esc closes the list. **Vim keys in agent chats** in Configuration >
+  middle click opens it in a tab. Your own messages written in Markdown (a
+  code fence, inline code, a list, a link, emphasis) render as the agent's
+  replies do; plain text, and text that only holds Markdown's characters (an
+  `_` or a `*` in a path), shows as typed. In a Claude session, typing `/`
+  lists the commands that match what follows (Claude Code's own, then the
+  session's skills and custom commands, read from its transcript); a click,
+  or the arrows and Tab or Enter, fill in `/name`, Enter on a whole name
+  sends it, and Esc closes the list. **Vim keys in agent chats** in Configuration >
   Behavior (off by default) makes chat message boxes Vim editors: insert mode
   first, `:w` sends, PageUp/PageDown scroll the conversation, and on touch
   screens an **Esc** button stands in for the missing key. Enter sends and Shift+Enter adds a line; on
