@@ -3,6 +3,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { marked } from "marked";
 import { lazyWithReload } from "../lazyWithReload";
+import { useForgeSlots } from "../forgeSlots";
 import "./markdown.css";
 const MermaidDiagram = lazyWithReload("mermaid-preview", () =>
   import("./MermaidDiagram").then((module) => ({
@@ -357,6 +358,9 @@ export function MarkdownPreview({
     };
   }, [html]);
 
+  // A chat's merge and pull request references, as chips.
+  const forgeChips = useForgeSlots(articleRef, html);
+
   useEffect(() => {
     if (!onSelectionChange) return;
     let frame = 0;
@@ -383,6 +387,7 @@ export function MarkdownPreview({
           if (event.button === 1) openLink(event);
         }}
         className={`file-preview-markdown ${className}`.trim()}
+        data-forge-scan=""
         onPointerDown={() => onSelectionChange?.(null)}
         onPointerUp={() => {
           requestAnimationFrame(() => {
@@ -411,6 +416,7 @@ export function MarkdownPreview({
           String(index),
         ),
       )}
+      {forgeChips}
     </>
   );
 }

@@ -1,0 +1,441 @@
+.forge-slot {
+  display: inline;
+}
+
+/*
+ * Inline boxes, not flex: a chip flows with the sentence around it, and
+ * selecting the sentence copies it as written (no line breaks around the
+ * reference).
+ */
+.forge-chip {
+  padding: 1px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--panel-2);
+  font-size: 0.86em;
+  line-height: 1.6;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* Message links are underlined (Markdown): a chip is not. */
+.forge-chip-main,
+.forge-chip-main:visited,
+.file-preview-markdown a.forge-chip-main {
+  color: var(--text);
+  text-decoration: none;
+}
+
+a.forge-chip-main:hover .forge-chip-ref {
+  text-decoration: underline;
+}
+
+.forge-chip svg {
+  vertical-align: -2px;
+}
+
+.forge-chip-main > svg:first-child {
+  margin-right: 3px;
+  color: var(--accent);
+}
+
+.forge-chip.is-merged .forge-chip-main > svg:first-child {
+  color: var(--syntax-keyword);
+}
+
+.forge-chip.is-closed .forge-chip-main > svg:first-child,
+.forge-chip.is-muted .forge-chip-main > svg:first-child {
+  color: var(--muted);
+}
+
+/* A long chip wraps between its parts, never inside one. */
+.forge-chip-main > *,
+.forge-chip-info > * {
+  white-space: nowrap;
+}
+
+.forge-chip-ref {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * What the forge says is shown, not part of the message: selecting the
+ * message (to quote it to the agent) leaves it out.
+ */
+.forge-chip-info {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.forge-chip-info > * {
+  margin-left: 4px;
+}
+
+.forge-chip-state {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--info-text);
+  font-size: 0.86em;
+}
+
+.forge-chip-state.is-merged {
+  background: color-mix(in srgb, var(--syntax-keyword) 22%, transparent);
+  color: var(--syntax-keyword);
+}
+
+.forge-chip-state.is-closed,
+.forge-chip-state.is-locked,
+.forge-chip-state.is-muted,
+.forge-chip-state.is-draft {
+  background: var(--border-soft);
+  color: var(--muted);
+}
+
+.forge-chip-state.is-error {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+.forge-chip-count {
+  color: var(--muted);
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.forge-chip-count svg {
+  margin-right: 1px;
+}
+
+.forge-chip-count.is-threads {
+  color: var(--warning-text);
+}
+
+.forge-chip-title {
+  display: inline-block;
+  overflow: hidden;
+  max-width: min(24ch, 100%);
+  color: var(--muted);
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+/* On a phone the hover card (a long press) has the title. */
+@media (max-width: 640px) {
+  .forge-chip-title,
+  .forge-header-noun {
+    display: none;
+  }
+}
+
+.forge-chip-loading,
+.forge-pipeline.is-running {
+  animation: forge-spin 1.2s linear infinite;
+}
+
+@keyframes forge-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .forge-chip-loading,
+  .forge-pipeline.is-running {
+    animation: none;
+  }
+}
+
+.forge-pipeline.is-success {
+  color: var(--green);
+}
+
+.forge-pipeline.is-failed {
+  color: var(--red);
+}
+
+.forge-pipeline.is-running,
+.forge-pipeline.is-pending {
+  color: var(--yellow);
+}
+
+.forge-pipeline.is-canceled,
+.forge-pipeline.is-skipped,
+.forge-pipeline.is-manual {
+  color: var(--muted);
+}
+
+/* The header's chip: the branch's request. */
+.forge-header {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 0;
+}
+
+.forge-chip.is-header {
+  font-size: 12px;
+}
+
+.forge-header-many {
+  display: inline-flex;
+  flex: none;
+  white-space: nowrap;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.forge-header-many > svg:first-child {
+  color: var(--accent);
+}
+
+.forge-menu-root {
+  position: relative;
+  display: inline-flex;
+}
+
+.forge-menu-button {
+  gap: 2px;
+  width: auto;
+  padding: 0 4px;
+  color: var(--accent);
+}
+
+.forge-menu-button span {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.forge-menu {
+  position: fixed;
+  z-index: 40;
+  max-width: calc(100vw - 32px);
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+}
+
+.forge-menu h3 {
+  margin: 2px 6px 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.forge-menu h4 {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 8px 6px 2px;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.forge-menu h4 small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.forge-menu ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.forge-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.forge-row-main {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.forge-row-main[aria-disabled="true"] {
+  pointer-events: none;
+}
+
+.forge-row-main:hover,
+.forge-row-main:focus-visible {
+  background: var(--panel-2);
+}
+
+.forge-row-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.forge-row-repo {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.forge-row-ref {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.forge-row-tag {
+  overflow: hidden;
+  max-width: 16ch;
+  padding: 0 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.forge-row-title {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The hover card. */
+.forge-card {
+  position: fixed;
+  z-index: 60;
+  max-width: calc(100vw - 24px);
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.forge-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.forge-card-head small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.forge-card-title {
+  margin: 4px 0 8px;
+  color: var(--text-strong);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.forge-card dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0;
+}
+
+.forge-card dt {
+  color: var(--muted);
+}
+
+.forge-card dd {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.forge-card-branches {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+
+.forge-card-jobs {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.forge-card-jobs > span {
+  color: var(--danger-text);
+  font-weight: 600;
+}
+
+.forge-card-jobs ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
+.forge-card-jobs small {
+  margin-right: 4px;
+  color: var(--muted);
+}
+
+.forge-card-note {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.forge-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.forge-card-actions a,
+.forge-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.forge-card-actions a:hover,
+.forge-card-actions button:hover {
+  background: var(--accent-soft);
+}
