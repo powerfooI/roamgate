@@ -327,6 +327,17 @@ state; sends are never replayed.
   boot ID), an interrupted run does not resume; a new run reads its workspaces
   again, keeps one whose ID still holds the same path and checkout under the
   new boot ID, and skips and names one whose ID now holds another workspace.
+  Each saved workspace is compared with the boot ID of now, so a task can keep
+  workspaces of one connection checked on two boots.
+- **Unreachable connections:** a new run (scheduled or Run now) waits up to
+  five minutes, woken by connection state changes, for a connection that is
+  connecting, reconnecting, or failed and retrying; one the user disconnected
+  is not waited for. It then runs without the workspaces of a connection still
+  down and names it with its state in the notice, or fails naming the
+  connections when nothing can be reached. An interrupted run resumes only
+  over all of its workspaces. A run that cannot start names the workspace,
+  connection, provider or step that failed; messages that may carry transport
+  or credential details stay masked.
 
 ## Task notifications
 

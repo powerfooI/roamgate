@@ -46,6 +46,7 @@ import {
 import { assertSafeDataPath, dataRoot } from "../config/data-paths";
 import { roamgateEnv } from "../config/environment";
 import {
+  type AssistantConnectionState,
   type AssistantContext,
   AssistantRecoveryNotReadyError,
   type RecoveryTarget,
@@ -132,6 +133,18 @@ type QueuedMessage = AssistantQueuedMessage & {
   scope?: AssistantWorkspaceRef[];
 };
 const MAX_STEERS = 8;
+/**
+ * How long a new task run waits for its connections that are down for now
+ * (connecting, reconnecting or failed and retrying) before it runs without
+ * their workspaces.
+ */
+export const TASK_CONNECTION_WAIT_MS = 5 * 60_000;
+/** Connection states that may become ready on their own. */
+const PASSING_CONNECTION_STATES = new Set([
+  "connecting",
+  "reconnecting",
+  "error",
+]);
 
 function savedSteers(value: unknown): SavedSteer[] {
   if (!Array.isArray(value) || value.length > MAX_STEERS)
@@ -2583,6 +2596,65 @@ export function createAssistantService(options: {
     return "closed";
   }
   /**
+   * The task's connections that are down now, after waiting up to
+   * TASK_CONNECTION_WAIT_MS for those that may come back on their own, woken
+   * by their state changes. One the user disconnected is not waited for.
+   * Without connection states (older bridges), none is down here and
+   * validation waits on them as before.
+   */
+  function downConnections(connectionIds: Iterable<string>) {
+    const down: (AssistantConnectionState & { id: string })[] = [];
+    for (const id of new Set(connectionIds)) {
+      const status = context.connectionState?.(id);
+      if (status && status.state !== "ready") down.push({ ...status, id });
+    }
+    return down;
+  }
+  async function awaitConnections(
+    connectionIds: string[],
+    signal?: AbortSignal,
+  ) {
+    const passing = () =>
+      downConnections(connectionIds).some((item) =>
+        PASSING_CONNECTION_STATES.has(item.state),
+      );
+    if (!passing() || !context.watchConnections)
+      return downConnections(connectionIds);
+    await new Promise<void>((resolve, reject) => {
+      let unwatch = () => {};
+      const finish = () => {
+        clearTimeout(timer);
+        unwatch();
+        signal?.removeEventListener("abort", abort);
+      };
+      const abort = () => {
+        finish();
+        reject(signal?.reason ?? new Error("The task run was stopped."));
+      };
+      const check = () => {
+        if (passing()) return;
+        finish();
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        finish();
+        resolve();
+      }, TASK_CONNECTION_WAIT_MS);
+      if (signal?.aborted) return abort();
+      signal?.addEventListener("abort", abort, { once: true });
+      unwatch = context.watchConnections!(check);
+      check();
+    });
+    signal?.throwIfAborted();
+    // A connection back lists its workspaces again.
+    await workspaceCatalog();
+    signal?.throwIfAborted();
+    return downConnections(connectionIds);
+  }
+  /** Why a connection cannot be reached, as its state says. */
+  const connectionWhy = (item: AssistantConnectionState) =>
+    `connection: ${item.state}${item.error ? `, ${item.error.slice(0, 200)}` : ""}`;
+  /**
    * The task targets on connections whose Herdr restarted since they were
    * checked, checked again for a new run: each is found again by its id,
    * with the current server identity, when that id still holds the same
@@ -2681,16 +2753,37 @@ export function createAssistantService(options: {
    * says which it skipped. A workspace still open that Ranger may no longer
    * use is kept, so that validation refuses the run. After a connection's
    * Herdr restarted, its workspaces are found again for the run (see
-   * reidentify) instead of failing it on the old server identity.
+   * reidentify) instead of failing it on the old server identity. The
+   * workspaces of a connection down for now are skipped once it was waited
+   * for (see awaitConnections), and named with why.
    */
-  async function narrowTask(prepared: PreparedTask, signal?: AbortSignal) {
+  async function narrowTask(
+    prepared: PreparedTask,
+    signal?: AbortSignal,
+    wait = true,
+  ) {
     await workspaceCatalog();
     signal?.throwIfAborted();
+    const connections = prepared.targets
+      .filter((target) => !workspaceRemoved(target))
+      .map((target) => target.connection_id);
+    const down = wait
+      ? await awaitConnections(connections, signal)
+      : downConnections(connections);
+    const downIds = new Set(down.map((item) => item.id));
     const gone = prepared.targets.filter((target) => workspaceRemoved(target));
-    const open = prepared.targets.filter((target) => !workspaceRemoved(target));
+    const away = prepared.targets.filter(
+      (target) =>
+        !workspaceRemoved(target) && downIds.has(target.connection_id),
+    );
+    const open = prepared.targets.filter(
+      (target) =>
+        !workspaceRemoved(target) && !downIds.has(target.connection_id),
+    );
     const { refreshed, changed, restarted } = await reidentify(open, signal);
     signal?.throwIfAborted();
-    if (!gone.length && !changed.length && !refreshed.size) return undefined;
+    if (!gone.length && !away.length && !changed.length && !refreshed.size)
+      return undefined;
     const skipped: string[] = [];
     for (const target of gone)
       skipped.push(
@@ -2699,12 +2792,38 @@ export function createAssistantService(options: {
     for (const { target, why } of changed)
       skipped.push(`${savedName(prepared, target)} (${why})`);
     signal?.throwIfAborted();
-    if (skipped.length === prepared.targets.length)
+    const unreachable = down.flatMap((item) => {
+      const count = away.filter(
+        (target) => target.connection_id === item.id,
+      ).length;
+      return count
+        ? [
+            `${item.label || item.id} unreachable: ${count === 1 ? "a workspace" : `${count} workspaces`} skipped (${connectionWhy(item)})`,
+          ]
+        : [];
+    });
+    if (
+      gone.length + away.length + changed.length ===
+      prepared.targets.length
+    ) {
+      // A check before the run: the run waits for them first.
+      if (!wait && away.length)
+        throw new AssistantRecoveryNotReadyError(
+          "None of the task's workspaces can be reached yet.",
+        );
       throw new AssistantUserError(
-        `None of the task's workspaces is open any more: ${namedList(skipped)}. Edit the task to choose its workspaces again.`,
+        away.length
+          ? `None of the task's workspaces can be reached: ${[
+              ...unreachable,
+              ...(skipped.length
+                ? [`no longer open: ${namedList(skipped)}`]
+                : []),
+            ].join("; ")}.`
+          : `None of the task's workspaces is open any more: ${namedList(skipped)}. Edit the task to choose its workspaces again.`,
       );
+    }
     const left = new Set(
-      [...gone, ...changed.map(({ target }) => target)].map(refKey),
+      [...gone, ...away, ...changed.map(({ target }) => target)].map(refKey),
     );
     const keep = <T extends AssistantWorkspaceRef>(refs: T[]) =>
       refs.filter((ref) => !left.has(refKey(ref)));
@@ -2716,6 +2835,7 @@ export function createAssistantService(options: {
             `Herdr on ${namedList(restarted)} restarted since the task was saved: its workspaces were checked again.`,
           ]
         : []),
+      ...unreachable.map((line) => `${line}.`),
       ...(skipped.length
         ? [
             `Skipped ${skipped.length === 1 ? "a workspace" : `${skipped.length} workspaces`} no longer open: ${namedList(skipped)}. Edit the task to update its workspaces.`,
@@ -2759,15 +2879,43 @@ export function createAssistantService(options: {
           ? `The original task permission is unavailable for ${refused}.`
           : "The original task permission is unavailable.",
       );
-    const available = await driver.catalog(prepared.config.credential_source);
-    const restored = await context.restoreScope(prepared.targets, signal);
-    if (prepared.input.mentions?.length) {
-      if (!context.bindMentions)
-        throw new Error("Task references are unavailable.");
-      await context.bindMentions(
-        restored,
-        restoredMentions(prepared.input.mentions, restored),
-        signal,
+    let available: Awaited<ReturnType<AssistantDriver["catalog"]>>;
+    try {
+      available = await driver.catalog(prepared.config.credential_source);
+    } catch {
+      signal?.throwIfAborted();
+      // Provider errors can carry credentials: say which, not what it said.
+      throw new AssistantUserError(
+        `The models of ${prepared.config.provider} could not be listed. Check its sign-in in Ranger's settings.`,
+      );
+    }
+    const restore = async () => {
+      const restored = await context.restoreScope!(prepared.targets, signal);
+      if (prepared.input.mentions?.length) {
+        if (!context.bindMentions)
+          throw new AssistantUserError(
+            "This bridge cannot restore the task's references.",
+          );
+        await context.bindMentions(
+          restored,
+          restoredMentions(prepared.input.mentions, restored),
+          signal,
+        );
+      }
+    };
+    try {
+      await restore();
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (
+        error instanceof AssistantUserError ||
+        error instanceof AssistantRecoveryNotReadyError
+      )
+        throw error;
+      // The workspace context's own messages: transport details are masked
+      // there already (readLeased).
+      throw new AssistantUserError(
+        `The task's workspaces could not be checked: ${error instanceof Error ? error.message : "unknown error"}.`,
       );
     }
     signal?.throwIfAborted();
@@ -2875,6 +3023,17 @@ export function createAssistantService(options: {
       throw new AssistantUserError(
         "These workspace connections do not support safe scheduled tasks.",
       );
+    // Those whose workspaces it may use: all of them, or those of its grant.
+    const down = await awaitConnections(
+      allWorkspaces()
+        ? (workspaceInventory?.connection_ids ?? [])
+        : effectiveScope().map((ref) => ref.connection_id),
+      signal,
+    );
+    const unreachable = down.map(
+      (item) =>
+        `${item.label || item.id} unreachable: its workspaces were skipped (${connectionWhy(item)})`,
+    );
     const listed = new Set((workspaceInventory?.workspaces ?? []).map(refKey));
     const granted = effectiveScope();
     const usable = granted.filter(
@@ -2893,7 +3052,9 @@ export function createAssistantService(options: {
     const scope = allowed.filter((ref) => supported.has(refKey(ref)));
     if (!scope.length)
       throw new AssistantUserError(
-        "No workspace Ranger may use is available for this task.",
+        unreachable.length
+          ? `No workspace Ranger may use can be reached for this task: ${unreachable.join("; ")}.`
+          : "No workspace Ranger may use is available for this task.",
       );
     const inScope = new Set(scope.map(refKey));
     const { mentions, ...input } = prepared.input;
@@ -2904,8 +3065,15 @@ export function createAssistantService(options: {
       captured.filter((workspace) => inScope.has(refKey(workspace))),
       prepared.config,
     );
-    if (cut)
-      rescoped.notice = `Ranger uses at most ${ASSISTANT_MAX_WORKSPACES} workspaces at once: this run may have left out some it may use.`;
+    const notices = [
+      ...unreachable.map((line) => `${line}.`),
+      ...(cut
+        ? [
+            `Ranger uses at most ${ASSISTANT_MAX_WORKSPACES} workspaces at once: this run may have left out some it may use.`,
+          ]
+        : []),
+    ];
+    if (notices.length) rescoped.notice = notices.join(" ");
     return rescoped;
   }
   if (!options.taskRun) {
@@ -2953,10 +3121,22 @@ export function createAssistantService(options: {
           async start(recover) {
             if (recover && child.peek().running) await child.resume();
             else
-              await child.handle("send", {
-                request_id: taskRun.id,
-                text: taskRun.input.prompt,
-              });
+              try {
+                await child.handle("send", {
+                  request_id: taskRun.id,
+                  text: taskRun.input.prompt,
+                });
+              } catch (error) {
+                if (
+                  error instanceof AssistantUserError ||
+                  error instanceof AssistantRecoveryNotReadyError
+                )
+                  throw error;
+                // send's own fixed messages: it masks provider errors.
+                throw new AssistantUserError(
+                  `Ranger could not start the run: ${error instanceof Error ? error.message : "unknown error"}.`,
+                );
+              }
           },
           resume: () => child.resume(),
           stop: async () => {

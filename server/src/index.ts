@@ -469,9 +469,19 @@ function connectionFailureReporter(connectionId: string): RecoveryReporter {
   return reporter;
 }
 
+// Ranger's scheduled tasks wait on these for a connection to come back.
+const connectionStatusListeners = new Set<() => void>();
 const connectionManager = new ConnectionManager<LegacyConnectionRuntime>(
   connectionBootstrap.defaultConnectionId,
   (status) => {
+    for (const listener of connectionStatusListeners)
+      try {
+        listener();
+      } catch (error) {
+        logger.warn("connection status listener failed", {
+          error: sanitizeConnectionError(error),
+        });
+      }
     const fields = {
       connection: status.id,
       state: status.state,
@@ -512,6 +522,19 @@ const assistantContext = createAssistantContext({
       .find((profile) => profile.id === id);
     if (!profile) throw new Error("Ranger connection is no longer configured");
     return connectionRecoveryFingerprint(profile);
+  },
+  connectionStatus: (id) => {
+    if (!connectionManager.has(id)) return undefined;
+    const status = connectionManager.status(id);
+    return {
+      label: status.label,
+      state: status.state,
+      ...(status.error ? { error: status.error.message } : {}),
+    };
+  },
+  watchConnections: (listener) => {
+    connectionStatusListeners.add(listener);
+    return () => connectionStatusListeners.delete(listener);
   },
   createWorktree: (runtime, params, isCurrent, beforeDispatch) =>
     createWorkspaceWorktree(
