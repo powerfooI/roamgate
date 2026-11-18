@@ -18,6 +18,7 @@ export function ImageLightbox({
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const [actualSize, setActualSize] = useState(false);
   // What has the focus as it opens, before its close button takes it.
   const [opener] = useState(() =>
@@ -30,6 +31,10 @@ export function ImageLightbox({
     if (!dialog) return;
     if (typeof dialog.showModal === "function") dialog.showModal();
     else dialog.setAttribute("open", "");
+    // Enter right after opening must not leave for a tab: showModal() puts
+    // the focus on the first control, "Open in a new tab", so the close
+    // button takes it once the dialog shows (React's autoFocus ran before).
+    closeRef.current?.focus({ preventScroll: true });
     return () => {
       if (dialog.open) dialog.close?.();
       opener?.focus({ preventScroll: true });
@@ -75,11 +80,10 @@ export function ImageLightbox({
           <ExternalLink size={15} aria-hidden="true" />
         </a>
         <button
+          ref={closeRef}
           type="button"
           className="image-lightbox-button"
           onClick={onClose}
-          // Enter right after opening must not leave for a tab.
-          autoFocus
           aria-label="Close"
           title="Close (Esc)"
         >

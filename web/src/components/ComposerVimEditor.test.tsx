@@ -29,6 +29,7 @@ if (process.env.ROAMGATE_COMPOSER_VIM_DOM_TEST !== "1") {
       Node: browser.Node,
       Text: browser.Text,
       Event: browser.Event,
+      KeyboardEvent: browser.KeyboardEvent,
       MutationObserver: browser.MutationObserver,
       getSelection: () => browser.getSelection(),
       requestAnimationFrame: (callback: FrameRequestCallback) =>
@@ -86,6 +87,56 @@ if (process.env.ROAMGATE_COMPOSER_VIM_DOM_TEST !== "1") {
     Vim.handleKey(cm, "<Esc>", "user");
     await render("from the terminal");
     expect(insert()).toBe(false);
+    await React.act(async () => root.unmount());
+  });
+
+  test("Enter in normal mode never adds a line where Enter does not send", async () => {
+    const { ComposerVimEditor } = await import("./ComposerVimEditor");
+    const { getCM, Vim } = await import("@replit/codemirror-vim");
+    const { EditorView } = await import("@codemirror/view");
+    const { createRoot } = await import("react-dom/client");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    let sent = 0;
+    await React.act(async () =>
+      root.render(
+        <ComposerVimEditor
+          value={"first\nsecond"}
+          selection={null}
+          placeholder="Message"
+          label="Message"
+          enterSends={false}
+          onChange={() => {}}
+          onSelect={() => {}}
+          onSubmit={() => sent++}
+          onPasteImages={() => {}}
+          onComposingChange={() => {}}
+        />,
+      ),
+    );
+    const view = EditorView.findFromDOM(
+      container.querySelector(".cm-editor") as HTMLElement,
+    )!;
+    const cm = getCM(view)!;
+    const enter = () =>
+      view.contentDOM.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    view.contentDOM.dispatchEvent(new Event("focus"));
+    // Insert mode: a line, as a touch screen's Enter adds.
+    enter();
+    expect(view.state.doc.toString()).toBe("first\nsecond\n");
+    Vim.handleKey(cm, "<Esc>", "user");
+    // Normal mode: Vim's Enter (to the next line), the text as it was.
+    enter();
+    expect(view.state.doc.toString()).toBe("first\nsecond\n");
+    expect(cm.state.vim?.insertMode).toBeFalsy();
+    expect(sent).toBe(0);
     await React.act(async () => root.unmount());
   });
 }

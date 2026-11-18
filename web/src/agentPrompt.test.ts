@@ -278,3 +278,23 @@ test("a permission question starts under the rule over its dialog", () => {
     "No",
   ]);
 });
+
+test("with the cursor on an editable rule, choices are reached with the arrows", () => {
+  const screen = (cursor: number) => [
+    "──────────────────────────────────────────────",
+    " Bash command",
+    "   curl -s https://example.com",
+    " Do you want to proceed?",
+    `${cursor === 1 ? " ❯" : "  "} 1. Yes`,
+    `${cursor === 2 ? " ❯" : "  "} 2. Yes, and don't ask again for: curl *`,
+    `${cursor === 3 ? " ❯" : "  "} 3. No, and tell Claude what to do differently (esc)`,
+  ];
+  // Elsewhere, a number answers as it does on the terminal.
+  expect(
+    parseAgentPrompt(screen(1)).options.map((option) => option.input),
+  ).toEqual(["1", "2", "3"]);
+  // On it, a number would be written into the rule.
+  expect(
+    parseAgentPrompt(screen(2)).options.map((option) => option.input),
+  ).toEqual(["\x1b[A\r", "\r", "\x1b[B\r"]);
+});
