@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { enrichAgentActivity } from "./agent-activity";
+import {
+  enrichAgentActivity,
+  REMOTE_ACTIVITY_REUSE_MS,
+} from "./agent-activity";
 import { createAgentSessionResolverContext } from "./session-resolver";
 import { createAgentSessionHandlers } from "./agent-sessions";
 import {
@@ -136,6 +139,46 @@ describe("agent activity timestamps", () => {
       (await list(handlers(snapshot, files(200)))).agents[0]?.last_activity_at,
     ).toBe(200);
     expect(paths).toEqual(["/remote/session", "/remote/session"]);
+  });
+
+  test("over SSH, reuses an agent's activity time while its state stays", async () => {
+    const paths: string[] = [];
+    let mtimeMs = 100;
+    const files: AgentSessionFileAccess = {
+      ...localAgentSessionFiles,
+      remote: true,
+      ...noTranscriptReads,
+      async statFile(path) {
+        paths.push(path);
+        return { path, mtimeMs };
+      },
+    };
+    const realNow = Date.now;
+    let now = realNow();
+    Date.now = () => now;
+    try {
+      let snapshot = [agent("path", "/remote/session")];
+      const handler = createAgentSessionHandlers({
+        files,
+        herdrCall: async () => ({ agents: snapshot }),
+      });
+      const time = async () =>
+        (await list(handler)).agents[0]?.last_activity_at;
+      expect(await time()).toBe(100);
+      mtimeMs = 200;
+      expect(await time()).toBe(100);
+      expect(paths).toHaveLength(1);
+      // Its agent changed state: stat again.
+      snapshot = [agent("path", "/remote/session", 2)];
+      expect(await time()).toBe(200);
+      expect(paths).toHaveLength(2);
+      mtimeMs = 300;
+      now += REMOTE_ACTIVITY_REUSE_MS;
+      expect(await time()).toBe(300);
+      expect(paths).toHaveLength(3);
+    } finally {
+      Date.now = realNow;
+    }
   });
 
   test("bounds concurrent stats while preserving the source ordering", async () => {

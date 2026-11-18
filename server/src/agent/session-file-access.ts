@@ -14,6 +14,36 @@ const SESSION_READ_TIMEOUT_MS = 60_000;
  */
 const KEPT_TEXT_BYTES = 64 * 1024 * 1024;
 const KEPT_TEXT_OVERLAP = 4096;
+/** How long stats wait for others to share one SSH command with. */
+export const STAT_BATCH_WINDOW_MS = 25;
+/** At most this many paths in one stat command. */
+const STAT_BATCH_PATHS = 64;
+/**
+ * A line per path, in order: "-" when it is not a file, "!" when it could
+ * not be read, else "+" and its size, mtime, base64 path, identity and
+ * change token (GNU stat, else BSD stat).
+ */
+const STAT_BATCH_SCRIPT = `for path in "$@"; do
+  if [ ! -f "$path" ]; then echo -; continue; fi
+  size="$(stat -c %s "$path" 2>/dev/null || stat -f %z "$path" 2>/dev/null)" &&
+  mtime="$(stat -c %Y "$path" 2>/dev/null || stat -f %m "$path" 2>/dev/null)" &&
+  identity="$(stat -c '%d:%i' "$path" 2>/dev/null || stat -f '%d:%i' "$path" 2>/dev/null)" &&
+  change="$(stat -c '%y:%z' "$path" 2>/dev/null || stat -f '%Fm:%Fc' "$path" 2>/dev/null)" &&
+  path64="$(printf '%s' "$path" | base64 | tr -d '\\n')" ||
+  { echo '!'; continue; }
+  printf '+%s\\t%s\\t%s\\t%s\\t%s\\n' "$size" "$mtime" "$path64" "$identity" "$change"
+done`;
+
+type StatBatch = {
+  paths: Map<
+    string,
+    {
+      resolve: (file: SessionFile | null) => void;
+      reject: (error: Error) => void;
+      promise: Promise<SessionFile | null>;
+    }
+  >;
+};
 
 type RunBinaryProcessWithTimeout = (
   argv: string[],
@@ -241,40 +271,74 @@ export function createAgentSessionFileAccess(args: {
     return result.stdout;
   }
 
-  async function statFile(path: string) {
-    const command = `
-set -eu
-path=${args.shQuote(path)}
-[ -f "$path" ] || exit 44
-size="$(stat -c %s "$path" 2>/dev/null || stat -f %z "$path")"
-mtime="$(stat -c %Y "$path" 2>/dev/null || stat -f %m "$path")"
-path64="$(printf '%s' "$path" | base64 | tr -d '\\n')"
-identity="$(stat -c '%d:%i' "$path" 2>/dev/null || stat -f '%d:%i' "$path")"
-change="$(stat -c '%y:%z' "$path" 2>/dev/null || stat -f '%Fm:%Fc' "$path")"
-printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$size" "$mtime" "$path64" "$identity" "$change"
-`;
-    const result = await args.runBinaryProcessWithTimeout(
-      sshReadCommandArgv(
-        host,
-        `bash -lc ${args.shQuote(command)}`,
-        [],
-        "agent.session.stat",
-      ),
-      SESSION_FILE_TIMEOUT_MS,
-    );
-    if (result.code === 44) return null;
-    if (result.code !== 0) {
-      throw new Error(
-        (
-          result.stderr ||
-          result.stdout.toString("utf8") ||
-          `remote session stat exited ${result.code}`
-        )
-          .trim()
-          .slice(0, 1000),
+  // Stats asked together (a poll over every pane, a session's subagents)
+  // go out as one SSH command: each would otherwise hold one of the host's
+  // few session slots. A stat joins only a batch not sent yet, so its answer
+  // is never older than the call.
+  let statBatch: StatBatch | null = null;
+
+  async function flushStats(paths: StatBatch["paths"]): Promise<void> {
+    const entries = [...paths];
+    try {
+      const result = await args.runBinaryProcessWithTimeout(
+        sshReadCommandArgv(
+          host,
+          `bash -c ${args.shQuote(STAT_BATCH_SCRIPT)} stat ${entries
+            .map(([path]) => args.shQuote(path))
+            .join(" ")}`,
+          [],
+          "agent.session.stat",
+        ),
+        SESSION_FILE_TIMEOUT_MS,
       );
+      if (result.code !== 0)
+        throw new Error(
+          (
+            result.stderr ||
+            result.stdout.toString("utf8") ||
+            `remote session stat exited ${result.code}`
+          )
+            .trim()
+            .slice(0, 1000),
+        );
+      const lines = result.stdout.toString("utf8").split("\n");
+      entries.forEach(([path, waiter], index) => {
+        const line = lines[index] ?? "";
+        if (line === "-") waiter.resolve(null);
+        else if (line.startsWith("+")) {
+          const file = parseRemoteFileMetadata(line.slice(1));
+          if (file?.path === path) waiter.resolve(file);
+          else waiter.reject(new Error("remote session stat answered badly"));
+        } else waiter.reject(new Error(`remote session stat failed: ${path}`));
+      });
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      for (const [, waiter] of entries) waiter.reject(failure);
     }
-    return parseRemoteFileMetadata(result.stdout.toString("utf8"));
+  }
+
+  function statFile(path: string): Promise<SessionFile | null> {
+    if (!statBatch) {
+      const batch: StatBatch = { paths: new Map() };
+      statBatch = batch;
+      setTimeout(() => {
+        if (statBatch === batch) statBatch = null;
+        void flushStats(batch.paths);
+      }, STAT_BATCH_WINDOW_MS);
+    }
+    const batch = statBatch;
+    const known = batch.paths.get(path);
+    if (known) return known.promise;
+    let resolve!: (file: SessionFile | null) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<SessionFile | null>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    batch.paths.set(path, { resolve, reject, promise });
+    // A full command line goes now; the next stat starts another.
+    if (batch.paths.size >= STAT_BATCH_PATHS) statBatch = null;
+    return promise;
   }
 
   /**

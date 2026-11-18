@@ -431,6 +431,7 @@ export async function resolveAgentSessionInfo(
   }
   if (agent === "pi" && !resolvedSession && cwd) {
     // Without Herdr's Pi integration: the newest session in its directory.
+    // Only a file named with a session id is taken, with that id.
     const found = await files.findPiSessionForCwd(cwd);
     const id = found
       ? /(?:^|_)([^_]+)\.jsonl$/.exec(basename(found.path))?.[1]

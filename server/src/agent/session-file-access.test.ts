@@ -37,7 +37,7 @@ describe("agent session file access", () => {
             stderr: "",
           };
         }
-        return { code: 0, stdout: Buffer.from(metadata), stderr: "" };
+        return { code: 0, stdout: Buffer.from(`+${metadata}`), stderr: "" };
       },
     });
 
@@ -75,7 +75,10 @@ describe("agent session file access", () => {
     const files = createAgentSessionFileAccess({
       sshHost: "operator@example.com",
       shQuote: quote,
-      async runBinaryProcessWithTimeout() {
+      async runBinaryProcessWithTimeout(argv) {
+        // A stat batch answers "-" for a path that is no file.
+        if (argv.at(-1)?.startsWith("bash -c "))
+          return { code: 0, stdout: Buffer.from("-\n"), stderr: "" };
         return { code: 44, stdout: Buffer.alloc(0), stderr: "" };
       },
     });
@@ -111,8 +114,12 @@ describe("agent session file access", () => {
       shQuote: quote,
       keptTextBytes,
       async runBinaryProcessWithTimeout(argv) {
-        const command = (argv.at(-1) ?? "").replace(/^bash -lc /, "");
-        const proc = Bun.spawn(["bash", "-c", `eval ${command}`], {
+        const command = argv.at(-1) ?? "";
+        // A stat batch is a whole command line; the rest run in a login shell.
+        const script = command.startsWith("bash -lc ")
+          ? `eval ${command.slice("bash -lc ".length)}`
+          : command;
+        const proc = Bun.spawn(["bash", "-c", script], {
           stdout: "pipe",
           stderr: "pipe",
         });
@@ -179,6 +186,60 @@ describe("agent session file access", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test("stats asked together share one SSH command", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "roamgate-remote-stat-"));
+    const a = join(dir, "a b.jsonl");
+    const b = join(dir, "b'q.jsonl");
+    const outputs: number[] = [];
+    const files = localHost(outputs);
+    try {
+      writeFileSync(a, "a".repeat(12));
+      writeFileSync(b, "b".repeat(34));
+      const [first, again, second, missing, folder] = await Promise.all([
+        files.statFile(a),
+        files.statFile(a),
+        files.statFile(b),
+        files.statFile(join(dir, "missing.jsonl")),
+        files.statFile(dir),
+      ]);
+      expect(outputs).toHaveLength(1);
+      expect(first).toMatchObject({ path: a, size: 12 });
+      expect(first?.identity).toMatch(/^\d+:\d+$/);
+      expect(first?.changeToken).toBeTruthy();
+      expect(again).toEqual(first!);
+      expect(second).toMatchObject({ path: b, size: 34 });
+      expect(missing).toBeNull();
+      expect(folder).toBeNull();
+      // Asked after the batch went: a new command, with what is there now.
+      appendFileSync(a, "more");
+      expect(await files.statFile(a)).toMatchObject({ size: 16 });
+      expect(outputs).toHaveLength(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a failed stat batch fails each of its stats", async () => {
+    let calls = 0;
+    const files = createAgentSessionFileAccess({
+      sshHost: "operator@example.com",
+      shQuote: quote,
+      async runBinaryProcessWithTimeout() {
+        calls++;
+        return { code: 255, stdout: Buffer.alloc(0), stderr: "refused" };
+      },
+    });
+    const results = await Promise.allSettled([
+      files.statFile("/a.jsonl"),
+      files.statFile("/b.jsonl"),
+    ]);
+    expect(calls).toBe(1);
+    expect(results.map((result) => result.status)).toEqual([
+      "rejected",
+      "rejected",
+    ]);
   });
 });
 
