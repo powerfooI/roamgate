@@ -649,3 +649,17 @@ test("logout clears every stored draft while reading each stored key once", asyn
   // One pass per store. An index loop costs 2 * saved ** 2 reads per store.
   expect(keyReads).toBeLessThanOrEqual(2 * saved);
 });
+
+test("a pane's box says its draft outlives a reload once its scope is active", async () => {
+  storage();
+  const drafts = await freshDrafts();
+  const key = drafts.terminalComposerDraftKey(
+    connection.id,
+    1,
+    pane.pane_id,
+    pane.terminal_id,
+  );
+  // Not kept before its connection's scope is active: a reload would lose it.
+  expect(drafts.terminalComposerDraftSaved(key)).toBe(false);
+  expect(drafts.terminalComposerDraftSaved(activate(drafts))).toBe(true);
+});

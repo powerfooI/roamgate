@@ -65,3 +65,36 @@ test("remembers a bounded number of images and releases older thumbnails", () =>
     URL.revokeObjectURL = revokeObjectURL;
   }
 });
+
+test("a reload shows a draft's images as [Image #N] again, without thumbnails", async () => {
+  const values = new Map<string, string>();
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      get length() {
+        return values.size;
+      },
+      key: (index: number) => [...values.keys()][index] ?? null,
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+      clear: () => values.clear(),
+    },
+  });
+  try {
+    type Attachments = typeof import("./composerAttachments");
+    const fresh = (tab: string): Promise<Attachments> =>
+      import(`./composerAttachments.ts?${tab}`);
+    const before = await fresh("before-reload");
+    before.rememberComposerAttachment(first, new File([], "shot.png"));
+    // A reload: a fresh module, the same tab.
+    const after = await fresh("after-reload");
+    const shown = after.attachmentDisplay(`look ${first}`);
+    expect(shown.text).toBe("look [Image #1]");
+    expect(shown.attachments).toEqual([{ path: first, name: "shot.png" }]);
+  } finally {
+    if (saved) Object.defineProperty(globalThis, "sessionStorage", saved);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+});

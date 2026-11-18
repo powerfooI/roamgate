@@ -201,6 +201,11 @@ export function terminalComposerDraftKey(
   ]);
 }
 
+/** Whether `key`'s draft is kept in the browser, and outlives a reload. */
+export function terminalComposerDraftSaved(key: string): boolean {
+  return draftStorageKeys.has(key);
+}
+
 export function readTerminalComposerDraft(key: string): string {
   synchronizeDraftLogout();
   return drafts.get(key) ?? "";

@@ -33,6 +33,7 @@ import {
   terminalComposerUploadCount,
   writeTerminalComposerDraft,
   writeTerminalComposerSelection,
+  terminalComposerDraftSaved,
 } from "../terminalComposer";
 import { terminalUploadedPathsText } from "../terminalFileDrop";
 import {
@@ -330,6 +331,8 @@ export function AgentHistoryComposer({
   return (
     <div
       className="agent-history-composer"
+      // Its draft outlives a reload: a newer build need not wait for it.
+      data-draft-saved={terminalComposerDraftSaved(draftKey) || undefined}
       onKeyDownCapture={onCommandKeys}
       onFocus={() => setFocused(true)}
       onBlur={(event) => {

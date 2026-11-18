@@ -430,9 +430,13 @@ Drafts stay in this browser and re-anchor to changed files on refresh.
   highlights are grey too.
 - Run as a [user service](docs/DEPLOYMENT.md#run-as-a-user-service) with
   checksum-verified updates, and probe `/health` or `/healthz`.
-- An open page reloads itself when the server it reconnects to, or comes back
-  to, serves another frontend build. It waits for editable fields to be cleared,
-  dialogs to close, and pending uploads and message submissions to finish.
+- An open page reloads itself when the server serves another frontend build:
+  checked when it reconnects or comes back to the foreground, and every five
+  minutes. Message box drafts (attached images included) come back after it.
+  It waits for uploads and submissions to finish and for a pause in typing; an
+  open dialog closes with it once the page has been left alone two minutes,
+  and text typed elsewhere holds it until cleared. While it waits, a notice
+  says why and offers to reload now.
 - [Command-line tools](docs/DEPLOYMENT.md#command-line-management) such as
   `roamgate doctor`, `url --qr`, `config`, `auth`, and `connections`.
 
