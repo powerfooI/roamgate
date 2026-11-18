@@ -102,7 +102,9 @@ describe.skipIf(!realSsh || process.platform === "win32")(
   },
 );
 
-// Logs each run as "start|end <mux|cold> <command>". A command named "hold"
+// Logs each run as "start|end <mux|cold> <command>". As sshd does, it hands
+// the remote line to a shell; the commands sent (cat, rm, hold) are fakes on
+// that shell's PATH, which log through remote-shell. A command named "hold"
 // waits for the release file. A multiplexed run exits 255 with nothing on
 // stderr once the dead-master marker exists, as a mux client whose master
 // went away does.
@@ -113,11 +115,18 @@ for arg in "$@"; do
   [ "$arg" = "-S" ] && mode=mux
   last="$arg"
 done
-echo "start $mode $last" >> "$FAKE_SSH_LOG"
-if [ "$last" = hold ]; then
+# sshd gives each session its own process group, which the wrapper kills.
+setsid=; command -v setsid >/dev/null && setsid=setsid
+PATH="$(dirname "$0")/remote:$PATH" FAKE_SSH_MODE=$mode exec $setsid sh -c "$last"
+`;
+const FAKE_REMOTE_SHELL = `#!/bin/sh
+mode=$FAKE_SSH_MODE
+command=$2
+echo "start $mode $command" >> "$FAKE_SSH_LOG"
+if [ "$command" = hold ]; then
   while [ ! -e "$FAKE_SSH_RELEASE" ]; do sleep 0.02; done
 fi
-echo "end $mode $last" >> "$FAKE_SSH_LOG"
+echo "end $mode $command" >> "$FAKE_SSH_LOG"
 if [ "$mode" = mux ] && [ -e "$FAKE_SSH_MASTER_DEAD" ]; then exit 255; fi
 echo "ran $mode"
 `;
@@ -133,6 +142,17 @@ function runWithFakeSsh(scenario: string) {
   mkdirSync(bin);
   writeFileSync(fakeSsh, FAKE_SSH);
   chmodSync(fakeSsh, 0o755);
+  writeFileSync(join(bin, "remote-shell"), FAKE_REMOTE_SHELL);
+  chmodSync(join(bin, "remote-shell"), 0o755);
+  mkdirSync(join(bin, "remote"));
+  for (const name of ["cat", "rm", "hold"]) {
+    const fake = join(bin, "remote", name);
+    writeFileSync(
+      fake,
+      `#!/bin/sh\nexec ${JSON.stringify(join(bin, "remote-shell"))} -c ${name}\n`,
+    );
+    chmodSync(fake, 0o755);
+  }
   const paths = {
     log: join(directory, "ssh.log"),
     release: join(directory, "release"),

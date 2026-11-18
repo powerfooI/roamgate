@@ -10,8 +10,15 @@ import {
 } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { join } from "node:path";
-import { sshCommandArgv } from "./ssh-command";
-import { holdSshSession } from "./ssh-sessions";
+import { sshCommandArgv, sshReadCommandArgv } from "./ssh-command";
+import {
+  holdSshSession,
+  runSshCommand,
+  SSH_MASTER_RECYCLE_AFTER_MS,
+  SSH_MASTER_RECYCLE_REFUSALS,
+  SSH_REFUSED_COOLDOWN_MS,
+  SSH_REFUSED_RETRY_DELAYS_MS,
+} from "./ssh-sessions";
 import {
   createSshMaster,
   type SshMaster,
@@ -200,6 +207,73 @@ describe("SSH command master lifecycle", () => {
     await flushMicrotasks();
     jest.advanceTimersByTime(10_000);
     expect(spawned).toHaveLength(2);
+  });
+
+  test("recycles a master whose host keeps refusing its sessions", async () => {
+    jest.useFakeTimers();
+    try {
+      const { master, spawned, listen } = harness();
+      const ready = master.ensure();
+      listen();
+      jest.advanceTimersByTime(1);
+      expect(await ready).toBeTrue();
+
+      // The host took every session of this connection and never gives
+      // them back (an sshd that stopped reaping them): each multiplexed
+      // command is refused, then runs on a connection of its own.
+      const runs: string[][] = [];
+      const run = async (attempt: string[]) => {
+        runs.push(attempt);
+        return attempt.includes("-S")
+          ? {
+              code: 255,
+              stderr:
+                "mux_client_request_session: session request failed: Session open refused by peer",
+            }
+          : { code: 0, stderr: "" };
+      };
+      async function command() {
+        let settled = false;
+        const done = runSshCommand(
+          sshReadCommandArgv("dev-box", "true"),
+          run,
+        ).finally(() => {
+          settled = true;
+        });
+        while (!settled) {
+          await flushMicrotasks();
+          jest.advanceTimersByTime(100);
+        }
+        return done;
+      }
+      const muxRuns = () => runs.filter((argv) => argv.includes("-S")).length;
+      expect((await command()).code).toBe(0);
+      expect(muxRuns()).toBe(SSH_REFUSED_RETRY_DELAYS_MS.length + 1);
+      expect(spawned[0].signals).toEqual([]);
+
+      // Refused for long enough: the master is closed, and opened again at
+      // once rather than after the crash restart delay.
+      jest.advanceTimersByTime(SSH_MASTER_RECYCLE_AFTER_MS);
+      expect((await command()).code).toBe(0);
+      expect(muxRuns()).toBe(SSH_MASTER_RECYCLE_REFUSALS);
+      expect(spawned[0].signals).toEqual([undefined]);
+      expect(sshCommandArgv("dev-box", "true")).not.toContain("-S");
+      await flushMicrotasks();
+      jest.advanceTimersByTime(0);
+      expect(spawned).toHaveLength(2);
+      listen();
+      jest.advanceTimersByTime(1);
+      await flushMicrotasks();
+      expect(sshCommandArgv("dev-box", "true").slice(0, 3)).toEqual([
+        "ssh",
+        "-S",
+        CONTROL_PATH,
+      ]);
+      // Past the refusals' cooldown, so no other test inherits it.
+      jest.advanceTimersByTime(SSH_REFUSED_COOLDOWN_MS);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test("stops for good on dispose and removes its socket", async () => {
