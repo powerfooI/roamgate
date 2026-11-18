@@ -250,7 +250,9 @@ or stylesheet, 5 MiB per image/font, 64 resources and 10 MiB per preview
 ## Agent activity
 
 `agent.list` adds `last_activity_at` from the session file's mtime, with a
-1.5-second budget; missing data never hides an agent.
+1.5-second budget; missing data never hides an agent. Over SSH, the time is
+reused for 30 seconds while the agent's state stays, and session file stats
+asked together go out as one SSH command.
 [History synchronization](./HISTORY.md) covers transcript projection and caching.
 
 ## Agent integrations

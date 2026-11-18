@@ -5,6 +5,18 @@ import {
 } from "./session-resolver";
 import { isRecord, normalizeAgentName } from "./session-utils";
 
+/**
+ * Over SSH, a pane's activity time is reused this long while its agent's
+ * state stays: Herdr's agent list is polled every few seconds, and a stat
+ * each time for each agent kept the host's session slots busy for an
+ * order only idle agents need.
+ */
+export const REMOTE_ACTIVITY_REUSE_MS = 30_000;
+const remoteActivity = new WeakMap<
+  AgentSessionResolverContext,
+  Map<string, { at: number; time: number | null }>
+>();
+
 /** Add durable activity metadata without parsing or downloading transcripts. */
 export async function enrichAgentActivity(
   result: unknown,
@@ -37,6 +49,20 @@ export async function enrichAgentActivity(
             (session.kind !== "path" && name !== "pi" && name !== "codex"))
         )
           continue;
+        const reuse = files.remote ? remoteActivityFor(context) : null;
+        const key = JSON.stringify([
+          agent.pane_id,
+          session.kind,
+          session.value,
+          agent.agent_status,
+          agent.state_change_seq,
+        ]);
+        const known = reuse?.get(key);
+        if (known && Date.now() - known.at < REMOTE_ACTIVITY_REUSE_MS) {
+          if (known.time !== null)
+            agents[index] = { ...agent, last_activity_at: known.time };
+          continue;
+        }
         try {
           const resolved = await resolveAgentSessionInfo(
             { pane_id: agent.pane_id },
@@ -45,9 +71,10 @@ export async function enrichAgentActivity(
             context,
           );
           const time = resolved.file?.mtimeMs;
-          if (typeof time === "number" && Number.isFinite(time) && time > 0) {
-            agents[index] = { ...agent, last_activity_at: time };
-          }
+          const usable =
+            typeof time === "number" && Number.isFinite(time) && time > 0;
+          if (usable) agents[index] = { ...agent, last_activity_at: time };
+          reuse?.set(key, { at: Date.now(), time: usable ? time : null });
         } catch {
           // Missing, unsupported, or unreadable sessions must not hide agents.
         }
@@ -71,4 +98,13 @@ export async function enrichAgentActivity(
   // In-flight stats may finish after the deadline. Return a detached snapshot
   // and stop scheduling more work so optional metadata cannot block navigation.
   return { ...result, agents: [...agents] };
+}
+
+function remoteActivityFor(context: AgentSessionResolverContext) {
+  let known = remoteActivity.get(context);
+  if (!known || known.size > 1000) {
+    known = new Map();
+    remoteActivity.set(context, known);
+  }
+  return known;
 }

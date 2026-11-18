@@ -341,6 +341,13 @@ describe("Pi without Herdr's Pi integration", () => {
     });
     // Another directory has no session of its own.
     expect((await resolve("/repo/other")).status).toBe("missing_session");
+    // A newest file with no session id in its name is not taken.
+    const unnamed = join(root, "sessions", "--repo-unnamed--");
+    await mkdir(unnamed, { recursive: true });
+    await writeFile(join(unnamed, "2026-10-03_.jsonl"), "{}\n");
+    const missing = await resolve("/repo/unnamed");
+    expect(missing.status).toBe("missing_session");
+    expect(missing.path).toBe("");
   });
 });
 
