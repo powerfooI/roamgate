@@ -29,6 +29,7 @@ import {
   taskNotificationTargetIsCurrent,
   worktreeRemovalCompletionNotice,
 } from "./store";
+import { setShowAllConnections } from "./showAllConnections";
 import type { GitStatusSummary, Pane } from "./types";
 import { __resetTabPinsForTests, setTabPinned } from "./tabPins";
 import {
@@ -1501,6 +1502,105 @@ describe("plugin popup toggle", () => {
     } finally {
       bridge.connection = originalConnection;
       __storeTesting.replaceState(previousState);
+    }
+  });
+});
+
+describe("all-connections topology", () => {
+  function mockReads(label: () => string) {
+    const original = bridge.readConnection;
+    const reads: string[] = [];
+    let fail = false;
+    bridge.readConnection = (async (connectionId: string, method: string) => {
+      reads.push(`${connectionId}:${method}`);
+      if (fail) throw new Error("connection went away");
+      const fresh = session(label());
+      if (method === "workspace.list") return { workspaces: fresh.workspaces };
+      if (method === "tab.list") return { tabs: fresh.tabs };
+      if (method === "pane.list") return { panes: fresh.panes };
+      return null;
+    }) as typeof bridge.readConnection;
+    return {
+      reads,
+      failNext() {
+        fail = true;
+      },
+      restore() {
+        bridge.readConnection = original;
+        setShowAllConnections(false);
+        __storeTesting.replaceState(partitionState());
+      },
+    };
+  }
+
+  test("reads another connection only while all connections are shown", async () => {
+    const mock = mockReads(() => "beta-live");
+    try {
+      setShowAllConnections(false);
+      __storeTesting.replaceState(partitionState());
+      await __storeTesting.refreshConnectionTopology("beta");
+      expect(mock.reads).toEqual([]);
+
+      setShowAllConnections(true);
+      await __storeTesting.refreshConnectionTopology("beta");
+      expect(mock.reads).toHaveLength(4);
+      const beta = store.get().sessionsByConnectionId.beta;
+      expect(beta?.workspaces[0]?.label).toBe("beta-live");
+      expect(beta?.lastRefresh).toBeGreaterThan(0);
+
+      // The displayed connection's top-level state is authoritative.
+      mock.reads.length = 0;
+      await __storeTesting.refreshConnectionTopology("alpha");
+      expect(mock.reads).toEqual([]);
+      expect(store.get().workspaces[0]?.label).toBe("alpha");
+    } finally {
+      mock.restore();
+    }
+  });
+
+  test("follows another connection's events, not a replaced runtime's", async () => {
+    const mock = mockReads(() => "beta-event");
+    try {
+      setShowAllConnections(true);
+      __storeTesting.replaceState(partitionState());
+      __storeTesting.handleHerdrEvent({
+        connection_id: "beta",
+        connection_generation: 0,
+        event: "pane.created",
+        data: {},
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(mock.reads).toEqual([]);
+
+      __storeTesting.handleHerdrEvent({
+        connection_id: "beta",
+        connection_generation: 1,
+        event: "pane.created",
+        data: {},
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(mock.reads).toContain("beta:pane.list");
+      expect(
+        store.get().sessionsByConnectionId.beta?.workspaces[0]?.label,
+      ).toBe("beta-event");
+    } finally {
+      mock.restore();
+    }
+  });
+
+  test("a failed read keeps what the connection last reported", async () => {
+    const mock = mockReads(() => "beta-first");
+    try {
+      setShowAllConnections(true);
+      __storeTesting.replaceState(partitionState());
+      await __storeTesting.refreshConnectionTopology("beta");
+      mock.failNext();
+      await __storeTesting.refreshConnectionTopology("beta");
+      const beta = store.get().sessionsByConnectionId.beta;
+      expect(beta?.workspaces[0]?.label).toBe("beta-first");
+      expect(beta?.error).toBe("connection went away");
+    } finally {
+      mock.restore();
     }
   });
 });

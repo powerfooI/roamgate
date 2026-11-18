@@ -604,6 +604,40 @@ export class Bridge {
     };
   }
 
+  /**
+   * Issues a read-only RPC against any ready connection, not necessarily the
+   * browser's active lease, bypassing the single-active-connection guard on
+   * `connection().call()`. This is how every connection's topology is kept
+   * alongside the active one's; mutating RPCs must still go through
+   * `connection()` on the active lease so the usual `isCurrent()`/generation
+   * checks apply.
+   */
+  readConnection(
+    connectionId: string,
+    method: "workspace.list" | "tab.list" | "pane.list" | "agent.list",
+  ): Promise<any> {
+    if (!this.helloAcceptedForSocket) {
+      return Promise.reject(new Error("bridge hello is unavailable"));
+    }
+    const requiresRuntimeGeneration =
+      this._hello?.capabilities?.connection_runtime_generation === true;
+    const serverRuntimeGeneration =
+      this.runtimeGenerations.get(connectionId) ?? null;
+    if (requiresRuntimeGeneration && serverRuntimeGeneration === null) {
+      return Promise.reject(
+        new Error("connection runtime generation is unavailable"),
+      );
+    }
+    return this.sendCall(
+      connectionId,
+      this._clientGeneration,
+      serverRuntimeGeneration,
+      method,
+      {},
+      RPC_TIMEOUT_MS,
+    );
+  }
+
   private setStatus(s: ConnectionStatus) {
     if (this._status === s) return;
     this._status = s;

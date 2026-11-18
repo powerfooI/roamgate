@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import type { ConnectionSummary } from "./api";
+import type { ConnectionSessionView } from "./connectionSessions";
 import {
   activePaneIdForSnapshot,
   paneCanClose,
+  paneJumpConnectionTarget,
   paneJumpEntries,
   paneJumpEntryKey,
   paneJumpTargetId,
@@ -53,6 +56,106 @@ function pane(
     revision: 1,
   };
 }
+
+function connection(id: string, label: string): ConnectionSummary {
+  return {
+    id,
+    label,
+    source: "profile",
+    is_default: false,
+    state: "ready",
+    generation: 1,
+  };
+}
+
+function connectionView(
+  id: string,
+  label: string,
+  topology: Pick<ConnectionSessionView, "workspaces" | "tabs" | "panes"> &
+    Partial<Pick<ConnectionSessionView, "recentPaneIds" | "active">>,
+): ConnectionSessionView {
+  return {
+    connection: connection(id, label),
+    active: false,
+    recentPaneIds: [],
+    error: null,
+    loaded: true,
+    ...topology,
+  };
+}
+
+describe("panes on connections that are not displayed", () => {
+  const snapshot = {
+    panes: [pane("p1", "w1", "t1")],
+    recentPaneIds: ["p1"],
+    tabs: [tab("t1", "w1")],
+    workspaces: [workspace("w1", "local-repo")],
+  };
+  // Pane and workspace ids repeat across connections on purpose.
+  const desktop = connectionView("desktop", "Desktop", {
+    workspaces: [
+      { ...workspace("w1", "tracing"), number: 1 },
+      { ...workspace("w2", "executor"), number: 2 },
+    ],
+    tabs: [tab("t1", "w1"), tab("t2", "w2")],
+    panes: [
+      pane("p1", "w1", "t1"),
+      pane("p2", "w1", "t1", "claude"),
+      pane("p3", "w2", "t2"),
+    ],
+    recentPaneIds: ["p2"],
+  });
+
+  test("the recent switcher lists one pane per workspace after local panes", () => {
+    const entries = paneJumpEntries(snapshot, "p1", [desktop]);
+    expect(entries.map((entry) => entry.key)).toEqual([
+      "p1",
+      "desktop:p2",
+      "desktop:p3",
+    ]);
+    // Real panes, labelled with their connection.
+    expect(entries[1]).toMatchObject({
+      paneId: "p2",
+      paneLabel: "Desktop · Pane p2",
+      title: "tracing",
+      agent: "claude",
+      connectionId: "desktop",
+    });
+  });
+
+  test("search reaches every pane, by workspace or connection name", () => {
+    expect(
+      paneSearchEntries(snapshot, "", "p1", [desktop]).map(
+        (entry) => entry.key,
+      ),
+    ).toEqual(["p1", "desktop:p2", "desktop:p1", "desktop:p3"]);
+    expect(
+      paneSearchEntries(snapshot, "executor", "p1", [desktop]).map(
+        (entry) => entry.key,
+      ),
+    ).toEqual(["desktop:p3"]);
+    expect(
+      paneSearchEntries(snapshot, "desktop", "p1", [desktop]),
+    ).toHaveLength(3);
+  });
+
+  test("the displayed connection's view adds nothing twice", () => {
+    const displayed = { ...desktop, active: true };
+    expect(
+      paneJumpEntries(snapshot, "p1", [displayed]).map((entry) => entry.key),
+    ).toEqual(["p1"]);
+  });
+
+  test("an entry elsewhere jumps across connections, never locally", () => {
+    const entries = paneJumpEntries(snapshot, "p1", [desktop]);
+    expect(paneJumpTargetId(entries, 1)).toBeNull();
+    expect(paneJumpConnectionTarget(entries, 1)).toEqual({
+      connectionId: "desktop",
+      paneId: "p2",
+    });
+    expect(paneJumpConnectionTarget(entries, 0)).toBeNull();
+  });
+});
 
 describe("recent pane projection", () => {
   test("falls back from a stale selection to the layout-focused pane", () => {
@@ -110,6 +213,7 @@ describe("recent pane projection", () => {
 
     expect(entries).toEqual([
       {
+        key: "p1",
         paneId: "p1",
         paneLabel: "Pane p1",
         title: "example-repo",
@@ -182,6 +286,7 @@ describe("recent pane projection", () => {
   test("does not refocus the pane that is already current", () => {
     const entries = [
       {
+        key: "current",
         paneId: "current",
         paneLabel: "Pane current",
         title: "one",
@@ -190,6 +295,7 @@ describe("recent pane projection", () => {
         current: true,
       },
       {
+        key: "previous",
         paneId: "previous",
         paneLabel: "Pane previous",
         title: "two",
@@ -328,7 +434,7 @@ describe("cross-server pane search", () => {
       tabs: [tab("t1", "w1")],
       workspaces: [workspace("w1", "rozkminy")],
     };
-    const local = paneSearchEntries(snapshot, "local", null, "Local");
+    const local = paneSearchEntries(snapshot, "local", null, [], "Local");
     const remote = serverPaneSearchEntries(panes, "", "local");
 
     expect(local.map((entry) => entry.serverLabel)).toEqual(["Local"]);
