@@ -473,7 +473,9 @@ worktree location in the worktree dialog (**Worktree location**) to make every
 new worktree land in `<directory>/<branch>` instead, with `/` and other unsafe
 characters in the branch name replaced by `-`. The directory must be absolute.
 It is stored per repository as `worktree_directory` in `settings.json`; clear it
-to return to Herdr's default.
+to return to Herdr's default. Every checkout of the repository, the main one
+and its linked worktrees, shares it: when Herdr does not name a workspace's
+repository, Roamgate asks git for its common directory, the key Herdr uses.
 
 ## Worktree command
 

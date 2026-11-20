@@ -267,6 +267,14 @@ function creationFixture(
     if (retireAfter === stage) current = false;
   };
   const workspace = { workspace_id: "created", cwd: "/created" };
+  let sourceWorkspace: unknown = {
+    cwd: "/source",
+    worktree: {
+      checkout_path: "/source/checkout",
+      repo_key: "/source/.git",
+      repo_name: "Source",
+    },
+  };
   const setupHook = {
     event: "worktree.created" as const,
     status: "skipped" as const,
@@ -312,10 +320,7 @@ function creationFixture(
         expect(params).not.toHaveProperty("expected_hooks_enabled");
         expect(params).not.toHaveProperty("expected_source_root");
         record("source");
-        return {
-          cwd: "/source",
-          worktree: { checkout_path: "/source/checkout", repo_name: "Source" },
-        };
+        return sourceWorkspace;
       },
       runWorktreeSetupHook: async (...args: unknown[]) => {
         hookArgs.push(args);
@@ -351,6 +356,9 @@ function creationFixture(
     runtime,
     syncBase,
     readSettings,
+    setSourceWorkspace: (value: unknown) => {
+      sourceWorkspace = value;
+    },
     isCurrent,
     calls,
     methods,
@@ -395,7 +403,11 @@ describe("shared worktree creation pipeline", () => {
       { workspace: result.workspace },
       {
         cwd: "/source/checkout",
-        worktree: { checkout_path: "/source/checkout", repo_name: "Source" },
+        worktree: {
+          checkout_path: "/source/checkout",
+          repo_key: "/source/.git",
+          repo_name: "Source",
+        },
       },
       { command: "printf approved", enabled: true },
       fixture.isCurrent,
@@ -554,7 +566,7 @@ describe("shared worktree creation pipeline", () => {
 });
 
 describe("configured worktree command", () => {
-  const repoKey = "ssh:host:/source/checkout";
+  const repoKey = "ssh:host:/source/.git";
   const template = "git recworktree add {path} --branch {branch} --base {base}";
 
   function commandFixture(
@@ -821,7 +833,13 @@ describe("repository worktree directory", () => {
     process.env.ROAMGATE_SETTINGS_PATH = join(dir, "settings.json");
     try {
       const key = workspaceRepoSettingsKey(
-        { cwd: "/source", worktree: { checkout_path: "/source/checkout" } },
+        {
+          cwd: "/source",
+          worktree: {
+            checkout_path: "/source/checkout",
+            repo_key: "/source/.git",
+          },
+        },
         "host",
         undefined,
       );
@@ -858,6 +876,101 @@ describe("repository worktree directory", () => {
       else process.env.ROAMGATE_SETTINGS_PATH = previous;
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // Herdr may describe the source workspace without its repository: git
+  // names it from the root, a linked worktree of the configured repository.
+  function unreportedFixture(
+    settings: Partial<GuiSettings>,
+    commonDir: string | null = "/repo/.git",
+  ) {
+    const fixture = creationFixture(
+      undefined,
+      false,
+      ["/repo.worktrees/review"],
+      settings,
+    );
+    fixture.setSourceWorkspace({ workspace_id: "source", label: "repo" });
+    const probes: string[][] = [];
+    const commands: string[] = [];
+    const create = () =>
+      createWorkspaceWorktree(
+        fixture.runtime,
+        { workspace_id: "source", branch: "feature/x" },
+        fixture.isCurrent,
+        undefined,
+        fixture.syncBase,
+        undefined,
+        {
+          readSettings: fixture.readSettings,
+          runProcess: async (argv) => {
+            const command = argv.at(-1)!;
+            if (command.includes("--git-common-dir")) {
+              probes.push(argv);
+              return commonDir
+                ? { code: 0, stdout: `${commonDir}\n`, stderr: "" }
+                : { code: 128, stdout: "", stderr: "fatal: not a git repo" };
+            }
+            if (command.includes("command -v"))
+              return { code: 0, stdout: "", stderr: "" };
+            commands.push(remoteScript(command));
+            return { code: 0, stdout: "/created/checkout\n", stderr: "" };
+          },
+        },
+      );
+    return { ...fixture, probes, commands, create };
+  }
+
+  test("a workspace Herdr reports no repository for uses its repository's directory", async () => {
+    const fixture = unreportedFixture({
+      repositories: { "ssh:host:/repo/.git": { worktree_directory: "/trees" } },
+    });
+    await fixture.create();
+    expect(fixture.probes).toHaveLength(1);
+    expect(fixture.probes[0]!.slice(-2)).toEqual([
+      "host",
+      "GIT_TERMINAL_PROMPT=0 git -C '/repo.worktrees/review' rev-parse --path-format=absolute --git-common-dir",
+    ]);
+    expect(fixture.methods).toEqual(["worktree.create"]);
+    expect(fixture.rpcParams[0]?.path).toBe("/trees/feature-x");
+  });
+
+  test("a worktree command defaults under the repository's name, not the linked checkout's", async () => {
+    const fixture = unreportedFixture({ worktree_command: "mk {path}" });
+    await fixture.create();
+    expect(fixture.commands[0]).toContain(
+      `export ROAMGATE_WORKTREE_PATH="$HOME"/'.herdr/worktrees/repo/feature-x'`,
+    );
+  });
+
+  test("settings saved under the checkout path still apply", async () => {
+    const legacy = unreportedFixture({
+      repositories: {
+        "ssh:host:/repo.worktrees/review": { worktree_directory: "/legacy" },
+      },
+    });
+    legacy.setSourceWorkspace({ cwd: "/repo.worktrees/review" });
+    await legacy.create();
+    expect(legacy.rpcParams[0]?.path).toBe("/legacy/feature-x");
+
+    const noGit = unreportedFixture(
+      { repositories: { "ssh:host:/repo/.git": { worktree_directory: "/t" } } },
+      null,
+    );
+    await noGit.create();
+    expect(noGit.rpcParams[0]?.path).toBeUndefined();
+  });
+
+  test("a repository Herdr reports is not asked of git", async () => {
+    const fixture = unreportedFixture({
+      repositories: { "ssh:host:/source/.git": { worktree_directory: "/s" } },
+    });
+    fixture.setSourceWorkspace({
+      worktree: { repo_key: "/source/.git", checkout_path: "/source/wt" },
+    });
+    await fixture.create();
+    expect(fixture.probes).toEqual([]);
+    expect(fixture.rpcParams[0]?.path).toBe("/s/feature-x");
   });
 });
 

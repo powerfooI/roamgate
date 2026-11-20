@@ -1188,6 +1188,92 @@ describe("confirmed Ranger action targets", () => {
     expect(result.detail).not.toContain("SECRET");
   });
 
+  test("a repository Herdr does not describe confirms the settings creation applies", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "assistant-repo-")));
+    const previous = process.env.ROAMGATE_SETTINGS_PATH;
+    process.env.ROAMGATE_SETTINGS_PATH = join(dir, "settings.json");
+    try {
+      const repo = join(dir, "repo");
+      mkdirSync(repo);
+      const init = Bun.spawnSync(["git", "init", "-q", repo]);
+      expect(init.exitCode).toBe(0);
+      await updateGuiSettings((settings) => ({
+        ...settings,
+        repositories: {
+          [`connection:local:local:${repo}/.git`]: {
+            worktree_directory: "/srv/trees",
+            worktree_command: "mk {path}",
+          },
+        },
+      }));
+      const f = fixture();
+      (f.runtime as { identity?: unknown }).identity = { id: "local" };
+      f.workspaces[0]!.cwd = repo;
+      f.panes[0]!.cwd = repo;
+      f.resolveWorkspaceGitRoot.mockImplementation(async () => ({
+        root: repo,
+        workspace: f.workspaces[0],
+      }));
+      f.runtime.worktreeHooks.sourceWorkspaceForWorktreeCreate = async () => ({
+        ...f.workspaces[0],
+      });
+      const prepared = await f.prepare("create_worktree", {
+        branch: "feature/ranger",
+      });
+      expect(prepared.preview.params.worktree_command).toBe("mk {path}");
+      expect(prepared.preview.params.path).toBe("/srv/trees/feature-ranger");
+
+      // Creation resolves the same repository and reaches the command's
+      // install probe instead of refusing a changed command.
+      const failures: unknown[] = [];
+      f.createWorktree.mockImplementation(
+        async (runtime, params, isCurrent, beforeDispatch) => {
+          try {
+            return await createWorkspaceWorktree(
+              runtime,
+              params,
+              isCurrent,
+              undefined,
+              async (args) => ({
+                workspace_id: args.workspaceId,
+                root: (await args.resolveGitRoot(args.workspaceId)).root,
+                base: "origin/main",
+                commit: "a".repeat(40),
+                command: "synthetic sync",
+                stdout: "",
+                stderr: "",
+              }),
+              beforeDispatch,
+              {
+                runProcess: async (argv, timeout) => {
+                  if (String(argv.at(-1)).includes("--git-common-dir"))
+                    return processUtils.runProcessWithCodeTimeout(
+                      argv,
+                      timeout,
+                    );
+                  throw new Error("Synthetic probe stop");
+                },
+              },
+            );
+          } catch (error) {
+            failures.push(error);
+            throw error;
+          }
+        },
+      );
+      await prepared.execute();
+      expect(f.createWorktree).toHaveBeenCalledTimes(1);
+      expect(
+        f.createWorktree.mock.calls[0]?.[1]?.expected_worktree_command,
+      ).toBe("mk {path}");
+      expect(String(failures[0])).toContain("Synthetic probe stop");
+    } finally {
+      if (previous === undefined) delete process.env.ROAMGATE_SETTINGS_PATH;
+      else process.env.ROAMGATE_SETTINGS_PATH = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("start uses a supported manifest, handles empty shells, and verifies the agent once", async () => {
     const f = fixture();
     const prepared = await f.prepare("start_agent", {
