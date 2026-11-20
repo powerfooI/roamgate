@@ -43,6 +43,7 @@ import {
 } from "./agentHistoryView";
 import { formatBytes } from "./agentSession";
 import { MarkdownPreview } from "./markdown";
+import { looksLikeMarkdown } from "../userMarkdown";
 import {
   attachedImagePieces,
   type MessagePiece,
@@ -140,7 +141,7 @@ const ChatBubble = memo(function ChatBubble({
           imageUrl || images?.length ? (
             <UserText text={preview} imageUrl={imageUrl} images={images} />
           ) : (
-            <p>{preview}</p>
+            <UserMessageText text={preview} />
           )
         ) : (
           <MarkdownPreview
@@ -234,7 +235,8 @@ function UserText({
       ? [{ text: piece.image }]
       : [piece],
   );
-  if (!pieces.some((piece) => "image" in piece)) return <p>{text}</p>;
+  if (!pieces.some((piece) => "image" in piece))
+    return <UserMessageText text={text} />;
   const nameOf = (path: string) => path.split(/[\\/]/).pop() ?? path;
   const urlOf = (piece: MessageImage) => piece.url ?? imageUrl!(piece.image);
   return (
@@ -272,7 +274,7 @@ function UserText({
             <img src={urlOf(piece)} alt={nameOf(piece.image)} loading="lazy" />
           </a>
         ) : (
-          <p key={index}>{piece.text}</p>
+          <UserMessageText key={index} text={piece.text} />
         ),
       )}
       {shown ? (
@@ -283,6 +285,22 @@ function UserText({
         />
       ) : null}
     </>
+  );
+}
+
+/**
+ * What the user typed: as typed, unless written in Markdown (a code fence,
+ * inline code, a list, a link), which renders as the agent's replies do,
+ * sanitised the same way.
+ */
+export function UserMessageText({ text }: { text: string }) {
+  if (!looksLikeMarkdown(text)) return <p>{text}</p>;
+  return (
+    <MarkdownPreview
+      text={text}
+      className="agent-history-chat-markdown"
+      breaks
+    />
   );
 }
 
@@ -305,7 +323,7 @@ function OutboxBubble({
       data-outbox-id={message.id}
     >
       <div className="agent-history-chat-bubble">
-        <p>{message.text.slice(0, HISTORY_PREVIEW_CHARS)}</p>
+        <UserMessageText text={message.text.slice(0, HISTORY_PREVIEW_CHARS)} />
       </div>
       <div className="agent-history-chat-meta">
         {failed ? (
