@@ -842,3 +842,33 @@ input[type="search"]::-webkit-search-decoration {
   border-radius: 999px;
   animation: toast-loading-spin 0.8s linear infinite;
 }
+
+/*
+ * A plugin popup Herdr is still opening: the overlay's frame at the size of
+ * Herdr Float's, so the key shows at once (PopupOverlay draws the real one).
+ */
+.popup-overlay-backdrop.is-opening {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.popup-overlay-backdrop.is-opening .popup-overlay-body {
+  display: flex;
+  width: 86%;
+  height: 82%;
+  max-width: 96vw;
+  max-height: 92vh;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 8px;
+  background: #1e1e1e;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  color: #ccc;
+  font-size: 12px;
+}

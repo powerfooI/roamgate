@@ -749,8 +749,10 @@ describe("store browser-local navigation", () => {
       });
       const pending = store.focusTab("a1");
       try {
-        expect(store.get().layout).toBeNull();
-        expect(terminalNavigationLoading(store.get())).toBe(true);
+        // The pane gone to fills the tab alone until the split arrives.
+        expect(store.get().layout?.panes.map((pane) => pane.pane_id)).toEqual([
+          "a1p",
+        ]);
       } finally {
         release();
         await pending;

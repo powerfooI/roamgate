@@ -220,6 +220,10 @@ Inspector state is scoped to each checkout; see
   remembers its view; **Open agents as a chat** in Configuration > Behavior
   (off by default) opens agent panes as a chat until switched. Review
   feedback sent to a pane shown as a chat is pre-filled in its message box.
+  Switched to, a chat loading its first messages fills the pane, its message
+  box at the bottom; one showing what it had last draws a thin moving line
+  across its top until its first read answers, and its row names the
+  workspace, dimmed, until the session's title is read.
 - A message sent from a chat's message box (in a pane or in Agent History)
   shows at once at the end of the conversation, dimmed with **Sending...**,
   then **On its way** once the pane took it, until the transcript's own entry

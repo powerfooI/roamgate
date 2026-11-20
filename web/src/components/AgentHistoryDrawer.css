@@ -367,6 +367,7 @@
 }
 
 .agent-history-messages {
+  position: relative;
   display: flex;
   min-height: 0;
   flex: 1 1 auto;
@@ -722,6 +723,11 @@
   text-overflow: ellipsis;
 }
 
+.agent-chat-title.is-placeholder {
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .agent-history-drawer.is-pane-chat .agent-history-actions {
   margin-left: auto;
 }
@@ -939,4 +945,53 @@
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
+}
+
+/*
+ * A pane's chat while it loads or catches up after a switch. Loading, the
+ * state fills the pane, the message box staying at the bottom; catching up,
+ * a thin line runs across the top of what it showed last.
+ */
+.terminal-chat-layer .agent-history-messages > .agent-history-state {
+  flex: 1 1 auto;
+  margin: 0;
+  background: transparent;
+  border: 0;
+}
+
+.agent-chat-catching-up {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.agent-chat-catching-up::after {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 30%;
+  background: var(--accent);
+  content: "";
+  animation: agent-chat-catching-up 1.1s ease-in-out infinite;
+}
+
+@keyframes agent-chat-catching-up {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-chat-catching-up::after {
+    width: 100%;
+    opacity: 0.5;
+    animation: none;
+  }
 }

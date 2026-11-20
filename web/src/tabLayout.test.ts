@@ -132,3 +132,15 @@ describe("provisional tab layout", () => {
     ).not.toBeNull();
   });
 });
+
+test("a tab of several panes with no geometry shows the pane gone to alone", () => {
+  const panes = [pane("p1", "t1"), pane("p2", "t1")];
+  expect(provisionalTabLayout(null, panes, "t1")).toBeNull();
+  expect(provisionalTabLayout(null, panes, "t1", "p3")).toBeNull();
+  const alone = provisionalTabLayout(null, panes, "t1", "p2");
+  expect(alone?.focused_pane_id).toBe("p2");
+  expect(alone?.panes.map((each) => each.pane_id)).toEqual(["p2"]);
+  // Cached geometry that still fits wins.
+  const cached = layout("t1", ["p1", "p2"]);
+  expect(provisionalTabLayout(cached, panes, "t1", "p2")).toBe(cached);
+});

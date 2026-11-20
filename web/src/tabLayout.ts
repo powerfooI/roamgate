@@ -49,12 +49,14 @@ export function clearTabLayouts() {
  * Geometry to render a tab with before its own `pane.layout` arrives. Cached
  * geometry is reused only while it still describes exactly the panes the tab
  * has, since a split or close since the last visit moves every rect. A single
- * pane needs no cache: it always fills its tab.
+ * pane needs no cache: it always fills its tab. Without either, the pane gone
+ * to fills the tab alone until the split arrives, rather than nothing at all.
  */
 export function provisionalTabLayout(
   cached: PaneLayout | null,
   panes: readonly Pane[],
   tabId: string | undefined,
+  paneId?: string | null,
 ): PaneLayout | null {
   if (!tabId) return null;
   const tabPanes = panes.filter((pane) => pane.tab_id === tabId);
@@ -68,15 +70,19 @@ export function provisionalTabLayout(
       return cached;
     }
   }
-  if (tabPanes.length > 1) return null;
+  const alone =
+    tabPanes.length === 1
+      ? tabPanes[0]
+      : tabPanes.find((pane) => pane.pane_id === paneId);
+  if (!alone) return null;
   const unit = { x: 0, y: 0, width: 1, height: 1 };
   return {
-    workspace_id: tabPanes[0].workspace_id,
+    workspace_id: alone.workspace_id,
     tab_id: tabId,
     zoomed: false,
     area: { ...unit },
-    focused_pane_id: tabPanes[0].pane_id,
-    panes: [{ pane_id: tabPanes[0].pane_id, focused: true, rect: { ...unit } }],
+    focused_pane_id: alone.pane_id,
+    panes: [{ pane_id: alone.pane_id, focused: true, rect: { ...unit } }],
     splits: [],
   };
 }
