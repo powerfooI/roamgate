@@ -20,6 +20,16 @@ describe("messageImagePieces", () => {
     ]);
   });
 
+  test("takes a remote macOS upload, whose TMPDIR ends with a slash", () => {
+    const path =
+      "/var/folders/9w/s7tm2hnn7y7d_jv5q_pn8mkc0000gn/T//roamgate-uploads-501/upload-yKyMNdvu/img-1794332697314-v59v6g.png";
+    expect(messageImagePieces(`${path} what is this?`)).toEqual([
+      { image: path },
+      { text: "what is this?" },
+    ]);
+    expect(messageImagePieces(`foo${path}`)).toEqual([{ text: `foo${path}` }]);
+  });
+
   test("takes Windows paths", () => {
     const path =
       "C:\\Users\\me\\AppData\\Local\\Temp\\roamgate-uploads-me\\upload-x\\a.JPG";

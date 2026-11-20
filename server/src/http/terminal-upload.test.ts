@@ -227,6 +227,30 @@ test.skipIf(process.platform === "win32")(
   },
 );
 
+test.skipIf(process.platform === "win32")(
+  "the remote script's path has no doubled slash when TMPDIR ends with one",
+  async () => {
+    const temp = await root();
+    const proc = Bun.spawn(
+      ["sh", "-c", remoteTerminalUploadScript("img-1-a.png", 60)],
+      {
+        env: { ...process.env, TMPDIR: `${temp}//` },
+        stdin: new Blob(["png"]),
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const [code, path] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+    ]);
+    expect(code).toBe(0);
+    expect(path.startsWith(`${temp}/roamgate-uploads-`)).toBe(true);
+    expect(path).not.toContain("//");
+    expect(await readFile(path, "utf8")).toBe("png");
+  },
+);
+
 test("a failed request stream removes the partial upload", async () => {
   const temp = await root();
   const handle = createTerminalUploadHandler({
