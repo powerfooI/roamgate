@@ -1,6 +1,19 @@
 import { afterEach, expect, test, jest } from "bun:test";
 import { Window as BrowserWindow, Event as BrowserEvent } from "happy-dom";
-import { entryScript, startFrontendFreshness } from "./frontendFreshness";
+import {
+  checkFrontendFreshness,
+  editableText,
+  entryScript,
+  frontendFreshnessState,
+  IDLE_RELOAD_MS,
+  NOTICE_AFTER_MS,
+  POLL_MS,
+  reloadForNewerBuild,
+  reloadHold,
+  type ReloadSituation,
+  startFrontendFreshness,
+  TYPING_QUIET_MS,
+} from "./frontendFreshness";
 
 test("the entry script is the hashed index chunk", () => {
   expect(
@@ -43,7 +56,7 @@ afterEach(() => {
   });
 });
 
-function page(entry: string | null) {
+function page(entry: string | null, options: { now?: () => number } = {}) {
   const browser = new BrowserWindow({ url: "http://localhost:8787/" });
   for (const key of globalsUsed)
     Object.defineProperty(globalThis, key, {
@@ -73,6 +86,7 @@ function page(entry: string | null) {
       reload: () => {
         reloads += 1;
       },
+      ...options,
     }),
   );
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -104,6 +118,7 @@ test("a reconnect to a server with another build reloads the page", async () => 
 test("unsent text delays the reload after blur until cleared", async () => {
   const tab = page("/assets/index-old.js");
   tab.box.value = "half a sentence";
+  tab.box.dispatchEvent(new BrowserEvent("input", { bubbles: true }));
   tab.box.focus();
   tab.serve("/assets/index-new.js");
   await tab.reconnect();
@@ -134,6 +149,7 @@ test("an unfocused API key survives a stale build until its dialog closes", asyn
   key.value = "unsaved-key";
   dialog.append(key);
   document.body.append(dialog);
+  fire(key, "input");
   tab.serve("/assets/index-new.js");
   await tab.reconnect();
   key.focus();
@@ -200,4 +216,211 @@ test("cleanup prevents an in-flight check from reloading", async () => {
   resolve('<script src="/assets/index-new.js"></script>');
   await Promise.resolve();
   expect(reloads).toBe(0);
+});
+
+/** A DOM event on an element of the page's (happy-dom's) document. */
+function fire(target: EventTarget, type: string) {
+  target.dispatchEvent(
+    new BrowserEvent(type, { bubbles: true }) as unknown as Event,
+  );
+}
+
+async function flushAll() {
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+}
+
+test("what holds a reload back, and until when", () => {
+  const free: ReloadSituation = {
+    sending: false,
+    unsaved: false,
+    typing: false,
+    dialog: false,
+  };
+  expect(reloadHold(free)).toBeNull();
+  expect(reloadHold({ ...free, sending: true })?.until).toBe("wait");
+  expect(reloadHold({ ...free, typing: true })?.until).toBe("wait");
+  expect(reloadHold({ ...free, dialog: true })?.until).toBe("idle");
+  expect(reloadHold({ ...free, unsaved: true, dialog: true })?.until).toBe(
+    "ask",
+  );
+  // Sending comes first: it ends by itself, whatever else waits.
+  expect(reloadHold({ ...free, sending: true, unsaved: true })?.reason).toBe(
+    "the composer to finish sending",
+  );
+});
+
+/** CodeMirror's empty editor: its placeholder is not text. */
+function codeMirror(text: string) {
+  const content = document.createElement("div");
+  content.className = "cm-content";
+  content.setAttribute("contenteditable", "true");
+  const line = document.createElement("div");
+  line.className = "cm-line";
+  if (text) line.textContent = text;
+  else {
+    const placeholder = document.createElement("span");
+    placeholder.className = "cm-placeholder";
+    placeholder.setAttribute("contenteditable", "false");
+    placeholder.setAttribute("aria-hidden", "true");
+    placeholder.textContent = "Message claude...";
+    line.append(placeholder, document.createElement("br"));
+  }
+  content.append(line);
+  return content;
+}
+
+test("an editor's placeholder is not text", () => {
+  page("/assets/index-old.js");
+  expect(editableText(codeMirror(""))).toBe("");
+  expect(editableText(codeMirror("hello"))).toBe("hello");
+});
+
+test("an empty chat box shown with its placeholder does not hold the reload", async () => {
+  const tab = page("/assets/index-old.js");
+  const box = codeMirror("");
+  document.body.append(box);
+  // Clicked and typed in, then emptied: still only its placeholder.
+  fire(box, "input");
+  tab.serve("/assets/index-new.js");
+  await tab.reconnect();
+  expect(tab.reloads()).toBe(1);
+});
+
+test("a composer's draft is kept by the browser and does not hold the reload", async () => {
+  const tab = page("/assets/index-old.js");
+  const composer = document.createElement("div");
+  composer.setAttribute("data-draft-saved", "true");
+  const box = codeMirror("[Image #1] what is this?");
+  composer.append(box);
+  document.body.append(composer);
+  fire(box, "input");
+  tab.serve("/assets/index-new.js");
+  await tab.reconnect();
+  expect(tab.reloads()).toBe(1);
+});
+
+test("a page filled-in field does not hold the reload, a typed one does", async () => {
+  const tab = page("/assets/index-old.js");
+  // Set by the page (a setting's current value): nothing to lose.
+  tab.box.value = "8000";
+  tab.serve("/assets/index-new.js");
+  await tab.reconnect();
+  expect(tab.reloads()).toBe(1);
+});
+
+test("typing holds the reload until a pause", async () => {
+  let clock = 1_000_000;
+  const tab = page("/assets/index-old.js", { now: () => clock });
+  jest.useFakeTimers();
+  try {
+    fire(document.body, "keydown");
+    tab.serve("/assets/index-new.js");
+    void tab.reconnect();
+    await flushAll();
+    expect(tab.reloads()).toBe(0);
+    clock += TYPING_QUIET_MS;
+    jest.advanceTimersByTime(1000);
+    expect(tab.reloads()).toBe(1);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("an open dialog is closed by the reload once the page is left alone", async () => {
+  let clock = 1_000_000;
+  const tab = page("/assets/index-old.js", { now: () => clock });
+  const dialog = document.createElement("div");
+  dialog.setAttribute("role", "dialog");
+  document.body.append(dialog);
+  jest.useFakeTimers();
+  try {
+    tab.serve("/assets/index-new.js");
+    void tab.reconnect();
+    await flushAll();
+    expect(tab.reloads()).toBe(0);
+    // Said at once: this waits for the user.
+    expect(frontendFreshnessState()).toEqual({
+      stale: true,
+      notice: "the dialog to close",
+    });
+    clock += IDLE_RELOAD_MS / 2;
+    fire(document.body, "pointerdown");
+    clock += IDLE_RELOAD_MS / 2;
+    jest.advanceTimersByTime(1000);
+    expect(tab.reloads()).toBe(0);
+    clock += IDLE_RELOAD_MS / 2;
+    jest.advanceTimersByTime(1000);
+    expect(tab.reloads()).toBe(1);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("typed text never reloads by itself, but the notice's button does", async () => {
+  let clock = 1_000_000;
+  const tab = page("/assets/index-old.js", { now: () => clock });
+  tab.box.value = "a comment not sent";
+  tab.box.dispatchEvent(new BrowserEvent("input", { bubbles: true }));
+  jest.useFakeTimers();
+  try {
+    tab.serve("/assets/index-new.js");
+    void tab.reconnect();
+    await flushAll();
+    expect(frontendFreshnessState()).toEqual({
+      stale: true,
+      notice: "unsaved text to be sent or cleared",
+    });
+    clock += 10 * IDLE_RELOAD_MS;
+    jest.advanceTimersByTime(5000);
+    expect(tab.reloads()).toBe(0);
+    reloadForNewerBuild();
+    expect(tab.reloads()).toBe(1);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("a short wait shows no notice, a long one does", async () => {
+  let clock = 1_000_000;
+  const tab = page("/assets/index-old.js", { now: () => clock });
+  activateTerminalComposerDraftScope("freshness", 1);
+  const key = terminalComposerDraftKey("freshness", 1, "notice-pane");
+  expect(beginTerminalComposerUpload(key)).toBe(true);
+  jest.useFakeTimers();
+  try {
+    tab.serve("/assets/index-new.js");
+    void tab.reconnect();
+    await flushAll();
+    expect(frontendFreshnessState()).toEqual({ stale: true, notice: null });
+    clock += NOTICE_AFTER_MS;
+    jest.advanceTimersByTime(1000);
+    expect(frontendFreshnessState().notice).toBe(
+      "the composer to finish sending",
+    );
+    finishTerminalComposerUpload(key);
+    jest.advanceTimersByTime(1000);
+    expect(tab.reloads()).toBe(1);
+  } finally {
+    finishTerminalComposerUpload(key);
+    jest.useRealTimers();
+  }
+});
+
+test("the page checks by itself now and then, and when something fails", async () => {
+  jest.useFakeTimers();
+  try {
+    const tab = page("/assets/index-old.js");
+    tab.serve("/assets/index-new.js");
+    jest.advanceTimersByTime(POLL_MS);
+    await flushAll();
+    expect(tab.reloads()).toBe(1);
+  } finally {
+    jest.useRealTimers();
+  }
+  for (const stop of stops.splice(0)) stop();
+  const tab = page("/assets/index-old.js");
+  tab.serve("/assets/index-new.js");
+  checkFrontendFreshness();
+  await flushAll();
+  expect(tab.reloads()).toBe(1);
 });

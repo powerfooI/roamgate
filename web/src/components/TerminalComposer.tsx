@@ -34,6 +34,7 @@ import {
   terminalComposerUploadCount,
   writeTerminalComposerDraft,
   writeTerminalComposerSelection,
+  terminalComposerDraftSaved,
 } from "../terminalComposer";
 import {
   type ComposerCommand,
@@ -660,6 +661,8 @@ export function TerminalComposer({
       <div
         ref={composerRef}
         className="terminal-composer"
+        // Its draft outlives a reload: a newer build need not wait for it.
+        data-draft-saved={terminalComposerDraftSaved(draftKey) || undefined}
         data-expanded={
           (expanded &&
             (editorFocused || toolPointerPending) &&

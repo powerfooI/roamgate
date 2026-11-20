@@ -3,9 +3,43 @@
  * their uploaded paths, which is what the agent gets; the box shows each as
  * `[Image #N]`, as Claude Code does, with a thumbnail above it.
  */
+import { roamgateSessionStorage } from "./browserStorage";
+
 export type ComposerAttachment = { path: string; name: string; url?: string };
 
 const known = new Map<string, ComposerAttachment>();
+/**
+ * The paths and names, kept by the tab: a reload (a newer build) shows a
+ * draft's images as `[Image #N]` again, without their thumbnails.
+ */
+const STORAGE_KEY = "composerAttachments:v1";
+
+function keep() {
+  try {
+    roamgateSessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([...known.values()].map(({ path, name }) => [path, name])),
+    );
+  } catch {
+    // Shown as their paths after a reload.
+  }
+}
+
+try {
+  const kept: unknown = JSON.parse(
+    roamgateSessionStorage.getItem(STORAGE_KEY) ?? "[]",
+  );
+  if (Array.isArray(kept))
+    for (const entry of kept)
+      if (
+        Array.isArray(entry) &&
+        typeof entry[0] === "string" &&
+        typeof entry[1] === "string"
+      )
+        known.set(entry[0], { path: entry[0], name: entry[1] });
+} catch {
+  // Nothing kept.
+}
 /**
  * The most images remembered, most recent last: an older one's thumbnail is
  * released, and its path shows as typed again.
@@ -35,6 +69,7 @@ export function rememberComposerAttachment(path: string, file: File) {
   known.set(path, { path, name: file.name || "image", url });
   while (known.size > REMEMBERED_ATTACHMENTS)
     forget(known.keys().next().value!);
+  keep();
 }
 
 const PLACEHOLDER = /\[Image #(\d+)\]/g;
