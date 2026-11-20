@@ -28,6 +28,15 @@ export function annotateSshArgv<T extends readonly string[]>(
   return argv;
 }
 
+/** Gives `to` (a variant of `from`, such as its retry argv) `from`'s annotation. */
+export function copySshAnnotation(
+  from: readonly string[],
+  to: readonly string[],
+  extra: SshProcessAnnotation = {},
+): void {
+  annotations.set(to, { ...annotations.get(from), ...extra });
+}
+
 /**
  * Debug accounting for ssh child processes: live count, startup drops and
  * one log line per exit.

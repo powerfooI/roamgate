@@ -109,6 +109,29 @@ export function createSshMaster(args: {
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
   let stopTask: Promise<void> | null = null;
+  // The master being closed to be opened again at once.
+  let recycling: SshMasterProcess | null = null;
+
+  /**
+   * Closes `child`, the ready master, and opens a new one as soon as it is
+   * gone: its host refuses every session it asks for. Commands in flight
+   * over it end (read-only ones run again on their own connection), and new
+   * ones log in on their own until the new master is ready.
+   */
+  function recycle(child: SshMasterProcess) {
+    if (stopped || proc !== child || recycling === child) return;
+    recycling = child;
+    unregisterSshMaster(owner);
+    logger.info("SSH command master recycled: the host refuses its sessions", {
+      connection,
+    });
+    void stopProcess(child).catch((error: unknown) => {
+      logger.debug("SSH command master did not stop for its recycle", {
+        connection,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
 
   async function isAlive(): Promise<boolean> {
     if (!proc || !exists(args.controlPath)) return false;
@@ -147,11 +170,16 @@ export function createSshMaster(args: {
       unregisterSshMaster(owner);
       if (stopped) return;
       logger.debug("SSH command master exited", { connection });
+      const recycled = recycling === child;
+      if (recycled) recycling = null;
       if (!wasReady() || restartTimer) return;
-      restartTimer = setTimeout(() => {
-        restartTimer = null;
-        void ensure();
-      }, restartDelayMs);
+      restartTimer = setTimeout(
+        () => {
+          restartTimer = null;
+          void ensure();
+        },
+        recycled ? 0 : restartDelayMs,
+      );
     };
     void child.exited.then(exitedHandler, exitedHandler);
   }
@@ -198,6 +226,7 @@ export function createSshMaster(args: {
       controlPath: args.controlPath,
       isListening: () => proc === child && exists(args.controlPath),
       isAlive,
+      recycle: () => recycle(child),
     });
     logger.debug("SSH command master ready", { connection });
     return true;

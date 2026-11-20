@@ -393,6 +393,46 @@ output itself and is not rerun. Every other command, including worktree, hook,
 upload, write, delete, and Git actions, reports that failure instead of risking
 a second run. A 255 from a live master is the remote command's status.
 
+sshd counts a session until the remote command ends, a moment after its
+client exits (and longer when a command killed here on a timeout still runs
+there), so the host may refuse a session (`Session open refused by peer`)
+below eight. The process helpers run multiplexed commands with
+`-o ProxyCommand=false` ahead of the user's config, so OpenSSH cannot fall
+back to a login of its own: a refused command has not run, and is run again
+over the master after 0.2, 0.5, 1 and 2 seconds, keeping its slot, then on a
+connection of its own. For five seconds after a refusal the destination
+gives no new slot past the ones then in use, less one. When the socket is
+gone the command runs cold at once, write or not, since it never started.
+OpenSSH's lines about the master are dropped from the stderr returned.
+Callers that spawn the argv themselves keep OpenSSH's own fallback.
+
+A host can also keep a connection's sessions taken for good: macOS's sshd
+has been seen to stop reaping its session processes, which stay zombies,
+so every session of that connection stays counted while new connections
+are served. When the master's host refuses eight sessions in a row over at
+least fifteen seconds, none served in between, the master is closed and
+opened again at once (at most once a minute), and commands go straight to
+a connection of their own instead of retrying over it until it is back.
+Commands in flight over it end with it; read-only ones run again cold.
+
+A command run with a deadline (the `*Timeout` process helpers) ends on the
+host as well as here. sshd keeps a session until its command exits, and a
+command waiting on nothing it reads (a locked macOS keychain under
+`glab auth status`, a stalled network call) never notices its client is
+gone, so each one killed here used to hold one of the host's MaxSessions
+for good. The remote line runs the command under `/bin/sh`, which the
+commands sent to hosts are written for (`$SHELL` may name a shell, such as
+fish, that sshd does not run them in), with a watchdog that kills the
+session's process group (sshd gives each session its own) two seconds past
+the deadline, and goes away when the command ends; PowerShell commands for
+Windows hosts run as they are. A client killed here frees its slot at once,
+but the host's session is still counted against the destination's slots
+until that remote deadline.
+
+Port forwards (the Herdr tunnel) are not sessions. One master per runtime is
+kept: a second would add a login and its lifecycle for sessions that the
+retry already covers.
+
 Commands run in one of two lanes. Interactive work, the default, is what the
 user waits on. Background work (the Git status refresh, and requests the
 browser marks background) holds at most five of the eight sessions, so three

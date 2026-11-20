@@ -33,6 +33,15 @@ export const SSH_NONINTERACTIVE_ARGS = [
   "ServerAliveCountMax=3",
 ] as const;
 
+/**
+ * Keeps a multiplexed command from logging in on its own when the master
+ * refuses its session (sshd's MaxSessions) or its socket is gone: OpenSSH
+ * would otherwise fall back to a connection of its own, through this proxy
+ * command, which fails at once. Given first, it wins over a ProxyCommand or
+ * ProxyJump of the user's config; it is never used while the master serves.
+ */
+export const SSH_MUX_ONLY_ARGS = ["-o", "ProxyCommand=false"] as const;
+
 export function validateSshDestination(value: unknown): string {
   if (
     typeof value !== "string" ||
@@ -130,6 +139,21 @@ function buildSshCommandArgv(
     destination: validated,
     controlPath,
     cold,
+    // The process helpers run this one: a session the master cannot open
+    // fails instead of logging in on its own, so they wait and retry it
+    // over the master. Windows' OpenSSH runs no POSIX `false`.
+    ...(controlPath && process.platform !== "win32"
+      ? {
+          muxOnly: [
+            "ssh",
+            "-S",
+            controlPath,
+            ...SSH_MUX_ONLY_ARGS,
+            ...policy,
+            command,
+          ],
+        }
+      : {}),
     retrySafe,
   });
   if (tag) {
