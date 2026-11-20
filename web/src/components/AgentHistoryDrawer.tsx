@@ -35,6 +35,7 @@ import {
   readTerminalComposerDraft,
   TerminalComposerSubmitKeyError,
   terminalComposerDraftKey,
+  writeTerminalComposerDraft,
 } from "../terminalComposer";
 import { sendTerminalComposerText } from "../terminalComposerSend";
 import { uploadTerminalImage } from "../terminalImageUpload";
@@ -87,6 +88,7 @@ import {
   formatOptionalCompact,
   formatTokenTotal,
   agentPromptWarning,
+  agentStateKind,
   tokenUsage,
 } from "./agentSession";
 import {
@@ -1110,12 +1112,132 @@ export function AgentHistoryDrawer({
     pane.pane_id,
     pane.terminal_id,
   );
+  // Claude Code gives its whole queue back to the prompt on Up. Taking a
+  // message out of the queue, or into the box to edit, goes through that:
+  // the prompt is then emptied and what stays queued is sent again, in order.
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const agentStatusRef = useRef(pane.agent_status);
+  agentStatusRef.current = pane.agent_status;
+  const takeQueueBack = useCallback(async (): Promise<
+    { entry: AgentHistoryEntry; text: string }[] | null
+  > => {
+    const queued = messagesRef.current.filter(
+      (entry) => entry.queued && entry.role === "user",
+    );
+    if (!queued.length) return null;
+    // An agent that is done has taken its queue already: sending the kept
+    // messages again would deliver them twice.
+    if (agentStateKind(agentStatusRef.current) !== "working") {
+      notifyComposerError("The agent already took its queue");
+      return null;
+    }
+    const texts = await Promise.all(
+      queued.map(async (entry) => {
+        if (entry.text_bytes === undefined) return entry.text;
+        const result = (await connectionClient.call("agent_history.entry", {
+          pane_id: pane.pane_id,
+          workspace_id: pane.workspace_id,
+          tab_id: pane.tab_id,
+          agent: pane.agent,
+          entry_id: entry.id,
+        })) as { text?: unknown };
+        return typeof result.text === "string" ? result.text : entry.text;
+      }),
+    );
+    const sleep = (ms: number) =>
+      new Promise((resolve) => window.setTimeout(resolve, ms));
+    await store.sendText(pane.pane_id, "\x1b[A");
+    // Claude Code records the queue's return (popAll) once its prompt holds
+    // it; emptying the prompt before then would leave the text behind.
+    const ids = new Set(queued.map((entry) => entry.id));
+    const deadline = Date.now() + 4000;
+    while (
+      Date.now() < deadline &&
+      messagesRef.current.some((entry) => entry.queued && ids.has(entry.id))
+    ) {
+      loadHistory();
+      await sleep(250);
+    }
+    await sleep(200);
+    // Backspace and Delete, as the cursor may be at either end; neither
+    // interrupts the agent, as Ctrl+C or Esc would. A few at a time: a write
+    // split inside Delete's escape sequence leaves a lone Esc, which puts a
+    // vim-mode prompt in normal mode, where Backspace only moves.
+    const length = texts.reduce((total, text) => total + text.length + 1, 16);
+    for (let sent = 0; sent < length; sent += 4)
+      await store.sendText(pane.pane_id, "\x7f\x1b[3~".repeat(4));
+    await sleep(300);
+    return queued.map((entry, index) => ({ entry, text: texts[index]! }));
+  }, [
+    connectionClient,
+    loadHistory,
+    notifyComposerError,
+    pane.agent,
+    pane.pane_id,
+    pane.tab_id,
+    pane.workspace_id,
+  ]);
+  /**
+   * Takes `only` out of the queue, or all of it with none given, and sends
+   * the rest again; what was taken goes into the box to edit unless dropped.
+   */
+  const takeQueued = useCallback(
+    async (only: AgentHistoryEntry | null, drop: boolean) => {
+      try {
+        const taken = await takeQueueBack();
+        if (!taken) return;
+        const picked = taken.filter(
+          ({ entry }) => !only || entry.id === only.id,
+        );
+        for (const { entry, text } of taken)
+          if (!picked.some((each) => each.entry === entry))
+            await sendMessage(text);
+        if (!drop) {
+          const draft = readTerminalComposerDraft(composerDraftKey);
+          const text = picked.map((each) => each.text).join("\n");
+          writeTerminalComposerDraft(
+            composerDraftKey,
+            draft ? `${text}\n${draft}` : text,
+          );
+        }
+        loadHistory();
+      } catch (error) {
+        notifyComposerError(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    },
+    [
+      composerDraftKey,
+      loadHistory,
+      notifyComposerError,
+      sendMessage,
+      takeQueueBack,
+    ],
+  );
+  const removeQueued = useCallback(
+    (entry: AgentHistoryEntry) => void takeQueued(entry, true),
+    [takeQueued],
+  );
+  const editQueued = useCallback(
+    (entry: AgentHistoryEntry) => void takeQueued(entry, false),
+    [takeQueued],
+  );
+  const hasQueued = messages.some(
+    (entry) => entry.queued && entry.role === "user",
+  );
   const historyComposer = (
     <AgentHistoryComposer
       // A pane or connection switch must never render, or send, the
       // previous draft before the new one loads.
       key={composerDraftKey}
       draftKey={composerDraftKey}
+      onRecallQueued={
+        hasQueued && pane.agent === "claude"
+          ? () => void takeQueued(null, false)
+          : undefined
+      }
       agent={pane.agent}
       status={pane.agent_status}
       stateSeq={pane.state_change_seq}
@@ -1438,6 +1560,12 @@ export function AgentHistoryDrawer({
             outbox={paneOutbox}
             onRetrySend={retrySend}
             onDiscardSend={discardSend}
+            onRemoveQueued={
+              paneChat && pane.agent === "claude" ? removeQueued : undefined
+            }
+            onEditQueued={
+              paneChat && pane.agent === "claude" ? editQueued : undefined
+            }
           />
           {historyMinimap("auto")}
         </div>

@@ -41,6 +41,7 @@ export function ComposerVimEditor({
   onSubmit,
   onPasteImages,
   onComposingChange,
+  onUpWhenEmpty,
   handleRef,
 }: {
   /** The box's text; a change from outside (an upload, the terminal's box)
@@ -55,6 +56,8 @@ export function ComposerVimEditor({
   onSubmit: () => void;
   onPasteImages: (files: File[]) => void;
   onComposingChange: (composing: boolean) => void;
+  /** Up in the empty box; true when it did something. */
+  onUpWhenEmpty?: () => boolean;
   handleRef?: RefObject<ComposerVimHandle | null>;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -72,6 +75,7 @@ export function ComposerVimEditor({
     onSubmit,
     onPasteImages,
     onComposingChange,
+    onUpWhenEmpty,
     enterSends,
   });
   handlers.current = {
@@ -80,6 +84,7 @@ export function ComposerVimEditor({
     onSubmit,
     onPasteImages,
     onComposingChange,
+    onUpWhenEmpty,
     enterSends,
   };
   const initial = useRef({ value, placeholder, label, handleRef });
@@ -111,6 +116,17 @@ export function ComposerVimEditor({
           // Undo and redo: vim's u and Ctrl-R, and Mod-Z / Mod-Shift-Z.
           history(),
           keymap.of(historyKeymap),
+          // Up in the empty box, ahead of vim's own Up.
+          Prec.highest(
+            keymap.of([
+              {
+                key: "ArrowUp",
+                run: (target) =>
+                  target.state.doc.length === 0 &&
+                  (handlers.current.onUpWhenEmpty?.() ?? false),
+              },
+            ]),
+          ),
           keymap.of([
             { key: "Mod-Enter", run: submit },
             // Without the default keymap nothing else adds a line.

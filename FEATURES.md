@@ -179,7 +179,10 @@ Inspector state is scoped to each checkout; see
   transcripts, and export.
   In a Claude session, messages sent while Claude works show where it took
   them, and those still waiting in its queue show at the end marked
-  **Queued**. What Claude Code writes into the user's turn itself (system
+  **Queued**. In a pane's chat, while Claude works, a queued message can be
+  taken back before it reads it (the cross beside **Queued**) or into the
+  box to edit (the pencil); Up in the empty box takes the whole queue back
+  to edit, as in Claude Code's prompt. The others stay queued, in order. What Claude Code writes into the user's turn itself (system
   reminders, task notifications, notes on images a tool read) is not shown as
   the user's, and a compaction summary shows as one **Conversation
   compacted** line that opens the summary.
