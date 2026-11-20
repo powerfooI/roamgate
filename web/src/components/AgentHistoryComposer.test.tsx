@@ -376,7 +376,7 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
       ]);
       expect(upload.mock.calls.length).toBe(uploadedCount);
       expect(error.mock.calls[error.mock.calls.length - 1]?.[0]).toBe(
-        "Choose an image to attach.",
+        "notes.txt did not upload: it is not an image",
       );
       expect(readTerminalComposerDraft(draftKey)).toBe("/tmp/camera.png  ");
       expect(terminalComposerUploadCount(draftKey)).toBe(0);
@@ -392,8 +392,46 @@ if (process.env.ROAMGATE_HISTORY_COMPOSER_DOM_TEST !== "1") {
         "review /tmp/first.png  ",
       );
       expect(error.mock.calls[error.mock.calls.length - 1]?.[0]).toBe(
-        "Image too large",
+        "photo.png did not upload: Image too large",
       );
+      expect(terminalComposerUploadCount(draftKey)).toBe(0);
+
+      // Several images go up three at a time, counted, shown as each
+      // finishes, and land in the order they were picked.
+      await fill("set");
+      const pending: ((path: string) => void)[] = [];
+      for (let index = 0; index < 4; index++)
+        upload.mockImplementationOnce(
+          () => new Promise<string>((resolve) => pending.push(resolve)),
+        );
+      const callsBefore = upload.mock.calls.length;
+      const photos = ["one", "two", "three", "four"].map(
+        (name) => new File(["image"], `${name}.png`, { type: "image/png" }),
+      );
+      await paste(photos);
+      const progress = () =>
+        container.querySelector(".agent-history-composer-upload")
+          ?.textContent ?? null;
+      expect(upload.mock.calls.length - callsBefore).toBe(3);
+      expect(progress()).toBe("Uploading 0/4");
+      await React.act(async () => pending[1]!("/tmp/two.png"));
+      expect(upload.mock.calls.length - callsBefore).toBe(4);
+      expect(progress()).toBe("Uploading 1/4");
+      expect(
+        container.querySelectorAll(
+          ".agent-history-composer-attachments .is-uploading",
+        ).length,
+      ).toBe(1);
+      expect(button("Uploading...").disabled).toBe(true);
+      await React.act(async () => pending[3]!("/tmp/four.png"));
+      await React.act(async () => pending[0]!("/tmp/one.png"));
+      expect(readTerminalComposerDraft(draftKey)).toBe("set");
+      await React.act(async () => pending[2]!("/tmp/three.png"));
+      expect(readTerminalComposerDraft(draftKey)).toBe(
+        "set /tmp/one.png /tmp/two.png /tmp/three.png /tmp/four.png  ",
+      );
+      expect(progress()).toBeNull();
+      expect(container.querySelector(".is-uploading")).toBeNull();
       expect(terminalComposerUploadCount(draftKey)).toBe(0);
 
       // A successful upload or a partial failure must leave IME preedit text
